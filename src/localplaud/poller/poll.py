@@ -19,7 +19,7 @@ from ..db.models import FileStatus, PlaudFile
 from ..db.session import session_scope
 from ..plaud.client import PlaudClient
 from ..plaud.models import PlaudFileDTO
-from ..store.files import audio_path
+from ..store.files import file_dir
 
 log = logging.getLogger(__name__)
 
@@ -77,14 +77,13 @@ def download_pending(client: PlaudClient, settings: Settings) -> int:
         pending = list(session.scalars(stmt))
 
     for row in pending:
-        ext = (row.fullname or "audio.opus").rsplit(".", 1)[-1].lower()
-        dest = audio_path(row.id, ext=ext)
+        dest_dir = file_dir(row.id)
         dto = PlaudFileDTO.model_validate(row.raw or {"id": row.id})
         try:
             with session_scope() as session:
                 fresh = session.get(PlaudFile, row.id)
                 fresh.status = FileStatus.downloading
-            client.download_audio(dto, dest)
+            dest = client.download_audio(dto, dest_dir)
             with session_scope() as session:
                 fresh = session.get(PlaudFile, row.id)
                 fresh.audio_path = str(dest)

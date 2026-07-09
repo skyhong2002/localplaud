@@ -35,9 +35,34 @@ class PlaudAuthError(PlaudError):
     pass
 
 
-# Keys in the file-detail payload that may carry a downloadable audio URL.
-# The exact key is still being confirmed; we scan defensively.
-_AUDIO_URL_HINTS = ("audio_url", "file_url", "url", "download_url", "oss_url", "cos_url", "cdn_url")
+def _iter_strings(obj: object):
+    """Yield every string value in a nested dict/list structure."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _iter_strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _iter_strings(v)
+
+
+def _find_url(obj: object, must_contain: tuple[str, ...] = ()) -> str | None:
+    """Find the first http(s) URL in ``obj``; if ``must_contain`` is given,
+    prefer a URL containing any of those substrings, else fall back to any."""
+    urls = [s for s in _iter_strings(obj) if s.startswith("http")]
+    if must_contain:
+        for u in urls:
+            if any(m in u for m in must_contain):
+                return u
+    return urls[0] if urls else None
+
+
+def _ext_from_url(url: str, default: str = "mp3") -> str:
+    path = url.split("?", 1)[0]
+    if "." in path.rsplit("/", 1)[-1]:
+        return path.rsplit(".", 1)[-1].lower()
+    return default
 
 
 class PlaudClient:
@@ -121,54 +146,79 @@ class PlaudClient:
 
     # ---- audio download ------------------------------------------------ #
 
-    def resolve_audio_url(self, file: PlaudFileDTO, detail: dict | None = None) -> str | None:
-        """Find the downloadable audio URL for a file.
+    def get_temp_url(self, file_id: str) -> str:
+        """Resolve the signed, expiring media URL via ``GET /file/temp-url/{id}``.
 
-        Strategy: inspect the file-detail payload for a URL-bearing field
-        (the signed CDN/OSS URL the web player uses). The exact key is still
-        being confirmed; we scan known hint keys at the top level and one
-        level deep. Returns None if not found.
-        """
-        detail = detail if detail is not None else self.get_detail(file.id)
-
-        def scan(obj: object) -> str | None:
-            if isinstance(obj, dict):
-                for k, v in obj.items():
-                    if isinstance(v, str) and v.startswith("http") and (
-                        k.lower() in _AUDIO_URL_HINTS or file.audio_ext in v or "audio" in k.lower()
-                    ):
-                        return v
-                for v in obj.values():
-                    found = scan(v)
-                    if found:
-                        return found
-            elif isinstance(obj, list):
-                for v in obj:
-                    found = scan(v)
-                    if found:
-                        return found
-            return None
-
-        return scan(detail)
-
-    def download_audio(self, file: PlaudFileDTO, dest: Path, detail: dict | None = None) -> Path:
-        """Download the file's audio to ``dest``. Raises PlaudError if the
-        download URL can't be resolved."""
-        url = self.resolve_audio_url(file, detail=detail)
+        The response is a small JSON wrapper around a signed AWS S3 URL
+        (host ``apse1-prod-plaud-bucket.s3.amazonaws.com``, path
+        ``/audiofiles/{id}.mp3``). The exact wrapper key isn't documented, so
+        we scan the payload for the signed URL. See docs/plaud-api.md."""
+        data = self._get_json(f"/file/temp-url/{file_id}")
+        url = _find_url(data, must_contain=(file_id, "amazonaws", "audiofiles", "Signature"))
         if not url:
             raise PlaudError(
-                f"Could not resolve an audio download URL for file {file.id}. "
-                "The download endpoint is a known open question — see "
-                "docs/plaud-api.md. Once confirmed, wire it in "
-                "PlaudClient.resolve_audio_url / download_audio."
+                f"/file/temp-url/{file_id} returned no signed URL (payload keys: "
+                f"{list(data)[:8] if isinstance(data, dict) else type(data).__name__})"
             )
+        return url
+
+    def download_audio(self, file: PlaudFileDTO, dest_dir: Path) -> Path:
+        """Download the file's audio into ``dest_dir`` as ``audio.<ext>``.
+
+        The real asset is typically MP3 (not the ``.opus`` the list metadata
+        implies), so the extension is taken from the signed URL. Returns the
+        written path."""
+        url = self.get_temp_url(file.id)
+        ext = _ext_from_url(url, default="mp3")
+        dest = dest_dir / f"audio.{ext}"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        # Signed URLs are usually on a different host and need no auth headers.
-        with httpx.Client(timeout=None, follow_redirects=True) as raw:
-            with raw.stream("GET", url) as resp:
-                resp.raise_for_status()
-                with dest.open("wb") as fh:
-                    for chunk in resp.iter_bytes(chunk_size=1 << 16):
-                        fh.write(chunk)
+        # Signed S3 URLs are on a different host and need no auth headers.
+        with httpx.Client(timeout=None, follow_redirects=True) as raw, raw.stream("GET", url) as resp:
+            resp.raise_for_status()
+            with dest.open("wb") as fh:
+                for chunk in resp.iter_bytes(chunk_size=1 << 16):
+                    fh.write(chunk)
         log.info("Downloaded %s -> %s (%d bytes)", file.id, dest, dest.stat().st_size)
         return dest
+
+    # ---- cloud-produced artifacts (optional reuse) --------------------- #
+
+    def _fetch_gzip_asset(self, url: str) -> bytes:
+        with httpx.Client(timeout=None, follow_redirects=True) as raw:
+            resp = raw.get(url)
+            resp.raise_for_status()
+            data = resp.content
+        if url.split("?", 1)[0].endswith(".gz"):
+            import gzip
+
+            return gzip.decompress(data)
+        return data
+
+    def get_cloud_summary_md(self, file_id: str, detail: dict | None = None) -> str | None:
+        """Plaud's own summary (markdown), if present. Resolved from the signed
+        ``file_summary/.../ai_content.md.gz`` asset in the detail payload."""
+        detail = detail if detail is not None else self.get_detail(file_id)
+        url = _find_url(detail, must_contain=("ai_content", "file_summary"))
+        if not url:
+            return None
+        try:
+            return self._fetch_gzip_asset(url).decode("utf-8", errors="replace")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not fetch cloud summary for %s: %s", file_id, exc)
+            return None
+
+    def get_cloud_transcript_json(self, file_id: str, detail: dict | None = None) -> dict | None:
+        """Plaud's own transcript as raw JSON (schema not yet modelled — see
+        issue #9). Resolved from the ``file_transcript/.../trans_result.json.gz``
+        signed asset."""
+        detail = detail if detail is not None else self.get_detail(file_id)
+        url = _find_url(detail, must_contain=("trans_result", "file_transcript"))
+        if not url:
+            return None
+        try:
+            import json
+
+            return json.loads(self._fetch_gzip_asset(url))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not fetch cloud transcript for %s: %s", file_id, exc)
+            return None

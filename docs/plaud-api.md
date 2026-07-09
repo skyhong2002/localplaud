@@ -99,13 +99,35 @@ payload. There is no separate transcript or summary endpoint — probes of
 **Open:** the exact JSON key layout and the transcript segment schema (how
 speakers / word timestamps are represented).
 
-### Audio download — **open**
-The signed audio URL for a file's `.opus` was not captured (the observed
-detail view was cached and no download control was clicked). Probed candidates
-`/file/url/{id}` and `/file/content/{id}` returned 404. localplaud's
-`PlaudClient.resolve_audio_url` currently scans the file-detail payload for a
-URL-bearing field; once the real endpoint is confirmed it's a one-line wire-up
-in `resolve_audio_url` / `download_audio`.
+### `GET /file/temp-url/{file_id}` — audio download ✅
+**Confirmed.** Clicking play/download on a recording calls this with the bare
+file id (not `fullname`). It returns a small JSON wrapper around a **signed,
+expiring AWS S3 URL**:
+
+```
+https://apse1-prod-plaud-bucket.s3.amazonaws.com/audiofiles/{file_id}.mp3
+    ?AWSAccessKeyId=…&Signature=…&x-amz-security-token=…&Expires=…
+```
+
+The real asset is **MP3**, despite the list metadata's `<id>.opus` `fullname`
+convention — so take the extension from the URL, not `fullname`, and treat the
+URL as short-lived. `PlaudClient.get_temp_url` / `download_audio` implement
+this (scanning the wrapper for the signed URL, since its exact JSON key wasn't
+extractable). **Open:** the exact wrapper key name.
+
+### Cloud transcript / summary assets ✅ (bonus)
+The `/file/detail/{id}` payload resolves to signed S3 assets on
+`apse1-prod-plaud-content-storage.s3.amazonaws.com`:
+
+| Asset | Path pattern |
+| --- | --- |
+| Transcript | `.../file_transcript/{id}/trans_result.json.gz` |
+| Summary (markdown) | `.../file_summary/{id}/ai_content.md.gz` |
+| Outline | `.../file_outline/{id}/outline.json.gz` |
+
+`PlaudClient.get_cloud_summary_md` and `get_cloud_transcript_json` fetch and
+gunzip these (best-effort, by URL substring). The summary is plain markdown and
+directly usable; the transcript JSON schema isn't modelled yet (issue #9).
 
 ## Open questions (tracked in issue #1)
 
