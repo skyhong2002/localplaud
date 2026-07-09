@@ -1,0 +1,53 @@
+# ---- Secrets & local config (NEVER commit) ----
+config.toml
+.env
+.env.*
+!.env.example
+*.cookie
+*.token
+secrets/
+
+# ---- Data (audio, transcripts, db) ----
+data/
+models/
+*.db
+*.sqlite
+*.sqlite3
+*.opus
+*.wav
+*.mp3
+*.m4a
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.uv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---- Editors / OS ----
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ---- Docker/runtime ----
+*.pid
+*.log
+caddy_data/
+caddy_config/
+
+# ---- Session / local agent artifacts ----
+GOAL_CONDITION.md
+GOAL_PROMPT.md
+.claude/settings.local.json
+HANDOFF.md

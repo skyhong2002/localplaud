@@ -1,0 +1,127 @@
+# localplaud configuration — copy to config.toml and edit.
+#
+# Secrets (Plaud cookie, API keys, HF token) are better kept OUT of this file.
+# Any field can be overridden by an environment variable using the prefix
+# LOCALPLAUD_ and "__" between levels, e.g.:
+#     LOCALPLAUD_PLAUD__COOKIE="session=..."
+#     LOCALPLAUD_ASR__OPENAI__API_KEY="sk-..."
+# You can also put those in a .env file (see .env.example). config.toml and
+# .env are git-ignored.
+
+[plaud]
+# API host for YOUR account/region. Find it in the browser devtools console:
+#   localStorage.getItem("pld_plaud_user_api_domain")
+# Do not assume the default below matches your region.
+api_base = "https://api-apse1.plaud.ai"
+
+# Authentication route:
+#   "cookie" — paste the browser session cookie/token (most reliable today).
+#   "login"  — programmatic email/password login (only if your account supports it).
+auth_mode = "cookie"
+
+# For auth_mode = "cookie": set the cookie via the env var
+#   LOCALPLAUD_PLAUD__COOKIE   (preferred, keeps it out of this file)
+# or uncomment below. See README "Getting your Plaud session".
+# cookie = "paste-cookie-header-value-here"
+
+# For auth_mode = "login" (env vars preferred for the password):
+# email = "you@example.com"
+# password = "..."   # better: LOCALPLAUD_PLAUD__PASSWORD
+
+[poller]
+enabled = true
+interval_seconds = 300           # how often to poll the Plaud cloud
+include_trash = false
+download_dir = "./data/audio"    # where downloaded .opus files land
+max_concurrent_downloads = 2
+
+[store]
+database_url = "sqlite:///./data/localplaud.db"
+
+[pipeline]
+# Local processing stages to run after each download.
+convert = true                   # opus -> 16kHz mono wav (needs ffmpeg)
+transcribe = true
+diarize = true
+summarize = true
+index = true                     # build embeddings for Q&A / search
+concurrency = 1
+prefer_cloud_artifacts = false   # true = reuse Plaud's own transcript/summary when present
+
+# --------------------------------------------------------------------------- #
+# ASR — speech recognition. Pluggable; local and cloud are equal choices.
+# --------------------------------------------------------------------------- #
+[asr]
+provider = "faster-whisper"      # faster-whisper | whispercpp | mlx-whisper | openai | deepgram | assemblyai
+language = "auto"                # ISO code (e.g. "en", "zh") or "auto"
+fallback = ["openai"]            # tried in order if the primary can't run
+
+  [asr.faster_whisper]           # local, CPU or NVIDIA CUDA (CTranslate2)
+  model = "large-v3"
+  device = "auto"                # auto | cpu | cuda
+  compute_type = "auto"          # auto | int8 | int8_float16 | float16 | float32
+
+  [asr.whispercpp]               # local, uses Metal on Apple Silicon
+  binary = "whisper-cli"
+  model_path = "./models/ggml-large-v3.bin"
+
+  [asr.mlx_whisper]              # local, Apple Silicon (MLX / Metal)
+  model = "mlx-community/whisper-large-v3-mlx"
+
+  [asr.openai]                   # cloud
+  # api_key via LOCALPLAUD_ASR__OPENAI__API_KEY
+  model = "whisper-1"
+
+  [asr.deepgram]                 # cloud, does speaker diarization server-side
+  # api_key via LOCALPLAUD_ASR__DEEPGRAM__API_KEY
+  model = "nova-2"
+  diarize = true
+
+  [asr.assemblyai]               # cloud, speaker labels server-side
+  # api_key via LOCALPLAUD_ASR__ASSEMBLYAI__API_KEY
+  speaker_labels = true
+
+# --------------------------------------------------------------------------- #
+# Diarization — only used when the ASR provider didn't already return speakers.
+# Cloud ASR (deepgram/assemblyai) return speakers directly, so this is skipped.
+# --------------------------------------------------------------------------- #
+[diarize]
+provider = "pyannote"            # pyannote | none
+# hf_token via LOCALPLAUD_DIARIZE__HF_TOKEN (needed to download pyannote models)
+# num_speakers = 2               # optional hint; omit to auto-detect
+
+# --------------------------------------------------------------------------- #
+# LLM — used for summaries / structured notes and Q&A answers.
+# --------------------------------------------------------------------------- #
+[llm]
+provider = "ollama"              # ollama | openai | anthropic
+
+  [llm.ollama]                   # local, no API key
+  host = "http://localhost:11434"
+  model = "llama3.1:8b"
+
+  [llm.openai]
+  # api_key via LOCALPLAUD_LLM__OPENAI__API_KEY
+  model = "gpt-4o-mini"
+
+  [llm.anthropic]
+  # api_key via LOCALPLAUD_LLM__ANTHROPIC__API_KEY
+  model = "claude-haiku-4-5"
+
+# --------------------------------------------------------------------------- #
+# Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.
+# --------------------------------------------------------------------------- #
+[embeddings]
+provider = "local"               # local (sentence-transformers) | openai
+
+  [embeddings.local]
+  model = "sentence-transformers/all-MiniLM-L6-v2"
+
+  [embeddings.openai]
+  # api_key via LOCALPLAUD_EMBEDDINGS__OPENAI__API_KEY
+  model = "text-embedding-3-small"
+
+[api]
+host = "0.0.0.0"
+port = 8080
+# public_url = "https://plaud.observe.tw"   # set to your domain behind the reverse proxy

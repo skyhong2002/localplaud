@@ -1,0 +1,61 @@
+[project]
+name = "localplaud"
+version = "0.1.0"
+description = "Self-hosted Plaud clone — mirror your Plaud cloud recordings locally and run your own transcription, diarization, summaries and Q&A."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Sky Hong" }]
+keywords = ["plaud", "transcription", "whisper", "diarization", "self-hosted", "asr"]
+
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy>=2.0",
+    "typer>=0.12",
+    "rich>=13.7",
+    "tomlkit>=0.13",
+    "python-dotenv>=1.0",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "numpy>=1.26",
+    "tenacity>=8.4",
+    "apscheduler>=3.10",
+]
+
+[project.optional-dependencies]
+# Local ASR via CTranslate2 (CPU + CUDA). The default local engine.
+faster-whisper = ["faster-whisper>=1.0"]
+# Apple Silicon local ASR (Metal via MLX).
+mlx = ["mlx-whisper>=0.4"]
+# Local speaker diarization + alignment.
+diarize = ["pyannote.audio>=3.1", "torch>=2.2"]
+# Local summaries / Q&A embeddings without any cloud provider.
+local-llm = ["sentence-transformers>=3.0"]
+# Cloud ASR / LLM SDKs (optional; only if you use those providers).
+cloud = ["openai>=1.35", "deepgram-sdk>=3.2", "assemblyai>=0.28", "anthropic>=0.30"]
+dev = ["pytest>=8.2", "ruff>=0.5", "mypy>=1.10", "respx>=0.21"]
+
+[project.scripts]
+localplaud = "localplaud.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/localplaud"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
