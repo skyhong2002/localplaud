@@ -1,0 +1,43 @@
+# localplaud — NVIDIA CUDA image (profile: gpu).
+#
+# Runs local faster-whisper + pyannote diarization on the GPU.
+# Requires the NVIDIA container toolkit on the host
+# (scripts/deploy/bootstrap.sh --gpu sets it up).
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONUNBUFFERED=1
+
+# Ubuntu 22.04 ships Python 3.10; get 3.12 from the deadsnakes PPA.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.12 python3.12-venv python3.12-dev \
+        ffmpeg curl git build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.12 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /build
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+# CUDA-enabled torch first (from the cu124 index), then the package —
+# pip sees torch already satisfied and keeps the CUDA build.
+RUN pip install torch --index-url https://download.pytorch.org/whl/cu124 \
+    && pip install ".[faster-whisper,diarize,cloud,local-llm]"
+
+RUN useradd --create-home --uid 1000 localplaud
+WORKDIR /app
+RUN mkdir -p /app/data && chown -R localplaud:localplaud /app
+USER localplaud
+
+VOLUME /app/data
+EXPOSE 8080
+
+CMD ["localplaud", "run"]
