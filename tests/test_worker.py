@@ -71,3 +71,39 @@ def test_retrieve_ranks_by_cosine(monkeypatch, tmp_path):
     hits = retrieve("citrus?", top_k=2)
     assert hits[0]["text"] == "about oranges"
     assert hits[0]["score"] > hits[1]["score"]
+
+
+def test_retrieve_ignores_mismatched_embedding_dims(monkeypatch, tmp_path):
+    """After switching embedding models, old chunks of a different dim must be
+    skipped, not crash np.stack / the dot product."""
+    import localplaud.db.session as db_session
+    from localplaud.config import get_settings
+    from localplaud.db.models import Chunk, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'qa2.db'}")
+    monkeypatch.setattr(db_session, "_engine", None)
+    monkeypatch.setattr(db_session, "_Session", None)
+    get_settings(reload=True)
+    init_db()
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="f1", filename="rec"))
+        s.add(Chunk(file_id="f1", idx=0, text="old model", embedding=np.ones(5, np.float32).tobytes(), dim=5))
+        s.add(Chunk(file_id="f1", idx=1, text="new model", embedding=np.ones(3, np.float32).tobytes(), dim=3))
+
+    class FakeEmbedder:
+        name = "fake"
+        dim = 3
+
+        def available(self):
+            return True
+
+        def embed(self, texts):
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr("localplaud.worker.qa.build_embedder", lambda cfg: FakeEmbedder())
+    from localplaud.worker.qa import retrieve
+
+    hits = retrieve("q", top_k=5)  # must not raise
+    assert [h["text"] for h in hits] == ["new model"]

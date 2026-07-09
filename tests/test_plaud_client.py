@@ -28,6 +28,16 @@ def test_ext_from_url():
     assert _ext_from_url("https://h/audiofiles/ID?Signature=z", default="mp3") == "mp3"
 
 
+def test_find_url_strict_by_default():
+    obj = {"a": "https://cdn.example/other.png", "b": "https://x/trans_result.json.gz?s=1"}
+    # No match for the requested asset -> None (avoid fetching the wrong asset).
+    assert _find_url(obj, must_contain=("ai_content",)) is None
+    # Explicit opt-in fallback returns the first URL.
+    assert _find_url(obj, must_contain=("ai_content",), allow_any=True).endswith(".png")
+    # A real match wins.
+    assert "trans_result" in _find_url(obj, must_contain=("trans_result",))
+
+
 @respx.mock
 def test_download_audio_uses_temp_url_and_mp3_ext(tmp_path):
     fid = "abc123"

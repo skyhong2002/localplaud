@@ -59,7 +59,19 @@ def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig) -> Transcript:
     # Build (start, end, speaker) turns.
     turns = [(turn.start, turn.end, spk) for turn, _, spk in annotation.itertracks(yield_label=True)]
 
+    if not turns:
+        # Diarization found nothing (e.g. near-silent audio) — don't claim we
+        # assigned speakers.
+        log.info("Diarization produced no turns for %s; leaving speakers unset", wav_path)
+        return transcript
+
     def speaker_for(start: float, end: float) -> str | None:
+        # Zero-length spans (Whisper emits some) become a point query.
+        if end <= start:
+            for t_start, t_end, spk in turns:
+                if t_start <= start <= t_end:
+                    return spk
+            return None
         best, best_overlap = None, 0.0
         for t_start, t_end, spk in turns:
             overlap = max(0.0, min(end, t_end) - max(start, t_start))

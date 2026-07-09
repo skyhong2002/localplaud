@@ -55,16 +55,49 @@ def sync_file_list(client: PlaudClient, settings: Settings) -> tuple[int, int]:
                 new_count += 1
                 log.info("New file discovered: %s (%s)", dto.id, dto.filename)
             else:
+                # Capture the pre-update values — _apply_dto overwrites them.
                 changed = (dto.version_ms or 0) != (row.version_ms or 0) or (
                     dto.version or 0
                 ) != (row.version or 0)
+                md5_changed = bool(dto.file_md5) and dto.file_md5 != row.file_md5
                 _apply_dto(row, dto)
-                if changed and row.status == FileStatus.done:
-                    # Cloud updated this file — re-process it.
-                    row.status = FileStatus.downloaded if row.audio_path else FileStatus.discovered
+                # Re-process a finished/errored file when the cloud changed it.
+                # An in-flight row (downloading/processing) is left alone.
+                if (changed or md5_changed) and row.status in (
+                    FileStatus.done,
+                    FileStatus.error,
+                ):
+                    if md5_changed or not row.audio_path:
+                        # The audio itself changed — force a fresh download.
+                        row.status = FileStatus.discovered
+                    else:
+                        row.status = FileStatus.downloaded
                     changed_count += 1
                     log.info("File changed upstream, will reprocess: %s", dto.id)
     return new_count, changed_count
+
+
+def reset_inflight() -> int:
+    """Recover files stranded mid-flight by a crash/kill: ``downloading`` →
+    ``discovered`` and ``processing`` → ``downloaded``. Safe to call at the
+    start of every cycle. Returns the number of rows reset."""
+    from sqlalchemy import update
+
+    reset = 0
+    with session_scope() as session:
+        reset += session.execute(
+            update(PlaudFile)
+            .where(PlaudFile.status == FileStatus.downloading)
+            .values(status=FileStatus.discovered)
+        ).rowcount
+        reset += session.execute(
+            update(PlaudFile)
+            .where(PlaudFile.status == FileStatus.processing)
+            .values(status=FileStatus.downloaded)
+        ).rowcount
+    if reset:
+        log.info("Reset %d in-flight file(s) after restart", reset)
+    return reset
 
 
 def download_pending(client: PlaudClient, settings: Settings) -> int:
@@ -141,6 +174,7 @@ def poll_once(settings: Settings | None = None) -> dict:
     """One full poll cycle: sync listing + download pending (+ optionally mirror
     Plaud's own summaries when ``pipeline.prefer_cloud_artifacts`` is set)."""
     settings = settings or get_settings()
+    reset_inflight()
     with PlaudClient(settings.plaud) as client:
         new, changed = sync_file_list(client, settings)
         downloaded = download_pending(client, settings)

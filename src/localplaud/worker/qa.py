@@ -21,8 +21,15 @@ from ..llm.base import build_llm
 log = logging.getLogger(__name__)
 
 
-def _load_matrix(session) -> tuple[list[Chunk], np.ndarray]:
-    chunks = list(session.scalars(select(Chunk).where(Chunk.embedding.is_not(None))))
+def _load_matrix(session, dim: int) -> tuple[list[Chunk], np.ndarray]:
+    # Only chunks embedded at the query's dimension are comparable; mixing dims
+    # (e.g. after switching embeddings.provider) would crash np.stack / the dot
+    # product. Filter to the current embedder's dimension.
+    chunks = list(
+        session.scalars(
+            select(Chunk).where(Chunk.embedding.is_not(None), Chunk.dim == dim)
+        )
+    )
     if not chunks:
         return [], np.zeros((0, 0), dtype=np.float32)
     vecs = np.stack([np.frombuffer(c.embedding, dtype=np.float32) for c in chunks])
@@ -38,7 +45,7 @@ def retrieve(query: str, top_k: int = 6, settings: Settings | None = None) -> li
 
     results: list[dict] = []
     with session_scope() as session:
-        chunks, mat = _load_matrix(session)
+        chunks, mat = _load_matrix(session, dim=len(qv))
         if not chunks:
             return []
         norms = mat / (np.linalg.norm(mat, axis=1, keepdims=True) + 1e-8)

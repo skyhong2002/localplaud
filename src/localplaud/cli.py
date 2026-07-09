@@ -117,7 +117,10 @@ def poll(
 
     settings = get_settings()
     while True:
-        poll_once(settings)
+        try:
+            poll_once(settings)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[yellow]poll error:[/] {exc}")
         if once:
             break
         time.sleep(settings.poller.interval_seconds)
@@ -132,8 +135,11 @@ def work(
 
     settings = get_settings()
     while True:
-        n = process_pending(settings)
-        console.print(f"Processed {n} file(s).")
+        try:
+            n = process_pending(settings)
+            console.print(f"Processed {n} file(s).")
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[yellow]work error:[/] {exc}")
         if once:
             break
         time.sleep(max(30, settings.poller.interval_seconds // 2))
@@ -143,28 +149,46 @@ def work(
 def run():
     """Run everything: poll on a schedule, process continuously, serve the UI."""
     import threading
+    from datetime import datetime
 
     from apscheduler.schedulers.background import BackgroundScheduler
 
+    from .db.session import init_db
     from .poller.poll import poll_once
     from .worker.pipeline import process_pending
 
     settings = get_settings()
-    from .db.session import init_db
-
     init_db()
 
+    # A non-blocking lock guarantees cycles never overlap even if one runs
+    # longer than the interval (ASR can take minutes) — a second firing simply
+    # skips rather than double-downloading / double-processing.
+    lock = threading.Lock()
+
     def cycle():
+        if not lock.acquire(blocking=False):
+            return
         try:
             poll_once(settings)
             process_pending(settings)
         except Exception as exc:  # noqa: BLE001
             console.print(f"[yellow]cycle error:[/] {exc}")
+        finally:
+            lock.release()
 
     scheduler = BackgroundScheduler()
-    scheduler.add_job(cycle, "interval", seconds=settings.poller.interval_seconds, id="cycle")
+    # next_run_time fires the first cycle immediately, under the same
+    # single-instance governance as the interval (no separate racing thread).
+    scheduler.add_job(
+        cycle,
+        "interval",
+        seconds=settings.poller.interval_seconds,
+        id="cycle",
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(),
+    )
     scheduler.start()
-    threading.Thread(target=cycle, daemon=True).start()  # kick one now
     console.print("[green]✓[/] poller + worker running; starting web UI…")
     _serve(settings)
 

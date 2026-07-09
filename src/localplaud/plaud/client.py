@@ -18,7 +18,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from ..config import PlaudConfig
 from .auth import build_client
@@ -47,14 +47,21 @@ def _iter_strings(obj: object):
             yield from _iter_strings(v)
 
 
-def _find_url(obj: object, must_contain: tuple[str, ...] = ()) -> str | None:
-    """Find the first http(s) URL in ``obj``; if ``must_contain`` is given,
-    prefer a URL containing any of those substrings, else fall back to any."""
+def _find_url(
+    obj: object, must_contain: tuple[str, ...] = (), allow_any: bool = False
+) -> str | None:
+    """Find an http(s) URL in ``obj``. If ``must_contain`` is given, only a URL
+    containing one of those substrings matches — unless ``allow_any`` is set,
+    in which case the first URL is returned as a fallback. Returning the wrong
+    asset silently corrupts data (a summary payload has many URLs), so the
+    strict behaviour is the default."""
     urls = [s for s in _iter_strings(obj) if s.startswith("http")]
     if must_contain:
         for u in urls:
             if any(m in u for m in must_contain):
                 return u
+        if not allow_any:
+            return None
     return urls[0] if urls else None
 
 
@@ -81,7 +88,15 @@ class PlaudClient:
 
     # ---- low level ----------------------------------------------------- #
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=10), reraise=True)
+    # Retry only transient transport errors — not auth failures or other 4xx,
+    # which won't get better on retry and would just hammer the API / slow the
+    # error down by ~3s of backoff.
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, max=10),
+        retry=retry_if_not_exception_type((PlaudAuthError, httpx.HTTPStatusError)),
+        reraise=True,
+    )
     def _get(self, path: str, **params) -> httpx.Response:
         resp = self._client.get(path, params=params or None)
         if resp.status_code in (401, 403):
@@ -134,7 +149,11 @@ class PlaudClient:
                 break
             yield from page.data_file_list
             skip += len(page.data_file_list)
-            if skip >= page.data_file_total or len(page.data_file_list) < page_size:
+            # Stop on a short page; only trust data_file_total when present
+            # (defaults to 0, which must not be read as "done").
+            if len(page.data_file_list) < page_size:
+                break
+            if page.data_file_total and skip >= page.data_file_total:
                 break
 
     # ---- detail (transcript + summary) --------------------------------- #
@@ -154,7 +173,11 @@ class PlaudClient:
         ``/audiofiles/{id}.mp3``). The exact wrapper key isn't documented, so
         we scan the payload for the signed URL. See docs/plaud-api.md."""
         data = self._get_json(f"/file/temp-url/{file_id}")
-        url = _find_url(data, must_contain=(file_id, "amazonaws", "audiofiles", "Signature"))
+        # This endpoint's payload wraps exactly one signed URL, so falling back
+        # to "the only URL present" is safe here (unlike the detail payload).
+        url = _find_url(
+            data, must_contain=(file_id, "amazonaws", "audiofiles", "Signature"), allow_any=True
+        )
         if not url:
             raise PlaudError(
                 f"/file/temp-url/{file_id} returned no signed URL (payload keys: "
