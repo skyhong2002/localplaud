@@ -81,21 +81,26 @@ def auth_import(
     if not raw.strip():
         console.print("[red]No input.[/] Paste a cURL command or use --file.")
         raise typer.Exit(1)
+    import json
+
     parsed = parse_curl(raw)
+    if not parsed.get("token") and not parsed.get("cookie"):
+        console.print(
+            "[yellow]No Authorization or Cookie found in that cURL.[/] Copy an "
+            "[bold]authenticated[/] request to api-*.plaud.ai (e.g. /user/me)."
+        )
+        raise typer.Exit(1)
     console.print("[bold]Add these to your .env[/] (secrets stay out of config.toml):\n")
     if parsed.get("api_base"):
         console.print(f'LOCALPLAUD_PLAUD__API_BASE="{parsed["api_base"]}"')
     if parsed.get("token"):
-        console.print(f'LOCALPLAUD_PLAUD__COOKIE="{parsed["token"]}"')
-    elif parsed.get("cookie"):
+        console.print(f'LOCALPLAUD_PLAUD__TOKEN="{parsed["token"]}"')
+    if parsed.get("cookie"):
         console.print(f'LOCALPLAUD_PLAUD__COOKIE="{parsed["cookie"]}"')
     headers = parsed.get("headers", {})
-    keep = {k: v for k, v in headers.items() if k.lower().startswith(("x-", "app-", "timezone", "edit-from"))}
-    if keep:
-        console.print("\n[dim]# Plaud client headers (if auth check fails without them):[/]")
-        import json
-
-        console.print(f"LOCALPLAUD_PLAUD__EXTRA_HEADERS='{json.dumps(keep)}'")
+    if headers:
+        console.print("\n[dim]# Plaud client/device headers (needed if auth check fails):[/]")
+        console.print(f"LOCALPLAUD_PLAUD__EXTRA_HEADERS='{json.dumps(headers)}'")
 
 
 # --------------------------------------------------------------------------- #

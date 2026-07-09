@@ -144,13 +144,28 @@ def parse_curl(curl_text: str) -> dict[str, object]:
         if m:
             api_base = m.group(1)
 
-    result: dict[str, object] = {"headers": headers}
+    # Header names are case-insensitive and browsers emit them lowercased in
+    # "Copy as cURL" — match accordingly and pull auth/cookie out of the set.
+    def pop_ci(name: str) -> str | None:
+        for k in list(headers):
+            if k.lower() == name.lower():
+                return headers.pop(k)
+        return None
+
+    result: dict[str, object] = {}
     if api_base:
         result["api_base"] = api_base
-    if "Authorization" in headers:
-        result["token"] = headers.pop("Authorization")
-    if "Cookie" in headers and not cookie:
-        cookie = headers.pop("Cookie")
+    token = pop_ci("authorization")
+    if token:
+        result["token"] = token
+    header_cookie = pop_ci("cookie")
+    cookie = cookie or header_cookie
     if cookie:
         result["cookie"] = cookie
+    # Drop browser-noise headers; keep the Plaud client/device headers.
+    for noise in ("origin", "referer", "host", "accept", "accept-encoding",
+                  "accept-language", "sec-fetch-mode", "sec-fetch-site",
+                  "sec-fetch-dest", "user-agent", "content-length", "connection"):
+        pop_ci(noise)
+    result["headers"] = headers
     return result
