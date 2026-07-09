@@ -41,6 +41,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Slim, cloud-only image: no faster-whisper/torch (pointless on a CPU box
+      # and very slow to build on weak ARM). Use cloud ASR/LLM/embeddings —
+      # set the providers + API keys in .env / config.toml.
+      args:
+        EXTRAS: "cloud"
 
   localplaud-gpu:
     <<: *localplaud
