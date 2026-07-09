@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
@@ -17,12 +18,14 @@ from ..db.session import init_db, session_scope
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
-app = FastAPI(title="localplaud", docs_url="/api/docs")
 
-
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
     init_db()
+    yield
+
+
+app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
 
 
 def _fmt_dt(ms: int | None) -> str:
@@ -93,6 +96,21 @@ def index(request: Request):
     )
 
 
+_AUDIO_MIME = {"mp3": "audio/mpeg", "opus": "audio/ogg", "wav": "audio/wav", "m4a": "audio/mp4"}
+
+
+@app.get("/audio/{file_id}")
+def audio(file_id: str):
+    """Stream a downloaded recording's audio for the in-page player."""
+    with session_scope() as session:
+        r = session.get(PlaudFile, file_id)
+        path = r.audio_path if r else None
+    if not path or not Path(path).exists():
+        return JSONResponse({"error": "audio not downloaded"}, status_code=404)
+    ext = Path(path).suffix.lstrip(".").lower()
+    return FileResponse(path, media_type=_AUDIO_MIME.get(ext, "application/octet-stream"))
+
+
 @app.get("/file/{file_id}", response_class=HTMLResponse)
 def file_detail(request: Request, file_id: str):
     with session_scope() as session:
@@ -105,6 +123,7 @@ def file_detail(request: Request, file_id: str):
             "status": r.status.value,
             "duration_ms": r.duration_ms,
             "start_time_ms": r.start_time_ms,
+            "has_audio": bool(r.audio_path and Path(r.audio_path).exists()),
             "transcript": (
                 {
                     "provider": r.transcript.provider,

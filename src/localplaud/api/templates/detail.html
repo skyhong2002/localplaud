@@ -5,6 +5,10 @@
 <h2 style="margin:.2em 0">{{ f.filename or f.id[:12] }}</h2>
 <div class="src">{{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }} · <span class="status {{ f.status }}">{{ f.status }}</span></div>
 
+{% if f.has_audio %}
+<audio controls preload="none" style="width:100%; margin:14px 0" src="/audio/{{ f.id }}"></audio>
+{% endif %}
+
 {% for s in f.summaries %}
 <div class="summary">
   {% if s.title %}<h3>{{ s.title }}</h3>{% endif %}

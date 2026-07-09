@@ -102,12 +102,54 @@ def download_pending(client: PlaudClient, settings: Settings) -> int:
     return downloaded
 
 
+def ingest_cloud_summaries(client: PlaudClient, settings: Settings) -> int:
+    """Mirror Plaud's own summary (markdown) for files that have one, stored as
+    a ``source="cloud"`` summary under the ``plaud`` template. Lets even a box
+    with no local ASR/LLM keep the cloud's notes. Returns count ingested."""
+    from ..db.models import Summary as SummaryRow
+
+    ingested = 0
+    with session_scope() as session:
+        stmt = select(PlaudFile).where(PlaudFile.cloud_is_summary.is_(True))
+        candidates = [(r.id) for r in session.scalars(stmt)]
+
+    for fid in candidates:
+        with session_scope() as session:
+            has_cloud = any(s.template == "plaud" for s in session.get(PlaudFile, fid).summaries)
+        if has_cloud:
+            continue
+        try:
+            md = client.get_cloud_summary_md(fid)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("cloud summary fetch failed for %s: %s", fid, exc)
+            continue
+        if not md:
+            continue
+        title = next((ln[2:].strip() for ln in md.splitlines() if ln.startswith("# ")), None)
+        with session_scope() as session:
+            session.add(
+                SummaryRow(
+                    file_id=fid, template="plaud", title=title,
+                    content_md=md, source="cloud",
+                )
+            )
+        ingested += 1
+    return ingested
+
+
 def poll_once(settings: Settings | None = None) -> dict:
-    """One full poll cycle: sync listing + download pending."""
+    """One full poll cycle: sync listing + download pending (+ optionally mirror
+    Plaud's own summaries when ``pipeline.prefer_cloud_artifacts`` is set)."""
     settings = settings or get_settings()
     with PlaudClient(settings.plaud) as client:
         new, changed = sync_file_list(client, settings)
         downloaded = download_pending(client, settings)
-    result = {"new": new, "changed": changed, "downloaded": downloaded}
+        cloud_summaries = (
+            ingest_cloud_summaries(client, settings)
+            if settings.pipeline.prefer_cloud_artifacts
+            else 0
+        )
+    result = {"new": new, "changed": changed, "downloaded": downloaded,
+              "cloud_summaries": cloud_summaries}
     log.info("Poll cycle complete: %s", result)
     return result
