@@ -29,6 +29,17 @@ Plaud device or its app.
 > polls the Plaud cloud on a schedule, pulls down new/changed recordings, and
 > processes them locally.
 
+## Status
+
+Working end to end: cloud polling, **audio download** (`GET /file/temp-url/{id}`
+→ signed S3), local transcription (6 ASR backends), diarization, LLM summaries,
+embeddings + Q&A, an in-page audio player, and optional mirroring of Plaud's own
+summaries. Runs natively and in Docker (mac/gpu/cpu profiles), verified on three
+architectures. **You provide a Plaud session** (paste it once from your
+browser — auth is header-token, see below) and any cloud provider keys you want.
+Programmatic login and a few exact response schemas are still being
+reverse-engineered — see the [open issues](https://github.com/skyhong2002/localplaud/issues).
+
 ## How it works
 
 ```
