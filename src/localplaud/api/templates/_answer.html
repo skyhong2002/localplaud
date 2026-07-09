@@ -1,0 +1,14 @@
+<div class="answer">
+  <div>{{ res.answer }}</div>
+  {% if res.sources %}
+  <div class="src" style="margin-top:12px">
+    <strong>Sources</strong>
+    {% for s in res.sources[:5] %}
+    <div>• <a href="/file/{{ s.file_id }}">{{ s.filename }}</a>
+      {% if s.start is not none %}<span style="opacity:.7">@ {{ (s.start // 60) | int }}:{{ '%02d' % (s.start % 60) }}</span>{% endif %}
+      <span style="opacity:.6">({{ '%.2f' % s.score }})</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>

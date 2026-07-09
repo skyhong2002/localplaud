@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block body %}
+<form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin">
+  <input name="q" placeholder="Ask your recordings anything…" autocomplete="off" required>
+  <button type="submit">Ask</button>
+</form>
+<div id="spin" class="htmx-indicator src">thinking…</div>
+<div id="answer"></div>
+
+{% if files %}
+  {% for f in files %}
+  <div class="card">
+    <div>
+      <div><a href="/file/{{ f.id }}">{{ f.filename or f.id[:12] }}</a></div>
+      <div class="meta">{{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}</div>
+    </div>
+    <div class="tags">
+      <span class="tag {% if f.has_transcript %}on{% endif %}">transcript</span>
+      <span class="tag {% if f.has_summary %}on{% endif %}">summary</span>
+      <span class="status {{ f.status }}">{{ f.status }}</span>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">No recordings yet.<br>Run <code>localplaud poll --once</code> to sync from the Plaud cloud.</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ f.filename or f.id }} — localplaud{% endblock %}
+{% block body %}
+<p><a href="/">← all recordings</a></p>
+<h2 style="margin:.2em 0">{{ f.filename or f.id[:12] }}</h2>
+<div class="src">{{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }} · <span class="status {{ f.status }}">{{ f.status }}</span></div>
+
+{% for s in f.summaries %}
+<div class="summary">
+  {% if s.title %}<h3>{{ s.title }}</h3>{% endif %}
+  <div id="summary-{{ loop.index }}">{{ s.content_md }}</div>
+</div>
+{% endfor %}
+
+{% if f.transcript %}
+<h3>Transcript <span class="src">· {{ f.transcript.provider }}{% if f.transcript.language %} · {{ f.transcript.language }}{% endif %}</span></h3>
+<div>
+  {% for seg in f.transcript.segments %}
+  <div class="seg">
+    {% if seg.start is not none %}<span class="ts">{{ (seg.start // 60) | int }}:{{ '%02d' % (seg.start % 60) }}</span>{% endif %}
+    {% if seg.speaker %}<span class="who">{{ seg.speaker }}</span> {% endif %}
+    <span>{{ seg.text }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No transcript yet.</div>
+{% endif %}
+
+<script>
+  // Render the markdown summaries lightly (headings/bullets already read fine as text).
+  document.querySelectorAll('[id^="summary-"]').forEach(el => {
+    el.innerHTML = el.textContent
+      .replace(/^### (.*)$/gm, '<h4>$1</h4>')
+      .replace(/^## (.*)$/gm, '<h3>$1</h3>')
+      .replace(/^# (.*)$/gm, '<h3>$1</h3>')
+      .replace(/^\s*[-*] (.*)$/gm, '• $1<br>')
+      .replace(/\n{2,}/g, '<br><br>');
+  });
+</script>
+{% endblock %}
