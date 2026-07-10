@@ -216,10 +216,17 @@ imports. Implemented pipeline stages now persist attempts, provider/model proven
 timestamps, and failures; optional-stage errors retain usable transcript/notes and
 can resume from existing artifacts. Ollama embeddings have model-aware health checks
 and modern batch API support. MLX large-v3-turbo is smoke-tested on SkyLabMac, and
-the code targets pyannote Community-1, but VAD/alignment plus authenticated
-real-audio diarization verification remain. Single-file Ask now answers grounded
-only in one recording and renders each citation as a playable timestamp that seeks
-the player, and whole-library Ask citations deep-link to the cited moment
-(`/file/{id}?t=`). Other major gaps include editable artifacts, mind maps, Ask
-save-to-note and follow-up threads, richer organization/export, automation, and UI
-polish.
+the code targets pyannote Community-1. Optional VAD groundwork now exists behind a
+default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-timestamp
+region offsetting; faster-whisper's native bundled VAD filter), and degrades honestly
+to whole-file transcription with a visible health note when the optional `vad` extra
+is absent — but it still needs a real Taiwan Mandarin / code-switch benchmark before
+being enabled by default. Word-level forced alignment is still not implemented:
+Whisper's own word timestamps remain the alignment source, and a whisperX-style
+wav2vec2 aligner needs per-language models and a real-recording accuracy evaluation
+first. Authenticated real-audio diarization verification also remains. Single-file
+Ask now answers grounded only in one recording and renders each citation as a
+playable timestamp that seeks the player, and whole-library Ask citations deep-link
+to the cited moment (`/file/{id}?t=`). Other major gaps include editable artifacts,
+mind maps, Ask save-to-note and follow-up threads, richer organization/export,
+automation, and UI polish.

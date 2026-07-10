@@ -77,6 +77,21 @@ provider = "faster-whisper"      # faster-whisper | whispercpp | mlx-whisper | o
 language = "auto"                # ISO code (e.g. "en", "zh") or "auto"
 fallback = []                    # opt in explicitly; avoid surprise paid processing
 
+  [asr.vad]                      # Voice Activity Detection — first stage of the speech pipeline
+  # Off by default until benchmarked on real Taiwan Mandarin / code-switch audio.
+  # Enabling the local (mlx-whisper) path needs the optional 'vad' extra:
+  #   pip install 'localplaud[vad]'   (silero-vad). faster-whisper's native VAD
+  # filter bundles its own silero and needs no extra. If enabled but the package
+  # is missing, ASR logs a warning and falls back to whole-file transcription.
+  enabled = false
+  threshold = 0.5                # silero speech-probability cutoff (0-1)
+  min_speech_ms = 250            # drop speech blips shorter than this
+  min_silence_ms = 100           # silence needed to close a speech region
+  speech_pad_ms = 30             # padding silero adds around each region
+  merge_gap_s = 0.5              # merge regions separated by a shorter gap (mlx path)
+  region_pad_s = 0.2             # extra padding per ASR chunk so words aren't clipped
+  max_region_s = 30.0            # split longer regions to bound each ASR call
+
   [asr.faster_whisper]           # local, CPU or NVIDIA CUDA (CTranslate2)
   model = "large-v3-turbo"
   device = "auto"                # auto | cpu | cuda

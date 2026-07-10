@@ -181,6 +181,29 @@ class AssemblyAIConfig(BaseModel):
     speaker_labels: bool = True
 
 
+class VadConfig(BaseModel):
+    """Voice Activity Detection (the first stage of the speech pipeline).
+
+    When enabled, speech regions are detected before ASR so long silences are
+    trimmed and long recordings are transcribed in bounded chunks with globally
+    correct timestamps. Local silero-vad requires the optional ``vad`` extra
+    (``pip install 'localplaud[vad]'``); faster-whisper's native ``vad_filter``
+    bundles its own silero and needs no extra. Defaults to disabled until it is
+    benchmarked on real Taiwan Mandarin / code-switch recordings.
+    """
+
+    enabled: bool = False
+    # silero-vad thresholds (defaults match silero's own recommendations).
+    threshold: float = 0.5  # speech probability cutoff (0-1)
+    min_speech_ms: int = 250  # drop speech blips shorter than this
+    min_silence_ms: int = 100  # silence needed to close a speech region
+    speech_pad_ms: int = 30  # padding silero adds around each detected region
+    # Chunk planning for the local (mlx) path — see asr.vad.merge_speech_regions.
+    merge_gap_s: float = 0.5  # merge regions separated by a shorter gap
+    region_pad_s: float = 0.2  # extra padding per chunk so words aren't clipped
+    max_region_s: float = 30.0  # split longer regions to bound each ASR call
+
+
 AsrProviderName = Literal[
     "faster-whisper", "whispercpp", "mlx-whisper", "openai", "deepgram", "assemblyai"
 ]
@@ -196,6 +219,7 @@ class AsrConfig(BaseModel):
     language: str = "auto"  # ISO code (e.g. "en", "zh") or "auto"
     fallback: list[AsrProviderName] = Field(default_factory=list)
 
+    vad: VadConfig = Field(default_factory=VadConfig)
     faster_whisper: FasterWhisperConfig = Field(default_factory=FasterWhisperConfig)
     whispercpp: WhisperCppConfig = Field(default_factory=WhisperCppConfig)
     mlx_whisper: MlxWhisperConfig = Field(default_factory=MlxWhisperConfig)

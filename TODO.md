@@ -71,6 +71,19 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   assignment, model provenance, and actionable health checks. SkyLabMac still needs
   the optional dependency plus acceptance of the gated model terms and a Hugging
   Face token before real-audio verification. VAD and word-level alignment remain.
+- ✅ Added optional VAD groundwork behind a **default-off** `asr.vad.enabled` flag
+  (`asr/vad.py`): provider-agnostic silero-vad detection + region merge/pad/split
+  planning, ffmpeg region slicing, and honest `health()`. The mlx path transcribes
+  merged speech regions and offsets timestamps back to global time; the
+  faster-whisper path wires its native bundled-silero `vad_filter`. Missing the
+  optional `vad` extra is a *degraded* (not failed) state: ASR logs a warning,
+  falls back to whole-file transcription, and the provider `health()` says so.
+  Remaining: benchmark VAD on real Taiwan Mandarin / code-switch recordings before
+  enabling it by default. **Word-level forced alignment is deliberately NOT
+  implemented here** — Whisper's own word timestamps are currently the alignment
+  source, and a whisperX-style wav2vec2 forced aligner needs per-language models
+  plus a Mandarin/code-switch accuracy evaluation, so it must be benchmarked on real
+  user recordings first.
 - Persist stable speaker IDs separately from editable display names.
 - Add a custom vocabulary/correction layer for names, specialist terms, Taiwan
   Mandarin, and Mandarin/English code-switching.
