@@ -4,9 +4,10 @@ Status: Accepted
 
 ## Context
 
-localplaud mirrors Plaud cloud recordings and reprocesses them locally:
-polling an HTTP API, running ASR/diarization, calling LLMs, storing
-transcripts, and serving a small query UI. The dominant constraint is the
+localplaud downloads Plaud raw recordings and independently replaces the paid
+Intelligence workflow: polling an HTTP API, running ASR/alignment/diarization,
+calling LLMs, storing editable derived artifacts, and serving a full daily-use
+Web App. The dominant backend constraint is the
 ASR/diarization ecosystem — faster-whisper, whisper.cpp bindings,
 mlx-whisper, pyannote.audio, sentence-transformers — which is
 overwhelmingly Python. The tool must run on a Mac mini and in Linux
@@ -25,9 +26,12 @@ Docker, be installable by one person, and need no build pipeline.
   the `LOCALPLAUD_` prefix and `__` nesting (see `src/localplaud/config.py`).
 - **SQLAlchemy 2 (typed ORM) + SQLite** to start. The engine is created
   from `store.database_url`, so Postgres is a config swap, not a rewrite.
-- **FastAPI + Jinja2 templates + HTMX** for the web UI. Server-rendered
-  HTML with HTMX for interactivity means no Node, no bundler, no JS build
-  step — one `uv sync` gets a working UI.
+- **FastAPI** remains the application/API server. **Jinja2 + HTMX** are the
+  initial rendering stack and remain appropriate for server-driven areas.
+  They are an implementation starting point, not a product constraint: richer
+  client-side state or a SPA may be introduced for synchronized playback,
+  inline editing, optimistic updates, accessible navigation, and other
+  interactions required by `docs/product-workflow.md`.
 
 ## Consequences
 
@@ -38,8 +42,9 @@ Docker, be installable by one person, and need no build pipeline.
 - SQLite means zero-ops single-user storage; concurrency is bounded, which
   matches the pipeline's `concurrency = 1` default. Postgres remains the
   documented scale-up path via `database_url`.
-- The UI ceiling is "server-rendered + HTMX". If a rich SPA is ever
-  needed, that becomes a new decision; for a personal knowledge base it
-  is not.
+- The primary Web App must approach Plaud's workflow completeness and responsiveness.
+  Architecture is evaluated against that experience rather than minimizing frontend
+  tooling at all costs. A frontend architecture change should still be deliberate,
+  incremental, tested, and documented.
 - Python-level performance is acceptable because the hot paths (ASR
   inference, ffmpeg) run in native code anyway.

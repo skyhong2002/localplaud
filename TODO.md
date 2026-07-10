@@ -7,37 +7,88 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT). Work is on branch `feat/core-pipeline` (PR #6, CI green, 90 tests).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
-- **Real account verified**: the official Open API provider is live in production (OAuth auto-refresh verified). Notably it returns the account's **full history (~750 recordings)** — the old api-apse1 web listing only showed the most recent ~200 — so the backlog sync is correspondingly bigger. Cloud transcripts/summaries are being mirrored (`prefer_cloud_artifacts = true`), skipping local re-transcription where Plaud already did the work.
+- **Real account verified**: the official Open API provider is live in production
+  (OAuth auto-refresh verified) and returns the account's **full history (~750
+  recordings)**. Raw audio download works without requesting Plaud AI generation.
+- **Product direction changed**: localplaud must replace the Plaud Intelligence
+  subscription workflow. Plaud is retained only for recorder → App → raw-audio
+  cloud transport. See `AGENTS.md` and `docs/product-workflow.md`.
+- **Current production is not yet subscription-independent**: it has
+  `prefer_cloud_artifacts = true`, previously imported Plaud artifacts, diarization
+  disabled, and an embedding failure (`bge-m3` is not installed; Ollama returns 404).
+  On the latest inspection the database had 747 downloaded, 1 processing, 6 error,
+  0 done, and 0 indexed chunks. Do not describe production as end-to-end healthy.
 - Dev env on SkyLabMac: `~/Projects/localplaud` (venv, ffmpeg static, config.toml, `.env`). Claude Code CLI installed (`~/.local/bin/claude`).
 
 ## TODO — prioritized
 
-### ✅ DONE (2026-07-10) — P0: official Open API is now the default provider
+### ✅ DONE (2026-07-10) — Foundation: official Open API and raw audio
 `plaud.provider = "official"` (default): OAuth via the official Plaud CLI
 (`localplaud auth login` wraps it; tokens in `~/.plaud/tokens.json`,
 auto-refresh implemented in `plaud/oauth.py`, verified live — both tokens
-rotate, 24h expiry). `PlaudOfficialClient` (`plaud/official.py`) mirrors
-Plaud's own transcripts (with speaker names) + summaries from
-`/open/third-party/files/{id}`; with `pipeline.prefer_cloud_artifacts = true`
-the pipeline reuses them and skips local re-transcription. api-apse1 is now
+rotate, 24h expiry). `/open/third-party/files/{id}` supplies a signed raw-audio
+URL. The client can also import Plaud transcripts/summaries, but that capability is
+now migration/debug-only and cannot be a primary pipeline dependency. api-apse1 is
 optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 `version`/`file_md5`/`edit_time`/`is_trash`. Full API notes: `docs/plaud-api.md`.
-Largely closes issues #8 and #9.
 
-### P1 — Ongoing sync robustness
-- ~~api-apse1 refresh-flow stopgap (`pld_ut` cookie)~~ superseded by the
-  official provider. Remaining nice-to-have: a native PKCE flow inside
-  localplaud (drop the Node.js dependency for `auth login`).
+### P0 — Make raw-audio processing production-safe
+
+- Add an explicit `independent`/`raw_audio_only` mode. It must reject Plaud-derived
+  transcripts and summaries even when old rows already exist; keep any imports
+  separately labelled for migration/comparison.
+- Migrate the existing database safely: preserve cloud artifacts, but do not let
+  them satisfy local completion. Queue raw audio for independent processing.
+- Replace the one-file `status` gate with durable per-stage runs and retries. ASR,
+  transcript, and notes remain usable if mind map, embedding, or an integration fails.
+- Fix Ollama embeddings with model-level health checks and pull/validate the selected
+  embedding model before processing the backlog.
+- Make queue ordering useful: newest recordings first for daily use, controlled
+  backlog processing separately, with visible progress and retry policy.
+
+### P0 — SOTA speech and speakers
+
+- Default Apple Silicon to `mlx-community/whisper-large-v3-turbo`; use the equivalent
+  faster-whisper/CTranslate2 turbo model on CUDA/CPU.
+- Add VAD and word-level alignment, then production-quality pyannote diarization and
+  assign speakers to words/segments. Whisper itself is not speaker-aware.
+- Persist stable speaker IDs separately from editable display names.
+- Add a custom vocabulary/correction layer for names, specialist terms, Taiwan
+  Mandarin, and Mandarin/English code-switching.
+- Establish a benchmark set from consented user-owned recordings: WER/CER, diarization
+  error, timestamp quality, hallucination rate, runtime, and memory.
+
+### P0 — Full-transcript notes and usable knowledge
+
+- Replace the current 24,000-character truncation with full-coverage hierarchical
+  summarization.
+- Make templates editable data; support auto selection, per-file custom generation,
+  multiple note tabs, provenance, and safe regeneration.
+- Re-index the corrected canonical transcript. Add single-file Ask and whole-library
+  Ask with playable timestamp citations and save-to-note.
+
+### P1 — Plaud-like Web App workflow
+
+- Implement `docs/product-workflow.md`: library filters/folders/tags, responsive
+  split panes, persistent player, waveform/progress, transcript editing, speaker
+  naming, notes, mind map, Ask, processing UI, and actionable recovery.
+- Treat the Web App as the product, not a status viewer. CLI remains setup/ops tooling.
+- Add original localplaud visual design with Plaud-like interaction density and
+  information architecture; do not copy Plaud assets.
+- Export audio, TXT/Markdown/SRT/VTT/DOCX/PDF transcripts, Markdown/DOCX/PDF notes,
+  and PNG/Markdown mind maps with speaker/timestamp options.
+
+### P2 — Automation and integrations
+
+- Rules matching source, duration, early-transcript keyword, folder/tag, and metadata.
+- Per-rule ASR/diarization/template selection, notification, email, webhook, and
+  export actions with independent retry/history.
+- Native PKCE inside localplaud to remove the Node.js dependency from first login.
 
 ### P1 — Deploy the other two machines
 - **CCLabPC** (nvplaud.observe.tw, NVIDIA/CUDA): docker `gpu` profile or native; needs user in `docker` group. DNS already points here.
 - **Oracle** (plaud.skyhong.tw, aarch64 CPU): `cpu` slim image (already builds/runs there) + Caddy vhost; cloud ASR.
 - Pattern to reuse: append a `<domain> { basic_auth … ; reverse_proxy 127.0.0.1:8080 }` block to that host's Caddyfile (SkyLabMac already done this way).
-
-### P2 — Product polish (from earlier review)
-- UI: Mind Map tab, folders/tags in the sidebar, export PDF/SRT (currently .md only), SPA-style pane swapping.
-- Cloud ASR providers (Deepgram/OpenAI/AssemblyAI) real-key verification; pyannote diarization with a HF token.
-- Programmatic login (issue #8) — solved by P0's OAuth.
 
 ### Housekeeping
 - Merge PR #6 to `main` (blocked: agent can't self-merge).

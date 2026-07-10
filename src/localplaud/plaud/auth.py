@@ -2,7 +2,7 @@
 
 Plaud's web app authenticates to the API with header-token auth — an
 ``Authorization`` value plus a set of client/device headers — not a single
-readable cookie (see CLAUDE.md / docs/plaud-api.md). Until the programmatic
+readable cookie (see AGENTS.md / docs/plaud-api.md). Until the programmatic
 login flow is reverse-engineered, the supported route is: the user copies an
 authenticated request's headers out of their browser and localplaud replays
 them.

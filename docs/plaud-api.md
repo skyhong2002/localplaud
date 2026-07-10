@@ -3,6 +3,16 @@
 localplaud only ever issues **read-only** requests to the Plaud cloud. Two
 providers exist; this document is the reference both clients are built from.
 
+## Product boundary
+
+The official API is used for OAuth, recording discovery, minimal metadata, and raw
+audio download. The subscription-independent pipeline must succeed when
+`source_list`, `note_list`, and every Plaud AI artifact are empty.
+
+Plaud transcripts/summaries may be imported only through an explicit migration or
+debug path. They must retain Plaud provenance and must not silently satisfy local
+pipeline completion. See [ADR 0007](adr/0007-subscription-independence.md).
+
 ## Official Open API (default provider — `plaud/official.py`)
 
 Sanctioned developer API, documented at <https://docs.plaud.ai> (MCP & CLI).
@@ -31,13 +41,15 @@ All endpoints verified against a real account (2026-07-10).
     providers merge cleanly.
   - `/open/third-party/files/{id}` — the listing fields plus:
     - `presigned_url` — 24 h S3 audio URL (`.mp3`).
-    - `source_list[]` — transcript assets; the `data_type == "transaction"`
+    - `source_list[]` — optional Plaud-generated transcript assets; the
+      `data_type == "transaction"`
       entry's `data_content` is a JSON **string** of segments `{content,
       start_time, end_time, speaker, original_speaker, embeddingKey}` (times
       in ms; `speaker` reflects user renames, `original_speaker` is
       "Speaker N"). Other types seen: `outline`, `transaction_polish`.
-    - `note_list[]` — the `data_type == "auto_sum_note"` entry's
-      `data_content` is Plaud's summary as markdown.
+    - `note_list[]` — optional Plaud-generated artifacts; the
+      `data_type == "auto_sum_note"` entry's `data_content` is Plaud's summary as
+      markdown. Neither list is a primary-pipeline dependency.
 - **Not exposed** (hence the optional apse1 enrichment): `version`,
   `file_md5`, `edit_time`, `is_trash`, tags, scene.
 
@@ -156,7 +168,7 @@ URL as short-lived. `PlaudClient.get_temp_url` / `download_audio` implement
 this (scanning the wrapper for the signed URL, since its exact JSON key wasn't
 extractable). **Open:** the exact wrapper key name.
 
-### Cloud transcript / summary assets ✅ (bonus)
+### Cloud transcript / summary assets (migration/debug only)
 The `/file/detail/{id}` payload resolves to signed S3 assets on
 `apse1-prod-plaud-content-storage.s3.amazonaws.com`:
 
@@ -166,9 +178,10 @@ The `/file/detail/{id}` payload resolves to signed S3 assets on
 | Summary (markdown) | `.../file_summary/{id}/ai_content.md.gz` |
 | Outline | `.../file_outline/{id}/outline.json.gz` |
 
-`PlaudClient.get_cloud_summary_md` and `get_cloud_transcript_json` fetch and
-gunzip these (best-effort, by URL substring). The summary is plain markdown and
-directly usable; the transcript JSON schema isn't modelled yet (issue #9).
+`PlaudClient.get_cloud_summary_md` and `get_cloud_transcript_json` can fetch and
+gunzip these for migration, debugging, or benchmark comparison. Imported results
+must remain labelled `source=plaud`; the primary pipeline derives its own artifacts
+from downloaded audio.
 
 ## Open questions (tracked in issue #1)
 

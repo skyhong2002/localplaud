@@ -7,9 +7,13 @@ rationale.
 
 | Profile | Hardware                     | ASR                                   |
 | ------- | ---------------------------- | ------------------------------------- |
-| `cpu`   | small/cloud CPU box          | cloud ASR API (Deepgram/OpenAI/AAI)   |
-| `gpu`   | NVIDIA + CUDA                | local Whisper in-container (CUDA)      |
-| `mac`   | Apple Silicon                | local Whisper on the host, or cloud    |
+| `cpu`   | CPU-only machine             | local turbo where practical; explicit cloud opt-in |
+| `gpu`   | NVIDIA + CUDA                | local Whisper large-v3-turbo           |
+| `mac`   | Apple Silicon                | local MLX large-v3-turbo on the host   |
+
+The subscription-independent reference profile uses local Whisper large-v3-turbo plus
+alignment and diarization. A cloud ASR remains possible, but is an explicit cost and
+privacy choice rather than an automatic fallback.
 
 ## Before you start (per host)
 
@@ -56,8 +60,10 @@ Whisper must run on the host. Two options:
 - **On-device Metal ASR** (fastest, private): run the app natively and let
   Caddy (in Docker) proxy to it:
   ```bash
-  uv sync --extra mlx --extra local-llm      # mlx-whisper uses Metal
-  # config.toml: [asr] provider = "mlx-whisper"
+  uv sync --extra mlx --extra diarize --extra local-llm
+  # config.toml: provider = "mlx-whisper"
+  # model = "mlx-community/whisper-large-v3-turbo"
+  # [diarize] provider = "pyannote" (plus HF token/model acceptance)
   uv run localplaud run                        # host app on :8080
   docker compose --profile mac up -d caddy     # HTTPS only; Caddyfile → host.docker.internal:8080
   ```
@@ -73,7 +79,8 @@ docker compose --profile gpu up -d --build
 
 Uses `Dockerfile.cuda` (CUDA 12.4 + faster-whisper on GPU + pyannote for
 diarization). Verify the GPU is visible: `docker compose exec localplaud-gpu nvidia-smi`.
-Set `[asr] provider = "faster-whisper"`, `device = "cuda"`.
+Set `[asr] provider = "faster-whisper"`, model `large-v3-turbo`, device `cuda`,
+and keep the diarization profile enabled.
 
 > **Running CUDA natively (no Docker)**: the NVIDIA driver alone isn't enough —
 > CTranslate2 needs cuBLAS and cuDNN 9. Install the `cuda` extra
@@ -82,12 +89,14 @@ Set `[asr] provider = "faster-whisper"`, `device = "cuda"`.
 
 ### 3. Oracle Cloud (aarch64, 2 vCPU) → `plaud.skyhong.tw`
 
-The always-on poller/downloader. Too weak for local Whisper, so it uses a
-cloud ASR API:
+The always-on poller/downloader. It is too weak to be the preferred local turbo
+inference worker. For subscription independence, let it ingest/store while a Mac or
+CUDA worker processes the shared queue. A cloud ASR API is an explicit alternative:
 
 ```bash
 ./scripts/deploy/bootstrap.sh
-# .env: LOCALPLAUD_ASR__PROVIDER=deepgram + LOCALPLAUD_ASR__DEEPGRAM__API_KEY=...
+# Explicit cloud choice only:
+# LOCALPLAUD_ASR__PROVIDER=deepgram + LOCALPLAUD_ASR__DEEPGRAM__API_KEY=...
 docker compose --profile cpu up -d --build
 ```
 

@@ -1,47 +1,57 @@
-# ADR 0003: Pluggable ASR — provider registry with ordered fallback
+# ADR 0003: SOTA local speech pipeline with pluggable providers
 
-Status: Accepted
+Status: Accepted (revised 2026-07-10)
 
 ## Context
 
-No single ASR setup fits every deployment: a Mac mini wants Metal
-(whisper.cpp / mlx-whisper), an NVIDIA box wants faster-whisper on CUDA, a
-weak VPS is better served by a cloud API, and users differ on the
-privacy/accuracy/cost trade-off. Some cloud providers (Deepgram,
-AssemblyAI) also return speaker labels server-side, which local Whisper
-does not. The rest of the pipeline (diarization, summaries, chunking,
-search) must not care where a transcript came from.
+localplaud must replace Plaud's paid transcription and speaker workflow from raw
+audio. A provider abstraction is still useful across Apple Silicon, NVIDIA, CPU, and
+explicit cloud configurations, but merely returning transcript text is not enough.
+The default product result needs strong multilingual ASR, accurate timestamps, and
+speaker-attributed segments suitable for editing, playback, summaries, and citations.
+
+Whisper does not perform speaker diarization. Describing a Whisper model as
+"speaker-aware" conflates separate problems and produces a misleading product state.
 
 ## Decision
 
-- A **provider registry** (`localplaud/asr/registry.py`): each provider
-  module registers a factory by name via `@register(name)`. Modules are
-  imported lazily, so optional heavy deps (torch, MLX, cloud SDKs) are
-  only required for the provider actually selected.
-- **Local and cloud providers are equal first-class choices**, selected by
-  `asr.provider` in config — cloud is a deliberate option (accuracy,
-  server-side diarization, no GPU needed), not merely a weak-machine
-  fallback. Supported: `faster-whisper`, `whispercpp`, `mlx-whisper`
-  (local); `openai`, `deepgram`, `assemblyai` (cloud).
-- **Ordered fallback**: `asr.fallback` lists providers tried in order when
-  the primary reports `available() == False` or raises `AsrUnavailable`
-  (missing GPU, model, dependency, or API key).
-- **One normalised output**: every provider returns the
-  `Transcript`/`Segment`/`Word` model (`localplaud/asr/base.py`) with
-  timestamps and optional speaker labels. `Transcript.has_speakers`
-  records whether diarization already happened; if not, the pyannote
-  stage fills in speakers afterwards.
+- The default accuracy/speed baseline is **OpenAI Whisper large-v3-turbo**:
+  - Apple Silicon: `mlx-community/whisper-large-v3-turbo` via MLX Whisper.
+  - NVIDIA/CUDA and CPU: `large-v3-turbo`/`turbo` through faster-whisper or an
+    equivalent verified CTranslate2 conversion.
+- The complete default speech path is:
+
+  ```text
+  VAD -> Whisper large-v3-turbo -> word-level alignment
+      -> speaker diarization -> word/segment speaker assignment
+  ```
+
+- Use a current production-quality pyannote pipeline, or a replacement that wins a
+  documented benchmark. WhisperX is an acceptable integration pattern for alignment,
+  diarization, and speaker assignment.
+- Diarization is required for the Plaud-like default profile. If it cannot run, store
+  the ASR artifact but mark the recording clearly degraded; never set
+  `has_speakers=true` without real speaker output.
+- Store stable machine speaker IDs separately from editable display names. Preserve
+  timestamps, word data, provider/model/version, language, and confidence where
+  available.
+- Keep the provider registry and normalized transcript contract. Local turbo is the
+  subscription-independent default; cloud providers are explicit operator choices,
+  not silent fallbacks. Any paid fallback must require opt-in and be visible in UI,
+  logs, and artifact provenance.
+- Taiwan Mandarin and Mandarin/English code-switching are first-class benchmark cases.
+  Model or diarization changes require evaluation on consented user-owned recordings
+  for WER/CER, diarization error, hallucination, timestamp quality, speed, and memory.
 
 ## Consequences
 
-- Adding a provider is one module implementing `available()` +
-  `transcribe()` and normalising to `Transcript`; nothing downstream
-  changes.
-- `pip install localplaud` stays lightweight; extras
-  (`faster-whisper`, `mlx`, `cloud`, `diarize`) pull deps per provider.
-- Fallback makes the pipeline resilient (e.g. local model missing →
-  cloud), at the cost that a misconfigured primary can silently shift
-  work to a paid provider — fallback use is logged at WARNING.
-- Normalisation flattens provider-specific extras (per-word confidence
-  variants, punctuation metadata) to the common model; anything else must
-  be added to the shared model deliberately.
+- Existing providers may remain available, but not every provider satisfies the full
+  Plaud-like quality profile.
+- The current `transcribe -> diarize` implementation is an intermediate state; word
+  alignment, durable stage runs, editable speakers, and degraded-state UI are required.
+- Apple Silicon and CUDA use different inference runtimes while targeting the same
+  model family and normalized artifact.
+- Speaker diarization adds model downloads, compute, and potentially a Hugging Face
+  token/license acceptance step. Deployment and health checks must surface this.
+- Falling back from local inference to a paid API can break the project's cost/privacy
+  promise, so availability alone is insufficient justification for automatic fallback.

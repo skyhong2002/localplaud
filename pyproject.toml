@@ -1,7 +1,7 @@
 [project]
 name = "localplaud"
 version = "0.1.0"
-description = "Self-hosted Plaud clone — mirror your Plaud cloud recordings locally and run your own transcription, diarization, summaries and Q&A."
+description = "Self-hosted replacement for the Plaud Intelligence workflow, from raw audio to diarized transcripts, notes, Ask, and export."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

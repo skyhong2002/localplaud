@@ -124,8 +124,8 @@ class PipelineConfig(BaseModel):
     # Which summary template to use (default | meeting | call | lecture |
     # personal — see worker/summary_templates.py).
     summary_template: str = "default"
-    # Re-use Plaud's own transcript/summary when the cloud already made one,
-    # instead of recomputing locally. Set false to always redo locally.
+    # Migration/debug import only. The independent primary workflow keeps this
+    # false and derives every artifact from raw audio.
     prefer_cloud_artifacts: bool = False
 
 
@@ -133,19 +133,19 @@ class PipelineConfig(BaseModel):
 
 
 class FasterWhisperConfig(BaseModel):
-    model: str = "large-v3"
+    model: str = "large-v3-turbo"
     device: Literal["auto", "cpu", "cuda"] = "auto"
     compute_type: Literal["auto", "int8", "int8_float16", "float16", "float32"] = "auto"
 
 
 class WhisperCppConfig(BaseModel):
     binary: str = "whisper-cli"  # from whisper.cpp; uses Metal on Apple Silicon
-    model_path: Path = Path("./models/ggml-large-v3.bin")
+    model_path: Path = Path("./models/ggml-large-v3-turbo.bin")
     extra_args: list[str] = Field(default_factory=list)
 
 
 class MlxWhisperConfig(BaseModel):
-    model: str = "mlx-community/whisper-large-v3-mlx"
+    model: str = "mlx-community/whisper-large-v3-turbo"
 
 
 class OpenAIAsrConfig(BaseModel):
@@ -171,10 +171,10 @@ AsrProviderName = Literal[
 
 
 class AsrConfig(BaseModel):
-    """ASR is fully pluggable. Local and cloud providers are equal first-class
-    choices — pick whichever gives the best accuracy / speaker separation for
-    your machine, not just as a fallback. ``fallback`` providers are tried in
-    order if the primary can't run (e.g. no GPU, model missing)."""
+    """ASR is pluggable, with local Whisper large-v3-turbo as the default
+    subscription-independent quality baseline. ``fallback`` names providers tried
+    in order when the primary is unavailable; paid cloud fallback requires explicit
+    operator configuration."""
 
     provider: AsrProviderName = "faster-whisper"
     language: str = "auto"  # ISO code (e.g. "en", "zh") or "auto"

@@ -26,7 +26,7 @@ def test_env_vars_override_defaults(monkeypatch, tmp_path):
 
     # Untouched nested defaults still exist alongside the overrides.
     assert s.asr.language == "auto"
-    assert s.asr.faster_whisper.model == "large-v3"
+    assert s.asr.faster_whisper.model == "large-v3-turbo"
     assert s.asr.deepgram.model == "nova-2"
     assert s.poller.interval_seconds == 300
     assert s.store.database_url.startswith("sqlite:///")

@@ -57,9 +57,9 @@ summarize = true
 index = true                     # build embeddings for Q&A / search
 concurrency = 1                  # files processed in parallel by the worker
 summary_template = "default"     # default | meeting | call | lecture | personal
-# true = mirror Plaud's own transcript (with speaker names!) and summary when
-# the cloud already made them — the pipeline then skips local re-transcription
-# for those files entirely. Strongly recommended with the official provider.
+# Migration/debug only. The subscription-independent workflow keeps this false
+# and derives every artifact from raw audio. A future strict mode will also refuse
+# to reuse previously imported Plaud artifacts.
 prefer_cloud_artifacts = false
 
 # --------------------------------------------------------------------------- #
@@ -71,16 +71,16 @@ language = "auto"                # ISO code (e.g. "en", "zh") or "auto"
 fallback = ["openai"]            # tried in order if the primary can't run
 
   [asr.faster_whisper]           # local, CPU or NVIDIA CUDA (CTranslate2)
-  model = "large-v3"
+  model = "large-v3-turbo"
   device = "auto"                # auto | cpu | cuda
   compute_type = "auto"          # auto | int8 | int8_float16 | float16 | float32
 
   [asr.whispercpp]               # local, uses Metal on Apple Silicon
   binary = "whisper-cli"
-  model_path = "./models/ggml-large-v3.bin"
+  model_path = "./models/ggml-large-v3-turbo.bin"
 
   [asr.mlx_whisper]              # local, Apple Silicon (MLX / Metal)
-  model = "mlx-community/whisper-large-v3-mlx"
+  model = "mlx-community/whisper-large-v3-turbo"
 
   [asr.openai]                   # cloud
   # api_key via LOCALPLAUD_ASR__OPENAI__API_KEY
@@ -100,7 +100,7 @@ fallback = ["openai"]            # tried in order if the primary can't run
 # Cloud ASR (deepgram/assemblyai) return speakers directly, so this is skipped.
 # --------------------------------------------------------------------------- #
 [diarize]
-provider = "pyannote"            # pyannote | none
+provider = "pyannote"            # required for the default Plaud-like speaker workflow
 # hf_token via LOCALPLAUD_DIARIZE__HF_TOKEN (needed to download pyannote models)
 # num_speakers = 2               # optional hint; omit to auto-detect
 

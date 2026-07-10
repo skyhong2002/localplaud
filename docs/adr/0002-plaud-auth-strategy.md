@@ -6,7 +6,8 @@ Status: Accepted
 
 localplaud needs an authenticated, headless session against the user's own
 Plaud cloud account (`api-apse1.plaud.ai` or the region host from
-`pld_plaud_user_api_domain`). Reverse-engineering findings (see CLAUDE.md):
+`pld_plaud_user_api_domain`). Historical reverse-engineering findings (see
+`AGENTS.md` and `docs/plaud-api.md`):
 
 - Auth is **header-token based, not a readable cookie**. `document.cookie`
   only contains analytics/ALB cookies; nothing there is a reusable session

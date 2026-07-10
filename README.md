@@ -5,9 +5,9 @@
 <h1 align="center"></h1>
 
 <p align="center">
-  <b>A self-hosted Plaud clone.</b> Keep recording with your physical Plaud device,
-  but mirror everything to a machine you own and run your own transcription,
-  speaker diarization, summaries, and Q&amp;A — your audio never leaves home.
+  <b>A self-hosted replacement for the Plaud Intelligence workflow.</b> Keep using
+  your physical Plaud recorder and its raw-audio upload path; localplaud takes over
+  transcription, speakers, notes, search, Ask, and export on machines you control.
 </p>
 
 <p align="center">
@@ -22,28 +22,30 @@
 
 ## Why
 
-Plaud's hardware is great; its cloud is a black box. **localplaud** treats the
-official Plaud cloud as the source of truth for your *raw audio* and rebuilds
-everything the cloud does — download, transcode, transcribe, diarize,
-summarize, template notes, and ask-your-recordings search — on hardware you
-control. It is a **mirror + local processing layer**, not a replacement for the
-Plaud device or its app.
+Plaud's hardware and device sync are useful; its paid Intelligence workflow should
+be optional. **localplaud** treats the official Plaud cloud as a transport and source
+of truth for *raw audio* only, then independently rebuilds the useful workflow —
+download, transcode, transcribe, align, diarize, correct, summarize, map, search,
+Ask, and export — on hardware you control. It replaces the subscription processing
+experience, not the recorder or the App's device-upload role.
 
-> You keep using the Plaud device and its app exactly as before. localplaud
-> polls the Plaud cloud on a schedule, pulls down new/changed recordings, and
-> processes them locally.
+> Record and upload as usual, but do not need to press Plaud's Generate button.
+> localplaud polls the read-only Open API, downloads the audio, and owns every
+> derived artifact. See the [target product workflow](docs/product-workflow.md).
 
 ## Status
 
-Working end to end: cloud polling over **Plaud's official Open API** (OAuth,
-auto-refreshing — sign in once with `localplaud auth login`), audio download,
-local transcription (6 ASR backends), diarization, LLM summaries, embeddings +
-Q&A, an in-page audio player, and mirroring of Plaud's own transcripts (with
-speaker names) and summaries so you can skip local re-transcription entirely.
-Runs natively and in Docker (mac/gpu/cpu profiles), verified on three
-architectures. The reverse-engineered web API remains available as an optional
-enrichment source / fallback provider — see the
-[open issues](https://github.com/skyhong2002/localplaud/issues).
+The core skeleton works: OAuth polling through **Plaud's official Open API**, raw
+audio download, pluggable local ASR, diarization, LLM notes, embeddings/Q&A, audio
+playback, and a FastAPI Web App. It runs natively and in Docker profiles.
+
+The subscription-replacement experience is **in progress**, not complete. The
+current implementation still needs strict raw-audio-only processing, durable
+stage-level state, the large-v3-turbo + alignment + diarization default path,
+long-recording summarization, editable transcripts/speakers/notes, mind maps,
+single-file Ask, richer export/organization/automation, and Plaud-level Web App
+polish. Plaud-produced transcripts and summaries may be imported for migration or
+comparison, but are not part of the target primary workflow.
 
 ## How it works
 
@@ -54,9 +56,9 @@ enrichment source / fallback provider — see the
                                                    ▼
    ┌─────────────────────────── localplaud ───────────────────────────┐
    │  poller ─► store (audio on disk + SQLite) ─► worker pipeline:     │
-   │             convert ─► transcribe ─► diarize ─► summarize ─► index │
+   │      convert ─► ASR ─► align ─► diarize ─► notes/map ─► index     │
    │                                          │                        │
-   │                              api / web UI (search + Q&A)          │
+   │                  Plaud-like Web App (review/edit/Ask/export)      │
    └───────────────────────────────────────────────────────────────────┘
 ```
 
@@ -64,10 +66,10 @@ enrichment source / fallback provider — see the
   `version`/`version_ms`), downloads the `.opus` audio.
 - **store** — audio bytes on the filesystem; metadata, transcripts, summaries
   and embeddings in SQLite.
-- **worker** — the local pipeline: `opus → wav` (ffmpeg) → ASR → diarization →
-  LLM summary/notes → embeddings for Q&A.
-- **api / ui** — a small FastAPI + HTMX app to browse, search, and ask
-  questions across your recordings.
+- **worker** — the independent pipeline: audio → Whisper large-v3-turbo → word
+  alignment → speaker diarization → notes/mind map → embeddings.
+- **api / ui** — the primary daily-use Web App: browse, listen, review, edit,
+  regenerate, organize, Ask, and export.
 
 ## Quickstart
 
@@ -152,11 +154,16 @@ LOCALPLAUD_DIARIZE__HF_TOKEN="hf_..."
 
 ## ASR providers
 
-ASR is fully pluggable, and **local and cloud engines are equal first-class
-choices** — pick whichever gives you the best accuracy / speaker separation,
-not just as a weak-machine fallback. Set `asr.provider`, list `asr.fallback`
-providers to try if the primary can't run, and drop in API keys for the cloud
-options.
+ASR remains pluggable, but the subscription-independent quality baseline is local
+**Whisper large-v3-turbo**. On Apple Silicon the target model is
+`mlx-community/whisper-large-v3-turbo`; on CUDA/CPU use the equivalent
+faster-whisper/CTranslate2 model. Cloud ASR remains an explicit operator choice,
+not a silent fallback.
+
+Whisper does not identify speakers. Plaud-like speaker results require a complete
+pipeline of VAD, turbo ASR, word-level alignment, diarization (pyannote or a
+benchmarked equivalent), and speaker assignment. A provider returning only text is
+therefore not considered the complete default experience.
 
 | Provider          | Type   | Runs on                    | Diarization |
 | ----------------- | ------ | -------------------------- | ----------- |
@@ -166,6 +173,8 @@ options.
 | `openai`          | cloud  | any                        | via pyannote |
 | `deepgram`        | cloud  | any                        | built-in    |
 | `assemblyai`      | cloud  | any                        | built-in    |
+
+See [ADR 0003](docs/adr/0003-pluggable-asr.md) for the target quality contract.
 
 ## Deploying to your own machines
 
@@ -179,7 +188,7 @@ on very different hardware:
 | `cpu`   | small/cloud CPU boxes | cloud ASR API                         |
 
 A bundled Caddy reverse proxy terminates HTTPS for your domain automatically.
-See [Deployment](#deploying-to-your-own-machines) below and `docs/deploy.md`.
+See [`docs/deploy.md`](docs/deploy.md).
 
 ## Development
 

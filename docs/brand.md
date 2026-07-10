@@ -12,9 +12,14 @@ app and usable in docs. Not affiliated with Plaud.
 
 ## Concept
 
-A **microphone** (voice recording) in a rounded tile — localplaud is about your
-own voice notes. The name pairs it: *local* (muted gray, your machine) +
-*plaud* (accent gradient, the cloud it mirrors).
+A **microphone** (voice recording) in a rounded tile — localplaud is about owning
+the intelligence workflow around your recordings. The name pairs it: *local*
+(muted gray, your machine) + *plaud* (accent gradient, the recorder/upload path it
+extends).
+
+The Web App may follow Plaud's proven information architecture and interaction
+rhythm, but localplaud uses original marks, components, copy, and visual details. The
+goal is familiar workflow, not a deceptive pixel clone.
 
 ## Colors (shared with the UI tokens)
 
