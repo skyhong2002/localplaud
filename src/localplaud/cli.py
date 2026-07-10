@@ -391,7 +391,12 @@ def doctor():
         from .asr.registry import build_provider
 
         p = build_provider(settings.asr.provider, settings.asr)
-        row(f"asr:{settings.asr.provider}", p.available())
+        health = getattr(p, "health", None)
+        if callable(health):
+            ok, detail = health()
+            row(f"asr:{settings.asr.provider}", ok, detail)
+        else:
+            row(f"asr:{settings.asr.provider}", p.available())
     except Exception as exc:  # noqa: BLE001
         row(f"asr:{settings.asr.provider}", False, str(exc)[:60])
 

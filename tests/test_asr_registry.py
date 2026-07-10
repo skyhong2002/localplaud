@@ -1,5 +1,6 @@
 """ASR registry: registration, selection, and fallback — no optional deps."""
 
+import builtins
 from pathlib import Path
 
 import pytest
@@ -79,3 +80,19 @@ def test_no_provider_available_raises(dummy_providers):
     cfg = _cfg("brokenprimary", fallback=["brokenprimary"])
     with pytest.raises(AsrUnavailable):
         registry.transcribe_with_fallback(AUDIO, cfg)
+
+
+def test_mlx_health_explains_dependency_import_failure(monkeypatch):
+    from localplaud.asr.mlx_provider import MlxWhisperProvider
+
+    real_import = builtins.__import__
+
+    def fail_mlx_import(name, *args, **kwargs):
+        if name == "mlx_whisper":
+            raise ImportError("Numba needs NumPy 2.4 or less")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_mlx_import)
+    ok, detail = MlxWhisperProvider(AsrConfig()).health()
+    assert ok is False
+    assert "Numba needs NumPy 2.4 or less" in detail

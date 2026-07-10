@@ -87,6 +87,8 @@ cd localplaud
 # install (choose extras for the ASR you want — see below)
 uv sync --extra faster-whisper          # local ASR, CPU/CUDA
 #   or: pip install -e ".[faster-whisper]"
+# Apple Silicon: uv sync --extra mlx
+#   or: pip install -e ".[mlx]"
 
 cp config.example.toml config.toml      # edit to taste
 cp .env.example .env                    # put secrets here (git-ignored)
@@ -98,6 +100,10 @@ localplaud poll --once                  # pull the file list + download audio
 localplaud work --once                  # run the pipeline on downloaded files
 localplaud serve                        # web UI at http://localhost:8080
 ```
+
+The MLX extra constrains NumPy to the range currently supported by numba, which
+mlx-whisper uses for word timestamps. `localplaud doctor` reports the underlying
+import error if that local speech stack becomes incompatible.
 
 Or run everything as a daemon (poll on a schedule + process continuously):
 

@@ -19,15 +19,20 @@ class MlxWhisperProvider:
         self.language = cfg.language
 
     def available(self) -> bool:
+        return self.health()[0]
+
+    def health(self) -> tuple[bool, str]:
         import shutil
 
         try:
             import mlx_whisper  # noqa: F401
-        except ImportError:
-            return False
+        except ImportError as exc:
+            return False, f"mlx-whisper import failed: {exc}"
         # mlx-whisper shells out to ffmpeg in load_audio; a bare daemon/launchd
         # PATH often lacks it, so treat a missing ffmpeg as unavailable.
-        return shutil.which("ffmpeg") is not None
+        if shutil.which("ffmpeg") is None:
+            return False, "ffmpeg missing from PATH"
+        return True, f"model {self.cfg.model} configured"
 
     def transcribe(self, audio_path: Path, language: str = "auto") -> Transcript:
         import shutil

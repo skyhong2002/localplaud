@@ -33,7 +33,9 @@ faster-whisper = ["faster-whisper>=1.0"]
 # and cuDNN 9 libs. (Not needed with Dockerfile.cuda, which bundles them.)
 cuda = ["faster-whisper>=1.0", "nvidia-cublas-cu12", "nvidia-cudnn-cu12>=9.0"]
 # Apple Silicon local ASR (Metal via MLX).
-mlx = ["mlx-whisper>=0.4"]
+# mlx-whisper imports numba for word timestamps. Keep NumPy within numba's
+# supported range so a routine dependency upgrade cannot disable ASR at import.
+mlx = ["mlx-whisper>=0.4", "numpy>=1.26,<2.5"]
 # Local speaker diarization + alignment.
 diarize = ["pyannote.audio>=3.1", "torch>=2.2"]
 # Local summaries / Q&A embeddings without any cloud provider.
