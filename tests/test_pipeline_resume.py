@@ -32,12 +32,18 @@ def _install_fakes(monkeypatch, counters):
         return {"title": "T", "content_md": "# T\n\nbody", "provider": "fake",
                 "model": "m", "template": settings.pipeline.summary_template}
 
+    def fake_mindmap(transcript, settings, summary_md=None):
+        counters["mm"] += 1
+        return {"template": "mind_map", "title": None, "content_md": "# T\n- point",
+                "provider": "fake", "model": "m", "detail": {"outline_nodes": 2}}
+
     def fake_embed(chunks, settings):
         counters["emb"] += 1
         return [b"\x00\x00\x80?" for _ in chunks], "fake", 1  # one float32 = 1.0
 
     monkeypatch.setattr("localplaud.worker.pipeline.transcribe.run_asr", fake_asr)
     monkeypatch.setattr("localplaud.worker.pipeline.summarize.summarize", fake_summary)
+    monkeypatch.setattr("localplaud.worker.pipeline.mindmap.generate_mind_map", fake_mindmap)
     monkeypatch.setattr("localplaud.worker.pipeline.index.embed_chunks", fake_embed)
 
 
@@ -53,16 +59,16 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
     with session_scope() as s:
         s.add(PlaudFile(id="f1", filename="r", status=FileStatus.downloaded, audio_path=str(audio)))
 
-    counters = {"asr": 0, "sum": 0, "emb": 0}
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
     _install_fakes(monkeypatch, counters)
 
     # First run: every stage executes once.
     process_file("f1")
-    assert counters == {"asr": 1, "sum": 1, "emb": 1}
+    assert counters == {"asr": 1, "sum": 1, "mm": 1, "emb": 1}
     with session_scope() as s:
         f = s.get(PlaudFile, "f1")
         assert f.status == FileStatus.done
-        assert f.transcript is not None and len(f.summaries) == 1 and len(f.chunks) == 1
+        assert f.transcript is not None and len(f.summaries) == 2 and len(f.chunks) == 1
         stages = {run.stage: run for run in f.stage_runs}
         assert stages[StageName.convert].status == StageStatus.skipped
         assert stages[StageName.transcribe].attempts == 1
@@ -73,7 +79,7 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
 
     # Second run without force: all stages skipped (artifacts reused).
     process_file("f1")
-    assert counters == {"asr": 1, "sum": 1, "emb": 1}
+    assert counters == {"asr": 1, "sum": 1, "mm": 1, "emb": 1}
     with session_scope() as s:
         stages = {run.stage: run for run in s.get(PlaudFile, "f1").stage_runs}
         assert stages[StageName.transcribe].attempts == 1
@@ -82,7 +88,7 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
 
     # With force: everything recomputes.
     process_file("f1", force=True)
-    assert counters == {"asr": 2, "sum": 2, "emb": 2}
+    assert counters == {"asr": 2, "sum": 2, "mm": 2, "emb": 2}
     with session_scope() as s:
         stages = {run.stage: run for run in s.get(PlaudFile, "f1").stage_runs}
         assert stages[StageName.transcribe].attempts == 2
@@ -102,7 +108,7 @@ def test_index_failure_keeps_transcript_and_summary(monkeypatch, tmp_path):
     with session_scope() as s:
         s.add(PlaudFile(id="index-failure", status=FileStatus.downloaded, audio_path=str(audio)))
 
-    counters = {"asr": 0, "sum": 0, "emb": 0}
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
     _install_fakes(monkeypatch, counters)
 
     def fail_embed(chunks, settings):
@@ -116,7 +122,7 @@ def test_index_failure_keeps_transcript_and_summary(monkeypatch, tmp_path):
         f = s.get(PlaudFile, "index-failure")
         assert f.status == FileStatus.partial
         assert f.local_transcript is not None
-        assert len(f.summaries) == 1
+        assert {s.template for s in f.summaries} == {"default", "mind_map"}
         assert len(f.chunks) == 0
         index_run = next(x for x in f.stage_runs if x.stage == StageName.index)
         assert index_run.status == StageStatus.failed
@@ -207,10 +213,10 @@ def test_independent_mode_ignores_but_preserves_cloud_transcript(monkeypatch, tm
             )
         )
 
-    counters = {"asr": 0, "sum": 0, "emb": 0}
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
     _install_fakes(monkeypatch, counters)
     process_file("cloud-only")
-    assert counters == {"asr": 1, "sum": 1, "emb": 1}
+    assert counters == {"asr": 1, "sum": 1, "mm": 1, "emb": 1}
 
     with session_scope() as s:
         f = s.get(PlaudFile, "cloud-only")
@@ -221,7 +227,7 @@ def test_independent_mode_ignores_but_preserves_cloud_transcript(monkeypatch, tm
 
     # Resume uses the local transcript and never falls back to the Plaud copy.
     process_file("cloud-only")
-    assert counters == {"asr": 1, "sum": 1, "emb": 1}
+    assert counters == {"asr": 1, "sum": 1, "mm": 1, "emb": 1}
 
 
 def test_migration_mode_can_explicitly_reuse_cloud_transcript(monkeypatch, tmp_path):
@@ -255,9 +261,9 @@ def test_migration_mode_can_explicitly_reuse_cloud_transcript(monkeypatch, tmp_p
             )
         )
 
-    counters = {"asr": 0, "sum": 0, "emb": 0}
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
     _install_fakes(monkeypatch, counters)
     process_file("migration", settings=settings)
-    assert counters == {"asr": 0, "sum": 1, "emb": 1}
+    assert counters == {"asr": 0, "sum": 1, "mm": 1, "emb": 1}
     with session_scope() as s:
         assert [t.source for t in s.get(PlaudFile, "migration").transcripts] == ["cloud"]

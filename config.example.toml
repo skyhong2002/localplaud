@@ -54,6 +54,7 @@ convert = true                   # opus -> 16kHz mono wav (needs ffmpeg)
 transcribe = true
 diarize = true
 summarize = true
+mind_map = true                  # nested Markdown outline rendered as a tree in the Web App
 index = true                     # build embeddings for Q&A / search
 concurrency = 1                  # files processed in parallel by the worker
 files_per_cycle = 1              # daemon batch; newest first so fresh files stay responsive

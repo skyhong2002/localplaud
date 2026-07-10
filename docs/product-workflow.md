@@ -231,6 +231,9 @@ wav2vec2 aligner needs per-language models and a real-recording accuracy evaluat
 first. Authenticated real-audio diarization verification also remains. Single-file
 Ask now answers grounded only in one recording and renders each citation as a
 playable timestamp that seeks the player, and whole-library Ask citations deep-link
-to the cited moment (`/file/{id}?t=`). Other major gaps include editable artifacts,
-mind maps, Ask save-to-note and follow-up threads, richer organization/export,
-automation, and UI polish.
+to the cited moment (`/file/{id}?t=`). Long transcripts are summarized with full
+coverage through bounded hierarchical map/reduce. Mind maps are generated from the
+canonical transcript as full-coverage Markdown outlines, rendered as a collapsible
+tree in the recording workspace, and included in Markdown export; PNG mind-map
+export remains. Other major gaps include editable artifacts, Ask save-to-note and
+follow-up threads, richer organization/export, automation, and UI polish.

@@ -60,11 +60,21 @@ def render_markdown(file_id: str) -> str:
             if independent
             else file.summaries
         )
+        mind_maps = [s for s in summaries if s.template == "mind_map"]
         for summary in summaries:
+            if summary.template == "mind_map":
+                continue
             heading = f"## {summary.template}"
             if summary.title:
                 heading += f": {summary.title}"
             parts += [heading, "", summary.content_md.strip(), ""]
+
+        if mind_maps:
+            outline = mind_maps[-1].content_md.strip()
+            if outline.startswith("# "):
+                # Demote the outline's H1 root beneath this section heading.
+                outline = "###" + outline[1:]
+            parts += ["## Mind map", "", outline, ""]
 
         transcript = file.local_transcript if independent else file.transcript
         if transcript is not None and transcript.segments:

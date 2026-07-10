@@ -47,10 +47,13 @@
     </details>
     {% endif %}
 
+    {% set mindmaps = f.summaries | selectattr('template', 'equalto', 'mind_map') | list %}
+    {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
     <div class="tabs">
       {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}
       {% if f.imported_transcript %}<button data-panel="imported" class="{% if not f.transcript and not f.summaries %}on{% endif %}">Plaud import ☁</button>{% endif %}
-      {% for s in f.summaries %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template|capitalize }}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
+      {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template|capitalize }}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
+      {% if mindmaps %}<button data-panel="mindmap" class="{% if not f.transcript and not notes %}on{% endif %}">Mind map</button>{% endif %}
       <button data-panel="ask" class="{% if not f.transcript and not f.imported_transcript and not f.summaries %}on{% endif %}">Ask</button>
     </div>
 
@@ -89,9 +92,28 @@
     </div>
     {% endif %}
 
-    {% for s in f.summaries %}
+    {% for s in notes %}
     <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %} data-md>{{ s.content_md }}</div>
     {% endfor %}
+
+    {% if mindmaps %}
+    <div class="tabpanel" data-panel="mindmap" {% if f.transcript or notes %}hidden{% endif %}>
+      <style>
+        .mindmap { margin-top: 10px; }
+        .mindmap details { margin-left: 14px; padding-left: 10px; border-left: 1px solid var(--border); }
+        .mindmap > details { margin-left: 0; padding-left: 0; border-left: none; }
+        .mindmap summary { cursor: pointer; font-weight: 600; padding: 3px 0; }
+        .mindmap > details > summary { font-size: 16px; font-weight: 700; }
+        .mindmap .mm-leaf { margin-left: 14px; padding: 2px 0 2px 10px; border-left: 1px solid var(--border); color: var(--fg); }
+      </style>
+      <div style="display:flex; gap:7px; margin-top:10px">
+        <button type="button" class="btn sec" id="mm-expand" style="padding:6px 10px; font-size:12px">Expand all</button>
+        <button type="button" class="btn sec" id="mm-collapse" style="padding:6px 10px; font-size:12px">Collapse all</button>
+      </div>
+      <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
+      <div id="mindmap-tree" class="mindmap"></div>
+    </div>
+    {% endif %}
 
     <div class="tabpanel" data-panel="ask" {% if f.transcript or f.imported_transcript or f.summaries %}hidden{% endif %}>
       <div class="sub" style="margin:12px 0 8px; font-size:13px">
@@ -129,6 +151,39 @@
       .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
       .replace(/^\s*[-*] (.*)$/gm,'• $1<br>').replace(/\n{2,}/g,'<br><br>');
   });
+  // mind map: render the Markdown outline as a collapsible tree
+  const mmSrc = document.getElementById('mindmap-src');
+  if (mmSrc) {
+    let rootLabel = 'Mind map';
+    const roots = [], stack = [];
+    for (const line of mmSrc.textContent.split('\n')) {
+      const h = line.match(/^#\s+(.*)$/);
+      if (h) { rootLabel = h[1].trim(); continue; }
+      const b = line.match(/^(\s*)[-*+]\s+(.*)$/);
+      if (!b || !b[2].trim()) continue;
+      const depth = Math.min(Math.floor(b[1].replace(/\t/g, '  ').length / 2), stack.length);
+      const node = { text: b[2].trim(), children: [] };
+      (depth === 0 ? roots : stack[depth - 1].children).push(node);
+      stack.length = depth; stack.push(node);
+    }
+    const render = node => {
+      if (!node.children.length) {
+        const leaf = document.createElement('div');
+        leaf.className = 'mm-leaf'; leaf.textContent = node.text;
+        return leaf;
+      }
+      const det = document.createElement('details'); det.open = true;
+      const sum = document.createElement('summary'); sum.textContent = node.text;
+      det.appendChild(sum);
+      node.children.forEach(c => det.appendChild(render(c)));
+      return det;
+    };
+    const tree = document.getElementById('mindmap-tree');
+    tree.appendChild(render({ text: rootLabel, children: roots }));
+    const setAll = open => tree.querySelectorAll('details').forEach(d => { d.open = open; });
+    document.getElementById('mm-expand').onclick = () => setAll(true);
+    document.getElementById('mm-collapse').onclick = () => setAll(false);
+  }
   // tabs
   const panels = document.querySelectorAll('.tabpanel');
   document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {

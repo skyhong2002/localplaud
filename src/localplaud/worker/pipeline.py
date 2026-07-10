@@ -1,7 +1,7 @@
 """The worker pipeline — turn a downloaded recording into a knowledge entry.
 
 Stages (each gated by config in ``pipeline``):
-    convert -> transcribe -> diarize -> summarize -> index
+    convert -> transcribe -> diarize -> summarize -> mind_map -> index
 
 State lives on the ``PlaudFile`` row; derived artifacts become ``Transcript``,
 ``Summary`` and ``Chunk`` rows. Stages are resumable: a file is only marked
@@ -31,7 +31,7 @@ from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
 from ..store.files import wav_path
-from . import convert, index, summarize, transcribe
+from . import convert, index, mindmap, summarize, transcribe
 from .diarize import DiarizationUnavailable, diarize
 
 log = logging.getLogger(__name__)
@@ -279,6 +279,40 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                 "disabled" if not pcfg.summarize else "no transcript",
             )
 
+        # --- mind map (skip if a local mind map already exists) ------- #
+        if pcfg.mind_map and transcript is not None:
+            if force or not _has_summary(file_id, "mind_map"):
+                _begin_stage(file_id, StageName.mind_map)
+                try:
+                    summary_md = _load_summary_md(file_id, pcfg.summary_template)
+                    result = mindmap.generate_mind_map(transcript, settings, summary_md)
+                    _persist_summary(file_id, result)
+                    _finish_stage(
+                        file_id,
+                        StageName.mind_map,
+                        provider=result.get("provider"),
+                        model=result.get("model"),
+                        artifact_source="local",
+                        detail=result.get("detail", {}),
+                    )
+                except Exception as exc:  # noqa: BLE001 - transcript/notes stay usable
+                    log.exception("Mind map generation failed for %s", file_id)
+                    _fail_stage(file_id, StageName.mind_map, exc)
+                    partial_errors.append(f"mind_map: {exc}")
+            else:
+                _finish_stage(
+                    file_id,
+                    StageName.mind_map,
+                    artifact_source="local",
+                    detail={"reused": True},
+                )
+        else:
+            _skip_stage(
+                file_id,
+                StageName.mind_map,
+                "disabled" if not pcfg.mind_map else "no transcript",
+            )
+
         # --- index (skip if chunks already exist) --------------------- #
         if pcfg.index and transcript is not None:
             if force or not _has_chunks(file_id):
@@ -347,6 +381,16 @@ def _has_summary(file_id: str, template: str) -> bool:
             s.template == template and s.source == "local"
             for s in session.get(PlaudFile, file_id).summaries
         )
+
+
+def _load_summary_md(file_id: str, template: str) -> str | None:
+    with session_scope() as session:
+        rows = [
+            s.content_md
+            for s in session.get(PlaudFile, file_id).summaries
+            if s.template == template and s.source == "local"
+        ]
+        return rows[-1] if rows else None
 
 
 def _has_chunks(file_id: str) -> bool:

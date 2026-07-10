@@ -118,6 +118,7 @@ class PipelineConfig(BaseModel):
     transcribe: bool = True
     diarize: bool = True
     summarize: bool = True
+    mind_map: bool = True  # nested Markdown outline rendered as a tree
     index: bool = True  # embeddings for Q&A / semantic search
     # Number of files processed concurrently by the worker.
     concurrency: int = 1

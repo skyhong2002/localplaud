@@ -96,6 +96,12 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   map/reduce summarization. Every transcript chunk contributes coverage notes before
   the selected template produces final Markdown; stage provenance records strategy,
   transcript size, chunks, and map/reduce call counts.
+- ✅ Added a `mind_map` pipeline stage (toggle `pipeline.mind_map`, default on):
+  a full-coverage nested Markdown outline built from the canonical transcript with
+  the same bounded map/reduce chunking (existing local notes are structural context
+  only). Stored as a provenanced `mind_map` note, resumable/degradable like other
+  optional stages, rendered as a collapsible tree tab in the Web detail page, and
+  included in Markdown export. PNG mind-map export remains.
 - Make templates editable data; support auto selection, per-file custom generation,
   multiple note tabs, provenance, and safe regeneration.
 - ✅ Single-file Ask: `/file/{id}/ask` answers grounded only in one recording, with
@@ -135,7 +141,8 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 - Add original localplaud visual design with Plaud-like interaction density and
   information architecture; do not copy Plaud assets.
 - Export audio, TXT/Markdown/SRT/VTT/DOCX/PDF transcripts, Markdown/DOCX/PDF notes,
-  and PNG/Markdown mind maps with speaker/timestamp options.
+  and PNG mind maps with speaker/timestamp options (Markdown mind-map export ships
+  in the combined Markdown export).
 
 ### P2 — Automation and integrations
 
