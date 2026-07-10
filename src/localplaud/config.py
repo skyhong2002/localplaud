@@ -29,13 +29,47 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 # --------------------------------------------------------------------------- #
 
 
-class PlaudConfig(BaseModel):
-    """How to reach and authenticate against the Plaud cloud API.
+class PlaudOfficialConfig(BaseModel):
+    """The official Plaud Open API (platform.plaud.ai) with sanctioned OAuth.
 
-    ``api_base`` is region-specific (the browser stores it in localStorage as
-    ``pld_plaud_user_api_domain``). Read it from your own browser — do not
-    assume the default matches your account.
+    The one-time browser sign-in happens through the official Plaud CLI
+    (``localplaud auth login`` wraps it); after that, localplaud reads and
+    auto-refreshes the token set in ``tokens_path``. No secrets needed for the
+    default public client.
     """
+
+    api_base: str = "https://platform.plaud.ai/developer/api"
+    refresh_url: str = (
+        "https://platform.plaud.ai/developer/api/oauth/third-party/access-token/refresh"
+    )
+    # Token cache written by the official CLI (`plaud login`).
+    tokens_path: Path = Path("~/.plaud/tokens.json")
+    request_timeout_seconds: float = 30.0
+
+
+class PlaudConfig(BaseModel):
+    """How to reach and authenticate against the Plaud cloud.
+
+    ``provider`` picks the client:
+
+    - ``official`` (default) — the sanctioned Open API with auto-refreshing
+      OAuth (see ``official``). No more pasting browser sessions.
+    - ``apse1`` — the reverse-engineered web API, driven by a pasted browser
+      session (``cookie``/``token``/``extra_headers``).
+
+    When the provider is ``official`` and apse1 credentials are ALSO present,
+    the poller uses apse1 as an optional enrichment source for change-detection
+    fields the Open API lacks (``version``/``file_md5``/``edit_time``/
+    ``is_trash``) — disable with ``apse1_enrichment = false``.
+
+    ``api_base`` (apse1) is region-specific (the browser stores it in
+    localStorage as ``pld_plaud_user_api_domain``). Read it from your own
+    browser — do not assume the default matches your account.
+    """
+
+    provider: Literal["official", "apse1"] = "official"
+    official: PlaudOfficialConfig = Field(default_factory=PlaudOfficialConfig)
+    apse1_enrichment: bool = True
 
     api_base: str = "https://api-apse1.plaud.ai"
     # "cookie": paste a session cookie/token from the browser (most reliable).

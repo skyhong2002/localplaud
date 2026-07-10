@@ -1,10 +1,51 @@
-# Plaud cloud API — reverse-engineering notes
+# Plaud cloud API notes
 
-Everything here was observed **read-only**, against the account owner's own
-data, from the browser at <https://web.plaud.ai>. localplaud only ever issues
-GET requests to the Plaud cloud. This document is the reference the
-`localplaud.plaud` client is built from; anything marked **open** is not yet
-confirmed.
+localplaud only ever issues **read-only** requests to the Plaud cloud. Two
+providers exist; this document is the reference both clients are built from.
+
+## Official Open API (default provider — `plaud/official.py`)
+
+Sanctioned developer API, documented at <https://docs.plaud.ai> (MCP & CLI).
+All endpoints verified against a real account (2026-07-10).
+
+- **Base**: `https://platform.plaud.ai/developer/api`, auth `Authorization:
+  Bearer <access_token>`.
+- **OAuth** (PKCE, authorization-code):
+  - Authorize (browser): `https://web.plaud.ai/platform/oauth?client_id=…&redirect_uri=…&response_type=code&code_challenge=…&code_challenge_method=S256&state=…`
+  - Exchange: `POST /oauth/third-party/access-token` (form-encoded `code`,
+    `redirect_uri`, `code_verifier`, `state`; `Authorization: Basic
+    base64(client_id:)` — the official CLI's client is public, no secret).
+  - **Refresh**: `POST /oauth/third-party/access-token/refresh` with just
+    `refresh_token` (form-encoded). Response rotates both tokens; a missing
+    `refresh_token` in the response means "keep the old one".
+  - Token cache: `~/.plaud/tokens.json` — `{access_token, refresh_token,
+    token_type, expires_at}` (epoch **ms**; access token lives 24 h). Written
+    by the official CLI (`plaud login`), read + refreshed by localplaud.
+- **Endpoints** (all GET):
+  - `/open/third-party/users/current` — whoami (`id`, `email`, `nickname`).
+  - `/open/third-party/files/?page=&page_size=` — listing, `{type, data:
+    [{id, name, created_at, start_at, duration, serial_number}], page,
+    page_size}`. `page_size` 10–100, `page` ≤ 1000; a short page ends the
+    walk. Timestamps are naive ISO strings in UTC; `duration` is a string of
+    milliseconds. **File ids are identical to the web API's** — the two
+    providers merge cleanly.
+  - `/open/third-party/files/{id}` — the listing fields plus:
+    - `presigned_url` — 24 h S3 audio URL (`.mp3`).
+    - `source_list[]` — transcript assets; the `data_type == "transaction"`
+      entry's `data_content` is a JSON **string** of segments `{content,
+      start_time, end_time, speaker, original_speaker, embeddingKey}` (times
+      in ms; `speaker` reflects user renames, `original_speaker` is
+      "Speaker N"). Other types seen: `outline`, `transaction_polish`.
+    - `note_list[]` — the `data_type == "auto_sum_note"` entry's
+      `data_content` is Plaud's summary as markdown.
+- **Not exposed** (hence the optional apse1 enrichment): `version`,
+  `file_md5`, `edit_time`, `is_trash`, tags, scene.
+
+## Legacy web API (`plaud/client.py` — reverse-engineered)
+
+Everything below was observed **read-only**, against the account owner's own
+data, from the browser at <https://web.plaud.ai>. Anything marked **open** is
+not yet confirmed.
 
 ## Hosts
 

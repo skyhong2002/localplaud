@@ -12,16 +12,22 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 
 ## TODO — prioritized
 
-### P0 — Switch to Plaud's official MCP / Open API (biggest win)
-Replaces the reverse-engineered `api-apse1` client for the core loop, with sanctioned OAuth that **auto-refreshes** (no more 14h session re-paste, no WAF 403).
-- Official MCP: remote `https://mcp.plaud.ai/mcp`, local `npx -y @plaud-ai/mcp@latest`. Docs: <https://docs.plaud.ai/plaud-mcp-cli/mcp>, blog: <https://www.plaud.ai/blogs/news/introducing-plaud-mcp-and-cli>.
-- Underlying REST: `GET platform.plaud.ai/developer/api/open/third-party/files/?page=&page_size=` and `.../files/{id}`. OAuth token endpoints under `platform.plaud.ai/developer/api/oauth/third-party/*`; tokens cached in `~/.plaud/tokens.json`.
-- Tools/capabilities (read-only): `list_files`, `get_file` (returns a **24h presigned audio URL** + transcript `source_list` + Markdown `note_list`), `get_transcript`, `get_note`, `get_current_user`.
-- **Plan**: add a `plaud-official` client provider (OAuth Open API) behind the same interface as `PlaudClient`; make it the default. Keep the api-apse1 client as optional enrichment for change-detection fields the Open API lacks (`version` / `file_md5` / `edit_time` / `is_trash`, tags/scene). Reuse `get_transcript`/`get_note` to mirror Plaud's own transcript+notes (largely closes issue #9) and skip local re-transcription when desired.
-- Full analysis: `scratchpad/plaud-recon/MCP.md`.
+### ✅ DONE (2026-07-10) — P0: official Open API is now the default provider
+`plaud.provider = "official"` (default): OAuth via the official Plaud CLI
+(`localplaud auth login` wraps it; tokens in `~/.plaud/tokens.json`,
+auto-refresh implemented in `plaud/oauth.py`, verified live — both tokens
+rotate, 24h expiry). `PlaudOfficialClient` (`plaud/official.py`) mirrors
+Plaud's own transcripts (with speaker names) + summaries from
+`/open/third-party/files/{id}`; with `pipeline.prefer_cloud_artifacts = true`
+the pipeline reuses them and skips local re-transcription. api-apse1 is now
+optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
+`version`/`file_md5`/`edit_time`/`is_trash`. Full API notes: `docs/plaud-api.md`.
+Largely closes issues #8 and #9.
 
 ### P1 — Ongoing sync robustness
-- Until the MCP switch lands: the pasted access token expires ~14h. The `pld_ut` cookie is a **refresh token** (`auth_method: token_refresh`) → a refresh flow against api-apse1 is feasible as a stopgap. (Superseded once P0 lands.)
+- ~~api-apse1 refresh-flow stopgap (`pld_ut` cookie)~~ superseded by the
+  official provider. Remaining nice-to-have: a native PKCE flow inside
+  localplaud (drop the Node.js dependency for `auth login`).
 
 ### P1 — Deploy the other two machines
 - **CCLabPC** (nvplaud.observe.tw, NVIDIA/CUDA): docker `gpu` profile or native; needs user in `docker` group. DNS already points here.

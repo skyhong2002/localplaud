@@ -52,7 +52,7 @@ def test_ingest_cloud_summaries(monkeypatch, tmp_path):
     from localplaud.db.models import PlaudFile
     from localplaud.db.session import init_db, session_scope
     from localplaud.plaud.client import PlaudClient
-    from localplaud.poller.poll import ingest_cloud_summaries
+    from localplaud.poller.poll import ingest_cloud_artifacts
 
     init_db()
     with session_scope() as s:
@@ -72,8 +72,10 @@ def test_ingest_cloud_summaries(monkeypatch, tmp_path):
 
     settings.plaud = PlaudConfig(api_base=API, token="Bearer t")
     with PlaudClient(settings.plaud) as c:
-        n = ingest_cloud_summaries(c, settings)
-    assert n == 1
+        n = ingest_cloud_artifacts(c, settings)
+        assert n == 1
+        # Idempotent: the second pass finds nothing new to mirror.
+        assert ingest_cloud_artifacts(c, settings) == 0
     with session_scope() as s:
         summaries = s.get(PlaudFile, "fc").summaries
         assert len(summaries) == 1

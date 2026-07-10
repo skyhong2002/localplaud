@@ -60,13 +60,30 @@ def test_init_creates_database(monkeypatch, tmp_path):
     assert "Database ready" in result.output
 
 
-def test_auth_check_without_credentials_fails_helpfully(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)  # no token/cookie anywhere
+def test_auth_check_without_oauth_session_fails_helpfully(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    # Default provider is the official Open API; point the token cache at an
+    # empty location so the developer's real ~/.plaud session can't leak in.
+    monkeypatch.setenv(
+        "LOCALPLAUD_PLAUD__OFFICIAL__TOKENS_PATH", str(tmp_path / "tokens.json")
+    )
+    get_settings(reload=True)
 
     result = runner.invoke(app, ["auth", "check"])
 
     assert result.exit_code != 0
     # The error explains what's missing and points at the fix.
+    assert "auth login" in result.output
+
+
+def test_auth_check_apse1_without_credentials_fails_helpfully(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)  # no token/cookie anywhere
+    monkeypatch.setenv("LOCALPLAUD_PLAUD__PROVIDER", "apse1")
+    get_settings(reload=True)
+
+    result = runner.invoke(app, ["auth", "check"])
+
+    assert result.exit_code != 0
     assert "credentials" in result.output
     assert "auth import" in result.output
 

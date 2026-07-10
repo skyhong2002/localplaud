@@ -9,24 +9,34 @@
 # .env are git-ignored.
 
 [plaud]
+# Which Plaud cloud client to use:
+#   "official" (default) — Plaud's sanctioned Open API with OAuth that
+#       auto-refreshes. One-time setup: `localplaud auth login` (opens your
+#       browser once, tokens land in ~/.plaud/tokens.json). Recommended.
+#   "apse1"    — the reverse-engineered web API, driven by a browser session
+#       you paste (expires ~14h; see README "Your Plaud session").
+provider = "official"
+
+# When the provider is "official" AND an apse1 browser session is also
+# configured (see below), the poller additionally reads the legacy listing to
+# fill change-detection fields the Open API lacks (version / file_md5 /
+# edit_time / is_trash). Purely optional.
+apse1_enrichment = true
+
+# ---- apse1 (legacy / enrichment) settings ---------------------------------- #
 # API host for YOUR account/region. Find it in the browser devtools console:
 #   localStorage.getItem("pld_plaud_user_api_domain")
 # Do not assume the default below matches your region.
 api_base = "https://api-apse1.plaud.ai"
 
-# Authentication route:
-#   "cookie" — paste the browser session cookie/token (most reliable today).
-#   "login"  — programmatic email/password login (only if your account supports it).
-auth_mode = "cookie"
-
-# For auth_mode = "cookie": set the cookie via the env var
-#   LOCALPLAUD_PLAUD__COOKIE   (preferred, keeps it out of this file)
-# or uncomment below. See README "Getting your Plaud session".
+# Session paste route: set the session via env vars (preferred, keeps it out
+# of this file) — LOCALPLAUD_PLAUD__TOKEN / LOCALPLAUD_PLAUD__COOKIE.
 # cookie = "paste-cookie-header-value-here"
 
-# For auth_mode = "login" (env vars preferred for the password):
-# email = "you@example.com"
-# password = "..."   # better: LOCALPLAUD_PLAUD__PASSWORD
+  [plaud.official]
+  # Defaults work for everyone; override only if Plaud changes its platform.
+  # api_base = "https://platform.plaud.ai/developer/api"
+  # tokens_path = "~/.plaud/tokens.json"
 
 [poller]
 enabled = true
@@ -47,7 +57,10 @@ summarize = true
 index = true                     # build embeddings for Q&A / search
 concurrency = 1                  # files processed in parallel by the worker
 summary_template = "default"     # default | meeting | call | lecture | personal
-prefer_cloud_artifacts = false   # true = also mirror Plaud's own summary when present
+# true = mirror Plaud's own transcript (with speaker names!) and summary when
+# the cloud already made them — the pipeline then skips local re-transcription
+# for those files entirely. Strongly recommended with the official provider.
+prefer_cloud_artifacts = false
 
 # --------------------------------------------------------------------------- #
 # ASR — speech recognition. Pluggable; local and cloud are equal choices.

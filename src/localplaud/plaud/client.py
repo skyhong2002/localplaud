@@ -291,6 +291,15 @@ class PlaudClient:
             log.warning("Could not fetch cloud summary for %s: %s", file_id, exc)
             return None
 
+    def get_cloud_transcript_segments(
+        self, file_id: str, detail: dict | None = None
+    ) -> list[dict] | None:
+        """Interface parity with ``PlaudOfficialClient``. The apse1
+        ``trans_result.json`` schema is still unmapped (issue #9), so this
+        client cannot produce normalized segments yet — use the official
+        provider to mirror cloud transcripts."""
+        return None
+
     def get_cloud_transcript_json(self, file_id: str, detail: dict | None = None) -> dict | None:
         """Plaud's own transcript as raw JSON (schema not yet modelled — see
         issue #9). Resolved from the ``file_transcript/.../trans_result.json.gz``

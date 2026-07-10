@@ -35,14 +35,15 @@ Plaud device or its app.
 
 ## Status
 
-Working end to end: cloud polling, **audio download** (`GET /file/temp-url/{id}`
-→ signed S3), local transcription (6 ASR backends), diarization, LLM summaries,
-embeddings + Q&A, an in-page audio player, and optional mirroring of Plaud's own
-summaries. Runs natively and in Docker (mac/gpu/cpu profiles), verified on three
-architectures. **You provide a Plaud session** (paste it once from your
-browser — auth is header-token, see below) and any cloud provider keys you want.
-Programmatic login and a few exact response schemas are still being
-reverse-engineered — see the [open issues](https://github.com/skyhong2002/localplaud/issues).
+Working end to end: cloud polling over **Plaud's official Open API** (OAuth,
+auto-refreshing — sign in once with `localplaud auth login`), audio download,
+local transcription (6 ASR backends), diarization, LLM summaries, embeddings +
+Q&A, an in-page audio player, and mirroring of Plaud's own transcripts (with
+speaker names) and summaries so you can skip local re-transcription entirely.
+Runs natively and in Docker (mac/gpu/cpu profiles), verified on three
+architectures. The reverse-engineered web API remains available as an optional
+enrichment source / fallback provider — see the
+[open issues](https://github.com/skyhong2002/localplaud/issues).
 
 ## How it works
 
@@ -84,10 +85,8 @@ uv sync --extra faster-whisper          # local ASR, CPU/CUDA
 cp config.example.toml config.toml      # edit to taste
 cp .env.example .env                    # put secrets here (git-ignored)
 
-# tell localplaud how to reach your Plaud account (see "Your Plaud session")
-#   -> set LOCALPLAUD_PLAUD__COOKIE / auth headers in .env
-
 localplaud init                         # create the database
+localplaud auth login                   # one-time browser OAuth (official API)
 localplaud auth check                   # verify your Plaud session works
 localplaud poll --once                  # pull the file list + download audio
 localplaud work --once                  # run the pipeline on downloaded files
@@ -105,7 +104,7 @@ localplaud run
 | Command | What it does |
 | --- | --- |
 | `localplaud init` | Create the database + data dirs |
-| `localplaud auth import` / `auth check` | Import a browser session / verify it |
+| `localplaud auth login` / `auth check` | One-time OAuth sign-in / verify the session |
 | `localplaud doctor` | Check ffmpeg + your ASR/LLM/embedding providers + auth |
 | `localplaud poll [--once]` | Sync the cloud listing + download audio |
 | `localplaud work [--once] [--force]` | Run the pipeline on downloaded recordings |
@@ -118,21 +117,25 @@ localplaud run
 
 ### Your Plaud session
 
-localplaud never sees your Plaud password unless you give it one. Auth is still
-being finalized (Plaud uses header-token auth, not a simple cookie), so the
-supported route today is **paste your browser session**:
+localplaud never sees your Plaud password. The default provider is **Plaud's
+official Open API**: run `localplaud auth login` once — it opens your browser
+for OAuth (via the official Plaud CLI, Node.js ≥ 20) and caches an
+auto-refreshing token set in `~/.plaud/tokens.json`. That's it; the session
+keeps itself alive.
 
-1. Log in to <https://web.plaud.ai> in your browser.
-2. Open DevTools → Network, click any recording, and find an authenticated
-   request to `api-*.plaud.ai` (e.g. `GET /user/me`).
-3. Copy its `Authorization` header (and the Plaud client headers) into `.env`
-   as described in `.env.example`.
-4. Also copy your region's API host from the console:
-   `localStorage.getItem("pld_plaud_user_api_domain")` → set `plaud.api_base`.
-5. `localplaud auth check` confirms it works.
+Optionally, you can *also* paste a legacy web session (`api-*.plaud.ai`).
+localplaud then enriches its sync metadata with fields the Open API doesn't
+expose (`version`, `file_md5`, `edit_time`, `is_trash`) — useful for detecting
+edits/deletions faster, but not required:
 
-See [`docs/plaud-api.md`](docs/plaud-api.md) for the reverse-engineered API
-details and the current open questions.
+1. Log in to <https://web.plaud.ai>, open DevTools → Network, and find an
+   authenticated request to `api-*.plaud.ai` (e.g. `GET /user/me`).
+2. Copy it as cURL and run `localplaud auth import` to turn it into `.env`
+   lines (this session expires after ~14 h).
+3. Setting `plaud.provider = "apse1"` makes this the primary provider instead.
+
+`localplaud auth check` confirms whichever provider is configured. See
+[`docs/plaud-api.md`](docs/plaud-api.md) for API details.
 
 ## Configuration
 

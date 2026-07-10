@@ -45,24 +45,62 @@ def init():
 
 @auth_app.command("check")
 def auth_check():
-    """Verify your Plaud session works (GET /user/me)."""
-    from .plaud.client import PlaudAuthError, PlaudClient
+    """Verify your Plaud session works (whoami against the configured provider)."""
+    from .plaud import make_plaud_client
+    from .plaud.client import PlaudAuthError
 
     settings = get_settings()
     try:
-        with PlaudClient(settings.plaud) as client:
+        with make_plaud_client(settings.plaud) as client:
             me = client.check_auth()
-        console.print("[green]✓[/] Authenticated to Plaud cloud.")
+        console.print(
+            f"[green]✓[/] Authenticated to Plaud cloud "
+            f"([bold]{settings.plaud.provider}[/] provider)."
+        )
         data = me.get("data", me) if isinstance(me, dict) else None
-        uid = data.get("id") if isinstance(data, dict) else None
-        if uid:
-            console.print(f"  user id: [dim]{uid}[/]")
+        if isinstance(data, dict):
+            for key in ("id", "email", "nickname"):
+                if data.get(key):
+                    console.print(f"  {key}: [dim]{data[key]}[/]")
     except PlaudAuthError as exc:
         console.print(f"[red]✗ Auth failed:[/] {exc}")
         raise typer.Exit(1) from exc
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]✗ Error:[/] {exc}")
         raise typer.Exit(1) from exc
+
+
+@auth_app.command("login")
+def auth_login():
+    """Sign in to the official Plaud Open API (one-time browser OAuth).
+
+    Wraps the official Plaud CLI, which opens your browser and saves an
+    auto-refreshing token set to ~/.plaud/tokens.json. After this, no more
+    session pasting — localplaud keeps the session alive by itself.
+    """
+    import shutil
+    import subprocess
+
+    settings = get_settings()
+    tokens_path = settings.plaud.official.tokens_path.expanduser()
+    if shutil.which("plaud"):
+        cmd = ["plaud", "login"]
+    elif shutil.which("npx"):
+        cmd = ["npx", "-y", "@plaud-ai/cli@latest", "login"]
+    else:
+        console.print(
+            "[red]✗[/] Needs the official Plaud CLI (Node.js ≥ 20): "
+            "run [bold]npm install -g @plaud-ai/cli && plaud login[/], "
+            f"then re-run this. Tokens land in [dim]{tokens_path}[/]."
+        )
+        raise typer.Exit(1)
+    console.print(f"Launching [bold]{' '.join(cmd)}[/] — finish the sign-in in your browser…")
+    proc = subprocess.run(cmd)  # noqa: S603 — interactive, inherits stdio
+    if proc.returncode != 0 or not tokens_path.exists():
+        console.print("[red]✗[/] Login did not complete.")
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/] Signed in; tokens saved to [bold]{tokens_path}[/].")
+    auth_check()
 
 
 @auth_app.command("import")
@@ -340,8 +378,21 @@ def doctor():
     except Exception as exc:  # noqa: BLE001
         row(f"embeddings:{settings.embeddings.provider}", False, str(exc)[:60])
 
-    has_creds = bool(settings.plaud.token or settings.plaud.cookie)
-    row("plaud auth", has_creds, "credentials set" if has_creds else "run `localplaud auth import`")
+    if settings.plaud.provider == "official":
+        from .plaud.oauth import OfficialTokenStore
+
+        st = OfficialTokenStore(
+            settings.plaud.official.tokens_path, settings.plaud.official.refresh_url
+        ).status()
+        row("plaud auth (official)", st["ok"],
+            st["detail"] if st["ok"] else "run `localplaud auth login`")
+        has_legacy = bool(settings.plaud.token or settings.plaud.cookie)
+        if settings.plaud.apse1_enrichment:
+            row("apse1 enrichment", has_legacy,
+                "credentials set" if has_legacy else "no session pasted (optional)")
+    else:
+        has_creds = bool(settings.plaud.token or settings.plaud.cookie)
+        row("plaud auth", has_creds, "credentials set" if has_creds else "run `localplaud auth import`")
 
     console.print(table)
 
