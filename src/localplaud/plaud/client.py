@@ -72,6 +72,53 @@ def _ext_from_url(url: str, default: str = "mp3") -> str:
     return default
 
 
+# Download safety limits + SSRF guard. URLs to fetch come out of API responses,
+# so a compromised/MITM'd response must not be able to make us hit an internal
+# host (cloud metadata, localhost services) or blow up memory/disk.
+_MAX_AUDIO_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+_MAX_ASSET_BYTES = 128 * 1024 * 1024  # 128 MiB (transcript/summary assets)
+
+
+def _assert_safe_fetch_url(url: str) -> None:
+    """Reject non-https URLs and any that resolve to a private/loopback/
+    link-local address (SSRF protection)."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise PlaudError(f"refusing to fetch non-https URL: {parsed.scheme}://…")
+    host = parsed.hostname
+    if not host:
+        raise PlaudError("fetch URL has no host")
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or 443, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise PlaudError(f"cannot resolve fetch host {host!r}: {exc}") from exc
+    for *_, sockaddr in infos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            raise PlaudError(f"refusing to fetch URL resolving to non-public IP {ip}")
+
+
+def _bounded_gunzip(data: bytes, max_out: int) -> bytes:
+    """Decompress gzip data, aborting if the output would exceed ``max_out``
+    (defends against decompression bombs)."""
+    import zlib
+
+    dec = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    out = bytearray()
+    for i in range(0, len(data), 1 << 16):
+        out += dec.decompress(data[i : i + (1 << 16)], max_out - len(out) + 1)
+        if len(out) > max_out:
+            raise PlaudError(f"gzip asset expands past {max_out} bytes; aborting")
+    out += dec.flush()
+    if len(out) > max_out:
+        raise PlaudError(f"gzip asset expands past {max_out} bytes; aborting")
+    return bytes(out)
+
+
 class PlaudClient:
     def __init__(self, cfg: PlaudConfig):
         self.cfg = cfg
@@ -192,29 +239,43 @@ class PlaudClient:
         implies), so the extension is taken from the signed URL. Returns the
         written path."""
         url = self.get_temp_url(file.id)
+        _assert_safe_fetch_url(url)
         ext = _ext_from_url(url, default="mp3")
         dest = dest_dir / f"audio.{ext}"
         dest.parent.mkdir(parents=True, exist_ok=True)
+        written = 0
         # Signed S3 URLs are on a different host and need no auth headers.
-        with httpx.Client(timeout=None, follow_redirects=True) as raw, raw.stream("GET", url) as resp:
+        # follow_redirects is off so a redirect can't bounce us to an internal
+        # host after the safety check.
+        with httpx.Client(timeout=120, follow_redirects=False) as raw, raw.stream(
+            "GET", url
+        ) as resp:
             resp.raise_for_status()
             with dest.open("wb") as fh:
                 for chunk in resp.iter_bytes(chunk_size=1 << 16):
+                    written += len(chunk)
+                    if written > _MAX_AUDIO_BYTES:
+                        fh.close()
+                        dest.unlink(missing_ok=True)
+                        raise PlaudError(
+                            f"audio for {file.id} exceeds {_MAX_AUDIO_BYTES} bytes; aborting"
+                        )
                     fh.write(chunk)
-        log.info("Downloaded %s -> %s (%d bytes)", file.id, dest, dest.stat().st_size)
+        log.info("Downloaded %s -> %s (%d bytes)", file.id, dest, written)
         return dest
 
     # ---- cloud-produced artifacts (optional reuse) --------------------- #
 
     def _fetch_gzip_asset(self, url: str) -> bytes:
-        with httpx.Client(timeout=None, follow_redirects=True) as raw:
+        _assert_safe_fetch_url(url)
+        with httpx.Client(timeout=60, follow_redirects=False) as raw:
             resp = raw.get(url)
             resp.raise_for_status()
             data = resp.content
+        if len(data) > _MAX_ASSET_BYTES:
+            raise PlaudError(f"asset exceeds {_MAX_ASSET_BYTES} bytes; aborting")
         if url.split("?", 1)[0].endswith(".gz"):
-            import gzip
-
-            return gzip.decompress(data)
+            return _bounded_gunzip(data, _MAX_ASSET_BYTES)
         return data
 
     def get_cloud_summary_md(self, file_id: str, detail: dict | None = None) -> str | None:

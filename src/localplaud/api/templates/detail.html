@@ -32,9 +32,13 @@
 {% endif %}
 
 <script>
-  // Render the markdown summaries lightly (headings/bullets already read fine as text).
+  // Render the markdown summaries lightly. Escape HTML FIRST so a summary or
+  // transcript containing markup (incl. a MITM'd cloud summary) can't inject
+  // script/HTML — then apply the plain markdown transforms.
+  const esc = s => s.replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   document.querySelectorAll('[id^="summary-"]').forEach(el => {
-    el.innerHTML = el.textContent
+    el.innerHTML = esc(el.textContent)
       .replace(/^### (.*)$/gm, '<h4>$1</h4>')
       .replace(/^## (.*)$/gm, '<h3>$1</h3>')
       .replace(/^# (.*)$/gm, '<h3>$1</h3>')

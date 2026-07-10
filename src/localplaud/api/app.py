@@ -28,6 +28,18 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
 
 
+@app.middleware("http")
+async def _auth_gate(request: Request, call_next):
+    """If api.auth_token is configured, require it on every request (except the
+    health check) via an X-Auth-Token header or ?token= query param."""
+    token = get_settings().api.auth_token
+    if token and request.url.path != "/healthz":
+        supplied = request.headers.get("x-auth-token") or request.query_params.get("token")
+        if supplied != token:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
 def _fmt_dt(ms: int | None) -> str:
     if not ms:
         return ""
