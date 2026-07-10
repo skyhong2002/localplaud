@@ -16,6 +16,7 @@ class FasterWhisperProvider:
 
     def __init__(self, cfg):
         self.cfg = cfg.faster_whisper
+        self.vad = cfg.vad
         self.language = cfg.language
 
     def available(self) -> bool:
@@ -50,12 +51,26 @@ class FasterWhisperProvider:
             "Loading faster-whisper model %s (device=%s, compute_type=%s)",
             self.cfg.model, device, compute_type,
         )
+        # faster-whisper bundles its own silero VAD, so vad_filter needs no extra
+        # dependency. Off by default until benchmarked on real recordings.
+        vad_kwargs: dict = {}
+        if self.vad.enabled:
+            log.info("faster-whisper VAD filter enabled")
+            vad_kwargs["vad_filter"] = True
+            vad_kwargs["vad_parameters"] = {
+                "threshold": self.vad.threshold,
+                "min_speech_duration_ms": self.vad.min_speech_ms,
+                "min_silence_duration_ms": self.vad.min_silence_ms,
+                "speech_pad_ms": self.vad.speech_pad_ms,
+                "max_speech_duration_s": self.vad.max_region_s,
+            }
         try:
             model = WhisperModel(self.cfg.model, device=device, compute_type=compute_type)
             segments_iter, info = model.transcribe(
                 str(audio_path),
                 language=None if language == "auto" else language,
                 word_timestamps=True,
+                **vad_kwargs,
             )
             segments = [
                 Segment(
