@@ -50,7 +50,14 @@ class OllamaProvider:
                     "model": self.cfg.model,
                     "messages": messages,
                     "stream": False,
-                    "options": {"temperature": temperature},
+                    # Keep the token budget for visible output. Thinking-capable
+                    # local models can otherwise spend the whole response on a
+                    # hidden reasoning field and return empty content.
+                    "think": False,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens,
+                    },
                 },
                 timeout=600,
             )
@@ -71,4 +78,7 @@ class OllamaProvider:
             raise LLMError(
                 f"Ollama returned HTTP {resp.status_code}: {resp.text[:500]}"
             )
-        return resp.json()["message"]["content"]
+        content = resp.json().get("message", {}).get("content", "")
+        if not content.strip():
+            raise LLMError("Ollama LLM returned an empty completion")
+        return content

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -78,3 +80,35 @@ def test_ollama_embed_missing_model_is_actionable():
     embedder = OllamaEmbedder(OllamaEmbeddingsConfig(host=HOST, model="bge-m3"))
     with pytest.raises(EmbeddingUnavailable, match="ollama pull bge-m3"):
         embedder.embed(["one"])
+
+
+@respx.mock
+def test_ollama_llm_disables_thinking_and_honors_visible_token_budget():
+    from localplaud.config import OllamaConfig
+    from localplaud.llm.ollama import OllamaProvider
+
+    route = respx.post(f"{HOST}/api/chat").mock(
+        return_value=httpx.Response(200, json={"message": {"content": "# Demo\n- Ready"}})
+    )
+    provider = OllamaProvider(OllamaConfig(host=HOST, model="qwen3.5:9b"))
+    assert provider.complete("make an outline", max_tokens=321) == "# Demo\n- Ready"
+    payload = json.loads(route.calls[0].request.content)
+    assert payload["think"] is False
+    assert payload["options"]["num_predict"] == 321
+
+
+@respx.mock
+def test_ollama_llm_rejects_empty_visible_completion():
+    from localplaud.config import OllamaConfig
+    from localplaud.llm.base import LLMError
+    from localplaud.llm.ollama import OllamaProvider
+
+    respx.post(f"{HOST}/api/chat").mock(
+        return_value=httpx.Response(
+            200,
+            json={"message": {"content": "", "thinking": "hidden only"}},
+        )
+    )
+    provider = OllamaProvider(OllamaConfig(host=HOST, model="qwen3.5:9b"))
+    with pytest.raises(LLMError, match="empty completion"):
+        provider.complete("make an outline")
