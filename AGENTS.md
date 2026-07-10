@@ -183,6 +183,9 @@ brute-force vectors when library size requires it.
   resumability, and the affected user journey.
 - For Web App changes, verify the rendered result in a real browser at desktop and
   mobile widths, including empty, loading, degraded, error, and long-content states.
+  The dev server binds to `127.0.0.1:8080` by default. T3 Code's browser sandbox
+  cannot reach localhost; use the Tailscale IP instead:
+  `http://100.71.224.62:8080` (start with `LOCALPLAUD_API__HOST=0.0.0.0`).
 - Treat Plaud Web audits as read-only product research: never press Generate, send an
   Ask prompt, create a share link, export, edit an AutoFlow, change settings, or
   modify/delete account data unless the user separately and explicitly authorizes

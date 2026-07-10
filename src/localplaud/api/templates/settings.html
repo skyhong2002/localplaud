@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}Settings — localplaud{% endblock %}
+{% block body %}
+<div class="content"><div class="pane-inner">
+<h1 class="page">Settings</h1>
+<p class="sub" style="margin-bottom:20px">Configure providers, models, and pipeline stages. Changes are saved to <code>config.toml</code> and take effect after a restart.</p>
+
+<div id="settings-form">
+  <!-- ASR -->
+  <div class="panel" style="margin-bottom:16px">
+    <strong>ASR (Speech Recognition)</strong>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
+        <select id="asr-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
+          {% for p in asr_providers %}
+          <option value="{{ p }}" {% if p == cfg.asr_provider %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="min-width:100px;font-size:13px;color:var(--muted)">Model</label>
+        <input id="asr-model" type="text" value="{{ cfg.asr_model }}" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none" />
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="min-width:100px;font-size:13px;color:var(--muted)">Language</label>
+        <select id="asr-language" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
+          <option value="auto" {% if cfg.asr_language == "auto" %}selected{% endif %}>Auto-detect</option>
+          <option value="zh" {% if cfg.asr_language == "zh" %}selected{% endif %}>Chinese (zh)</option>
+          <option value="en" {% if cfg.asr_language == "en" %}selected{% endif %}>English (en)</option>
+          <option value="ja" {% if cfg.asr_language == "ja" %}selected{% endif %}>Japanese (ja)</option>
+          <option value="ko" {% if cfg.asr_language == "ko" %}selected{% endif %}>Korean (ko)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- LLM -->
+  <div class="panel" style="margin-bottom:16px">
+    <strong>LLM (Summaries &amp; Q&amp;A)</strong>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
+        <select id="llm-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
+          {% for p in llm_providers %}
+          <option value="{{ p }}" {% if p == cfg.llm_provider %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="min-width:100px;font-size:13px;color:var(--muted)">Model</label>
+        <input id="llm-model" type="text" value="{{ cfg.llm_model }}" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Embeddings -->
+  <div class="panel" style="margin-bottom:16px">
+    <strong>Embeddings (Search &amp; Ask)</strong>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
+        <select id="embeddings-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
+          {% for p in embeddings_providers %}
+          <option value="{{ p }}" {% if p == cfg.embeddings_provider %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="min-width:100px;font-size:13px;color:var(--muted)">Model</label>
+        <input id="embeddings-model" type="text" value="{{ cfg.embeddings_model }}" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none" />
+      </div>
+    </div>
+  </div>
+
+  <!-- Diarization -->
+  <div class="panel" style="margin-bottom:16px">
+    <strong>Diarization (Speaker Detection)</strong>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
+        <select id="diarize-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
+          {% for p in diarize_providers %}
+          <option value="{{ p }}" {% if p == cfg.diarize_provider %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Align -->
+  <div class="panel" style="margin-bottom:16px">
+    <strong>Alignment (Word-level Timestamps)</strong>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
+        <select id="align-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
+          {% for p in align_providers %}
+          <option value="{{ p }}" {% if p == cfg.align_provider %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pipeline Stages -->
+  <div class="panel" style="margin-bottom:16px">
+    <strong>Pipeline Stages</strong>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+      {% for stage in pipeline_stages %}
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+        <input type="checkbox" id="stage-{{ stage.key }}" {% if stage.enabled %}checked{% endif %} style="width:16px;height:16px;accent-color:var(--blue)" />
+        <span style="font-size:13px">{{ stage.label }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Summary Template -->
+  <div class="panel" style="margin-bottom:16px">
+    <strong>Summary Template</strong>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
+      <select id="summary-template" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
+        {% for t in summary_templates %}
+        <option value="{{ t }}" {% if t == cfg.summary_template %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <!-- Poller -->
+  <div class="panel" style="margin-bottom:16px">
+    <strong>Poller</strong>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
+      <label style="min-width:100px;font-size:13px;color:var(--muted)">Interval (seconds)</label>
+      <input id="poll-interval" type="number" value="{{ cfg.poll_interval }}" min="30" max="3600" style="width:120px;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none" />
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div style="display:flex;gap:10px;margin-top:20px">
+    <button class="btn" onclick="saveSettings()">Save Settings</button>
+    <button class="btn sec" onclick="location.href='/status'">Back to Status</button>
+  </div>
+  <div id="save-msg" style="margin-top:12px;font-size:13px;display:none"></div>
+</div>
+
+<script>
+async function saveSettings() {
+  const msg = document.getElementById('save-msg');
+  msg.style.display = 'block';
+  msg.style.color = 'var(--muted)';
+  msg.textContent = 'Saving...';
+
+  const payload = {
+    asr: {
+      provider: document.getElementById('asr-provider').value,
+      model: document.getElementById('asr-model').value,
+      language: document.getElementById('asr-language').value,
+    },
+    llm: {
+      provider: document.getElementById('llm-provider').value,
+      model: document.getElementById('llm-model').value,
+    },
+    embeddings: {
+      provider: document.getElementById('embeddings-provider').value,
+      model: document.getElementById('embeddings-model').value,
+    },
+    diarize: {
+      provider: document.getElementById('diarize-provider').value,
+    },
+    align: {
+      provider: document.getElementById('align-provider').value,
+    },
+    pipeline: {
+      stages: {
+        convert: document.getElementById('stage-convert').checked,
+        transcribe: document.getElementById('stage-transcribe').checked,
+        align: document.getElementById('stage-align').checked,
+        diarize: document.getElementById('stage-diarize').checked,
+        correct: document.getElementById('stage-correct').checked,
+        summarize: document.getElementById('stage-summarize').checked,
+        mind_map: document.getElementById('stage-mind_map').checked,
+        index: document.getElementById('stage-index').checked,
+      },
+      summary_template: document.getElementById('summary-template').value,
+    },
+    poller: {
+      interval_seconds: parseInt(document.getElementById('poll-interval').value, 10),
+    },
+  };
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      msg.style.color = 'var(--ok)';
+      msg.textContent = 'Settings saved. Restart localplaud for changes to take effect.';
+    } else {
+      msg.style.color = 'var(--red)';
+      msg.textContent = 'Error: ' + (data.error || 'Failed to save');
+    }
+  } catch (e) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = 'Error: ' + e.message;
+  }
+}
+</script>
+{% endblock %}

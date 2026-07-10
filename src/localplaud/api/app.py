@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from datetime import UTC
 from pathlib import Path
@@ -1731,3 +1732,207 @@ def api_transcript_revisions(file_id: str) -> JSONResponse:
             ).count(),
         } for revision in reversed(r.transcript_revisions)]
     return JSONResponse({"file_id": file_id, "revisions": data})
+
+
+# --------------------------------------------------------------------------- #
+# Settings page + API
+# --------------------------------------------------------------------------- #
+
+
+class SettingsInput(BaseModel):
+    asr: dict[str, str]
+    llm: dict[str, str]
+    embeddings: dict[str, str]
+    diarize: dict[str, str]
+    align: dict[str, str]
+    pipeline: dict
+    poller: dict[str, int]
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request):
+    settings = get_settings()
+    ctx = _base_ctx(request, "settings") | {
+        "asr_providers": ["faster-whisper", "mlx-whisper", "whispercpp", "openai", "deepgram", "assemblyai", "remote-worker"],
+        "llm_providers": ["ollama", "openai", "anthropic", "codex-local", "remote-worker"],
+        "embeddings_providers": ["local", "openai", "ollama", "remote-worker"],
+        "diarize_providers": ["pyannote", "remote-worker", "none"],
+        "align_providers": ["whisper-timestamps", "whisperx", "remote-worker", "none"],
+        "summary_templates": ["default", "meeting", "call", "lecture", "personal"],
+        "pipeline_stages": [
+            {"key": "convert", "label": "Convert (opus → wav)", "enabled": settings.pipeline.convert},
+            {"key": "transcribe", "label": "Transcribe (ASR)", "enabled": settings.pipeline.transcribe},
+            {"key": "align", "label": "Align (word-level timestamps)", "enabled": settings.pipeline.align},
+            {"key": "diarize", "label": "Diarize (speaker detection)", "enabled": settings.pipeline.diarize},
+            {"key": "correct", "label": "Correct (vocabulary/names)", "enabled": settings.pipeline.correct},
+            {"key": "summarize", "label": "Summarize (notes)", "enabled": settings.pipeline.summarize},
+            {"key": "mind_map", "label": "Mind map", "enabled": settings.pipeline.mind_map},
+            {"key": "index", "label": "Index (embeddings)", "enabled": settings.pipeline.index},
+        ],
+        "cfg": {
+            "asr_provider": settings.asr.provider,
+            "asr_model": _get_asr_model(settings),
+            "asr_language": settings.asr.language,
+            "llm_provider": settings.llm.provider,
+            "llm_model": _get_llm_model(settings),
+            "embeddings_provider": settings.embeddings.provider,
+            "embeddings_model": _get_embeddings_model(settings),
+            "diarize_provider": settings.diarize.provider,
+            "align_provider": settings.align.provider,
+            "summary_template": settings.pipeline.summary_template,
+            "poll_interval": settings.poller.interval_seconds,
+        },
+    }
+    return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
+
+
+def _get_asr_model(settings) -> str:
+    p = settings.asr.provider
+    if p == "mlx-whisper":
+        return settings.asr.mlx_whisper.model
+    if p == "faster-whisper":
+        return settings.asr.faster_whisper.model
+    if p == "whispercpp":
+        return settings.asr.whispercpp.model_path.name
+    if p == "openai":
+        return settings.asr.openai.model
+    return ""
+
+
+def _get_llm_model(settings) -> str:
+    p = settings.llm.provider
+    if p == "ollama":
+        return settings.llm.ollama.model
+    if p == "openai":
+        return settings.llm.openai.model
+    if p == "anthropic":
+        return settings.llm.anthropic.model
+    return ""
+
+
+def _get_embeddings_model(settings) -> str:
+    p = settings.embeddings.provider
+    if p == "local":
+        return settings.embeddings.local.model
+    if p == "openai":
+        return settings.embeddings.openai.model
+    if p == "ollama":
+        return settings.embeddings.ollama.model
+    return ""
+
+
+@app.post("/api/settings")
+def api_save_settings(payload: SettingsInput) -> JSONResponse:
+    import tomllib
+
+    config_path = Path(os.environ.get("LOCALPLAUD_CONFIG", "config.toml"))
+    if not config_path.exists():
+        return JSONResponse({"error": "config.toml not found"}, status_code=404)
+
+    # Read existing config
+    with config_path.open("rb") as f:
+        existing = tomllib.load(f)
+
+    # Build new config sections
+    new_config: dict = {}
+
+    # ASR
+    asr_cfg = existing.get("asr", {})
+    asr_cfg["provider"] = payload.asr.get("provider", asr_cfg.get("provider"))
+    asr_cfg["language"] = payload.asr.get("language", asr_cfg.get("language"))
+    provider_key = payload.asr.get("provider", "").replace("-", "_")
+    model = payload.asr.get("model", "")
+    if model and provider_key in asr_cfg:
+        asr_cfg[provider_key] = asr_cfg.get(provider_key, {})
+        if provider_key == "whispercpp":
+            asr_cfg[provider_key]["model_path"] = model
+        else:
+            asr_cfg[provider_key]["model"] = model
+    new_config["asr"] = asr_cfg
+
+    # LLM
+    llm_cfg = existing.get("llm", {})
+    llm_cfg["provider"] = payload.llm.get("provider", llm_cfg.get("provider"))
+    llm_provider_key = payload.llm.get("provider", "")
+    llm_model = payload.llm.get("model", "")
+    if llm_model and llm_provider_key in llm_cfg:
+        llm_cfg[llm_provider_key] = llm_cfg.get(llm_provider_key, {})
+        llm_cfg[llm_provider_key]["model"] = llm_model
+    new_config["llm"] = llm_cfg
+
+    # Embeddings
+    emb_cfg = existing.get("embeddings", {})
+    emb_cfg["provider"] = payload.embeddings.get("provider", emb_cfg.get("provider"))
+    emb_provider_key = payload.embeddings.get("provider", "")
+    emb_model = payload.embeddings.get("model", "")
+    if emb_model and emb_provider_key in emb_cfg:
+        emb_cfg[emb_provider_key] = emb_cfg.get(emb_provider_key, {})
+        emb_cfg[emb_provider_key]["model"] = emb_model
+    new_config["embeddings"] = emb_cfg
+
+    # Diarize
+    dia_cfg = existing.get("diarize", {})
+    dia_cfg["provider"] = payload.diarize.get("provider", dia_cfg.get("provider"))
+    new_config["diarize"] = dia_cfg
+
+    # Align
+    align_cfg = existing.get("align", {})
+    align_cfg["provider"] = payload.align.get("provider", align_cfg.get("provider"))
+    new_config["align"] = align_cfg
+
+    # Pipeline
+    pipe_cfg = existing.get("pipeline", {})
+    stages = payload.pipeline.get("stages", {})
+    for key in ("convert", "transcribe", "align", "diarize", "correct", "summarize", "mind_map", "index"):
+        if key in stages:
+            pipe_cfg[key] = stages[key]
+    if "summary_template" in payload.pipeline:
+        pipe_cfg["summary_template"] = payload.pipeline["summary_template"]
+    new_config["pipeline"] = pipe_cfg
+
+    # Poller
+    poller_cfg = existing.get("poller", {})
+    if "interval_seconds" in payload.poller:
+        poller_cfg["interval_seconds"] = payload.poller["interval_seconds"]
+    new_config["poller"] = poller_cfg
+
+    # Merge with existing (preserve sections not touched)
+    merged = {**existing, **new_config}
+
+    # Write back
+    try:
+        import tomli_w
+        with config_path.open("w") as f:
+            tomli_w.dump(merged, f)
+    except ImportError:
+        # Fallback: manual TOML write for simple values
+        lines = []
+        for section, values in merged.items():
+            lines.append(f"[{section}]")
+            for k, v in values.items():
+                if isinstance(v, dict):
+                    lines.append(f"  [{section}.{k}]")
+                    for dk, dv in v.items():
+                        lines.append(f'  {dk} = {_toml_value(dv)}')
+                else:
+                    lines.append(f'{k} = {_toml_value(v)}')
+            lines.append("")
+        with config_path.open("w") as f:
+            f.write("\n".join(lines))
+
+    return JSONResponse({"ok": True, "message": "Settings saved. Restart required."})
+
+
+def _toml_value(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return str(v)
+    if isinstance(v, str):
+        return f'"{v}"'
+    if isinstance(v, list):
+        items = ", ".join(_toml_value(x) for x in v)
+        return f"[{items}]"
+    return str(v)
