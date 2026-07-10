@@ -96,6 +96,22 @@ Or run everything as a daemon (poll on a schedule + process continuously):
 localplaud run
 ```
 
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `localplaud init` | Create the database + data dirs |
+| `localplaud auth import` / `auth check` | Import a browser session / verify it |
+| `localplaud doctor` | Check ffmpeg + your ASR/LLM/embedding providers + auth |
+| `localplaud poll [--once]` | Sync the cloud listing + download audio |
+| `localplaud work [--once] [--force]` | Run the pipeline on downloaded recordings |
+| `localplaud run` | Poll + process + serve, all together |
+| `localplaud ls` / `status` | List recordings / counts by stage |
+| `localplaud ask "…"` | Q&A across all transcripts |
+| `localplaud reprocess <id>` | Re-run the pipeline on one recording |
+| `localplaud export <id> [-o …]` | Export a recording to Markdown |
+| `localplaud serve` | Web UI only |
+
 ### Your Plaud session
 
 localplaud never sees your Plaud password unless you give it one. Auth is still
