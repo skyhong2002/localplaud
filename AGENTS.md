@@ -114,17 +114,29 @@ as Plaud Web while remaining recognizably localplaud.
 
 Required areas include:
 
-- library navigation with search, folders/tags, filters, processing state, and
-  responsive list/detail layouts;
+- a persistent shell with Home/recent files, Search, all files,
+  uncategorized/trash recovery, folders/tags, capture-source filters, Ask,
+  Templates, Discover/Automation, Settings, processing state, and responsive
+  list/detail layouts;
 - a recording workspace with synchronized audio, clickable active transcript,
-  speaker colors/naming, inline edits, summaries, mind map, and single-file Ask;
+  speaker colors/naming, inline edits, raw-versus-corrected transcript views,
+  transcript search/find-replace, summaries, mind map, and single-file Ask;
 - whole-library Ask with grounded citations and source navigation;
+- suggested Ask questions and reusable local skills/quick actions must remain
+  grounded in the selected recording or library scope and must not silently mutate
+  notes or tasks;
 - generation/re-generation controls, template selection, visible progress, and
   actionable failure recovery;
+- personal and discoverable template surfaces with search, scenario categories,
+  provenance, authorship, descriptions, and versioned copy/install behavior;
 - export/share controls with practical audio, transcript, subtitle, note, image,
-  and document formats;
-- settings for sync, ASR, diarization, vocabulary, LLMs, embeddings, automation,
-  privacy, and system health.
+  and document formats, including transcript timestamp and speaker-label toggles;
+- AutoFlow views with readable triggers/actions, enablement, notification policy,
+  edit ownership, history, and failures; locally owned rules must be editable from
+  the Web App and externally owned rules must be visibly read-only;
+- settings for account/security and active sessions, workspace personalization,
+  locale/preferences, sync/backup, ASR, diarization, vocabulary, LLMs, embeddings,
+  authorized apps/integrations, automation, privacy, support/about, and system health.
 
 HTMX/Jinja may continue where it supports this experience. It is not a product
 constraint: adopt richer client-side state or a SPA architecture if synchronized
@@ -167,6 +179,11 @@ brute-force vectors when library size requires it.
   resumability, and the affected user journey.
 - For Web App changes, verify the rendered result in a real browser at desktop and
   mobile widths, including empty, loading, degraded, error, and long-content states.
+- Treat Plaud Web audits as read-only product research: never press Generate, send an
+  Ask prompt, create a share link, export, edit an AutoFlow, change settings, or
+  modify/delete account data unless the user separately and explicitly authorizes
+  that action. Record workflow concepts, never private recording content, account
+  identifiers, tokens, or other secrets in repository documents.
 - Keep README, configuration examples, ADRs, deployment docs, and TODO status aligned
   with implementation. Label targets as targets; do not claim unfinished behavior is
   already working.

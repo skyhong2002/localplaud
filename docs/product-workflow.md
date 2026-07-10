@@ -33,11 +33,53 @@ feature, never an implicit fallback.
 
 ## Information architecture
 
+### Observed Plaud Web baseline (read-only audit, 2026-07-10)
+
+The authenticated Plaud Web surface was inspected without generating, editing,
+exporting, sharing, or deleting anything. localplaud should preserve the useful
+workflow concepts below while using local artifacts, original branding, and its own
+interaction design:
+
+- a persistent personal-workspace shell with Search, Home, library-wide Ask,
+  Templates, Discover/Automation, folders, source filters, plan/usage state, and
+  Settings;
+- a recent-files home and an all-files table with name, duration, creation date,
+  sortable columns, folders, uncategorized/trash views, and capture-source facets;
+- a file workspace that keeps the library context available while switching between
+  transcript and notes, with file-level Ask and compact share/export/more actions;
+- a transcript reader with a synchronized duration/player, timestamps, speaker
+  labels, an explicit polished-versus-raw transcript view, and find/replace;
+- notes that identify the template used, support multiple structured sections and a
+  mind map, and keep generation feedback separate from editing;
+- Ask at both file and library scope, including suggested questions and reusable
+  skills such as action-item extraction, task tables, and insight generation;
+- a searchable template library with My Space and Explore, scenario/category
+  browsing, first-party and community templates, descriptions, authorship, and
+  popularity signals;
+- one export menu for copy transcript/notes and export audio, transcript, notes, and
+  mind map; transcript export exposes format plus timestamp and speaker-label
+  switches (Plaud currently offered TXT, SRT, DOCX, and PDF in the audited dialog);
+- Discover includes AutoFlow, applications, integrations, and feedback. AutoFlow
+  exposes enablement, notification state, a human-readable trigger/action summary,
+  and currently tells Web users when rules are view-only and must be edited in the
+  mobile app;
+- Settings separates account/security, workspace personalization, preferences,
+  custom vocabulary, private-cloud sync, authorized applications, support, and
+  product information.
+
+This list is a workflow benchmark, not a requirement to reproduce Plaud's account,
+subscription, community, or cloud-sharing implementation. localplaud must improve on
+it where subscription independence, local provenance, privacy, recovery, or
+accessibility require a different design.
+
 ### 1. Recordings library
 
-- Persistent navigation for Recordings, Ask, Templates, Automation, and Settings.
+- Persistent navigation for Home, Search, Recordings, Ask, Templates,
+  Discover/Automation, and Settings.
 - Search by title and transcript content.
-- Folders/tags, date/source/duration/status filters, and useful sorting.
+- Recent-files home plus all-files, uncategorized, and trash/recovery views.
+- Folders/tags, capture-source, date, duration, and processing-state filters, with
+  sortable name, duration, and creation-date columns.
 - Every row communicates recorded time, duration, processing state, and whether
   attention is needed.
 - Bulk organization, export, reprocess, and deletion of local derivatives.
@@ -49,13 +91,15 @@ feature, never an implicit fallback.
 - Persistent audio player with seek, speed, skip, waveform/progress, and keyboard
   controls.
 - Transcript tab: click-to-seek, active-segment tracking, timestamps, speaker colors,
-  speaker rename, inline correction, and search within the recording.
+  speaker rename, inline correction, search/find-replace within the recording, and a
+  clearly labelled switch between raw ASR and the corrected canonical transcript.
 - Notes: multiple generated or user-authored note tabs, inline editing, generation
   provenance, template/model selection, and safe regeneration.
 - Mind map: navigable hierarchy generated from the canonical corrected transcript
   and notes.
 - Ask: single-file chat, quick actions, follow-up prompts, timestamp citations,
-  source excerpts, and save-to-note.
+  suggested questions, reusable skills/quick actions, follow-up prompts, timestamp
+  citations, source excerpts, and save-to-note.
 - History: visible revisions and stage failures where useful, without overwhelming
   the normal reading experience.
 
@@ -73,6 +117,9 @@ feature, never an implicit fallback.
 - Custom mode selects language, ASR profile, speaker settings, note templates, and
   LLM per file.
 - Users can create and edit templates as structured prompts.
+- Template management has separate personal and discovery surfaces, search,
+  scenario/category browsing, first-party/community provenance, description,
+  authorship, and optional popularity signals.
 - Multiple templates may run for the same recording without deleting prior notes.
 - Long recordings use full-coverage hierarchical summarization; silent truncation is
   forbidden.
@@ -84,6 +131,12 @@ feature, never an implicit fallback.
 - Actions choose transcription/diarization profile, templates, exports, notifications,
   email, or webhooks.
 - Rules have ordering, enable/disable, dry-run visibility, and run history.
+- Each rule has a readable sentence describing trigger, scope, conditions, and
+  actions; the UI shows enablement, notification policy, last/next run where
+  applicable, and which editing surface owns the rule.
+- The Web App must support creating and editing local rules. If another client or
+  external integration owns a rule, show it as explicitly read-only rather than
+  presenting controls that cannot save.
 - A failed downstream action can retry without rerunning ASR.
 
 ### 6. Settings and system health
@@ -93,6 +146,11 @@ feature, never an implicit fallback.
 - LLM and embedding providers with real model-level health checks.
 - Storage use, backup, retention, privacy, authentication, and remote-access settings.
 - Queue/stage status, current job, retry controls, and useful errors.
+- Separate, navigable sections for account/security and active sessions, workspace
+  personalization, locale/preferences, custom vocabulary, private sync/backup,
+  authorized applications/integrations, support, and version/about information.
+- Authorized integrations show scope, provenance, last use, health, and revocation;
+  destructive account/session actions are isolated from ordinary preferences.
 
 ## Processing contract
 

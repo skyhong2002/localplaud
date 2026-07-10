@@ -72,6 +72,22 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 - Implement `docs/product-workflow.md`: library filters/folders/tags, responsive
   split panes, persistent player, waveform/progress, transcript editing, speaker
   naming, notes, mind map, Ask, processing UI, and actionable recovery.
+- Match the audited daily navigation model: Home/recent files, Search, all files,
+  uncategorized, trash/recovery, folders, capture-source facets, library Ask,
+  Templates, Discover/Automation, and Settings with responsive persistence.
+- Add sortable library columns (name, duration, creation date), visible processing
+  state, attention indicators, bulk selection, and safe recovery from trash.
+- Add an explicit raw-ASR versus corrected-canonical transcript switch, synchronized
+  timestamps/speaker labels, transcript-local search and find/replace, and preserve
+  edits independently from the raw artifact.
+- Add file Ask suggested questions and reusable local skills (action items, task
+  table, insights), plus grounded follow-ups and save-to-note.
+- Build template My Space and Explore surfaces with search, categories/scenarios,
+  first-party/community provenance, authorship, descriptions, and versioned install
+  or copy-to-workspace behavior.
+- Consolidate copy/export actions in the file workspace. At minimum support the
+  audited transcript choices TXT/SRT/DOCX/PDF with timestamp and speaker-label
+  toggles, then retain the broader localplaud export targets below.
 - Treat the Web App as the product, not a status viewer. CLI remains setup/ops tooling.
 - Add original localplaud visual design with Plaud-like interaction density and
   information architecture; do not copy Plaud assets.
@@ -83,6 +99,14 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 - Rules matching source, duration, early-transcript keyword, folder/tag, and metadata.
 - Per-rule ASR/diarization/template selection, notification, email, webhook, and
   export actions with independent retry/history.
+- Add a Discover hub for AutoFlow, local applications, and integrations. AutoFlow
+  must show enablement, notification state, a readable trigger/action sentence,
+  ownership/editability, history, and failures; local rules must be editable on Web,
+  while externally owned rules are clearly read-only.
+- Add settings sections for account/security and active sessions, workspace
+  personalization, locale/preferences, vocabulary, private sync/backup, authorized
+  apps/integrations, support, and version/about. Show integration scopes, health,
+  last use, and revoke controls without mixing them with destructive account actions.
 - Native PKCE inside localplaud to remove the Node.js dependency from first login.
 
 ### P1 — Deploy the other two machines
