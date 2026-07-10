@@ -61,4 +61,8 @@ def build_embedder(cfg: EmbeddingsConfig) -> Embedder:
         from .openai_embed import OpenAIEmbedder
 
         return OpenAIEmbedder(cfg.openai)
+    if cfg.provider == "ollama":
+        from .ollama_embed import OllamaEmbedder
+
+        return OllamaEmbedder(cfg.ollama)
     raise EmbeddingUnavailable(f"unknown embedding provider: {cfg.provider!r}")

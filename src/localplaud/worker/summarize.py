@@ -55,16 +55,20 @@ def _render_transcript(transcript: AsrTranscript, max_chars: int = 24000) -> str
 
 
 def summarize(transcript: AsrTranscript, settings: Settings) -> dict:
-    """Return {title, content_md, provider, model}."""
+    """Return {title, content_md, provider, model, template}."""
+    from .summary_templates import render_prompt
+
     llm = build_llm(settings.llm)
-    prompt = _TEMPLATE.format(transcript=_render_transcript(transcript))
-    content = llm.complete(prompt, system=_SYSTEM, temperature=0.2, max_tokens=1500)
+    template = settings.pipeline.summary_template
+    system, prompt = render_prompt(template, _render_transcript(transcript))
+    content = llm.complete(prompt, system=system, temperature=0.2, max_tokens=1500)
     title = _extract_title(content)
     return {
         "title": title,
         "content_md": content,
         "provider": settings.llm.provider,
         "model": getattr(getattr(settings.llm, settings.llm.provider, None), "model", None),
+        "template": template,
     }
 
 

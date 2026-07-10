@@ -85,6 +85,9 @@ class PipelineConfig(BaseModel):
     index: bool = True  # embeddings for Q&A / semantic search
     # Number of files processed concurrently by the worker.
     concurrency: int = 1
+    # Which summary template to use (default | meeting | call | lecture |
+    # personal — see worker/summary_templates.py).
+    summary_template: str = "default"
     # Re-use Plaud's own transcript/summary when the cloud already made one,
     # instead of recomputing locally. Set false to always redo locally.
     prefer_cloud_artifacts: bool = False
@@ -195,15 +198,30 @@ class OpenAIEmbeddingsConfig(BaseModel):
     model: str = "text-embedding-3-small"
 
 
+class OllamaEmbeddingsConfig(BaseModel):
+    """Local embeddings via Ollama — no torch/sentence-transformers needed."""
+
+    host: str = "http://localhost:11434"
+    model: str = "bge-m3"
+
+
 class EmbeddingsConfig(BaseModel):
-    provider: Literal["local", "openai"] = "local"
+    provider: Literal["local", "openai", "ollama"] = "local"
     local: LocalEmbeddingsConfig = Field(default_factory=LocalEmbeddingsConfig)
     openai: OpenAIEmbeddingsConfig = Field(default_factory=OpenAIEmbeddingsConfig)
+    ollama: OllamaEmbeddingsConfig = Field(default_factory=OllamaEmbeddingsConfig)
 
 
 class ApiConfig(BaseModel):
-    host: str = "0.0.0.0"
+    # Loopback by default so an accidental `localplaud run` isn't exposed to the
+    # LAN. In Docker this is overridden to 0.0.0.0 (the container sits behind
+    # Caddy and its port isn't published).
+    host: str = "127.0.0.1"
     port: int = 8080
+    # Optional shared secret. When set, every request must present it as an
+    # ``X-Auth-Token`` header or ``?token=`` query param. Prefer putting real
+    # auth (e.g. Caddy basic_auth) in front; this is a lightweight backstop.
+    auth_token: str | None = None
     # Used to build absolute links behind a reverse proxy; set per machine.
     public_url: str | None = None
 

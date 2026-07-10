@@ -53,7 +53,8 @@ def auth_check():
         with PlaudClient(settings.plaud) as client:
             me = client.check_auth()
         console.print("[green]✓[/] Authenticated to Plaud cloud.")
-        uid = me.get("data", me).get("id") if isinstance(me, dict) else None
+        data = me.get("data", me) if isinstance(me, dict) else None
+        uid = data.get("id") if isinstance(data, dict) else None
         if uid:
             console.print(f"  user id: [dim]{uid}[/]")
     except PlaudAuthError as exc:
@@ -75,9 +76,11 @@ def auth_import(
     In your browser DevTools → Network, right-click an authenticated request to
     api-*.plaud.ai → Copy → Copy as cURL, then pipe it here.
     """
+    from pathlib import Path
+
     from .plaud.auth import parse_curl
 
-    raw = open(curl_file).read() if curl_file else sys.stdin.read()
+    raw = Path(curl_file).read_text() if curl_file else sys.stdin.read()
     if not raw.strip():
         console.print("[red]No input.[/] Paste a cURL command or use --file.")
         raise typer.Exit(1)
@@ -129,6 +132,7 @@ def poll(
 @app.command()
 def work(
     once: bool = typer.Option(False, "--once", help="Process the backlog once and exit."),
+    force: bool = typer.Option(False, "--force", help="Recompute all stages, ignoring cached artifacts."),
 ):
     """Run the local pipeline on downloaded recordings."""
     from .worker.pipeline import process_pending
@@ -136,13 +140,29 @@ def work(
     settings = get_settings()
     while True:
         try:
-            n = process_pending(settings)
+            n = process_pending(settings, force=force)
             console.print(f"Processed {n} file(s).")
         except Exception as exc:  # noqa: BLE001
             console.print(f"[yellow]work error:[/] {exc}")
         if once:
             break
         time.sleep(max(30, settings.poller.interval_seconds // 2))
+
+
+@app.command()
+def export(
+    file_id: str = typer.Argument(..., help="Recording id (see `localplaud ls`)."),
+    out: str = typer.Option(None, "--out", "-o", help="Output path (default: alongside the audio)."),
+):
+    """Export a recording's transcript + summaries to a Markdown file."""
+    from .exporter import export_to_file
+
+    try:
+        path = export_to_file(file_id, out)
+    except ValueError as exc:
+        console.print(f"[red]✗[/] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✓[/] Exported to [bold]{path}[/]")
 
 
 @app.command()

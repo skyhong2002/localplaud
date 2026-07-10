@@ -45,8 +45,9 @@ transcribe = true
 diarize = true
 summarize = true
 index = true                     # build embeddings for Q&A / search
-concurrency = 1
-prefer_cloud_artifacts = false   # true = reuse Plaud's own transcript/summary when present
+concurrency = 1                  # files processed in parallel by the worker
+summary_template = "default"     # default | meeting | call | lecture | personal
+prefer_cloud_artifacts = false   # true = also mirror Plaud's own summary when present
 
 # --------------------------------------------------------------------------- #
 # ASR — speech recognition. Pluggable; local and cloud are equal choices.
@@ -112,16 +113,25 @@ provider = "ollama"              # ollama | openai | anthropic
 # Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.
 # --------------------------------------------------------------------------- #
 [embeddings]
-provider = "local"               # local (sentence-transformers) | openai
+provider = "local"               # local (sentence-transformers) | ollama | openai
 
   [embeddings.local]
   model = "sentence-transformers/all-MiniLM-L6-v2"
+
+  [embeddings.ollama]            # local, no torch — just a running Ollama daemon
+  host = "http://localhost:11434"
+  model = "bge-m3"
 
   [embeddings.openai]
   # api_key via LOCALPLAUD_EMBEDDINGS__OPENAI__API_KEY
   model = "text-embedding-3-small"
 
 [api]
-host = "0.0.0.0"
+# Loopback by default so a stray `localplaud run` isn't LAN-exposed. Docker
+# overrides this to 0.0.0.0 (it sits behind Caddy).
+host = "127.0.0.1"
 port = 8080
+# Optional shared secret: when set, every request needs it as an X-Auth-Token
+# header or ?token= param. Prefer real auth (Caddy basic_auth) in front.
+# auth_token via LOCALPLAUD_API__AUTH_TOKEN
 # public_url = "https://plaud.observe.tw"   # set to your domain behind the reverse proxy

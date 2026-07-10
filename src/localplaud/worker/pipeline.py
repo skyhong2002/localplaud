@@ -51,7 +51,7 @@ def _rehydrate_transcript(row: TranscriptRow) -> Transcript:
     )
 
 
-def process_file(file_id: str, settings: Settings | None = None) -> None:
+def process_file(file_id: str, settings: Settings | None = None, force: bool = False) -> None:
     settings = settings or get_settings()
     pcfg = settings.pipeline
 
@@ -64,39 +64,45 @@ def process_file(file_id: str, settings: Settings | None = None) -> None:
         row.status = FileStatus.processing
         row.error = None
         audio = Path(row.audio_path)
+        existing_wav = row.wav_path
 
     try:
-        # --- convert -------------------------------------------------- #
-        wav = Path(row.wav_path) if row.wav_path else wav_path(file_id)
+        # --- convert (skip if the wav already exists) ----------------- #
+        wav = Path(existing_wav) if existing_wav else wav_path(file_id)
         if pcfg.convert:
-            convert.to_wav(audio, wav)
-            with session_scope() as session:
-                session.get(PlaudFile, file_id).wav_path = str(wav)
+            if force or not wav.exists():
+                convert.to_wav(audio, wav)
+                with session_scope() as session:
+                    session.get(PlaudFile, file_id).wav_path = str(wav)
         else:
             wav = audio
 
-        # --- transcribe ----------------------------------------------- #
+        # --- transcribe (reuse an existing transcript to resume) ------ #
         transcript: Transcript | None = None
         if pcfg.transcribe:
-            transcript = transcribe.run_asr(wav, settings)
+            existing = _load_transcript(file_id) if not force else None
+            if existing is not None:
+                log.info("Reusing existing transcript for %s", file_id)
+                transcript = existing
+            else:
+                transcript = transcribe.run_asr(wav, settings)
+                if pcfg.diarize and not transcript.has_speakers:
+                    try:
+                        transcript = diarize(wav, transcript, settings.diarize)
+                    except DiarizationUnavailable as exc:
+                        log.warning("Diarization skipped for %s: %s", file_id, exc)
+                _persist_transcript(file_id, transcript)
 
-            # --- diarize ---------------------------------------------- #
-            if pcfg.diarize and not transcript.has_speakers:
-                try:
-                    transcript = diarize(wav, transcript, settings.diarize)
-                except DiarizationUnavailable as exc:
-                    log.warning("Diarization skipped for %s: %s", file_id, exc)
-
-            _persist_transcript(file_id, transcript)
-
-        # --- summarize ------------------------------------------------ #
+        # --- summarize (skip if this template's summary already exists) #
         if pcfg.summarize and transcript is not None:
-            result = summarize.summarize(transcript, settings)
-            _persist_summary(file_id, result)
+            if force or not _has_summary(file_id, pcfg.summary_template):
+                result = summarize.summarize(transcript, settings)
+                _persist_summary(file_id, result)
 
-        # --- index ---------------------------------------------------- #
+        # --- index (skip if chunks already exist) --------------------- #
         if pcfg.index and transcript is not None:
-            _persist_chunks(file_id, transcript, settings)
+            if force or not _has_chunks(file_id):
+                _persist_chunks(file_id, transcript, settings)
 
         with session_scope() as session:
             session.get(PlaudFile, file_id).status = FileStatus.done
@@ -109,6 +115,24 @@ def process_file(file_id: str, settings: Settings | None = None) -> None:
             r.status = FileStatus.error
             r.error = str(exc)[:2000]
         raise
+
+
+def _load_transcript(file_id: str) -> Transcript | None:
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        return _rehydrate_transcript(row.transcript) if row and row.transcript else None
+
+
+def _has_summary(file_id: str, template: str) -> bool:
+    with session_scope() as session:
+        return any(s.template == template for s in session.get(PlaudFile, file_id).summaries)
+
+
+def _has_chunks(file_id: str) -> bool:
+    from ..db.models import Chunk
+
+    with session_scope() as session:
+        return session.query(Chunk.id).filter(Chunk.file_id == file_id).first() is not None
 
 
 def _persist_transcript(file_id: str, transcript: Transcript) -> None:
@@ -129,16 +153,17 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> None:
 
 
 def _persist_summary(file_id: str, result: dict) -> None:
+    template = result.get("template", "default")
     with session_scope() as session:
         session.execute(
             delete(SummaryRow).where(
-                SummaryRow.file_id == file_id, SummaryRow.template == "default"
+                SummaryRow.file_id == file_id, SummaryRow.template == template
             )
         )
         session.add(
             SummaryRow(
                 file_id=file_id,
-                template="default",
+                template=template,
                 title=result.get("title"),
                 content_md=result.get("content_md", ""),
                 llm_provider=result.get("provider"),
@@ -171,20 +196,33 @@ def _persist_chunks(file_id: str, transcript: Transcript, settings: Settings) ->
             )
 
 
-def process_pending(settings: Settings | None = None, limit: int | None = None) -> int:
-    """Process all files in ``downloaded`` state. Returns count processed."""
+def process_pending(
+    settings: Settings | None = None, limit: int | None = None, force: bool = False
+) -> int:
+    """Process all files in ``downloaded`` state, up to ``pipeline.concurrency``
+    at a time. Returns count processed successfully."""
     settings = settings or get_settings()
     with session_scope() as session:
         stmt = select(PlaudFile.id).where(PlaudFile.status == FileStatus.downloaded)
         if limit:
             stmt = stmt.limit(limit)
         ids = list(session.scalars(stmt))
+    if not ids:
+        return 0
 
-    done = 0
-    for fid in ids:
+    workers = max(1, settings.pipeline.concurrency)
+
+    def _run(fid: str) -> bool:
         try:
-            process_file(fid, settings)
-            done += 1
+            process_file(fid, settings, force=force)
+            return True
         except Exception:  # noqa: BLE001
-            continue  # error already recorded on the row
-    return done
+            return False  # error already recorded on the row
+
+    if workers == 1:
+        return sum(_run(fid) for fid in ids)
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return sum(pool.map(_run, ids))

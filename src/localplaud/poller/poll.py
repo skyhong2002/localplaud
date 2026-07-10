@@ -100,39 +100,53 @@ def reset_inflight() -> int:
     return reset
 
 
+def _download_one(client: PlaudClient, file_id: str, raw: dict) -> bool:
+    dest_dir = file_dir(file_id)
+    dto = PlaudFileDTO.model_validate(raw or {"id": file_id})
+    try:
+        with session_scope() as session:
+            session.get(PlaudFile, file_id).status = FileStatus.downloading
+        dest = client.download_audio(dto, dest_dir)
+        with session_scope() as session:
+            fresh = session.get(PlaudFile, file_id)
+            fresh.audio_path = str(dest)
+            fresh.status = FileStatus.downloaded
+            from datetime import datetime
+
+            fresh.downloaded_at = datetime.now(UTC)
+            fresh.error = None
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.error("Download failed for %s: %s", file_id, exc)
+        with session_scope() as session:
+            fresh = session.get(PlaudFile, file_id)
+            fresh.status = FileStatus.error
+            fresh.error = str(exc)[:2000]
+        return False
+
+
 def download_pending(client: PlaudClient, settings: Settings) -> int:
-    """Download audio for discovered files. Returns count downloaded."""
-    downloaded = 0
+    """Download audio for discovered files, up to
+    ``poller.max_concurrent_downloads`` at a time. Returns count downloaded."""
     with session_scope() as session:
-        stmt = select(PlaudFile).where(PlaudFile.status == FileStatus.discovered)
+        stmt = select(PlaudFile.id, PlaudFile.raw).where(
+            PlaudFile.status == FileStatus.discovered
+        )
         if not settings.poller.include_trash:
             stmt = stmt.where(PlaudFile.is_trash.is_(False))
-        pending = list(session.scalars(stmt))
+        pending = [(fid, raw) for fid, raw in session.execute(stmt)]
+    if not pending:
+        return 0
 
-    for row in pending:
-        dest_dir = file_dir(row.id)
-        dto = PlaudFileDTO.model_validate(row.raw or {"id": row.id})
-        try:
-            with session_scope() as session:
-                fresh = session.get(PlaudFile, row.id)
-                fresh.status = FileStatus.downloading
-            dest = client.download_audio(dto, dest_dir)
-            with session_scope() as session:
-                fresh = session.get(PlaudFile, row.id)
-                fresh.audio_path = str(dest)
-                fresh.status = FileStatus.downloaded
-                from datetime import datetime
+    workers = max(1, settings.poller.max_concurrent_downloads)
+    if workers == 1:
+        return sum(_download_one(client, fid, raw) for fid, raw in pending)
 
-                fresh.downloaded_at = datetime.now(UTC)
-                fresh.error = None
-            downloaded += 1
-        except Exception as exc:  # noqa: BLE001
-            log.error("Download failed for %s: %s", row.id, exc)
-            with session_scope() as session:
-                fresh = session.get(PlaudFile, row.id)
-                fresh.status = FileStatus.error
-                fresh.error = str(exc)[:2000]
-    return downloaded
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = pool.map(lambda fr: _download_one(client, fr[0], fr[1]), pending)
+    return sum(results)
 
 
 def ingest_cloud_summaries(client: PlaudClient, settings: Settings) -> int:
