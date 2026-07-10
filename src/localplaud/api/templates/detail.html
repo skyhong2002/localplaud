@@ -19,13 +19,33 @@
         {% if f.transcript or f.summaries %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:8px 12px; font-size:13px">Export</a>{% endif %}
         <button class="btn sec" style="padding:8px 12px; font-size:13px"
           hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
-          hx-confirm="Re-run the pipeline for this recording?">Re-run</button>
+          hx-confirm="Resume failed or missing processing stages?">Resume</button>
+        <button class="btn sec" style="padding:8px 12px; font-size:13px"
+          hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML"
+          hx-confirm="Rebuild every local artifact for this recording?">Rebuild all</button>
       </div>
     </div>
     <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px"></div>
 
     {% if f.has_audio %}<audio id="player" controls preload="none" src="/audio/{{ f.id }}"></audio>{% endif %}
     {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}</div>{% endif %}
+    {% if f.stages %}
+    <details class="panel" style="margin-top:12px">
+      <summary style="cursor:pointer;font-weight:650">Processing details</summary>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+        {% for stage in f.stages %}
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div>
+            <strong>{{ stage.name }}</strong>
+            {% if stage.provider %}<span class="sub"> · {{ stage.provider }}{% if stage.model %}:{{ stage.model }}{% endif %}</span>{% endif %}
+            {% if stage.error %}<div style="color:var(--red);font-size:12px;margin-top:2px">{{ stage.error }}</div>{% endif %}
+          </div>
+          <span class="st {{ stage.status }}">{{ stage.status }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
 
     <div class="tabs">
       {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}

@@ -42,7 +42,9 @@ playback, and a FastAPI Web App. It runs natively and in Docker profiles.
 The subscription-replacement experience is **in progress**, not complete. The
 default `independent` artifact mode now refuses Plaud transcripts as pipeline input,
 preserves them as visibly labelled imports, and safely requeues legacy cloud-derived
-rows for local ASR. The implementation still needs durable stage-level state, the
+rows for local ASR. Durable stage records preserve attempts, provider/model
+provenance, timing, and actionable failures; optional-stage failures retain usable
+transcripts and notes for targeted resume. The implementation still needs the
 large-v3-turbo + alignment + diarization default path,
 long-recording summarization, editable transcripts/speakers/notes, mind maps,
 single-file Ask, richer export/organization/automation, and Plaud-level Web App

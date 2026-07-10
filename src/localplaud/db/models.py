@@ -42,8 +42,28 @@ class FileStatus(enum.StrEnum):
     downloading = "downloading"
     downloaded = "downloaded"  # audio on disk, pipeline not finished
     processing = "processing"
+    partial = "partial"  # core transcript usable; one or more downstream stages degraded
     done = "done"  # pipeline complete
     error = "error"
+
+
+class StageName(enum.StrEnum):
+    convert = "convert"
+    transcribe = "transcribe"
+    align = "align"
+    diarize = "diarize"
+    summarize = "summarize"
+    mind_map = "mind_map"
+    index = "index"
+
+
+class StageStatus(enum.StrEnum):
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    degraded = "degraded"
+    failed = "failed"
+    skipped = "skipped"
 
 
 class PlaudFile(Base):
@@ -100,6 +120,11 @@ class PlaudFile(Base):
     )
     chunks: Mapped[list[Chunk]] = relationship(
         back_populates="file", cascade="all, delete-orphan"
+    )
+    stage_runs: Mapped[list[StageRun]] = relationship(
+        back_populates="file",
+        cascade="all, delete-orphan",
+        order_by="StageRun.id",
     )
 
     @property
@@ -195,6 +220,36 @@ class Chunk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     file: Mapped[PlaudFile] = relationship(back_populates="chunks")
+
+
+class StageRun(Base):
+    """Durable state for one processing stage of one recording."""
+
+    __tablename__ = "stage_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"))
+    stage: Mapped[StageName] = mapped_column(
+        Enum(StageName, native_enum=False, length=32)
+    )
+    status: Mapped[StageStatus] = mapped_column(
+        Enum(StageStatus, native_enum=False, length=20), default=StageStatus.pending
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    artifact_source: Mapped[str | None] = mapped_column(String(32), default=None)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    file: Mapped[PlaudFile] = relationship(back_populates="stage_runs")
+
+    __table_args__ = (UniqueConstraint("file_id", "stage", name="uq_stage_run_file_stage"),)
 
 
 class KeyValue(Base):

@@ -347,7 +347,11 @@ def status():
 @app.command()
 def reprocess(
     file_id: str = typer.Argument(..., help="Recording id to re-run the pipeline on."),
-    force: bool = typer.Option(True, "--force/--resume", help="Recompute all stages (default) or resume."),
+    force: bool = typer.Option(
+        False,
+        "--force/--resume",
+        help="Resume from existing artifacts (default) or recompute all stages.",
+    ),
 ):
     """Re-run the local pipeline on one recording."""
     from .db.models import FileStatus, PlaudFile

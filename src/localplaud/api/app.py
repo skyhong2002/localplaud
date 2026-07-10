@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 
 from ..config import get_settings
-from ..db.models import FileStatus, PlaudFile
+from ..db.models import FileStatus, PlaudFile, StageRun, StageStatus
 from ..db.session import init_db, session_scope
 
 _HERE = Path(__file__).parent
@@ -240,6 +240,19 @@ def file_detail(request: Request, file_id: str):
             "speakers": speakers,
             "summaries": summaries,
             "error": r.error,
+            "stages": [
+                {
+                    "name": stage.stage.value,
+                    "status": stage.status.value,
+                    "attempts": stage.attempts,
+                    "provider": stage.provider,
+                    "model": stage.model,
+                    "source": stage.artifact_source,
+                    "detail": stage.detail or {},
+                    "error": stage.error,
+                }
+                for stage in r.stage_runs
+            ],
         }
         files = [
             _file_summary(x)
@@ -261,6 +274,22 @@ def status_page(request: Request):
             ).all()
         )
         stats = _stats(session)
+        stage_counts = list(
+            session.execute(
+                select(StageRun.stage, StageRun.status, func.count())
+                .group_by(StageRun.stage, StageRun.status)
+                .order_by(StageRun.stage, StageRun.status)
+            ).all()
+        )
+        recent_stage_issues = list(
+            session.execute(
+                select(StageRun, PlaudFile.filename)
+                .join(PlaudFile, PlaudFile.id == StageRun.file_id)
+                .where(StageRun.status.in_([StageStatus.degraded, StageStatus.failed]))
+                .order_by(StageRun.updated_at.desc())
+                .limit(20)
+            ).all()
+        )
     status_rows = [(st.value, counts.get(st, 0)) for st in FileStatus]
     checks = _health_checks(settings)
     cfg = {
@@ -276,6 +305,19 @@ def status_page(request: Request):
         "stats": stats,
         "checks": checks,
         "cfg": cfg,
+        "stage_rows": [
+            (stage.value, state.value, count) for stage, state, count in stage_counts
+        ],
+        "stage_issues": [
+            {
+                "file_id": run.file_id,
+                "filename": filename or run.file_id[:12],
+                "stage": run.stage.value,
+                "status": run.status.value,
+                "error": run.error,
+            }
+            for run, filename in recent_stage_issues
+        ],
     }
     return templates.TemplateResponse(request=request, name="status.html", context=ctx)
 
@@ -338,7 +380,7 @@ def export_markdown(file_id: str):
 
 
 @app.post("/file/{file_id}/reprocess", response_class=HTMLResponse)
-def reprocess(file_id: str, force: bool = True):
+def reprocess(file_id: str, force: bool = False):
     """Kick off a pipeline re-run for one recording in the background."""
     import threading
 

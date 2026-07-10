@@ -5,7 +5,8 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 
 ## Status snapshot (2026-07-10)
 
-- Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT). Work is on branch `feat/core-pipeline` (PR #6, CI green, 90 tests).
+- Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
+  Active development is merged directly to `main` (120 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -45,8 +46,11 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   relabel local summaries derived from a cloud-only transcript as `legacy`, clear
   their non-provenanced chunks, and requeue audio for local ASR. Available explicitly
   as `localplaud prepare-independent` and run once on independent-mode startup.
-- Replace the one-file `status` gate with durable per-stage runs and retries. ASR,
-  transcript, and notes remain usable if mind map, embedding, or an integration fails.
+- ✅ Added durable per-recording stage runs with attempt count, status, provider/model,
+  artifact source, timestamps, and errors. ASR is persisted before optional work;
+  diarization, notes, and indexing failures produce an actionable `partial` state
+  without discarding usable artifacts. Web detail/status pages expose diagnostics,
+  and Resume retries only missing/failed work while Rebuild all is explicit.
 - ✅ Fixed Ollama embeddings: model-level health checks now distinguish a healthy
   daemon from a missing configured model, errors give the exact `ollama pull` action,
   modern `/api/embed` batches inputs with legacy compatibility, and stored provenance
@@ -123,7 +127,6 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 - Pattern to reuse: append a `<domain> { basic_auth … ; reverse_proxy 127.0.0.1:8080 }` block to that host's Caddyfile (SkyLabMac already done this way).
 
 ### Housekeeping
-- Merge PR #6 to `main` (blocked: agent can't self-merge).
 - Optional: root LaunchDaemon so production starts on boot without login (needs sudo).
 
 ## Ops quick-reference (SkyLabMac)

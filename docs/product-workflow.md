@@ -212,6 +212,10 @@ Transcript export must allow timestamps and speaker names to be toggled.
 As of 2026-07-10, the repository has the core poll/download/process/store/UI skeleton,
 but this document describes the target rather than current parity. Independent mode
 now enforces local transcript provenance and safely preserves/requeues legacy Plaud
-imports. Major remaining gaps include stage-level state, reliable embeddings, default
-diarization, word alignment, editable artifacts, long-form summarization, mind maps,
-single-file Ask, richer organization/export, automation, and UI polish.
+imports. Implemented pipeline stages now persist attempts, provider/model provenance,
+timestamps, and failures; optional-stage errors retain usable transcript/notes and
+can resume from existing artifacts. Ollama embeddings have model-aware health checks
+and modern batch API support. Major remaining gaps include the production speech
+default (large-v3-turbo, VAD, alignment, and diarization), editable artifacts,
+long-form summarization, mind maps, single-file Ask, richer organization/export,
+automation, and UI polish.

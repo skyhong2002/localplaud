@@ -21,7 +21,15 @@ def _client(monkeypatch, tmp_path):
 
 
 def _seed():
-    from localplaud.db.models import FileStatus, PlaudFile, Summary, Transcript
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        StageName,
+        StageRun,
+        StageStatus,
+        Summary,
+        Transcript,
+    )
     from localplaud.db.session import session_scope
 
     with session_scope() as s:
@@ -30,6 +38,15 @@ def _seed():
         s.add(Transcript(file_id="r1", provider="faster-whisper", language="en", has_speakers=True,
                          text="hi", segments=[{"text": "hello team", "start": 1.0, "end": 2.0, "speaker": "SPEAKER_00"}]))
         s.add(Summary(file_id="r1", template="meeting", title="Sync", content_md="# Sync\n\n- point"))
+        s.add(
+            StageRun(
+                file_id="r1",
+                stage=StageName.index,
+                status=StageStatus.failed,
+                attempts=1,
+                error="embedding model unavailable",
+            )
+        )
 
 
 def test_dashboard_renders(monkeypatch, tmp_path):
@@ -49,13 +66,18 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "SPEAKER_00" in r.text
     assert 'data-start' in r.text  # seekable segments
     assert "meeting" in r.text.lower()  # summary tab
+    assert "Processing details" in r.text
+    assert "embedding model unavailable" in r.text
+    assert "Resume" in r.text and "Rebuild all" in r.text
 
 
 def test_status_page_renders(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
+    _seed()
     r = c.get("/status")
     assert r.status_code == 200
     assert "Environment" in r.text and "Pipeline" in r.text and "Configuration" in r.text
+    assert "Needs attention" in r.text and "embedding model unavailable" in r.text
 
 
 def test_export_markdown_endpoint(monkeypatch, tmp_path):

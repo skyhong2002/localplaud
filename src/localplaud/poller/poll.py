@@ -97,6 +97,7 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                 # An in-flight row (downloading/processing) is left alone.
                 if (changed or md5_changed) and row.status in (
                     FileStatus.done,
+                    FileStatus.partial,
                     FileStatus.error,
                 ):
                     if md5_changed or not row.audio_path:
