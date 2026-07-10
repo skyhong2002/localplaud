@@ -54,14 +54,12 @@ comparison, but are not part of the target primary workflow.
 ## How it works
 
 ```mermaid
-flowchart TB
-    device["Plaud device"] -->|sync| app["Plaud app"] -->|upload| cloud["Plaud cloud"]
-    cloud -->|"poll + download · read-only"| poller
+flowchart LR
+    plaud["Plaud device<br/>→ App → Cloud"] -->|"read-only"| ingest
 
     subgraph localplaud["localplaud"]
-        direction TB
-        poller["poller"] --> store["store<br/>audio on disk + SQLite"]
-        store --> worker["worker pipeline<br/>convert → ASR → align<br/>diarize → notes/map → index"]
+        direction LR
+        ingest["poll + download<br/>→ store"] --> worker["convert → ASR → align<br/>→ diarize → notes/map → index"]
         worker --> web["Web App<br/>review · edit · Ask · export"]
     end
 ```
