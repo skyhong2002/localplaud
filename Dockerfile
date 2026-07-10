@@ -44,6 +44,8 @@ RUN mkdir -p /app/data && chown -R localplaud:localplaud /app
 USER localplaud
 
 VOLUME /app/data
+# The container sits behind Caddy; bind all interfaces inside it.
+ENV LOCALPLAUD_API__HOST=0.0.0.0
 EXPOSE 8080
 
 CMD ["localplaud", "run"]

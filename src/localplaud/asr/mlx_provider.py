@@ -19,17 +19,25 @@ class MlxWhisperProvider:
         self.language = cfg.language
 
     def available(self) -> bool:
+        import shutil
+
         try:
             import mlx_whisper  # noqa: F401
         except ImportError:
             return False
-        return True
+        # mlx-whisper shells out to ffmpeg in load_audio; a bare daemon/launchd
+        # PATH often lacks it, so treat a missing ffmpeg as unavailable.
+        return shutil.which("ffmpeg") is not None
 
     def transcribe(self, audio_path: Path, language: str = "auto") -> Transcript:
+        import shutil
+
         try:
             import mlx_whisper
         except ImportError as exc:
             raise AsrUnavailable("mlx-whisper is not installed") from exc
+        if shutil.which("ffmpeg") is None:
+            raise AsrUnavailable("mlx-whisper needs ffmpeg on PATH")
 
         log.info("Transcribing with mlx-whisper model %s", self.cfg.model)
         try:

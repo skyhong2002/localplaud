@@ -29,6 +29,9 @@ dependencies = [
 [project.optional-dependencies]
 # Local ASR via CTranslate2 (CPU + CUDA). The default local engine.
 faster-whisper = ["faster-whisper>=1.0"]
+# Native NVIDIA CUDA: driver alone isn't enough — CTranslate2 needs the cuBLAS
+# and cuDNN 9 libs. (Not needed with Dockerfile.cuda, which bundles them.)
+cuda = ["faster-whisper>=1.0", "nvidia-cublas-cu12", "nvidia-cudnn-cu12>=9.0"]
 # Apple Silicon local ASR (Metal via MLX).
 mlx = ["mlx-whisper>=0.4"]
 # Local speaker diarization + alignment.
