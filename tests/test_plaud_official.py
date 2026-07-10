@@ -166,6 +166,19 @@ def test_401_forces_one_refresh_then_retries(tmp_path):
 
 
 @respx.mock
+def test_429_retries_with_backoff_until_success(tmp_path, monkeypatch):
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda s: None)  # no real waits
+    _write_tokens(tmp_path / "tokens.json")
+    responses = iter([httpx.Response(429), httpx.Response(429),
+                      httpx.Response(200, json={"id": "u1"})])
+    respx.get(f"{API}/open/third-party/users/current").mock(
+        side_effect=lambda request: next(responses)
+    )
+    with PlaudOfficialClient(_cfg(tmp_path)) as c:
+        assert c.check_auth()["id"] == "u1"
+
+
+@respx.mock
 def test_auth_error_when_refresh_cannot_save_the_day(tmp_path):
     p = tmp_path / "tokens.json"
     _write_tokens(p, access="tok-stale")

@@ -39,6 +39,10 @@ from .oauth import OAuthError, OfficialTokenStore
 
 log = logging.getLogger(__name__)
 
+
+class PlaudRateLimited(PlaudError):
+    """HTTP 429 from the Open API — transient; retried with backoff."""
+
 # The Open API caps page_size at 100 (page at 1000).
 _PAGE_SIZE = 100
 
@@ -103,9 +107,12 @@ class PlaudOfficialClient:
 
     # ---- low level ------------------------------------------------------- #
 
+    # Transient transport errors AND rate limiting retry with backoff (the
+    # Open API 429s under a burst of detail calls, e.g. a first-sync backlog);
+    # auth failures and other 4xx/5xx don't get better on retry.
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, max=10),
+        stop=stop_after_attempt(6),
+        wait=wait_exponential(multiplier=2, max=60),
         retry=retry_if_not_exception_type((PlaudAuthError, httpx.HTTPStatusError)),
         reraise=True,
     )
@@ -127,6 +134,8 @@ class PlaudOfficialClient:
             resp = self._client.get(
                 path, params=params or None, headers={"Authorization": f"Bearer {token}"}
             )
+        if resp.status_code == 429:
+            raise PlaudRateLimited(f"Open API rate limit hit for {path}")
         if resp.status_code in (401, 403):
             raise PlaudAuthError(
                 f"Plaud Open API returned {resp.status_code} for {path} — "

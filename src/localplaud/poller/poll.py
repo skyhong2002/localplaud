@@ -132,6 +132,25 @@ def reset_inflight() -> int:
     return reset
 
 
+def reset_download_errors() -> int:
+    """Give failed downloads another chance each cycle: ``error`` rows that
+    never got audio on disk go back to ``discovered``. Download failures are
+    dominated by transient causes (rate limits, expired presigned URLs,
+    network); pipeline errors keep their audio_path and are NOT retried here.
+    Returns the number of rows reset."""
+    from sqlalchemy import update
+
+    with session_scope() as session:
+        reset = session.execute(
+            update(PlaudFile)
+            .where(PlaudFile.status == FileStatus.error, PlaudFile.audio_path.is_(None))
+            .values(status=FileStatus.discovered, error=None)
+        ).rowcount
+    if reset:
+        log.info("Retrying %d failed download(s)", reset)
+    return reset
+
+
 def _download_one(client, file_id: str, raw: dict, settings: Settings) -> bool:
     dest_dir = file_dir(file_id)
     dto = PlaudFileDTO.model_validate(raw or {"id": file_id})
@@ -317,6 +336,7 @@ def poll_once(settings: Settings | None = None) -> dict:
     ``pipeline.prefer_cloud_artifacts`` is set)."""
     settings = settings or get_settings()
     reset_inflight()
+    reset_download_errors()
     with make_plaud_client(settings.plaud) as client:
         new, changed = sync_file_list(client, settings)
         enriched_new, enriched_changed = enrich_from_apse1(settings)

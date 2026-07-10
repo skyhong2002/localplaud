@@ -33,6 +33,27 @@ def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
         assert s.get(PlaudFile, "ok").status == FileStatus.done  # untouched
 
 
+def test_reset_download_errors_retries_only_audioless_rows(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import reset_download_errors
+
+    init_db()
+    with session_scope() as s:
+        # Download-stage failure (429/network): no audio on disk -> retry.
+        s.add(PlaudFile(id="dl-err", status=FileStatus.error, error="429"))
+        # Pipeline failure: audio exists -> NOT a download problem, keep it.
+        s.add(PlaudFile(id="pipe-err", status=FileStatus.error, audio_path="/a.mp3",
+                        error="ollama down"))
+
+    assert reset_download_errors() == 1
+    with session_scope() as s:
+        assert s.get(PlaudFile, "dl-err").status == FileStatus.discovered
+        assert s.get(PlaudFile, "dl-err").error is None
+        assert s.get(PlaudFile, "pipe-err").status == FileStatus.error
+
+
 def test_sync_redownloads_when_md5_changes(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.config import get_settings
