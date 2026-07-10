@@ -1,5 +1,68 @@
 {% extends "base.html" %}
+
+{%- macro liburl(sort, dir, state, scene, view) -%}
+/?sort={{ sort }}&amp;dir={{ dir }}&amp;view={{ view }}
+{%- if q %}&amp;q={{ q | urlencode }}{% endif -%}
+{%- if state %}&amp;state={{ state | urlencode }}{% endif -%}
+{%- if scene is not none and scene != '' %}&amp;scene={{ scene }}{% endif -%}
+{%- endmacro -%}
+
+{%- macro sorth(col, label) -%}
+  {%- set active = lib.sort == col -%}
+  {%- set nxt = ('desc' if (active and lib.dir == 'asc') else ('asc' if active else ('asc' if col == 'name' else 'desc'))) -%}
+  <a class="sorth {% if active %}on{% endif %}" href="{{ liburl(col, nxt, lib.state, lib.scene, lib.view) }}"
+     aria-sort="{{ 'ascending' if (active and lib.dir=='asc') else ('descending' if active else 'none') }}">
+    {{ label }}{% if active %}<span class="arr">{{ '▲' if lib.dir == 'asc' else '▼' }}</span>{% endif %}
+  </a>
+{%- endmacro -%}
+
 {% block body %}
+<style>
+  .libbar { display:flex; flex-direction:column; gap:10px; margin:14px 0 12px; }
+  .filtrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .filtrow .lbl { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--faint); margin-right:2px; }
+  .fchip { font-size:11.5px; font-weight:600; border-radius:999px; padding:3px 10px; border:1px solid var(--border2);
+           color:var(--muted); background:var(--panel); cursor:pointer; white-space:nowrap; }
+  .fchip:hover { border-color:var(--blue-br); }
+  .fchip.on { color:var(--blue); border-color:var(--blue-br); background:var(--blue-soft); }
+  .fchip.trash.on { color:var(--red); border-color:var(--red); background:var(--red-soft); }
+  .fchip .n { color:var(--faint); font-weight:600; }
+
+  .rectable { width:100%; border-collapse:collapse; margin-top:4px; }
+  .rectable thead th { text-align:left; padding:6px 10px; border-bottom:1px solid var(--border);
+    font-size:11px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:var(--faint); white-space:nowrap; }
+  .rectable thead th.num { text-align:right; }
+  .sorth { display:inline-flex; align-items:center; gap:4px; color:var(--faint); }
+  .sorth.on { color:var(--fg); }
+  .sorth:hover { color:var(--blue); }
+  .sorth .arr { font-size:9px; }
+  .rectable tbody td { padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  .rectable tbody tr:hover { background:var(--panel2); }
+  .rectable tbody tr.attn td { box-shadow:inset 3px 0 0 var(--warn); }
+  .rectable .nm { font-weight:600; letter-spacing:-.01em; color:var(--fg); display:block;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:340px; }
+  .rectable .src, .rectable .num { color:var(--muted); font-size:12.5px; white-space:nowrap; }
+  .rectable .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .attn-dot { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; margin-left:6px;
+    border-radius:50%; background:var(--warn); color:#fff; font-size:10px; font-weight:800; vertical-align:middle; }
+
+  .banner { border:1px solid var(--border2); background:var(--panel2); border-radius:var(--radius);
+    padding:11px 14px; margin:12px 0; font-size:13px; color:var(--muted); }
+  .banner.trash { border-color:var(--red); background:var(--red-soft); color:var(--fg); }
+  .banner strong { color:var(--fg); }
+
+  @media (max-width:820px){
+    .rectable thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+    .rectable, .rectable tbody, .rectable tr, .rectable td { display:block; width:100%; }
+    .rectable tbody tr { border:1px solid var(--border); border-radius:var(--radius); margin-bottom:8px; padding:4px 2px; }
+    .rectable tbody td { border:0; padding:5px 12px; display:flex; justify-content:space-between; gap:12px; }
+    .rectable tbody td::before { content:attr(data-label); font-size:11px; font-weight:700; text-transform:uppercase;
+      letter-spacing:.03em; color:var(--faint); flex:none; }
+    .rectable .nm { max-width:none; text-align:right; }
+    .rectable .num { text-align:right; }
+    .rectable tbody tr.attn td:first-child { box-shadow:inset 3px 0 0 var(--warn); }
+  }
+</style>
 <div class="shell">
   {% set active_id = None %}
   {% include "_filelist.html" %}
@@ -21,12 +84,78 @@
     <div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">thinking…</div>
     <div id="answer"></div>
 
+    <div class="libbar">
+      <div class="filtrow">
+        <span class="lbl">State</span>
+        <a class="fchip {% if not lib.state %}on{% endif %}"
+           href="{{ liburl(lib.sort, lib.dir, '', lib.scene, lib.view) }}">All</a>
+        {% for s in states %}
+        <a class="fchip {% if lib.state == s %}on{% endif %}"
+           href="{{ liburl(lib.sort, lib.dir, s, lib.scene, lib.view) }}">{{ s }}</a>
+        {% endfor %}
+      </div>
+      {% if facets.scenes %}
+      <div class="filtrow">
+        <span class="lbl">Source</span>
+        <a class="fchip {% if lib.scene is none %}on{% endif %}"
+           href="{{ liburl(lib.sort, lib.dir, lib.state, '', lib.view) }}">All</a>
+        {% for sc in facets.scenes %}
+        <a class="fchip {% if sc.active %}on{% endif %}"
+           href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{{ sc.label }} <span class="n">{{ sc.count }}</span></a>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <div class="filtrow">
+        <span class="lbl">View</span>
+        <a class="fchip {% if lib.view == 'all' %}on{% endif %}"
+           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'all') }}">All files</a>
+        <a class="fchip trash {% if lib.view == 'trash' %}on{% endif %}"
+           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'trash') }}">🗑 Trash <span class="n">{{ facets.trash_count }}</span></a>
+      </div>
+    </div>
+
+    {% if lib.view == 'trash' %}
+    <div class="banner trash">
+      <strong>Trash mirrors Plaud's cloud trash.</strong> This is a read-only recovery view —
+      localplaud never deletes your cloud data. Restore a recording in the Plaud app to bring it back.
+    </div>
+    {% endif %}
+
     {% if not files %}
     <div class="empty"><div class="big">🎙️</div>
-      No recordings yet.<br>Run <code>localplaud auth import</code> then <code>localplaud poll --once</code> to sync.
+      {% if lib.view == 'trash' %}
+        Nothing in trash.
+      {% elif lib.q or lib.state or lib.scene is not none %}
+        No recordings match these filters.
+      {% else %}
+        No recordings yet.<br>Run <code>localplaud auth import</code> then <code>localplaud poll --once</code> to sync.
+      {% endif %}
     </div>
     {% else %}
-    <div class="sub" style="margin-top:18px">← Pick a recording from the list to read its transcript and notes.</div>
+    <table class="rectable">
+      <thead>
+        <tr>
+          <th>{{ sorth('name', 'Name') }}</th>
+          <th>Source</th>
+          <th>State</th>
+          <th class="num">{{ sorth('duration', 'Duration') }}</th>
+          <th class="num">{{ sorth('recorded', 'Recorded') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in files %}
+        <tr class="{% if f.needs_attention %}attn{% endif %}">
+          <td data-label="Name">
+            <a class="nm" href="/file/{{ f.id }}">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="Needs attention — {{ f.status }}">!</span>{% endif %}</a>
+          </td>
+          <td data-label="Source" class="src">{{ f.scene_label }}</td>
+          <td data-label="State"><span class="st {{ f.status }}">{{ f.status }}</span></td>
+          <td data-label="Duration" class="num">{{ f.duration_ms | dur }}</td>
+          <td data-label="Recorded" class="num">{{ f.start_time_ms | dt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
     {% endif %}
   </div></section>
 </div>
