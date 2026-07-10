@@ -258,6 +258,95 @@ def ask(question: str = typer.Argument(..., help="A question about your recordin
 
 
 @app.command()
+def status():
+    """Show a count of recordings by local processing status."""
+    from sqlalchemy import func, select
+
+    from .db.models import FileStatus, PlaudFile
+    from .db.session import session_scope
+
+    table = Table(title="Pipeline status")
+    table.add_column("status")
+    table.add_column("count", justify="right")
+    with session_scope() as session:
+        counts = dict(
+            session.execute(
+                select(PlaudFile.status, func.count()).group_by(PlaudFile.status)
+            ).all()
+        )
+    for st in FileStatus:
+        table.add_row(st.value, str(counts.get(st, 0)))
+    console.print(table)
+
+
+@app.command()
+def reprocess(
+    file_id: str = typer.Argument(..., help="Recording id to re-run the pipeline on."),
+    force: bool = typer.Option(True, "--force/--resume", help="Recompute all stages (default) or resume."),
+):
+    """Re-run the local pipeline on one recording."""
+    from .db.models import FileStatus, PlaudFile
+    from .db.session import session_scope
+    from .worker.pipeline import process_file
+
+    with session_scope() as session:
+        r = session.get(PlaudFile, file_id)
+        if r is None:
+            console.print(f"[red]✗[/] no such file: {file_id}")
+            raise typer.Exit(1)
+        if not r.audio_path:
+            console.print(f"[red]✗[/] {file_id} has no downloaded audio")
+            raise typer.Exit(1)
+        r.status = FileStatus.downloaded
+    process_file(file_id, force=force)
+    console.print(f"[green]✓[/] reprocessed {file_id}")
+
+
+@app.command()
+def doctor():
+    """Check the environment: ffmpeg, configured providers, and Plaud auth."""
+    settings = get_settings()
+    table = Table(title="localplaud doctor")
+    table.add_column("check")
+    table.add_column("result")
+
+    def row(name: str, ok: bool, detail: str = ""):
+        mark = "[green]✓[/]" if ok else "[red]✗[/]"
+        table.add_row(name, f"{mark} {detail}".strip())
+
+    from .worker.convert import ffmpeg_available
+
+    row("ffmpeg", ffmpeg_available(), "on PATH" if ffmpeg_available() else "missing (needed to transcode)")
+
+    try:
+        from .asr.registry import build_provider
+
+        p = build_provider(settings.asr.provider, settings.asr)
+        row(f"asr:{settings.asr.provider}", p.available())
+    except Exception as exc:  # noqa: BLE001
+        row(f"asr:{settings.asr.provider}", False, str(exc)[:60])
+
+    try:
+        from .llm.base import build_llm
+
+        row(f"llm:{settings.llm.provider}", build_llm(settings.llm).available())
+    except Exception as exc:  # noqa: BLE001
+        row(f"llm:{settings.llm.provider}", False, str(exc)[:60])
+
+    try:
+        from .embeddings.base import build_embedder
+
+        row(f"embeddings:{settings.embeddings.provider}", build_embedder(settings.embeddings).available())
+    except Exception as exc:  # noqa: BLE001
+        row(f"embeddings:{settings.embeddings.provider}", False, str(exc)[:60])
+
+    has_creds = bool(settings.plaud.token or settings.plaud.cookie)
+    row("plaud auth", has_creds, "credentials set" if has_creds else "run `localplaud auth import`")
+
+    console.print(table)
+
+
+@app.command()
 def serve():
     """Serve the web UI only (no polling)."""
     _serve(get_settings())
