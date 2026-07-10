@@ -11,7 +11,7 @@
         <h1 class="page">{{ f.filename }}</h1>
         <div class="sub" style="margin-top:2px">
           {{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}
-          {% if f.transcript %} · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %}{% endif %}
+          {% if f.transcript %} · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %} · {{ f.transcript.kind }}{% if f.transcript.revision %} rev {{ f.transcript.revision }}{% endif %}{% endif %}
           · <span class="st {{ f.status }}">{{ f.status }}</span>
         </div>
       </div>
@@ -59,13 +59,47 @@
 
     {% if f.transcript %}
     <div class="tabpanel" data-panel="transcript">
-      {% if f.speakers %}<div class="legend" id="legend"></div>{% endif %}
+      {% if f.has_corrected %}
+      <div class="viewswitch sub" style="margin:2px 0 10px; font-size:12.5px">
+        View:
+        {% if f.transcript.kind == 'corrected' %}
+        <strong>Corrected (rev {{ f.transcript.revision }})</strong>
+        · <a href="/file/{{ f.id }}?view=raw">Raw ASR</a>
+        {% else %}
+        <a href="/file/{{ f.id }}?view=corrected">Corrected (rev {{ f.corrected_revision }})</a>
+        · <strong>Raw ASR</strong> — read-only; edits apply to the corrected transcript
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if f.speakers %}
+      <div class="legend" id="legend">
+        {% for sp in f.speakers %}
+        <form class="item" method="post" action="/file/{{ f.id }}/speakers">
+          <span class="swatch" data-spk="{{ sp.key }}"></span>
+          <input type="hidden" name="key" value="{{ sp.key }}">
+          <input class="spk-name" type="text" name="name" value="{{ sp.name or '' }}"
+                 placeholder="{{ sp.key }}" aria-label="Display name for {{ sp.key }}">
+          <button class="spk-save" type="submit">Save</button>
+        </form>
+        {% endfor %}
+      </div>
+      {% endif %}
       <div id="transcript">
         {% for seg in f.transcript.segments %}
         <div class="seg {% if seg.speaker %}spk{% endif %}" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
           <div class="ts">{{ (seg.start or 0) | mmss }}</div>
           <div class="txt">
-            {% if seg.speaker %}<span class="who"><span class="dot"></span>{{ seg.speaker }}</span><br>{% endif %}{{ seg.text }}
+            {% if seg.speaker %}<span class="who"><span class="dot"></span>{{ f.speaker_names.get(seg.speaker, seg.speaker) }}</span><br>{% endif %}{{ seg.text }}
+            {% if f.can_edit %}
+            <button class="editbtn" type="button" title="Edit this segment" aria-label="Edit segment text">✎</button>
+            <form class="segedit" method="post" action="/file/{{ f.id }}/transcript/segments/{{ loop.index0 }}" hidden>
+              <textarea name="text" rows="2">{{ seg.text }}</textarea>
+              <div class="actions">
+                <button class="btn" type="submit">Save</button>
+                <button class="btn sec" type="button" data-cancel>Cancel</button>
+              </div>
+            </form>
+            {% endif %}
           </div>
         </div>
         {% endfor %}
@@ -190,13 +224,13 @@
     document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
     panels.forEach(p => p.hidden = p.dataset.panel !== b.dataset.panel);
   });
-  // speaker colors + legend
-  const vars=['--sp0','--sp1','--sp2','--sp3','--sp4','--sp5','--sp6','--sp7'], seen={};
-  document.querySelectorAll('.seg[data-spk]').forEach(seg=>{ const s=seg.dataset.spk, i=window.spkColor(s);
-    seg.style.setProperty('--c',`var(${vars[i]})`); seen[s]=i; });
-  const legend=document.getElementById('legend');
-  if(legend) Object.entries(seen).forEach(([s,i])=>legend.insertAdjacentHTML('beforeend',
-    `<span class="item"><span class="swatch" style="background:var(${vars[i]})"></span>${esc(s)}</span>`));
+  // speaker colors — segments first (keeps first-appearance ordering), then
+  // the server-rendered legend swatches share the same mapping
+  const vars=['--sp0','--sp1','--sp2','--sp3','--sp4','--sp5','--sp6','--sp7'];
+  document.querySelectorAll('.seg[data-spk]').forEach(seg=>{ const i=window.spkColor(seg.dataset.spk);
+    seg.style.setProperty('--c',`var(${vars[i]})`); });
+  document.querySelectorAll('.legend .swatch[data-spk]').forEach(sw=>{ const i=window.spkColor(sw.dataset.spk);
+    sw.style.background=`var(${vars[i]})`; });
   // click-to-seek + red active segment synced to audio (Plaud-style)
   const player=document.getElementById('player'), segs=[...document.querySelectorAll('.seg[data-start]')];
   segs.forEach(seg=>seg.onclick=()=>{ if(player){ player.currentTime=parseFloat(seg.dataset.start)||0; player.play(); }});
@@ -213,5 +247,12 @@
     if(t!==null && player){ const s=parseFloat(t); if(!isNaN(s)){
       const seek=()=>{ player.currentTime=s; }; if(player.readyState>=1) seek();
       else player.addEventListener('loadedmetadata', seek, {once:true}); player.load(); }}})();
+  // inline segment editing — never let the edit UI trigger click-to-seek
+  document.querySelectorAll('.seg .editbtn').forEach(btn=>btn.onclick=e=>{ e.stopPropagation();
+    const form=btn.parentElement.querySelector('.segedit'); form.hidden=!form.hidden;
+    if(!form.hidden) form.querySelector('textarea').focus(); });
+  document.querySelectorAll('.seg .segedit').forEach(form=>{ form.onclick=e=>e.stopPropagation();
+    const cancel=form.querySelector('[data-cancel]');
+    if(cancel) cancel.onclick=e=>{ e.stopPropagation(); form.hidden=true; }; });
 </script>
 {% endblock %}

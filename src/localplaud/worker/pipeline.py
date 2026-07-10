@@ -15,7 +15,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from ..asr.base import Segment, Transcript, Word
 from ..config import Settings, get_settings
@@ -26,11 +26,13 @@ from ..db.models import (
     StageName,
     StageRun,
     StageStatus,
+    TranscriptRevision,
 )
 from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
 from ..store.files import wav_path
+from ..store.speakers import speaker_keys_from_segments, sync_speakers
 from . import convert, index, mindmap, summarize, transcribe
 from .diarize import DiarizationUnavailable, diarize
 
@@ -101,9 +103,9 @@ def _fail_stage(file_id: str, stage: StageName, exc: Exception, *, degraded=Fals
     )
 
 
-def _rehydrate_transcript(row: TranscriptRow) -> Transcript:
+def _rehydrate_segments(segments: list[dict] | None) -> list[Segment]:
     segs = []
-    for s in row.segments or []:
+    for s in segments or []:
         words = [Word(**w) for w in s.get("words", [])]
         segs.append(
             Segment(
@@ -114,12 +116,28 @@ def _rehydrate_transcript(row: TranscriptRow) -> Transcript:
                 words=words,
             )
         )
+    return segs
+
+
+def _rehydrate_transcript(row: TranscriptRow) -> Transcript:
     return Transcript(
-        segments=segs,
+        segments=_rehydrate_segments(row.segments),
         language=row.language,
         provider=row.provider,
         model=row.model,
         has_speakers=row.has_speakers,
+    )
+
+
+def _rehydrate_revision(rev: TranscriptRevision, base: TranscriptRow | None) -> Transcript:
+    """Rehydrate a user-corrected revision, borrowing ASR provenance from the
+    raw base transcript when it still exists."""
+    return Transcript(
+        segments=_rehydrate_segments(rev.segments),
+        language=base.language if base is not None else None,
+        provider=base.provider if base is not None else "local-edit",
+        model=base.model if base is not None else None,
+        has_speakers=rev.has_speakers,
     )
 
 
@@ -364,6 +382,16 @@ def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str]
         row = session.get(PlaudFile, file_id)
         if row is None:
             return None
+        # User corrections are the canonical transcript for every downstream
+        # stage; the raw ASR row stays untouched underneath them.
+        corrected = row.corrected_transcript
+        if corrected is not None:
+            base = (
+                session.get(TranscriptRow, corrected.base_transcript_id)
+                if corrected.base_transcript_id is not None
+                else None
+            )
+            return (_rehydrate_revision(corrected, base), "local")
         local = [item for item in row.transcripts if item.source == "local"]
         if settings.pipeline.artifact_mode == "independent":
             selected = local[-1] if local else None
@@ -403,12 +431,25 @@ def _has_chunks(file_id: str) -> bool:
 def _persist_transcript(file_id: str, transcript: Transcript) -> None:
     with session_scope() as session:
         # Preserve imported Plaud transcripts for comparison/migration. Only the
-        # canonical local ASR result is replaced.
-        session.execute(
-            delete(TranscriptRow).where(
-                TranscriptRow.file_id == file_id, TranscriptRow.source == "local"
+        # canonical local ASR result is replaced. User corrections
+        # (TranscriptRevision rows) are never deleted here — edits survive
+        # re-ASR; their base pointer is detached instead (SET NULL semantics,
+        # applied explicitly because SQLite FK enforcement is off by default).
+        replaced_ids = list(
+            session.scalars(
+                select(TranscriptRow.id).where(
+                    TranscriptRow.file_id == file_id, TranscriptRow.source == "local"
+                )
             )
         )
+        if replaced_ids:
+            session.execute(
+                update(TranscriptRevision)
+                .where(TranscriptRevision.base_transcript_id.in_(replaced_ids))
+                .values(base_transcript_id=None)
+            )
+            session.execute(delete(TranscriptRow).where(TranscriptRow.id.in_(replaced_ids)))
+        segments = [asdict(s) for s in transcript.segments]
         session.add(
             TranscriptRow(
                 file_id=file_id,
@@ -418,9 +459,11 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> None:
                 has_speakers=transcript.has_speakers,
                 source="local",
                 text=transcript.text,
-                segments=[asdict(s) for s in transcript.segments],
+                segments=segments,
             )
         )
+        # Register stable speaker identities; existing display names are kept.
+        sync_speakers(session, file_id, speaker_keys_from_segments(segments))
 
 
 def _persist_summary(file_id: str, result: dict) -> None:

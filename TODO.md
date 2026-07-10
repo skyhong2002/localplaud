@@ -84,7 +84,11 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   source, and a whisperX-style wav2vec2 forced aligner needs per-language models
   plus a Mandarin/code-switch accuracy evaluation, so it must be benchmarked on real
   user recordings first.
-- Persist stable speaker IDs separately from editable display names.
+- ✅ Persist stable speaker IDs separately from editable display names: `speakers`
+  rows mirror the diarization keys per recording, renames are upserted from the
+  Web detail page (legend inline forms), survive re-ASR/re-diarization, and flow
+  into the transcript view and Markdown export. Remaining: propagate names into
+  newly generated summaries/Ask answers automatically.
 - Add a custom vocabulary/correction layer for names, specialist terms, Taiwan
   Mandarin, and Mandarin/English code-switching.
 - Establish a benchmark set from consented user-owned recordings: WER/CER, diarization
@@ -109,8 +113,14 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   grounded question chips; graceful degrade when unindexed or providers are down.
 - ✅ Whole-library Ask citations now deep-link to `/file/{id}?t={start}` and seek the
   player on load, so a cited answer opens the recording at the cited moment.
-- Remaining: save-to-note from an Ask answer, grounded follow-up threads, and
-  re-indexing the corrected canonical transcript after edits.
+- Remaining: save-to-note from an Ask answer and grounded follow-up threads.
+- ✅ Transcript corrections as revisions: inline per-segment editing on the Web
+  detail page creates immutable `transcript_revisions` on top of the untouched raw
+  ASR row; the latest revision is the canonical transcript for summaries, indexing,
+  and export, edits survive re-ASR, and each edit invalidates and rebuilds the
+  embedding index in the background without rerunning ASR (summary regeneration
+  stays explicit). Remaining: transcript find/replace, multi-segment/bulk edits,
+  and a revision history browser.
 
 ### P1 — Plaud-like Web App workflow
 
@@ -126,9 +136,10 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   view with count (localplaud never deletes cloud data). `/` and `/api/files` share
   the sort/state/scene/view params and fall back safely on bad input. Bulk selection,
   folders/tags, and uncategorized organization still remain.
-- Add an explicit raw-ASR versus corrected-canonical transcript switch, synchronized
-  timestamps/speaker labels, transcript-local search and find/replace, and preserve
-  edits independently from the raw artifact.
+- ✅ (partial) Explicit raw-ASR versus corrected-canonical transcript switch with
+  synchronized timestamps/speaker labels is live, and edits are preserved
+  independently from the raw artifact. Remaining: transcript-local search and
+  find/replace.
 - Add file Ask suggested questions and reusable local skills (action items, task
   table, insights), plus grounded follow-ups and save-to-note.
 - Build template My Space and Explore surfaces with search, categories/scenarios,

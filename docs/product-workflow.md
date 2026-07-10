@@ -235,5 +235,14 @@ to the cited moment (`/file/{id}?t=`). Long transcripts are summarized with full
 coverage through bounded hierarchical map/reduce. Mind maps are generated from the
 canonical transcript as full-coverage Markdown outlines, rendered as a collapsible
 tree in the recording workspace, and included in Markdown export; PNG mind-map
-export remains. Other major gaps include editable artifacts, Ask save-to-note and
-follow-up threads, richer organization/export, automation, and UI polish.
+export remains. Speaker identities are now persisted
+per recording with stable diarization keys and user-editable display names
+(renamed from the Web detail page, preserved across re-ASR, applied in transcript
+view and export), and transcript corrections are stored as revisions: per-segment
+inline edits create a corrected canonical transcript on top of the immutable raw
+ASR row, feed summaries/indexing/export, survive re-ASR, and re-index in the
+background without rerunning ASR, with a labelled raw-versus-corrected view
+switch. Transcript find/replace, a revision history browser, and automatic name
+propagation into already-generated notes remain. Other major gaps include editable
+notes/templates, Ask save-to-note and follow-up threads, richer organization/export,
+automation, and UI polish.

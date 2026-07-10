@@ -126,6 +126,16 @@ class PlaudFile(Base):
         cascade="all, delete-orphan",
         order_by="StageRun.id",
     )
+    speakers: Mapped[list[Speaker]] = relationship(
+        back_populates="file",
+        cascade="all, delete-orphan",
+        order_by="Speaker.id",
+    )
+    transcript_revisions: Mapped[list[TranscriptRevision]] = relationship(
+        back_populates="file",
+        cascade="all, delete-orphan",
+        order_by="TranscriptRevision.revision",
+    )
 
     @property
     def local_transcript(self) -> Transcript | None:
@@ -153,6 +163,11 @@ class PlaudFile(Base):
         """Compatibility setter for callers that assign one transcript."""
         self.transcripts = [] if value is None else [value]
 
+    @property
+    def corrected_transcript(self) -> TranscriptRevision | None:
+        """Latest user-corrected revision, or ``None`` when no edits exist."""
+        return self.transcript_revisions[-1] if self.transcript_revisions else None
+
 
 class Transcript(Base):
     __tablename__ = "transcripts"
@@ -174,6 +189,61 @@ class Transcript(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     file: Mapped[PlaudFile] = relationship(back_populates="transcripts")
+
+
+class Speaker(Base):
+    """A stable per-recording speaker identity with an editable display name.
+
+    ``key`` is the diarization label stored inside the transcript segment JSON
+    (e.g. ``SPEAKER_00``) and never changes; ``display_name`` is what the user
+    renames it to. ``None`` means "no custom name yet" — show the key.
+    """
+
+    __tablename__ = "speakers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"))
+
+    key: Mapped[str] = mapped_column(String(64))
+    display_name: Mapped[str | None] = mapped_column(String(128), default=None)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    file: Mapped[PlaudFile] = relationship(back_populates="speakers")
+
+    __table_args__ = (UniqueConstraint("file_id", "key", name="uq_speaker_file_key"),)
+
+
+class TranscriptRevision(Base):
+    """A user correction of the transcript — never destroys the raw ASR row.
+
+    Each edit produces the next ``revision`` for the file; the latest revision
+    is the corrected canonical transcript. ``base_transcript_id`` points at the
+    raw ASR transcript the revision chain was built on and is nullable so user
+    edits survive a re-run of ASR (the raw row may be replaced, edits stay).
+    """
+
+    __tablename__ = "transcript_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"))
+    base_transcript_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("transcripts.id", ondelete="SET NULL"), default=None
+    )
+
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    # Same shape as Transcript.segments (see asr.base.Segment).
+    segments: Mapped[list] = mapped_column(JSON, default=list)
+    text: Mapped[str] = mapped_column(Text, default="")
+    has_speakers: Mapped[bool] = mapped_column(default=False)
+    note: Mapped[str | None] = mapped_column(String(256), default=None)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    file: Mapped[PlaudFile] = relationship(back_populates="transcript_revisions")
 
 
 class Summary(Base):

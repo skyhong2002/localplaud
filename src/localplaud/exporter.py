@@ -15,6 +15,7 @@ from pathlib import Path
 from .config import get_settings
 from .db.models import PlaudFile
 from .db.session import session_scope
+from .store.speakers import display_names
 
 log = logging.getLogger(__name__)
 
@@ -76,12 +77,20 @@ def render_markdown(file_id: str) -> str:
                 outline = "###" + outline[1:]
             parts += ["## Mind map", "", outline, ""]
 
-        transcript = file.local_transcript if independent else file.transcript
-        if transcript is not None and transcript.segments:
+        # Corrected canonical transcript wins; the raw ASR row is the fallback.
+        corrected = file.corrected_transcript
+        if corrected is not None:
+            segments = corrected.segments
+        else:
+            transcript = file.local_transcript if independent else file.transcript
+            segments = transcript.segments if transcript is not None else None
+        if segments:
+            names = display_names(session, file.id)
             parts += ["## Transcript", ""]
-            for seg in transcript.segments:
+            for seg in segments:
                 stamp = _format_timestamp(seg.get("start") or 0.0)
                 speaker = seg.get("speaker")
+                speaker = names.get(speaker, speaker) if speaker else None
                 label = f"[{stamp}] {speaker}:" if speaker else f"[{stamp}]"
                 text = (seg.get("text") or "").strip()
                 parts.append(f"**{label}** {text}")
