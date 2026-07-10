@@ -288,3 +288,41 @@ def ask(request: Request, q: str = Form(...)):
     return templates.TemplateResponse(
         request=request, name="_answer.html", context={"q": q, "res": res}
     )
+
+
+@app.get("/file/{file_id}/export.md")
+def export_markdown(file_id: str):
+    """Download a recording's transcript + summaries as Markdown."""
+    from fastapi.responses import PlainTextResponse
+
+    from ..exporter import render_markdown
+
+    try:
+        md = render_markdown(file_id)
+    except ValueError:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return PlainTextResponse(
+        md,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{file_id}.md"'},
+    )
+
+
+@app.post("/file/{file_id}/reprocess", response_class=HTMLResponse)
+def reprocess(file_id: str, force: bool = True):
+    """Kick off a pipeline re-run for one recording in the background."""
+    import threading
+
+    from ..db.models import FileStatus
+    from ..worker.pipeline import process_file
+
+    with session_scope() as session:
+        r = session.get(PlaudFile, file_id)
+        if r is None or not r.audio_path:
+            return HTMLResponse(
+                '<span style="color:var(--err)">no audio to reprocess</span>', status_code=400
+            )
+        r.status = FileStatus.downloaded
+
+    threading.Thread(target=process_file, args=(file_id,), kwargs={"force": force}, daemon=True).start()
+    return HTMLResponse('<span style="color:var(--warn)">re-running… refresh in a moment</span>')

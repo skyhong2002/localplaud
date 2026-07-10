@@ -2,12 +2,27 @@
 {% block title %}{{ f.filename }} — localplaud{% endblock %}
 {% block body %}
 <a class="backlink" href="/">← Recordings</a>
-<h1 class="page" style="margin-bottom:4px">{{ f.filename }}</h1>
-<div class="sub" style="margin-bottom:16px">
-  {{ f.start_time_ms | dt }} &nbsp;·&nbsp; {{ f.duration_ms | dur }}
-  {% if f.transcript %} &nbsp;·&nbsp; {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %}{% endif %}
-  &nbsp;·&nbsp; <span class="st {{ f.status }}">{{ f.status }}</span>
+<div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap">
+  <div>
+    <h1 class="page" style="margin-bottom:4px">{{ f.filename }}</h1>
+    <div class="sub" style="margin-bottom:16px">
+      {{ f.start_time_ms | dt }} &nbsp;·&nbsp; {{ f.duration_ms | dur }}
+      {% if f.transcript %} &nbsp;·&nbsp; {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %}{% endif %}
+      &nbsp;·&nbsp; <span class="st {{ f.status }}">{{ f.status }}</span>
+    </div>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center">
+    {% if f.transcript or f.summaries %}
+    <a class="btn sec" href="/file/{{ f.id }}/export.md" style="font-size:13px; padding:8px 13px">Export .md</a>
+    {% endif %}
+    <button class="btn sec" style="font-size:13px; padding:8px 13px"
+            hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
+            hx-confirm="Re-run the pipeline (transcribe → summarize → index) for this recording?">
+      Re-run pipeline
+    </button>
+  </div>
 </div>
+<div id="reprocess-msg" class="sub" style="margin:-8px 0 12px; font-size:13px"></div>
 
 {% if f.has_audio %}
 <div class="panel" style="padding:12px 16px; margin-bottom:18px">

@@ -58,6 +58,22 @@ def test_status_page_renders(monkeypatch, tmp_path):
     assert "Environment" in r.text and "Pipeline" in r.text and "Configuration" in r.text
 
 
+def test_export_markdown_endpoint(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    r = c.get("/file/r1/export.md")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/markdown")
+    assert "Weekly Sync" in r.text and "## Transcript" in r.text
+    assert c.get("/file/missing/export.md").status_code == 404
+
+
+def test_reprocess_missing_audio(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()  # r1 has no audio_path
+    assert c.post("/file/r1/reprocess").status_code == 400
+
+
 def test_search_page_renders_empty(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     r = c.get("/search")
