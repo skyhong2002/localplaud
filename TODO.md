@@ -7,7 +7,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT). Work is on branch `feat/core-pipeline` (PR #6, CI green, 90 tests).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
-- **Real account verified**: auth + `/file/temp-url` → signed-S3 MP3 download works; ~200 recordings syncing/transcribing in the background.
+- **Real account verified**: the official Open API provider is live in production (OAuth auto-refresh verified). Notably it returns the account's **full history (~750 recordings)** — the old api-apse1 web listing only showed the most recent ~200 — so the backlog sync is correspondingly bigger. Cloud transcripts/summaries are being mirrored (`prefer_cloud_artifacts = true`), skipping local re-transcription where Plaud already did the work.
 - Dev env on SkyLabMac: `~/Projects/localplaud` (venv, ffmpeg static, config.toml, `.env`). Claude Code CLI installed (`~/.local/bin/claude`).
 
 ## TODO — prioritized
