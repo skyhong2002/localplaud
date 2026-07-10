@@ -23,12 +23,17 @@ from ..config import PlaudConfig
 
 log = logging.getLogger(__name__)
 
-# Sensible defaults for the Plaud client headers the API's CORS policy expects.
-# Any of these can be overridden via ``plaud.extra_headers`` in config.
+# Sensible defaults for the Plaud client headers. The API sits behind an edge
+# that rejects non-browser-looking requests with 403, so we send the same
+# Origin/Referer/Accept the web app does. Any of these can be overridden via
+# ``plaud.extra_headers`` in config.
 _DEFAULT_CLIENT_HEADERS = {
     "app-platform": "web",
     "app-language": "en",
     "edit-from": "web",
+    "Origin": "https://web.plaud.ai",
+    "Referer": "https://web.plaud.ai/",
+    "Accept": "application/json, text/plain, */*",
 }
 
 
@@ -50,7 +55,6 @@ def build_headers(cfg: PlaudConfig) -> dict[str, str]:
     """Assemble the request headers for the Plaud API from config."""
     headers: dict[str, str] = dict(_DEFAULT_CLIENT_HEADERS)
     headers["User-Agent"] = cfg.user_agent
-    headers["Accept"] = "application/json"
 
     if cfg.token:
         headers["Authorization"] = _normalize_authorization(cfg.token)

@@ -55,10 +55,12 @@ class PlaudConfig(BaseModel):
     # Extra request headers if a particular account/region needs them.
     extra_headers: dict[str, str] = Field(default_factory=dict)
 
-    # Network politeness.
+    # Network politeness. The Plaud edge rejects non-browser User-Agents with
+    # 403, so default to a browser UA (override via plaud.user_agent if needed).
     request_timeout_seconds: float = 30.0
     user_agent: str = (
-        "localplaud/0.1 (+https://github.com/skyhong2002/localplaud)"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
     )
 
 
