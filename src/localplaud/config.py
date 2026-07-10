@@ -121,6 +121,9 @@ class PipelineConfig(BaseModel):
     index: bool = True  # embeddings for Q&A / semantic search
     # Number of files processed concurrently by the worker.
     concurrency: int = 1
+    # The daemon yields after a small newest-first batch so fresh recordings
+    # are discovered promptly instead of sitting behind a months-long backlog.
+    files_per_cycle: int = 1
     # Which summary template to use (default | meeting | call | lecture |
     # personal — see worker/summary_templates.py).
     summary_template: str = "default"

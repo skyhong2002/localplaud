@@ -250,7 +250,7 @@ def run():
             return
         try:
             poll_once(settings)
-            process_pending(settings)
+            process_pending(settings, limit=settings.pipeline.files_per_cycle)
         except Exception as exc:  # noqa: BLE001
             console.print(f"[yellow]cycle error:[/] {exc}")
         finally:

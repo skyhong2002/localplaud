@@ -425,12 +425,17 @@ def _persist_chunks(file_id: str, transcript: Transcript, settings: Settings) ->
 def process_pending(
     settings: Settings | None = None, limit: int | None = None, force: bool = False
 ) -> int:
-    """Process all files in ``downloaded`` state, up to ``pipeline.concurrency``
-    at a time. Returns count processed successfully."""
+    """Process newest files in ``downloaded`` state, up to ``pipeline.concurrency``
+    at a time. ``limit`` bounds a daemon batch; ``None`` drains the backlog.
+    Returns the count that reached either complete or usable-partial state."""
     settings = settings or get_settings()
     with session_scope() as session:
-        stmt = select(PlaudFile.id).where(PlaudFile.status == FileStatus.downloaded)
-        if limit:
+        stmt = (
+            select(PlaudFile.id)
+            .where(PlaudFile.status == FileStatus.downloaded)
+            .order_by(PlaudFile.start_time_ms.desc().nulls_last(), PlaudFile.created_at.desc())
+        )
+        if limit is not None:
             stmt = stmt.limit(limit)
         ids = list(session.scalars(stmt))
     if not ids:

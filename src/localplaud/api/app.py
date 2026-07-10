@@ -298,6 +298,7 @@ def status_page(request: Request):
         "embeddings": settings.embeddings.provider,
         "diarize": settings.diarize.provider,
         "summary_template": settings.pipeline.summary_template,
+        "files_per_cycle": settings.pipeline.files_per_cycle,
         "poll_interval": settings.poller.interval_seconds,
     }
     ctx = _base_ctx(request, "status") | {

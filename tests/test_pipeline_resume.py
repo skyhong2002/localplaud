@@ -152,6 +152,33 @@ def test_asr_failure_marks_core_pipeline_error(monkeypatch, tmp_path):
         assert transcribe_run.attempts == 1
 
 
+def test_pending_batch_prioritizes_newest_recordings(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import process_pending
+
+    init_db()
+    with session_scope() as s:
+        for file_id, started in (("old", 100), ("new", 300), ("middle", 200)):
+            s.add(
+                PlaudFile(
+                    id=file_id,
+                    status=FileStatus.downloaded,
+                    audio_path=f"/{file_id}.wav",
+                    start_time_ms=started,
+                )
+            )
+
+    processed = []
+    monkeypatch.setattr(
+        "localplaud.worker.pipeline.process_file",
+        lambda file_id, settings, force=False: processed.append(file_id),
+    )
+    assert process_pending(limit=2) == 2
+    assert processed == ["new", "middle"]
+
+
 def test_independent_mode_ignores_but_preserves_cloud_transcript(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, PlaudFile

@@ -55,8 +55,10 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   daemon from a missing configured model, errors give the exact `ollama pull` action,
   modern `/api/embed` batches inputs with legacy compatibility, and stored provenance
   includes the model. Pulled `bge-m3` on SkyLabMac and smoke-tested two 1024-d vectors.
-- Make queue ordering useful: newest recordings first for daily use, controlled
-  backlog processing separately, with visible progress and retry policy.
+- ✅ Queue is newest-first, and daemon work is bounded by configurable
+  `pipeline.files_per_cycle` so fresh recordings can enter between backlog batches;
+  `localplaud work --once` remains the explicit full-backlog path. Stage/status
+  counts provide progress; automatic retry backoff policy remains to be added.
 
 ### P0 — SOTA speech and speakers
 

@@ -56,6 +56,7 @@ diarize = true
 summarize = true
 index = true                     # build embeddings for Q&A / search
 concurrency = 1                  # files processed in parallel by the worker
+files_per_cycle = 1              # daemon batch; newest first so fresh files stay responsive
 summary_template = "default"     # default | meeting | call | lecture | personal
 # "independent" (default) accepts only raw audio + metadata from Plaud and
 # requires a local transcript. "migration" permits explicitly imported Plaud
