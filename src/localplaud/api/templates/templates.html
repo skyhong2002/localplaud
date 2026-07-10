@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Template Community — localplaud{% endblock %}
+{% block body %}
+<style>
+  .tpl-topbar { display:flex; align-items:center; gap:10px; padding:9px 16px; border-bottom:1px solid var(--border); flex:none; }
+  .tpl-topbar .name { display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:500; }
+  .tpl-topbar .spacer { flex:1; }
+  .tpl-tabs { display:flex; gap:18px; justify-content:center; padding:12px 0 4px; }
+  .tpl-tabs a { font-size:13.5px; color:var(--muted); font-weight:500; padding:4px 2px; }
+  .tpl-tabs a.on { color:var(--fg); font-weight:600; }
+  .cats { display:flex; gap:8px; flex-wrap:wrap; margin:22px 0 6px; }
+  .cat { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--border); border-radius:10px;
+    background:#fff; padding:7px 14px; font-size:13px; cursor:pointer; color:var(--fg2); }
+  .cat.on { border-color:#111; color:var(--fg); font-weight:550; }
+  .tplgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:14px; margin-top:14px; }
+  .tplcard { border:1px solid var(--border); border-radius:var(--radius-lg); background:#fff; padding:16px;
+    display:flex; flex-direction:column; min-height:170px; }
+  .tplcard:hover { border-color:var(--border2); }
+  .tplcard .ic { color:var(--sp1); margin-bottom:26px; }
+  .tplcard .tt { font-size:16px; font-weight:500; letter-spacing:-.01em; }
+  .tplcard .ds { color:var(--muted); font-size:12.5px; margin-top:4px; flex:1; }
+  .tplcard .ft { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; margin-top:14px; }
+</style>
+
+<div class="tpl-topbar">
+  <span class="name">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+    Template Community
+  </span>
+  <span class="spacer"></span>
+  <a class="btn" href="/docs#/default/api_create_note_template_api_note_templates_post" title="Create via the API">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    Create template
+  </a>
+</div>
+
+<div class="page-scroll"><div class="page-inner" style="max-width:980px; padding-top:8px">
+  <div class="tpl-tabs">
+    <a class="on" href="/templates">My space</a>
+  </div>
+
+  {% if categories %}
+  <div class="cats">
+    {% for c in categories %}<span class="cat {% if loop.first %}on{% endif %}" data-cat="{{ c }}">{{ c }}</span>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if tpls %}
+  <div class="tplgrid">
+    {% for t in tpls %}
+    <div class="tplcard" data-cat="{{ t.category or 'General' }}">
+      <span class="ic">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h6M9 14h4"/></svg>
+      </span>
+      <div class="tt">{{ t.name }}</div>
+      <div class="ds">{{ t.description or 'No description yet.' }}</div>
+      <div class="ft">
+        <span>{{ t.provenance }}</span><span>·</span><span>v{{ t.version }}</span>
+        {% if not t.enabled %}<span>·</span><span>disabled</span>{% endif %}
+        {% if t.language %}<span>·</span><span>{{ t.language }}</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty"><div class="big">📄</div>No note templates yet.<br>
+    <span class="sub">Templates are user-manageable data — create them via the API (<code>POST /api/note-templates</code>).</span>
+  </div>
+  {% endif %}
+</div></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // category chips filter the grid client-side
+  const cats = document.querySelectorAll('.cat');
+  cats.forEach(c => c.onclick = () => {
+    cats.forEach(x => x.classList.remove('on')); c.classList.add('on');
+    const v = c.dataset.cat;
+    document.querySelectorAll('.tplcard').forEach(card =>
+      card.style.display = (v === 'All' || card.dataset.cat === v) ? '' : 'none');
+  });
+</script>
+{% endblock %}

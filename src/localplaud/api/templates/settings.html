@@ -1,151 +1,154 @@
 {% extends "base.html" %}
 {% block title %}Settings — localplaud{% endblock %}
 {% block body %}
-<div class="content"><div class="pane-inner">
-<h1 class="page">Settings</h1>
-<p class="sub" style="margin-bottom:20px">Configure providers, models, and pipeline stages. Changes are saved to <code>config.toml</code> and take effect after a restart.</p>
+<style>
+  .set-wrap { display:flex; flex:1; min-height:0; }
+  .set-nav { width:185px; flex:none; border-right:1px solid var(--border); padding:22px 12px; overflow-y:auto; }
+  .set-nav .grp { color:var(--muted); font-size:12px; padding:14px 10px 4px; }
+  .set-nav .grp:first-child { padding-top:0; }
+  .set-nav a { display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:8px; font-size:13.5px; color:var(--fg2); }
+  .set-nav a:hover { background:var(--hover); }
+  .set-nav a.on { background:var(--active); font-weight:550; }
+  .set-body { flex:1; overflow-y:auto; padding:26px 36px 90px; }
+  .set-body h2 { font-size:22px; font-weight:500; margin:34px 0 4px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+  .set-body h2:first-child { margin-top:0; }
+  .set-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:13px 0; }
+  .set-row + .set-row { border-top:1px solid var(--border); }
+  .set-row .k { font-size:14px; }
+  .set-row .hint { color:var(--muted); font-size:12.5px; margin-top:2px; }
+  .set-row select, .set-row input[type=text], .set-row input[type=number] { width:260px; }
+  .set-row input[type=checkbox] { width:16px; height:16px; accent-color:#111; }
+  .set-max { max-width:640px; }
+  @media (max-width:820px){
+    .set-wrap { flex-direction:column; }
+    .set-nav { width:100%; border-right:0; border-bottom:1px solid var(--border); display:flex; gap:2px; overflow-x:auto; padding:8px 10px; }
+    .set-nav .grp { display:none; }
+    .set-body { padding:18px 16px 70px; }
+    .set-row select, .set-row input[type=text], .set-row input[type=number] { width:170px; }
+  }
+</style>
 
-<div id="settings-form">
-  <!-- ASR -->
-  <div class="panel" style="margin-bottom:16px">
-    <strong>ASR (Speech Recognition)</strong>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
-        <select id="asr-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
-          {% for p in asr_providers %}
-          <option value="{{ p }}" {% if p == cfg.asr_provider %}selected{% endif %}>{{ p }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="min-width:100px;font-size:13px;color:var(--muted)">Model</label>
-        <input id="asr-model" type="text" value="{{ cfg.asr_model }}" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none" />
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="min-width:100px;font-size:13px;color:var(--muted)">Language</label>
-        <select id="asr-language" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
-          <option value="auto" {% if cfg.asr_language == "auto" %}selected{% endif %}>Auto-detect</option>
-          <option value="zh" {% if cfg.asr_language == "zh" %}selected{% endif %}>Chinese (zh)</option>
-          <option value="en" {% if cfg.asr_language == "en" %}selected{% endif %}>English (en)</option>
-          <option value="ja" {% if cfg.asr_language == "ja" %}selected{% endif %}>Japanese (ja)</option>
-          <option value="ko" {% if cfg.asr_language == "ko" %}selected{% endif %}>Korean (ko)</option>
-        </select>
-      </div>
+<div class="set-wrap">
+  <nav class="set-nav">
+    <div class="grp">Workspace</div>
+    <a class="on" href="#sec-asr">Speech recognition</a>
+    <a href="#sec-llm">Intelligence</a>
+    <a href="#sec-pipeline">Pipeline</a>
+    <a href="#sec-poller">Sync</a>
+    <div class="grp">Help &amp; support</div>
+    <a href="/status">System status</a>
+    <a href="/docs">API docs</a>
+  </nav>
+
+  <div class="set-body"><div class="set-max" id="settings-form">
+    <h1 class="page" style="margin-bottom:4px">Settings</h1>
+    <p class="sub" style="margin:0 0 26px; font-size:13px">
+      Configure providers, models, and pipeline stages. Changes are saved to
+      <code>config.toml</code> and take effect after a restart.</p>
+
+    <h2 id="sec-asr">Speech recognition</h2>
+    <div class="set-row">
+      <div class="k">ASR provider<div class="hint">Engine used to transcribe raw audio.</div></div>
+      <select id="asr-provider">
+        {% for p in asr_providers %}
+        <option value="{{ p }}" {% if p == cfg.asr_provider %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
     </div>
-  </div>
-
-  <!-- LLM -->
-  <div class="panel" style="margin-bottom:16px">
-    <strong>LLM (Summaries &amp; Q&amp;A)</strong>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
-        <select id="llm-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
-          {% for p in llm_providers %}
-          <option value="{{ p }}" {% if p == cfg.llm_provider %}selected{% endif %}>{{ p }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="min-width:100px;font-size:13px;color:var(--muted)">Model</label>
-        <input id="llm-model" type="text" value="{{ cfg.llm_model }}" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none" />
-      </div>
+    <div class="set-row">
+      <div class="k">ASR model</div>
+      <input id="asr-model" type="text" value="{{ cfg.asr_model }}">
     </div>
-  </div>
-
-  <!-- Embeddings -->
-  <div class="panel" style="margin-bottom:16px">
-    <strong>Embeddings (Search &amp; Ask)</strong>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
-        <select id="embeddings-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
-          {% for p in embeddings_providers %}
-          <option value="{{ p }}" {% if p == cfg.embeddings_provider %}selected{% endif %}>{{ p }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="min-width:100px;font-size:13px;color:var(--muted)">Model</label>
-        <input id="embeddings-model" type="text" value="{{ cfg.embeddings_model }}" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none" />
-      </div>
+    <div class="set-row">
+      <div class="k">Language</div>
+      <select id="asr-language">
+        <option value="auto" {% if cfg.asr_language == "auto" %}selected{% endif %}>Auto-detect</option>
+        <option value="zh" {% if cfg.asr_language == "zh" %}selected{% endif %}>Chinese (zh)</option>
+        <option value="en" {% if cfg.asr_language == "en" %}selected{% endif %}>English (en)</option>
+        <option value="ja" {% if cfg.asr_language == "ja" %}selected{% endif %}>Japanese (ja)</option>
+        <option value="ko" {% if cfg.asr_language == "ko" %}selected{% endif %}>Korean (ko)</option>
+      </select>
     </div>
-  </div>
-
-  <!-- Diarization -->
-  <div class="panel" style="margin-bottom:16px">
-    <strong>Diarization (Speaker Detection)</strong>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
-        <select id="diarize-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
-          {% for p in diarize_providers %}
-          <option value="{{ p }}" {% if p == cfg.diarize_provider %}selected{% endif %}>{{ p }}</option>
-          {% endfor %}
-        </select>
-      </div>
+    <div class="set-row">
+      <div class="k">Diarization provider<div class="hint">Speaker detection.</div></div>
+      <select id="diarize-provider">
+        {% for p in diarize_providers %}
+        <option value="{{ p }}" {% if p == cfg.diarize_provider %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
     </div>
-  </div>
-
-  <!-- Align -->
-  <div class="panel" style="margin-bottom:16px">
-    <strong>Alignment (Word-level Timestamps)</strong>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <label style="min-width:100px;font-size:13px;color:var(--muted)">Provider</label>
-        <select id="align-provider" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
-          {% for p in align_providers %}
-          <option value="{{ p }}" {% if p == cfg.align_provider %}selected{% endif %}>{{ p }}</option>
-          {% endfor %}
-        </select>
-      </div>
+    <div class="set-row">
+      <div class="k">Alignment provider<div class="hint">Word-level timestamps.</div></div>
+      <select id="align-provider">
+        {% for p in align_providers %}
+        <option value="{{ p }}" {% if p == cfg.align_provider %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
     </div>
-  </div>
 
-  <!-- Pipeline Stages -->
-  <div class="panel" style="margin-bottom:16px">
-    <strong>Pipeline Stages</strong>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
-      {% for stage in pipeline_stages %}
-      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-        <input type="checkbox" id="stage-{{ stage.key }}" {% if stage.enabled %}checked{% endif %} style="width:16px;height:16px;accent-color:var(--blue)" />
-        <span style="font-size:13px">{{ stage.label }}</span>
-      </label>
-      {% endfor %}
+    <h2 id="sec-llm">Intelligence</h2>
+    <div class="set-row">
+      <div class="k">LLM provider<div class="hint">Summaries &amp; Q&amp;A.</div></div>
+      <select id="llm-provider">
+        {% for p in llm_providers %}
+        <option value="{{ p }}" {% if p == cfg.llm_provider %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
     </div>
-  </div>
-
-  <!-- Summary Template -->
-  <div class="panel" style="margin-bottom:16px">
-    <strong>Summary Template</strong>
-    <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
-      <select id="summary-template" style="flex:1;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none">
+    <div class="set-row">
+      <div class="k">LLM model</div>
+      <input id="llm-model" type="text" value="{{ cfg.llm_model }}">
+    </div>
+    <div class="set-row">
+      <div class="k">Embeddings provider<div class="hint">Search &amp; Ask retrieval.</div></div>
+      <select id="embeddings-provider">
+        {% for p in embeddings_providers %}
+        <option value="{{ p }}" {% if p == cfg.embeddings_provider %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="set-row">
+      <div class="k">Embeddings model</div>
+      <input id="embeddings-model" type="text" value="{{ cfg.embeddings_model }}">
+    </div>
+    <div class="set-row">
+      <div class="k">Summary template<div class="hint">Default template for generated notes.</div></div>
+      <select id="summary-template">
         {% for t in summary_templates %}
         <option value="{{ t }}" {% if t == cfg.summary_template %}selected{% endif %}>{{ t }}</option>
         {% endfor %}
       </select>
     </div>
-  </div>
 
-  <!-- Poller -->
-  <div class="panel" style="margin-bottom:16px">
-    <strong>Poller</strong>
-    <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
-      <label style="min-width:100px;font-size:13px;color:var(--muted)">Interval (seconds)</label>
-      <input id="poll-interval" type="number" value="{{ cfg.poll_interval }}" min="30" max="3600" style="width:120px;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;outline:none" />
+    <h2 id="sec-pipeline">Pipeline</h2>
+    {% for stage in pipeline_stages %}
+    <div class="set-row">
+      <div class="k">{{ stage.label }}</div>
+      <input type="checkbox" id="stage-{{ stage.key }}" {% if stage.enabled %}checked{% endif %}>
     </div>
-  </div>
+    {% endfor %}
 
-  <!-- Actions -->
-  <div style="display:flex;gap:10px;margin-top:20px">
-    <button class="btn" onclick="saveSettings()">Save Settings</button>
-    <button class="btn sec" onclick="location.href='/status'">Back to Status</button>
-  </div>
-  <div id="save-msg" style="margin-top:12px;font-size:13px;display:none"></div>
+    <h2 id="sec-poller">Sync</h2>
+    <div class="set-row">
+      <div class="k">Poll interval<div class="hint">Seconds between Plaud cloud checks.</div></div>
+      <input id="poll-interval" type="number" value="{{ cfg.poll_interval }}" min="30" max="3600">
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:26px">
+      <button class="btn" onclick="saveSettings()">Save Settings</button>
+      <button class="btn sec" onclick="location.href='/status'">Back to Status</button>
+    </div>
+    <div id="save-msg" style="margin-top:12px;font-size:13px;display:none"></div>
+  </div></div>
 </div>
 
 <script>
+// left-nav highlight on click
+document.querySelectorAll('.set-nav a[href^="#"]').forEach(a => a.onclick = () => {
+  document.querySelectorAll('.set-nav a').forEach(x => x.classList.remove('on'));
+  a.classList.add('on');
+});
+
 async function saveSettings() {
   const msg = document.getElementById('save-msg');
   msg.style.display = 'block';
@@ -191,7 +194,9 @@ async function saveSettings() {
   };
 
   try {
-    const res = await fetch('/api/settings', {
+    const token = new URLSearchParams(window.location.search).get('token');
+    const endpoint = token ? '/api/settings?token=' + encodeURIComponent(token) : '/api/settings';
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
@@ -199,13 +204,13 @@ async function saveSettings() {
     const data = await res.json();
     if (res.ok) {
       msg.style.color = 'var(--ok)';
-      msg.textContent = 'Settings saved. Restart localplaud for changes to take effect.';
+      msg.textContent = data.message || 'Settings saved.';
     } else {
-      msg.style.color = 'var(--red)';
+      msg.style.color = 'var(--err)';
       msg.textContent = 'Error: ' + (data.error || 'Failed to save');
     }
   } catch (e) {
-    msg.style.color = 'var(--red)';
+    msg.style.color = 'var(--err)';
     msg.textContent = 'Error: ' + e.message;
   }
 }

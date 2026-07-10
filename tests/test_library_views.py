@@ -116,7 +116,7 @@ def test_invalid_params_fall_back(monkeypatch, tmp_path):
 def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
-    r = c.get("/")
+    r = c.get("/file-list?categoryId=allFiles")
     assert r.status_code == 200
     assert "rectable" in r.text  # sortable table present
     assert "Bravo call" in r.text
@@ -127,7 +127,7 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
 def test_index_trash_view_shows_banner(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
-    r = c.get("/?view=trash")
+    r = c.get("/file-list?categoryId=trash")
     assert r.status_code == 200
     assert "Trashed thing" in r.text
     assert "read-only recovery view" in r.text
@@ -137,5 +137,7 @@ def test_index_trash_view_shows_banner(monkeypatch, tmp_path):
 def test_index_invalid_params_ok(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
-    r = c.get("/?sort=xyz&dir=nope&state=bad&scene=notint&view=??")
+    r = c.get(
+        "/file-list?categoryId=allFiles&sort=xyz&dir=nope&state=bad&scene=notint&view=??"
+    )
     assert r.status_code == 200

@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Search — localplaud{% endblock %}
 {% block body %}
-<div class="content"><div class="pane-inner">
-<h1 class="page">Ask &amp; Search</h1>
-<form method="get" action="/search" class="ask">
-  <input class="search-input" name="q" value="{{ q }}" autofocus
+<div class="page-scroll"><div class="page-inner" style="max-width:760px">
+<h1 class="page">Semantic search</h1>
+<p class="sub" style="margin:0 0 18px; font-size:13px">Search across every transcript by meaning, not just keywords.</p>
+<form method="get" action="/search" style="display:flex; gap:8px; margin-bottom:18px">
+  <input name="q" value="{{ q }}" autofocus style="flex:1"
          placeholder="Search across every transcript by meaning…">
   <button class="btn" type="submit">Search</button>
 </form>
@@ -15,14 +16,14 @@
 </div>
 {% elif groups %}
 <div class="sub" style="margin:6px 2px 14px">{{ groups|length }} recording(s) matched.</div>
-<div class="list">
+<div style="display:flex; flex-direction:column; gap:12px">
   {% for g in groups %}
   <div class="panel" style="padding:14px 16px">
-    <a class="name" style="font-weight:650" href="/file/{{ g.file_id }}">{{ g.filename }}</a>
+    <a style="font-weight:600" href="/file/{{ g.file_id }}">{{ g.filename }}</a>
     {% for h in g.hits[:3] %}
-    <a class="seg" href="/file/{{ g.file_id }}" style="text-decoration:none">
-      <div class="ts">{{ h.start | mmss }}</div>
-      <div class="txt sub">{% if h.speaker %}<span style="color:var(--accent);font-weight:600">{{ h.speaker }}</span> {% endif %}{{ h.text[:220] }}{% if h.text|length > 220 %}…{% endif %}</div>
+    <a class="seg" href="/file/{{ g.file_id }}{% if h.start is not none %}?t={{ h.start }}{% endif %}" style="display:flex; gap:10px; padding:6px 0">
+      <span class="ts">{{ h.start | mmss }}</span>
+      <span class="txt sub" style="margin:0">{% if h.speaker %}<span style="font-weight:600; color:var(--fg)">{{ h.speaker }}</span> {% endif %}{{ h.text[:220] }}{% if h.text|length > 220 %}…{% endif %}</span>
     </a>
     {% endfor %}
   </div>

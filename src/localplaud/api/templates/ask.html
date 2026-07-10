@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Ask — localplaud{% endblock %}
+{% block body %}
+<style>
+  .ask-hero { min-height:52vh; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; }
+  .ask-hero h1 { font-size:30px; font-weight:400; letter-spacing:-.01em; margin:0 0 26px; }
+  .askbox { position:relative; width:min(590px, 100%); }
+  .askbox .beta { position:absolute; top:-8px; left:14px; background:var(--bg); padding:0 5px; font-size:10.5px; color:var(--muted); }
+  .askbox form { display:flex; align-items:center; gap:8px; border:1px solid var(--border2); border-radius:12px; padding:8px 8px 8px 14px; }
+  .askbox form:focus-within { border-color:#9a9a9a; }
+  .askbox input { flex:1; border:0; padding:4px 0; font-size:14px; border-radius:0; }
+  .askbox input:focus { border:0; }
+  .askbox .send { width:32px; height:32px; flex:none; border-radius:50%; border:0; background:var(--hover); cursor:pointer;
+    display:inline-flex; align-items:center; justify-content:center; color:var(--fg2); }
+  .askbox .send:hover { background:var(--active); }
+  .ask-out { width:min(590px, 100%); margin:26px auto 0; }
+</style>
+<div class="page-scroll"><div class="page-inner" style="max-width:760px">
+  <div class="ask-hero">
+    <h1>What's on your mind?</h1>
+    <div class="askbox">
+      <span class="beta">Beta</span>
+      <form hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin">
+        <input name="q" placeholder="Ask about recordings, notes, or anything in your library" autocomplete="off" required autofocus>
+        <button class="send" type="submit" title="Ask">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></svg>
+        </button>
+      </form>
+    </div>
+  </div>
+  <div class="ask-out">
+    <div id="spin" class="htmx-indicator sub" style="margin-bottom:8px">thinking…</div>
+    <div id="answer"></div>
+  </div>
+</div></div>
+{% endblock %}

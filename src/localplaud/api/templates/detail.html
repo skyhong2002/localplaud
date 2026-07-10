@@ -1,107 +1,225 @@
 {% extends "base.html" %}
 {% block title %}{{ f.filename }} — localplaud{% endblock %}
 {% block body %}
-<div class="shell">
-  {% set active_id = f.id %}
-  {% include "_filelist.html" %}
-  <section class="pane"><div class="pane-inner">
-    <a class="backlink" href="/">← All files</a>
-    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap">
-      <div>
-        <h1 class="page">{{ f.filename }}</h1>
-        <div class="sub" style="margin-top:2px">
-          {{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}
-          {% if f.transcript %} · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %} · {{ f.transcript.kind }}{% if f.transcript.revision %} rev {{ f.transcript.revision }}{% endif %}{% endif %}
-          · <span class="st {{ f.status }}">{{ f.status }}</span>
-        </div>
-      </div>
-      <div style="display:flex; gap:7px">
-        {% if f.transcript or f.summaries %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:8px 12px; font-size:13px">Export</a>{% endif %}
-        <button class="btn sec" style="padding:8px 12px; font-size:13px"
-          hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
-          hx-confirm="Resume failed or missing processing stages?">Resume</button>
-        <button class="btn sec" style="padding:8px 12px; font-size:13px"
-          hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML"
-          hx-confirm="Rebuild every local artifact for this recording?">Rebuild all</button>
+<style>
+  .topbar { display:flex; align-items:center; gap:10px; padding:9px 16px; border-bottom:1px solid var(--border); flex:none; }
+  .crumb { display:flex; align-items:center; gap:7px; min-width:0; color:var(--fg2); font-size:13.5px; }
+  .crumb a { display:inline-flex; align-items:center; gap:6px; color:var(--fg2); }
+  .crumb a:hover { color:var(--fg); }
+  .crumb .sepc { color:var(--faint); }
+  .crumb .title { font-weight:500; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .topbar .actions { margin-left:auto; display:flex; align-items:center; gap:6px; flex:none; }
+  .iconbtn { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:8px;
+    background:none; border:0; color:var(--fg2); cursor:pointer; }
+  .iconbtn:hover { background:var(--hover); }
+  .menu { position:absolute; z-index:50; right:0; top:34px; width:220px; background:#fff; border-radius:12px;
+    box-shadow:var(--shadow-pop); padding:6px; }
+  .menu[hidden] { display:none; }
+  .menu button, .menu a { display:flex; width:100%; align-items:center; gap:9px; padding:8px 10px; border-radius:8px;
+    background:none; border:0; cursor:pointer; font-size:13.5px; text-align:left; }
+  .menu button:hover, .menu a:hover { background:var(--hover); }
+  .menu .sep { border-top:1px solid var(--border); margin:5px 4px; }
+
+  .doc { max-width:640px; margin:0 auto; padding:18px 24px 120px; }
+  .tabs { display:flex; align-items:center; gap:18px; padding:2px 0 10px; }
+  .tabs button { background:none; border:0; padding:4px 2px; cursor:pointer; font-size:13.5px; color:var(--muted); font-weight:500; }
+  .tabs button.on { color:var(--fg); font-weight:600; }
+  .tabs .plus { border:0; background:var(--hover); border-radius:7px; width:24px; height:24px; display:inline-flex;
+    align-items:center; justify-content:center; color:var(--fg2); }
+
+  /* player */
+  .player { padding:6px 0 14px; border-bottom:1px solid var(--border); margin-bottom:10px; }
+  .pbar { height:4px; border-radius:2px; background:var(--border); cursor:pointer; position:relative; }
+  .pbar i { display:block; height:100%; width:0; border-radius:2px; background:#111; }
+  .prow { display:flex; align-items:center; gap:14px; margin-top:10px; }
+  .ptime { color:var(--muted); font-size:12.5px; font-variant-numeric:tabular-nums; }
+  .pmid { flex:1; display:flex; align-items:center; justify-content:center; gap:16px; }
+  .pplay { width:40px; height:40px; border-radius:50%; border:1px solid var(--border2); background:#fff; cursor:pointer;
+    display:inline-flex; align-items:center; justify-content:center; }
+  .pplay:hover { background:var(--hover); }
+  .pskip { background:none; border:0; color:var(--fg2); cursor:pointer; font-size:11px; font-weight:600; display:inline-flex;
+    flex-direction:column; align-items:center; gap:1px; }
+  .pspeed { background:none; border:0; color:var(--fg2); cursor:pointer; font-size:12.5px; font-weight:600;
+    border-radius:8px; padding:5px 8px; }
+  .pspeed:hover { background:var(--hover); }
+
+  .pill { display:inline-flex; align-items:center; gap:7px; background:var(--sb-bg); border:1px solid var(--border);
+    border-radius:999px; padding:5px 13px; font-size:12.5px; color:var(--muted); }
+  .pill a, .pill button { font-weight:600; color:var(--fg); background:none; border:0; cursor:pointer; font-size:12.5px; padding:0; }
+  .pillrow { text-align:center; margin:14px 0 6px; }
+
+  .h-title { font-size:26px; font-weight:600; letter-spacing:-.01em; line-height:1.3; margin:8px 0 2px; }
+  .h-meta { color:var(--muted); font-size:12.5px; margin-bottom:10px; }
+
+  /* transcript entries */
+  .seg { padding:10px 8px; border-radius:8px; margin:2px -8px; }
+  .seg:hover { background:#fafafa; }
+  .seg .head { display:flex; align-items:baseline; gap:10px; }
+  .seg .editbtn { visibility:hidden; margin-left:auto; background:none; border:0; color:var(--muted); cursor:pointer; font-size:12px; padding:0 4px; }
+  .seg:hover .editbtn { visibility:visible; }
+  .seg .editbtn:hover { color:var(--fg); }
+  .segedit { margin-top:6px; display:flex; flex-direction:column; gap:6px; cursor:default; }
+  .segedit[hidden] { display:none; }
+  .segedit textarea { width:100%; resize:vertical; }
+  .segedit .actions { display:flex; gap:6px; }
+  .segedit .actions button { padding:5px 12px; font-size:12px; }
+
+  details.tool { border:1px solid var(--border); border-radius:var(--radius-lg); padding:10px 14px; margin:8px 0; }
+  details.tool summary { cursor:pointer; font-weight:550; font-size:13px; color:var(--fg2); }
+  .legend { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+  .legend .item { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin:0; }
+  .legend .swatch { width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none; }
+  .legend .spk-name { width:120px; padding:4px 8px; font-size:12px; border-radius:7px; }
+  .legend .spk-save { background:none; border:1px solid var(--border2); color:var(--muted); border-radius:7px; padding:3px 9px; font-size:11.5px; cursor:pointer; }
+  .legend .spk-save:hover { color:var(--fg); background:var(--hover); }
+
+  .md h1 { font-size:20px; margin:.6em 0 .3em; font-weight:650; }
+  .md h3, .md h4 { font-size:15px; margin:1em 0 .25em; font-weight:600; }
+
+  .mindmap details { margin-left:14px; padding-left:10px; border-left:1px solid var(--border); }
+  .mindmap > details { margin-left:0; padding-left:0; border-left:none; }
+  .mindmap summary { cursor:pointer; font-weight:600; padding:3px 0; }
+  .mindmap > details > summary { font-size:16px; font-weight:700; }
+  .mindmap .mm-leaf { margin-left:14px; padding:2px 0 2px 10px; border-left:1px solid var(--border); }
+
+  @media (max-width:820px){
+    .topbar { position:sticky; top:0; background:#fff; z-index:15; }
+    .crumb .up { display:none; }
+    .doc { padding:14px 16px 90px; }
+  }
+</style>
+
+<div class="topbar">
+  <div class="crumb">
+    <a class="up" href="/file-list?categoryId=allFiles">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+      All files
+    </a>
+    <span class="sepc">›</span>
+    <span class="title">{{ f.filename }}</span>
+    <span class="st {{ f.status }}" style="margin-left:8px">{{ f.status }}</span>
+  </div>
+  <div class="actions">
+    {% if f.transcript or f.summaries %}
+    <a class="btn sec" style="padding:6px 12px; font-size:13px" href="/file/{{ f.id }}/export.md" title="Export Markdown">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      Export
+    </a>
+    {% endif %}
+    <div style="position:relative">
+      <button class="iconbtn" id="more-btn" title="More actions" aria-haspopup="menu">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+      </button>
+      <div class="menu" id="more-menu" hidden role="menu">
+        <button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
+                hx-confirm="Resume failed or missing processing stages?">Resume processing</button>
+        <button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML"
+                hx-confirm="Rebuild every local artifact for this recording?">Rebuild all</button>
+        <div class="sep"></div>
+        {% if f.transcript and f.has_corrected %}
+          {% if f.transcript.kind == 'corrected' %}
+          <a href="/file/{{ f.id }}?view=raw">View raw ASR transcript</a>
+          {% else %}
+          <a href="/file/{{ f.id }}?view=corrected">View corrected transcript</a>
+          {% endif %}
+        {% endif %}
+        <a href="/file/{{ f.id }}/export.md">Export Markdown</a>
       </div>
     </div>
-    <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px"></div>
+    <span style="border-left:1px solid var(--border); height:20px"></span>
+    <button class="btn sec" id="ask-toggle" style="padding:6px 12px; font-size:13px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2M5.5 5.5 7 7M18.5 5.5 17 7M4 13a8 8 0 0 1 16 0v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/></svg>
+      Ask
+    </button>
+  </div>
+</div>
 
-    {% if f.has_audio %}<audio id="player" controls preload="none" src="/audio/{{ f.id }}"></audio>{% endif %}
-    {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}</div>{% endif %}
-    {% if f.stages %}
-    <details class="panel" style="margin-top:12px">
-      <summary style="cursor:pointer;font-weight:650">Processing details</summary>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
-        {% for stage in f.stages %}
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
-          <div>
-            <strong>{{ stage.name }}</strong>
-            {% if stage.provider %}<span class="sub"> · {{ stage.provider }}{% if stage.model %}:{{ stage.model }}{% endif %}</span>{% endif %}
-            {% if stage.error %}<div style="color:var(--red);font-size:12px;margin-top:2px">{{ stage.error }}</div>{% endif %}
-          </div>
-          <span class="st {{ stage.status }}">{{ stage.status }}</span>
-        </div>
+<div class="page-scroll"><div class="doc">
+  {% set mindmaps = f.summaries | selectattr('template', 'equalto', 'mind_map') | list %}
+  {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
+
+  <div class="tabs">
+    {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}
+    {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template|capitalize }}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
+    {% if mindmaps %}<button data-panel="mindmap" class="{% if not f.transcript and not notes %}on{% endif %}">Mind map</button>{% endif %}
+    {% if f.imported_transcript %}<button data-panel="imported" class="{% if not f.transcript and not f.summaries %}on{% endif %}">Plaud import ☁</button>{% endif %}
+    <button class="plus" title="Generate more notes from Settings templates" aria-disabled="true">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+  </div>
+
+  <div id="reprocess-msg" class="sub" style="font-size:13px"></div>
+  {% if f.error %}<div class="panel" style="border-color:var(--err); color:var(--err); margin:8px 0">⚠ {{ f.error }}</div>{% endif %}
+
+  {% if f.has_audio %}
+  <div class="player">
+    <audio id="player" preload="metadata" src="/audio/{{ f.id }}"></audio>
+    <div class="pbar" id="pbar"><i id="pfill"></i></div>
+    <div class="prow">
+      <span class="ptime"><span id="pcur">00:00:00</span> / <span id="pdur">{{ (f.duration_ms or 0) // 1000 | int }}</span></span>
+      <div class="pmid">
+        <button class="pskip" id="pback" title="Back 15 seconds">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>15
+        </button>
+        <button class="pplay" id="pplay" title="Play / pause">
+          <svg id="ic-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
+          <svg id="ic-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
+        </button>
+        <button class="pskip" id="pfwd" title="Forward 15 seconds">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>15
+        </button>
+      </div>
+      <button class="pspeed" id="pspeed" title="Playback speed">1×</button>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- single-file Ask (toggled from the top bar) -->
+  <div id="ask-panel" data-panel="ask" hidden style="margin:6px 0 16px">
+    <div class="panel">
+      <div class="sub" style="font-size:12.5px; margin-bottom:9px">
+        Ask about this recording — answers stay grounded in its transcript and cite playable moments.
+      </div>
+      <div id="ask-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px">
+        {% for chip in ["What was decided?", "List action items with owners", "What are the key topics?"] %}
+        <button type="button" class="btn sec ask-chip" data-q="{{ chip }}" style="padding:4px 11px; font-size:12px">{{ chip }}</button>
         {% endfor %}
       </div>
-    </details>
-    {% endif %}
+      <form style="display:flex; gap:8px" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-swap="innerHTML"
+            hx-indicator="#file-ask-spin">
+        <input type="text" name="q" id="ask-q" placeholder="Ask a question about this recording…" style="flex:1" autocomplete="off" required>
+        <button class="btn" type="submit">Ask</button>
+      </form>
+      <div id="file-ask-spin" class="htmx-indicator sub" style="margin:6px 2px 0">thinking…</div>
+      <div id="file-answer"></div>
+    </div>
+  </div>
 
-    {% set mindmaps = f.summaries | selectattr('template', 'equalto', 'mind_map') | list %}
-    {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
-    <div class="tabs">
-      {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}
-      {% if f.imported_transcript %}<button data-panel="imported" class="{% if not f.transcript and not f.summaries %}on{% endif %}">Plaud import ☁</button>{% endif %}
-      {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template|capitalize }}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
-      {% if mindmaps %}<button data-panel="mindmap" class="{% if not f.transcript and not notes %}on{% endif %}">Mind map</button>{% endif %}
-      <button data-panel="ask" class="{% if not f.transcript and not f.imported_transcript and not f.summaries %}on{% endif %}">Ask</button>
+  <!-- ============ Transcript ============ -->
+  {% if f.transcript %}
+  <div class="tabpanel" data-panel="transcript">
+    <div class="h-title">{{ f.filename }}</div>
+    <div class="h-meta">
+      {{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}
+      · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %}
+      · {{ f.transcript.kind }}{% if f.transcript.revision %} rev {{ f.transcript.revision }}{% endif %}
     </div>
 
-    {% if f.transcript %}
-    <div class="tabpanel" data-panel="transcript">
-      {% if f.has_corrected %}
-      <div class="viewswitch sub" style="margin:2px 0 10px; font-size:12.5px">
-        View:
+    {% if f.has_corrected %}
+    <div class="pillrow">
+      <span class="pill">
         {% if f.transcript.kind == 'corrected' %}
-        <strong>Corrected (rev {{ f.transcript.revision }})</strong>
-        · <a href="/file/{{ f.id }}?view=raw">Raw ASR</a>
+        Corrected (rev {{ f.transcript.revision }}). <a href="/file/{{ f.id }}?view=raw">View original</a>
         {% else %}
-        <a href="/file/{{ f.id }}?view=corrected">Corrected (rev {{ f.corrected_revision }})</a>
-        · <strong>Raw ASR</strong> — read-only; edits apply to the corrected transcript
+        Viewing raw ASR — read-only. <a href="/file/{{ f.id }}?view=corrected">View corrected (rev {{ f.corrected_revision }})</a>
         {% endif %}
-      </div>
-      {% endif %}
-      {% if f.can_edit %}
-      <details class="panel" style="margin:8px 0 12px">
-        <summary style="cursor:pointer;font-weight:650">Find and replace transcript</summary>
-        <form method="post" action="/file/{{ f.id }}/transcript/replace"
-              style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:10px;align-items:end">
-          <input type="hidden" name="base_revision" value="{{ f.transcript.revision or 0 }}">
-          <label class="sub">Find<input name="find" required aria-label="Find transcript text"></label>
-          <label class="sub">Replace<input name="replacement" aria-label="Replacement text"></label>
-          <button class="btn sec" type="submit">Replace all</button>
-          <label class="sub" style="grid-column:1 / -1">
-            <input type="checkbox" name="case_sensitive" value="true"> Case-sensitive
-          </label>
-        </form>
-      </details>
-      {% endif %}
-      {% if f.revision_history %}
-      <details class="panel" style="margin:8px 0 12px">
-        <summary style="cursor:pointer;font-weight:650">Transcript revision history ({{ f.revision_history|length }})</summary>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
-          {% for rev in f.revision_history %}
-          <div class="sub">
-            <strong>Rev {{ rev.revision }}</strong> · {{ rev.kind }}
-            {% if rev.note %} · {{ rev.note }}{% endif %}
-            · {{ rev.summary_count }} note/map artifact(s)
-            · {{ rev.chunk_count }} indexed chunk(s)
-          </div>
-          {% endfor %}
-        </div>
-      </details>
-      {% endif %}
-      {% if f.speakers %}
+      </span>
+    </div>
+    {% endif %}
+
+    {% if f.speakers %}
+    <details class="tool">
+      <summary>Speakers ({{ f.speakers|length }})</summary>
       <div class="legend" id="legend">
         {% for sp in f.speakers %}
         <form class="item" method="post" action="/file/{{ f.id }}/speakers">
@@ -113,103 +231,134 @@
         </form>
         {% endfor %}
       </div>
-      {% endif %}
-      <div id="transcript">
-        {% for seg in f.transcript.segments %}
-        <div class="seg {% if seg.speaker %}spk{% endif %}" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
-          <div class="ts">{{ (seg.start or 0) | mmss }}</div>
-          <div class="txt">
-            {% if seg.speaker %}<span class="who"><span class="dot"></span>{{ f.speaker_names.get(seg.speaker, seg.speaker) }}</span><br>{% endif %}{{ seg.text }}
-            {% if f.can_edit %}
-            <button class="editbtn" type="button" title="Edit this segment" aria-label="Edit segment text">✎</button>
-            <form class="segedit" method="post" action="/file/{{ f.id }}/transcript/segments/{{ loop.index0 }}" hidden>
-              <input type="hidden" name="base_revision" value="{{ f.transcript.revision or 0 }}">
-              <textarea name="text" rows="2">{{ seg.text }}</textarea>
-              <div class="actions">
-                <button class="btn" type="submit">Save</button>
-                <button class="btn sec" type="button" data-cancel>Cancel</button>
-              </div>
-            </form>
-            {% endif %}
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
+    </details>
     {% endif %}
 
-    {% if f.imported_transcript %}
-    <div class="tabpanel" data-panel="imported" {% if f.transcript or f.summaries %}hidden{% endif %}>
-      <div class="panel sub" style="margin:8px 0 14px">
-        Imported from Plaud for migration/comparison. Independent processing does not
-        use this transcript as its canonical result.
-      </div>
-      <div class="transcript-import">
-        {% for seg in f.imported_transcript.segments %}
-        <div class="seg" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}">
-          <div class="ts">{{ (seg.start or 0) | mmss }}</div>
-          <div class="txt">
-            {% if seg.speaker %}<span class="who">{{ seg.speaker }}</span><br>{% endif %}{{ seg.text }}
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-
-    {% for s in notes %}
-    <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %}>
-      <div class="sub" style="margin-bottom:8px">Note rev {{ s.revision }}{% if s.transcript_revision is not none %} · based on transcript rev {{ s.transcript_revision }}{% endif %}{% if s.template_version %} · template v{{ s.template_version }}{% endif %}</div>
-      <div data-md>{{ s.content_md }}</div>
-    </div>
-    {% endfor %}
-
-    {% if mindmaps %}
-    <div class="tabpanel" data-panel="mindmap" {% if f.transcript or notes %}hidden{% endif %}>
-      <style>
-        .mindmap { margin-top: 10px; }
-        .mindmap details { margin-left: 14px; padding-left: 10px; border-left: 1px solid var(--border); }
-        .mindmap > details { margin-left: 0; padding-left: 0; border-left: none; }
-        .mindmap summary { cursor: pointer; font-weight: 600; padding: 3px 0; }
-        .mindmap > details > summary { font-size: 16px; font-weight: 700; }
-        .mindmap .mm-leaf { margin-left: 14px; padding: 2px 0 2px 10px; border-left: 1px solid var(--border); color: var(--fg); }
-      </style>
-      <div style="display:flex; gap:7px; margin-top:10px">
-        <button type="button" class="btn sec" id="mm-expand" style="padding:6px 10px; font-size:12px">Expand all</button>
-        <button type="button" class="btn sec" id="mm-collapse" style="padding:6px 10px; font-size:12px">Collapse all</button>
-        <a class="btn sec" href="/file/{{ f.id }}/mindmap.png" style="padding:6px 10px; font-size:12px">Download PNG</a>
-      </div>
-      <div class="sub" style="margin:8px 0">Mind map rev {{ mindmaps[0].revision }}{% if mindmaps[0].transcript_revision is not none %} · based on transcript rev {{ mindmaps[0].transcript_revision }}{% endif %}</div>
-      <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
-      <div id="mindmap-tree" class="mindmap"></div>
-    </div>
-    {% endif %}
-
-    <div class="tabpanel" data-panel="ask" {% if f.transcript or f.imported_transcript or f.summaries %}hidden{% endif %}>
-      <div class="sub" style="margin:12px 0 8px; font-size:13px">
-        Ask about this recording. Answers stay grounded in its transcript and cite playable moments.
-      </div>
-      <div id="ask-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:11px">
-        {% for chip in ["What was decided?", "List action items with owners", "What are the key topics?"] %}
-        <button type="button" class="btn sec ask-chip" data-q="{{ chip }}"
-          style="padding:5px 11px; font-size:12px">{{ chip }}</button>
-        {% endfor %}
-      </div>
-      <form class="ask" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-swap="innerHTML"
-            hx-indicator="#file-ask-spin">
-        <input type="text" name="q" id="ask-q" placeholder="Ask a question about this recording…"
-          autocomplete="off" required>
-        <button class="btn" type="submit">Ask</button>
+    {% if f.can_edit %}
+    <details class="tool">
+      <summary>Find and replace transcript</summary>
+      <form method="post" action="/file/{{ f.id }}/transcript/replace"
+            style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:10px;align-items:end">
+        <input type="hidden" name="base_revision" value="{{ f.transcript.revision or 0 }}">
+        <label class="sub" style="font-size:12px">Find<input name="find" required aria-label="Find transcript text" style="width:100%"></label>
+        <label class="sub" style="font-size:12px">Replace<input name="replacement" aria-label="Replacement text" style="width:100%"></label>
+        <button class="btn sec" type="submit">Replace all</button>
+        <label class="sub" style="grid-column:1 / -1; font-size:12px">
+          <input type="checkbox" name="case_sensitive" value="true"> Case-sensitive
+        </label>
       </form>
-      <div id="file-ask-spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">thinking…</div>
-      <div id="file-answer"></div>
-    </div>
-
-    {% if not f.transcript and not f.imported_transcript and not f.summaries %}
-    <div class="empty"><div class="big">📝</div>Not processed yet — no transcript or notes.</div>
+    </details>
     {% endif %}
-  </div></section>
-</div>
+
+    {% if f.revision_history %}
+    <details class="tool">
+      <summary>Transcript revision history ({{ f.revision_history|length }})</summary>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+        {% for rev in f.revision_history %}
+        <div class="sub" style="font-size:12.5px">
+          <strong>Rev {{ rev.revision }}</strong> · {{ rev.kind }}
+          {% if rev.note %} · {{ rev.note }}{% endif %}
+          · {{ rev.summary_count }} note/map artifact(s)
+          · {{ rev.chunk_count }} indexed chunk(s)
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+
+    {% if f.stages %}
+    <details class="tool">
+      <summary>Processing details</summary>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+        {% for stage in f.stages %}
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div>
+            <strong style="font-size:13px">{{ stage.name }}</strong>
+            {% if stage.provider %}<span class="sub" style="font-size:12px"> · {{ stage.provider }}{% if stage.model %}:{{ stage.model }}{% endif %}</span>{% endif %}
+            {% if stage.error %}<div style="color:var(--err);font-size:12px;margin-top:2px">{{ stage.error }}</div>{% endif %}
+          </div>
+          <span class="st {{ stage.status }}">{{ stage.status }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+
+    <div id="transcript" style="margin-top:14px">
+      {% for seg in f.transcript.segments %}
+      <div class="seg {% if seg.speaker %}spk{% endif %}" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
+        <div class="head">
+          <span class="ts">{{ (seg.start or 0) | mmss }}</span>
+          {% if seg.speaker %}<span class="who">{{ f.speaker_names.get(seg.speaker, seg.speaker) }}</span>{% endif %}
+          {% if f.can_edit %}
+          <button class="editbtn" type="button" title="Edit this segment" aria-label="Edit segment text">✎</button>
+          {% endif %}
+        </div>
+        <div class="txt">{{ seg.text }}</div>
+        {% if f.can_edit %}
+        <form class="segedit" method="post" action="/file/{{ f.id }}/transcript/segments/{{ loop.index0 }}" hidden>
+          <input type="hidden" name="base_revision" value="{{ f.transcript.revision or 0 }}">
+          <textarea name="text" rows="2">{{ seg.text }}</textarea>
+          <div class="actions">
+            <button class="btn" type="submit">Save</button>
+            <button class="btn sec" type="button" data-cancel>Cancel</button>
+          </div>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ============ Plaud import ============ -->
+  {% if f.imported_transcript %}
+  <div class="tabpanel" data-panel="imported" {% if f.transcript or f.summaries %}hidden{% endif %}>
+    <div class="pillrow"><span class="pill">
+      Imported from Plaud for migration/comparison. Independent processing does not
+      use this transcript as its canonical result.
+    </span></div>
+    <div class="transcript-import">
+      {% for seg in f.imported_transcript.segments %}
+      <div class="seg" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}">
+        <div class="head">
+          <span class="ts">{{ (seg.start or 0) | mmss }}</span>
+          {% if seg.speaker %}<span class="who">{{ seg.speaker }}</span>{% endif %}
+        </div>
+        <div class="txt">{{ seg.text }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ============ Notes ============ -->
+  {% for s in notes %}
+  <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %}>
+    <div class="h-title">{{ s.title or f.filename }}</div>
+    <div class="h-meta">Note rev {{ s.revision }}{% if s.transcript_revision is not none %} · based on transcript rev {{ s.transcript_revision }}{% endif %}{% if s.template_version %} · template v{{ s.template_version }}{% endif %}{% if s.source=='cloud' %} · imported from Plaud{% endif %}</div>
+    <div data-md>{{ s.content_md }}</div>
+  </div>
+  {% endfor %}
+
+  <!-- ============ Mind map ============ -->
+  {% if mindmaps %}
+  <div class="tabpanel" data-panel="mindmap" {% if f.transcript or notes %}hidden{% endif %}>
+    <div style="display:flex; gap:7px; margin-top:10px">
+      <button type="button" class="btn sec" id="mm-expand" style="padding:5px 10px; font-size:12px">Expand all</button>
+      <button type="button" class="btn sec" id="mm-collapse" style="padding:5px 10px; font-size:12px">Collapse all</button>
+      <a class="btn sec" href="/file/{{ f.id }}/mindmap.png" style="padding:5px 10px; font-size:12px">Download PNG</a>
+    </div>
+    <div class="h-meta" style="margin-top:8px">Mind map rev {{ mindmaps[0].revision }}{% if mindmaps[0].transcript_revision is not none %} · based on transcript rev {{ mindmaps[0].transcript_revision }}{% endif %}</div>
+    <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
+    <div id="mindmap-tree" class="mindmap"></div>
+  </div>
+  {% endif %}
+
+  {% if not f.transcript and not f.imported_transcript and not f.summaries %}
+  <div class="empty"><div class="big">📝</div>Not processed yet — no transcript or notes.</div>
+  {% endif %}
+</div></div>
 {% endblock %}
 
 {% block scripts %}
@@ -221,6 +370,7 @@
       .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
       .replace(/^\s*[-*] (.*)$/gm,'• $1<br>').replace(/\n{2,}/g,'<br><br>');
   });
+
   // mind map: render the Markdown outline as a collapsible tree
   const mmSrc = document.getElementById('mindmap-src');
   if (mmSrc) {
@@ -254,41 +404,84 @@
     document.getElementById('mm-expand').onclick = () => setAll(true);
     document.getElementById('mm-collapse').onclick = () => setAll(false);
   }
+
   // tabs
   const panels = document.querySelectorAll('.tabpanel');
-  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
-    document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+  document.querySelectorAll('.tabs button[data-panel]').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.tabs button[data-panel]').forEach(x=>x.classList.remove('on')); b.classList.add('on');
     panels.forEach(p => p.hidden = p.dataset.panel !== b.dataset.panel);
   });
-  // speaker colors — segments first (keeps first-appearance ordering), then
-  // the server-rendered legend swatches share the same mapping
+
+  // "..." topbar menu
+  const moreBtn = document.getElementById('more-btn'), moreMenu = document.getElementById('more-menu');
+  moreBtn.onclick = e => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; };
+  document.addEventListener('click', e => { if (!moreMenu.hidden && !moreMenu.contains(e.target)) moreMenu.hidden = true; });
+
+  // Ask panel toggle
+  const askPanel = document.getElementById('ask-panel');
+  document.getElementById('ask-toggle').onclick = () => {
+    askPanel.hidden = !askPanel.hidden;
+    if (!askPanel.hidden) { askPanel.scrollIntoView({behavior:'smooth', block:'nearest'}); document.getElementById('ask-q').focus(); }
+  };
+
+  // speaker colors — segments first (keeps first-appearance ordering)
   const vars=['--sp0','--sp1','--sp2','--sp3','--sp4','--sp5','--sp6','--sp7'];
   document.querySelectorAll('.seg[data-spk]').forEach(seg=>{ const i=window.spkColor(seg.dataset.spk);
     seg.style.setProperty('--c',`var(${vars[i]})`); });
   document.querySelectorAll('.legend .swatch[data-spk]').forEach(sw=>{ const i=window.spkColor(sw.dataset.spk);
     sw.style.background=`var(${vars[i]})`; });
-  // click-to-seek + red active segment synced to audio (Plaud-style)
-  const player=document.getElementById('player'), segs=[...document.querySelectorAll('.seg[data-start]')];
+
+  // ---- custom player ----
+  const player=document.getElementById('player');
+  const hms = t => { t=Math.max(0,Math.floor(t)); const p=n=>String(n).padStart(2,'0');
+    return `${p(Math.floor(t/3600))}:${p(Math.floor(t/60)%60)}:${p(t%60)}`; };
+  if (player) {
+    const fill=document.getElementById('pfill'), bar=document.getElementById('pbar');
+    const cur=document.getElementById('pcur'), durEl=document.getElementById('pdur');
+    const play=document.getElementById('pplay'), icP=document.getElementById('ic-play'), icQ=document.getElementById('ic-pause');
+    const speeds=[1,1.25,1.5,2,0.75], speedBtn=document.getElementById('pspeed'); let si=0;
+    const setDur=()=>{ if(!isNaN(player.duration)) durEl.textContent=hms(player.duration); };
+    durEl.textContent = hms(parseInt(durEl.textContent,10)||0);
+    player.addEventListener('loadedmetadata', setDur);
+    play.onclick=()=>{ player.paused?player.play():player.pause(); };
+    player.onplay=()=>{ icP.style.display='none'; icQ.style.display=''; };
+    player.onpause=()=>{ icP.style.display=''; icQ.style.display='none'; };
+    document.getElementById('pback').onclick=()=>{ player.currentTime=Math.max(0,player.currentTime-15); };
+    document.getElementById('pfwd').onclick=()=>{ player.currentTime=player.currentTime+15; };
+    speedBtn.onclick=()=>{ si=(si+1)%speeds.length; player.playbackRate=speeds[si]; speedBtn.textContent=speeds[si]+'×'; };
+    bar.onclick=e=>{ const r=bar.getBoundingClientRect();
+      if(player.duration) player.currentTime=(e.clientX-r.left)/r.width*player.duration; };
+    player.ontimeupdate=()=>{ cur.textContent=hms(player.currentTime);
+      if(player.duration) fill.style.width=(player.currentTime/player.duration*100)+'%';
+      const t=player.currentTime;
+      segs.forEach(s=>s.classList.toggle('active', t>=parseFloat(s.dataset.start) && t<parseFloat(s.dataset.end||1e9))); };
+  }
+
+  // click-to-seek
+  const segs=[...document.querySelectorAll('.seg[data-start]')];
   segs.forEach(seg=>seg.onclick=()=>{ if(player){ player.currentTime=parseFloat(seg.dataset.start)||0; player.play(); }});
-  if(player) player.ontimeupdate=()=>{ const t=player.currentTime;
-    segs.forEach(s=>s.classList.toggle('active', t>=parseFloat(s.dataset.start) && t<parseFloat(s.dataset.end||1e9))); };
+
   // single-file Ask: suggested-question chips fill the input (grounded, non-mutating)
   document.querySelectorAll('.ask-chip').forEach(chip=>chip.onclick=()=>{
     const q=document.getElementById('ask-q'); if(q){ q.value=chip.dataset.q; q.focus(); }});
+
   // delegated [data-seek] handler so HTMX-swapped Ask citations stay playable
   document.addEventListener('click', e=>{ const el=e.target.closest('[data-seek]'); if(!el) return;
     e.preventDefault(); if(player){ player.currentTime=parseFloat(el.dataset.seek)||0; player.play(); }});
+
   // deep-link: /file/{id}?t={seconds} seeks the player on load (no autoplay)
   (function(){ const t=new URLSearchParams(location.search).get('t');
     if(t!==null && player){ const s=parseFloat(t); if(!isNaN(s)){
       const seek=()=>{ player.currentTime=s; }; if(player.readyState>=1) seek();
       else player.addEventListener('loadedmetadata', seek, {once:true}); player.load(); }}})();
+
   // inline segment editing — never let the edit UI trigger click-to-seek
   document.querySelectorAll('.seg .editbtn').forEach(btn=>btn.onclick=e=>{ e.stopPropagation();
-    const form=btn.parentElement.querySelector('.segedit'); form.hidden=!form.hidden;
+    const form=btn.closest('.seg').querySelector('.segedit'); form.hidden=!form.hidden;
     if(!form.hidden) form.querySelector('textarea').focus(); });
   document.querySelectorAll('.seg .segedit').forEach(form=>{ form.onclick=e=>e.stopPropagation();
     const cancel=form.querySelector('[data-cancel]');
     if(cancel) cancel.onclick=e=>{ e.stopPropagation(); form.hidden=true; }; });
+  document.querySelectorAll('details.tool').forEach(d=>d.onclick=e=>e.stopPropagation());
 </script>
 {% endblock %}

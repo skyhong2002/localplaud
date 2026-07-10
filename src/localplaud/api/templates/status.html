@@ -1,7 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Status — localplaud{% endblock %}
 {% block body %}
-<div class="content"><div class="pane-inner">
+<style>
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:16px 0 20px; }
+  .tile { background:#fff; border:1px solid var(--border); border-radius:var(--radius-lg); padding:13px 14px; }
+  .tile .k { font-size:12px; color:var(--muted); }
+  .tile .v { font-size:24px; font-weight:600; letter-spacing:-.02em; margin-top:2px; }
+  .tile .v small { font-size:13px; color:var(--muted); font-weight:400; }
+  .cols { display:grid; }
+  @media (max-width:820px){ .stats, .cols { grid-template-columns:repeat(2,1fr) !important; } }
+</style>
+<div class="page-scroll"><div class="page-inner" style="max-width:840px">
 <h1 class="page">Status</h1>
 
 <div class="stats">

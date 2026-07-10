@@ -131,7 +131,20 @@ def _file_summary(r: PlaudFile) -> dict:
 
 
 def _base_ctx(request: Request, active: str) -> dict:
-    return {"request": request, "active": active, "public_url": get_settings().api.public_url}
+    # Sidebar file counts (All files / Trash) are part of the persistent shell.
+    with session_scope() as session:
+        all_count = session.scalar(
+            select(func.count()).select_from(PlaudFile).where(PlaudFile.is_trash.is_(False))
+        ) or 0
+        trash_count = session.scalar(
+            select(func.count()).select_from(PlaudFile).where(PlaudFile.is_trash.is_(True))
+        ) or 0
+    return {
+        "request": request,
+        "active": active,
+        "public_url": get_settings().api.public_url,
+        "counts": {"all": all_count, "trash": trash_count},
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -1062,8 +1075,43 @@ def _stats(session) -> dict:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(
+def home(request: Request):
+    """Home — recent files plus a quick library/attention overview."""
+    with session_scope() as session:
+        recent = [
+            _file_summary(r)
+            for r in session.scalars(
+                select(PlaudFile)
+                .where(PlaudFile.is_trash.is_(False))
+                .order_by(PlaudFile.start_time_ms.desc(), PlaudFile.id.asc())
+                .limit(5)
+            )
+        ]
+        attention = [
+            _file_summary(r)
+            for r in session.scalars(
+                select(PlaudFile)
+                .where(
+                    PlaudFile.is_trash.is_(False),
+                    PlaudFile.status.in_([FileStatus.error, FileStatus.partial]),
+                )
+                .order_by(PlaudFile.start_time_ms.desc(), PlaudFile.id.asc())
+                .limit(6)
+            )
+        ]
+        stats = _stats(session)
+    ctx = _base_ctx(request, "home") | {
+        "recent": recent,
+        "attention": attention,
+        "stats": stats,
+    }
+    return templates.TemplateResponse(request=request, name="index.html", context=ctx)
+
+
+@app.get("/file-list", response_class=HTMLResponse)
+def file_list(
     request: Request,
+    categoryId: str | None = None,  # noqa: N803 - matches Plaud Web's query param
     q: str | None = None,
     sort: str | None = None,
     dir: str | None = None,
@@ -1071,22 +1119,45 @@ def index(
     scene: str | None = None,
     view: str | None = None,
 ):
+    if categoryId == "trash":
+        view = "trash"
     params = _parse_library_params(q, sort, dir, state, scene, view)
     with session_scope() as session:
         rows = list(session.scalars(_library_query(params).limit(300)))
         files = [_file_summary(r) for r in rows]
-        stats = _stats(session)
         facets = _library_facets(session, params)
-    ctx = _base_ctx(request, "recordings") | {
+    in_trash = params["view"] == "trash"
+    ctx = _base_ctx(request, "trash" if in_trash else "allfiles") | {
         "files": files,
-        "stats": stats,
         "q": params["q"],
         "lib": params,
         "facets": facets,
         "states": [s.value for s in FileStatus],
         "attention_states": _ATTENTION_STATES,
+        "category": "trash" if in_trash else "allFiles",
+        "page_title": "Trash" if in_trash else "All files",
     }
-    return templates.TemplateResponse(request=request, name="index.html", context=ctx)
+    return templates.TemplateResponse(request=request, name="filelist.html", context=ctx)
+
+
+@app.get("/ask", response_class=HTMLResponse)
+def ask_page(request: Request):
+    ctx = _base_ctx(request, "ask")
+    return templates.TemplateResponse(request=request, name="ask.html", context=ctx)
+
+
+@app.get("/templates", response_class=HTMLResponse)
+def templates_page(request: Request):
+    with session_scope() as session:
+        tpls = [
+            _template_json(row)
+            for row in session.scalars(select(NoteTemplate).order_by(NoteTemplate.name))
+        ]
+    categories = (
+        ["All"] + sorted({t["category"] or "General" for t in tpls}) if tpls else []
+    )
+    ctx = _base_ctx(request, "templates") | {"tpls": tpls, "categories": categories}
+    return templates.TemplateResponse(request=request, name="templates.html", context=ctx)
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -1329,13 +1400,7 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
                 for stage in r.stage_runs
             ],
         }
-        files = [
-            _file_summary(x)
-            for x in session.scalars(
-                select(PlaudFile).order_by(PlaudFile.start_time_ms.desc()).limit(300)
-            )
-        ]
-    ctx = _base_ctx(request, "recordings") | {"f": f, "files": files, "q": ""}
+    ctx = _base_ctx(request, "allfiles") | {"f": f}
     return templates.TemplateResponse(request=request, name="detail.html", context=ctx)
 
 

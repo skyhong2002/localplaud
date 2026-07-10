@@ -69,6 +69,8 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "Processing details" in r.text
     assert "embedding model unavailable" in r.text
     assert "Resume" in r.text and "Rebuild all" in r.text
+    assert ".segedit[hidden] { display:none; }" in r.text
+    assert ".sb-group { flex-direction:row; flex:none; }" in r.text
 
 
 def test_status_page_renders(monkeypatch, tmp_path):
