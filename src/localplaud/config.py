@@ -124,6 +124,9 @@ class PipelineConfig(BaseModel):
     # The daemon yields after a small newest-first batch so fresh recordings
     # are discovered promptly instead of sitting behind a months-long backlog.
     files_per_cycle: int = 1
+    # Character budget per LLM call. Longer transcripts are covered through
+    # hierarchical map/reduce notes instead of being truncated.
+    summary_chunk_chars: int = 12_000
     # Which summary template to use (default | meeting | call | lecture |
     # personal — see worker/summary_templates.py).
     summary_template: str = "default"

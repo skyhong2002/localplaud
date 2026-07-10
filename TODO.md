@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-10)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (120 tests passing locally).
+  Active development is merged directly to `main` (125 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -79,8 +79,10 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 
 ### P0 — Full-transcript notes and usable knowledge
 
-- Replace the current 24,000-character truncation with full-coverage hierarchical
-  summarization.
+- ✅ Replaced the 24,000-character truncation with bounded hierarchical
+  map/reduce summarization. Every transcript chunk contributes coverage notes before
+  the selected template produces final Markdown; stage provenance records strategy,
+  transcript size, chunks, and map/reduce call counts.
 - Make templates editable data; support auto selection, per-file custom generation,
   multiple note tabs, provenance, and safe regeneration.
 - Re-index the corrected canonical transcript. Add single-file Ask and whole-library

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from localplaud.asr.base import Segment, Transcript
-from localplaud.worker.summarize import _extract_title, _render_transcript
+from localplaud.worker.summarize import _chunk_text, _extract_title, _render_transcript
 
 
 def _transcript(*segs: Segment) -> Transcript:
@@ -56,6 +56,44 @@ def test_render_no_marker_when_under_limit():
 
 def test_render_empty_transcript():
     assert _render_transcript(_transcript()) == ""
+
+
+def test_chunk_text_preserves_every_character():
+    text = "first line\n" + "x" * 35 + "\nlast line"
+    chunks = _chunk_text(text, 12)
+    assert all(len(chunk) <= 12 for chunk in chunks)
+    assert "".join(chunks).replace("\n", "") == text.replace("\n", "")
+
+
+def test_long_transcript_uses_every_chunk_before_final_summary(monkeypatch):
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import summarize
+
+    calls: list[str] = []
+
+    class FakeLlm:
+        def complete(self, prompt, **kwargs):
+            calls.append(prompt)
+            if prompt.startswith("Extract faithful coverage notes"):
+                return f"coverage note {len(calls)}"
+            if prompt.startswith("Consolidate these ordered coverage notes"):
+                return "consolidated coverage"
+            return "# Complete note\n\n## Summary\nAll parts covered."
+
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda cfg: FakeLlm())
+    transcript = _transcript(*(
+        Segment(text=f"segment-{idx}-" + chr(65 + idx) * 35, start=idx, end=idx + 1)
+        for idx in range(4)
+    ))
+    settings = Settings(pipeline={"summary_chunk_chars": 50})
+    result = summarize(transcript, settings)
+
+    map_prompts = [p for p in calls if p.startswith("Extract faithful coverage notes")]
+    assert len(map_prompts) == result["coverage"]["chunks"]
+    assert result["coverage"]["strategy"] == "hierarchical"
+    assert result["coverage"]["transcript_chars"] == len(_render_transcript(transcript))
+    assert "[truncated]" not in "".join(map_prompts)
+    assert result["title"] == "Complete note"
 
 
 # --------------------------------------------------------------------------- #

@@ -256,7 +256,10 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         provider=result.get("provider"),
                         model=result.get("model"),
                         artifact_source="local",
-                        detail={"template": result.get("template", "default")},
+                        detail={
+                            "template": result.get("template", "default"),
+                            "coverage": result.get("coverage", {}),
+                        },
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript remains usable
                     log.exception("Summarization failed for %s", file_id)
