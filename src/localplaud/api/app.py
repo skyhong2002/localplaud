@@ -224,7 +224,13 @@ def file_detail(request: Request, file_id: str):
             "summaries": summaries,
             "error": r.error,
         }
-    ctx = _base_ctx(request, "recordings") | {"f": f}
+        files = [
+            _file_summary(x)
+            for x in session.scalars(
+                select(PlaudFile).order_by(PlaudFile.start_time_ms.desc()).limit(300)
+            )
+        ]
+    ctx = _base_ctx(request, "recordings") | {"f": f, "files": files, "q": ""}
     return templates.TemplateResponse(request=request, name="detail.html", context=ctx)
 
 

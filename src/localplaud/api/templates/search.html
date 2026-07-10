@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Search — localplaud{% endblock %}
 {% block body %}
-<h1 class="page">Semantic search</h1>
+<div class="content"><div class="pane-inner">
+<h1 class="page">Ask &amp; Search</h1>
 <form method="get" action="/search" class="ask">
   <input class="search-input" name="q" value="{{ q }}" autofocus
          placeholder="Search across every transcript by meaning…">
@@ -30,4 +31,5 @@
 {% else %}
 <div class="empty"><div class="big">🔎</div>Search your recordings by meaning, not just keywords.</div>
 {% endif %}
+</div></div>
 {% endblock %}

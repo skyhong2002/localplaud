@@ -48,7 +48,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert r.status_code == 200
     assert "SPEAKER_00" in r.text
     assert 'data-start' in r.text  # seekable segments
-    assert "meeting" in r.text  # summary tab
+    assert "meeting" in r.text.lower()  # summary tab
 
 
 def test_status_page_renders(monkeypatch, tmp_path):

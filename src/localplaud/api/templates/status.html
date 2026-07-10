@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Status — localplaud{% endblock %}
 {% block body %}
+<div class="content"><div class="pane-inner">
 <h1 class="page">Status</h1>
 
 <div class="stats">
@@ -50,4 +51,5 @@
     <div><span class="sub">Poll interval</span><br><code>{{ cfg.poll_interval }}s</code></div>
   </div>
 </div>
+</div></div>
 {% endblock %}

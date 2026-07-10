@@ -1,81 +1,66 @@
 {% extends "base.html" %}
 {% block title %}{{ f.filename }} — localplaud{% endblock %}
 {% block body %}
-<a class="backlink" href="/">← Recordings</a>
-<div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap">
-  <div>
-    <h1 class="page" style="margin-bottom:4px">{{ f.filename }}</h1>
-    <div class="sub" style="margin-bottom:16px">
-      {{ f.start_time_ms | dt }} &nbsp;·&nbsp; {{ f.duration_ms | dur }}
-      {% if f.transcript %} &nbsp;·&nbsp; {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %}{% endif %}
-      &nbsp;·&nbsp; <span class="st {{ f.status }}">{{ f.status }}</span>
-    </div>
-  </div>
-  <div style="display:flex; gap:8px; align-items:center">
-    {% if f.transcript or f.summaries %}
-    <a class="btn sec" href="/file/{{ f.id }}/export.md" style="font-size:13px; padding:8px 13px">Export .md</a>
-    {% endif %}
-    <button class="btn sec" style="font-size:13px; padding:8px 13px"
-            hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
-            hx-confirm="Re-run the pipeline (transcribe → summarize → index) for this recording?">
-      Re-run pipeline
-    </button>
-  </div>
-</div>
-<div id="reprocess-msg" class="sub" style="margin:-8px 0 12px; font-size:13px"></div>
-
-{% if f.has_audio %}
-<div class="panel" style="padding:12px 16px; margin-bottom:18px">
-  <audio id="player" controls preload="none" src="/audio/{{ f.id }}"></audio>
-</div>
-{% endif %}
-
-{% if f.error %}<div class="panel" style="border-color:var(--err);color:var(--err);margin-bottom:18px">⚠ {{ f.error }}</div>{% endif %}
-
-{% if f.summaries %}
-<div class="panel" style="margin-bottom:18px">
-  <div class="tabs">
-    {% for s in f.summaries %}
-    <button data-tab="{{ loop.index0 }}" class="{% if loop.first %}on{% endif %}">
-      {{ s.template }}{% if s.source == 'cloud' %} ☁{% endif %}
-    </button>
-    {% endfor %}
-  </div>
-  {% for s in f.summaries %}
-  <div class="md sumtab" data-tab="{{ loop.index0 }}" {% if not loop.first %}hidden{% endif %} data-md>{{ s.content_md }}</div>
-  {% endfor %}
-</div>
-{% endif %}
-
-{% if f.transcript %}
-<div class="panel">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-    <strong>Transcript</strong>
-    <a class="chip" href="/status" style="opacity:.7">{{ f.transcript.segments|length }} segments</a>
-  </div>
-  {% if f.speakers %}
-  <div class="legend" id="legend"></div>
-  {% endif %}
-  <div id="transcript">
-    {% for seg in f.transcript.segments %}
-    <div class="seg {% if seg.speaker %}spk{% endif %}" data-start="{{ seg.start or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
-      {% if seg.speaker %}<div class="bar"></div>{% endif %}
-      <div class="ts">{{ (seg.start or 0) | mmss }}</div>
-      <div class="txt">
-        {% if seg.speaker %}<span class="who">{{ seg.speaker }}</span> {% endif %}{{ seg.text }}
+<div class="shell">
+  {% set active_id = f.id %}
+  {% include "_filelist.html" %}
+  <section class="pane"><div class="pane-inner">
+    <a class="backlink" href="/">← All files</a>
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap">
+      <div>
+        <h1 class="page">{{ f.filename }}</h1>
+        <div class="sub" style="margin-top:2px">
+          {{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}
+          {% if f.transcript %} · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %}{% endif %}
+          · <span class="st {{ f.status }}">{{ f.status }}</span>
+        </div>
+      </div>
+      <div style="display:flex; gap:7px">
+        {% if f.transcript or f.summaries %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:8px 12px; font-size:13px">Export</a>{% endif %}
+        <button class="btn sec" style="padding:8px 12px; font-size:13px"
+          hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
+          hx-confirm="Re-run the pipeline for this recording?">Re-run</button>
       </div>
     </div>
+    <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px"></div>
+
+    {% if f.has_audio %}<audio id="player" controls preload="none" src="/audio/{{ f.id }}"></audio>{% endif %}
+    {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}</div>{% endif %}
+
+    <div class="tabs">
+      {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}
+      {% for s in f.summaries %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template|capitalize }}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
+    </div>
+
+    {% if f.transcript %}
+    <div class="tabpanel" data-panel="transcript">
+      {% if f.speakers %}<div class="legend" id="legend"></div>{% endif %}
+      <div id="transcript">
+        {% for seg in f.transcript.segments %}
+        <div class="seg {% if seg.speaker %}spk{% endif %}" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
+          <div class="ts">{{ (seg.start or 0) | mmss }}</div>
+          <div class="txt">
+            {% if seg.speaker %}<span class="who"><span class="dot"></span>{{ seg.speaker }}</span><br>{% endif %}{{ seg.text }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% for s in f.summaries %}
+    <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %} data-md>{{ s.content_md }}</div>
     {% endfor %}
-  </div>
+
+    {% if not f.transcript and not f.summaries %}
+    <div class="empty"><div class="big">📝</div>Not processed yet — no transcript or notes.</div>
+    {% endif %}
+  </div></section>
 </div>
-{% else %}
-<div class="empty"><div class="big">📝</div>No transcript yet — the pipeline hasn't processed this recording.</div>
-{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
-  // Lightweight, XSS-safe markdown for summaries.
   const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   document.querySelectorAll('[data-md]').forEach(el => {
     el.innerHTML = esc(el.textContent.trim())
@@ -83,29 +68,23 @@
       .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
       .replace(/^\s*[-*] (.*)$/gm,'• $1<br>').replace(/\n{2,}/g,'<br><br>');
   });
-  // Summary tabs
+  // tabs
+  const panels = document.querySelectorAll('.tabpanel');
   document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
-    document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
-    b.classList.add('on');
-    document.querySelectorAll('.sumtab').forEach(t=>t.hidden = t.dataset.tab!==b.dataset.tab);
+    document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    panels.forEach(p => p.hidden = p.dataset.panel !== b.dataset.panel);
   });
-  // Speaker colors + legend + click-to-seek
-  const vars=['--sp0','--sp1','--sp2','--sp3','--sp4','--sp5','--sp6','--sp7'];
-  const seen={};
-  document.querySelectorAll('.seg[data-spk]').forEach(seg=>{
-    const s=seg.dataset.spk; const i=window.spkColor(s);
-    seg.style.setProperty('--c', `var(${vars[i]})`);
-    seen[s]=i;
-  });
+  // speaker colors + legend
+  const vars=['--sp0','--sp1','--sp2','--sp3','--sp4','--sp5','--sp6','--sp7'], seen={};
+  document.querySelectorAll('.seg[data-spk]').forEach(seg=>{ const s=seg.dataset.spk, i=window.spkColor(s);
+    seg.style.setProperty('--c',`var(${vars[i]})`); seen[s]=i; });
   const legend=document.getElementById('legend');
-  if(legend) Object.entries(seen).forEach(([s,i])=>{
-    legend.insertAdjacentHTML('beforeend',
-      `<span class="item"><span class="swatch" style="background:var(${vars[i]})"></span>${esc(s)}</span>`);
-  });
-  const player=document.getElementById('player');
-  document.querySelectorAll('.seg[data-start]').forEach(seg=>seg.onclick=()=>{
-    if(!player) return; player.currentTime=parseFloat(seg.dataset.start)||0; player.play();
-    window.scrollTo({top:0,behavior:'smooth'});
-  });
+  if(legend) Object.entries(seen).forEach(([s,i])=>legend.insertAdjacentHTML('beforeend',
+    `<span class="item"><span class="swatch" style="background:var(${vars[i]})"></span>${esc(s)}</span>`));
+  // click-to-seek + red active segment synced to audio (Plaud-style)
+  const player=document.getElementById('player'), segs=[...document.querySelectorAll('.seg[data-start]')];
+  segs.forEach(seg=>seg.onclick=()=>{ if(player){ player.currentTime=parseFloat(seg.dataset.start)||0; player.play(); }});
+  if(player) player.ontimeupdate=()=>{ const t=player.currentTime;
+    segs.forEach(s=>s.classList.toggle('active', t>=parseFloat(s.dataset.start) && t<parseFloat(s.dataset.end||1e9))); };
 </script>
 {% endblock %}
