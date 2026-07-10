@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-10)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (125 tests passing locally).
+  Active development is merged directly to `main` (197 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -14,11 +14,13 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 - **Product direction changed**: localplaud must replace the Plaud Intelligence
   subscription workflow. Plaud is retained only for recorder → App → raw-audio
   cloud transport. See `AGENTS.md` and `docs/product-workflow.md`.
-- **Current production is not yet subscription-independent**: its running process
-  started with `prefer_cloud_artifacts = true`, previously imported Plaud artifacts,
-  and diarization disabled. The earlier embedding blocker is repaired on the host
-  (`bge-m3` installed and `/api/embed` smoke-tested), but the service still needs a
-  controlled restart onto the new independent-mode code and backlog verification.
+- **Independent mode is live in production**: the service was backed up and
+  restarted on the current `main` with `artifact_mode = "independent"` and
+  `prefer_cloud_artifacts = false`; local transcript revisions preserve provenance,
+  mind maps are resumable, and a real failed mind-map stage was retried successfully
+  after fixing thinking-only Ollama completions. The remaining production quality
+  blocker is diarization: pyannote is configured, but model-term acceptance and a
+  Hugging Face token are still missing, so affected files remain usable `partial`.
 - Dev env on SkyLabMac: `~/Projects/localplaud` (venv, ffmpeg static, config.toml, `.env`). Claude Code CLI installed (`~/.local/bin/claude`).
 
 ## TODO — prioritized
