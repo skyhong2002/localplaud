@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Status — localplaud{% endblock %}
+{% block body %}
+<h1 class="page">Status</h1>
+
+<div class="stats">
+  <div class="tile"><div class="k">Recordings</div><div class="v">{{ stats.total }}</div></div>
+  <div class="tile"><div class="k">Processed</div><div class="v">{{ stats.done }}</div></div>
+  <div class="tile"><div class="k">In progress</div><div class="v">{{ stats.processing }}</div></div>
+  <div class="tile"><div class="k">Total audio</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
+</div>
+
+<div class="cols" style="grid-template-columns:1fr 1fr; gap:16px">
+  <div class="panel">
+    <strong>Environment</strong>
+    <div style="margin-top:10px; display:flex; flex-direction:column; gap:7px">
+      {% for c in checks %}
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px">
+        <span>{{ c.name }}</span>
+        <span style="display:flex;align-items:center;gap:8px">
+          {% if c.detail %}<span class="sub" style="font-size:12px">{{ c.detail }}</span>{% endif %}
+          <span style="color:{% if c.ok %}var(--ok){% else %}var(--err){% endif %};font-weight:700">{% if c.ok %}✓{% else %}✗{% endif %}</span>
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <strong>Pipeline</strong>
+    <div style="margin-top:10px; display:flex; flex-direction:column; gap:7px">
+      {% for name, count in status_rows %}
+      <div style="display:flex; justify-content:space-between">
+        <span class="st {{ name }}" style="background:none;padding:0">{{ name }}</span>
+        <span style="font-variant-numeric:tabular-nums">{{ count }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:16px">
+  <strong>Configuration</strong>
+  <div style="margin-top:10px; display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px">
+    <div><span class="sub">ASR</span><br><code>{{ cfg.asr }}</code></div>
+    <div><span class="sub">LLM</span><br><code>{{ cfg.llm }}</code></div>
+    <div><span class="sub">Embeddings</span><br><code>{{ cfg.embeddings }}</code></div>
+    <div><span class="sub">Diarize</span><br><code>{{ cfg.diarize }}</code></div>
+    <div><span class="sub">Summary template</span><br><code>{{ cfg.summary_template }}</code></div>
+    <div><span class="sub">Poll interval</span><br><code>{{ cfg.poll_interval }}s</code></div>
+  </div>
+</div>
+{% endblock %}

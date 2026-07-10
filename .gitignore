@@ -51,3 +51,4 @@ GOAL_CONDITION.md
 GOAL_PROMPT.md
 .claude/settings.local.json
 HANDOFF.md
+.claude/launch.json

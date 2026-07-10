@@ -1,27 +1,48 @@
 {% extends "base.html" %}
 {% block body %}
+<div class="stats">
+  <div class="tile"><div class="k">Recordings</div><div class="v">{{ stats.total }}</div></div>
+  <div class="tile"><div class="k">Processed</div><div class="v">{{ stats.done }}</div></div>
+  <div class="tile"><div class="k">In progress</div><div class="v">{{ stats.processing }}</div></div>
+  <div class="tile"><div class="k">Total audio</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
+</div>
+
 <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin">
-  <input name="q" placeholder="Ask your recordings anything…" autocomplete="off" required>
-  <button type="submit">Ask</button>
+  <input name="q" placeholder="Ask your recordings anything…  (e.g. what did we decide about pricing?)" autocomplete="off" required>
+  <button class="btn" type="submit">Ask</button>
 </form>
-<div id="spin" class="htmx-indicator src">thinking…</div>
+<div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">thinking…</div>
 <div id="answer"></div>
 
+<form method="get" action="/" class="ask" style="margin-top:6px">
+  <input class="search-input" name="q" value="{{ q }}" placeholder="Filter recordings by name…">
+  <button class="btn sec" type="submit">Filter</button>
+  <a class="btn sec" href="/search" style="display:grid;place-items:center">Semantic search →</a>
+</form>
+
 {% if files %}
+<div class="list">
   {% for f in files %}
-  <div class="card">
-    <div>
-      <div><a href="/file/{{ f.id }}">{{ f.filename or f.id[:12] }}</a></div>
-      <div class="meta">{{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}</div>
+  <a class="rec" href="/file/{{ f.id }}">
+    <div class="icon">{% if f.scene == 1 %}👥{% else %}🎙️{% endif %}</div>
+    <div class="body">
+      <div class="name">{{ f.filename }}</div>
+      <div class="meta">{{ f.start_time_ms | dt }} &nbsp;·&nbsp; {{ f.duration_ms | dur }}</div>
     </div>
-    <div class="tags">
-      <span class="tag {% if f.has_transcript %}on{% endif %}">transcript</span>
-      <span class="tag {% if f.has_summary %}on{% endif %}">summary</span>
-      <span class="status {{ f.status }}">{{ f.status }}</span>
+    <div class="right">
+      {% if f.has_transcript %}<span class="chip on">transcript</span>{% endif %}
+      {% if f.has_summary %}<span class="chip on">notes</span>{% endif %}
+      <span class="st {{ f.status }}">{{ f.status }}</span>
     </div>
-  </div>
+  </a>
   {% endfor %}
+</div>
 {% else %}
-  <div class="empty">No recordings yet.<br>Run <code>localplaud poll --once</code> to sync from the Plaud cloud.</div>
+<div class="empty">
+  <div class="big">🎙️</div>
+  {% if q %}No recordings match “{{ q }}”.{% else %}
+  No recordings yet.<br>Run <code>localplaud auth import</code> then <code>localplaud poll --once</code> to sync from the Plaud cloud.
+  {% endif %}
+</div>
 {% endif %}
 {% endblock %}
