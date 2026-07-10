@@ -38,8 +38,15 @@ def test_find_url_strict_by_default():
     assert "trans_result" in _find_url(obj, must_contain=("trans_result",))
 
 
+def _no_ssrf(monkeypatch):
+    # These tests exercise fetch/parse logic, not the SSRF guard (which does
+    # real DNS). The guard has its own dedicated tests below.
+    monkeypatch.setattr("localplaud.plaud.client._assert_safe_fetch_url", lambda u: None)
+
+
 @respx.mock
-def test_download_audio_uses_temp_url_and_mp3_ext(tmp_path):
+def test_download_audio_uses_temp_url_and_mp3_ext(tmp_path, monkeypatch):
+    _no_ssrf(monkeypatch)
     fid = "abc123"
     signed = f"https://apse1-prod-plaud-bucket.s3.amazonaws.com/audiofiles/{fid}.mp3?AWSAccessKeyId=k&Signature=s&Expires=1"
     respx.get(f"{API}/file/temp-url/{fid}").mock(
@@ -56,7 +63,8 @@ def test_download_audio_uses_temp_url_and_mp3_ext(tmp_path):
 
 
 @respx.mock
-def test_get_cloud_summary_md_gunzips(tmp_path):
+def test_get_cloud_summary_md_gunzips(tmp_path, monkeypatch):
+    _no_ssrf(monkeypatch)
     fid = "abc"
     asset = f"https://apse1-prod-plaud-content-storage.s3.amazonaws.com/permanent/w/m/file_summary/{fid}/ai_content.md.gz?Signature=z"
     detail = {"status": 0, "data": {"assets": {"summary": asset}}}
@@ -67,6 +75,41 @@ def test_get_cloud_summary_md_gunzips(tmp_path):
     with PlaudClient(_cfg()) as c:
         md = c.get_cloud_summary_md(fid)
     assert md.startswith("# Title")
+
+
+def test_assert_safe_fetch_url_rejects_bad(monkeypatch):
+    import pytest
+
+    from localplaud.plaud.client import PlaudError, _assert_safe_fetch_url
+
+    # non-https rejected before any DNS
+    with pytest.raises(PlaudError):
+        _assert_safe_fetch_url("http://example.com/x")
+
+    # a host resolving to a private/loopback IP is rejected
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("169.254.169.254", 443))],
+    )
+    with pytest.raises(PlaudError):
+        _assert_safe_fetch_url("https://metadata.internal/x")
+
+    # a public IP passes
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("52.216.1.1", 443))]
+    )
+    _assert_safe_fetch_url("https://s3.amazonaws.com/x")  # no raise
+
+
+def test_bounded_gunzip_blocks_bomb():
+    import pytest
+
+    from localplaud.plaud.client import PlaudError, _bounded_gunzip
+
+    assert _bounded_gunzip(gzip.compress(b"hello"), 1000) == b"hello"
+    bomb = gzip.compress(b"\x00" * (5 * 1024 * 1024))
+    with pytest.raises(PlaudError):
+        _bounded_gunzip(bomb, 1024)
 
 
 @respx.mock

@@ -47,6 +47,7 @@ def test_audio_route_serves_and_404(monkeypatch, tmp_path):
 @respx.mock
 def test_ingest_cloud_summaries(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
+    monkeypatch.setattr("localplaud.plaud.client._assert_safe_fetch_url", lambda u: None)
     from localplaud.config import get_settings
     from localplaud.db.models import PlaudFile
     from localplaud.db.session import init_db, session_scope
