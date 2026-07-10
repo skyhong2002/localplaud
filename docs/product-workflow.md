@@ -215,7 +215,11 @@ now enforces local transcript provenance and safely preserves/requeues legacy Pl
 imports. Implemented pipeline stages now persist attempts, provider/model provenance,
 timestamps, and failures; optional-stage errors retain usable transcript/notes and
 can resume from existing artifacts. Ollama embeddings have model-aware health checks
-and modern batch API support. MLX large-v3-turbo is smoke-tested on SkyLabMac, and
+and modern batch API support. The recordings library now supports sortable
+name/duration/recorded columns, processing-state and capture-source filters, per-row
+processing state with error/partial attention indicators, and a read-only trash
+mirror view; folders/tags, uncategorized organization, and bulk operations remain.
+MLX large-v3-turbo is smoke-tested on SkyLabMac, and
 the code targets pyannote Community-1. Optional VAD groundwork now exists behind a
 default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-timestamp
 region offsetting; faster-whisper's native bundled VAD filter), and degrades honestly

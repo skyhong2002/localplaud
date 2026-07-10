@@ -89,6 +89,9 @@ def _file_summary(r: PlaudFile) -> dict:
         "duration_ms": r.duration_ms,
         "start_time_ms": r.start_time_ms,
         "scene": r.scene,
+        "scene_label": _scene_label(r.scene),
+        "is_trash": r.is_trash,
+        "needs_attention": r.status.value in _ATTENTION_STATES,
         "has_transcript": transcript is not None,
         "has_imported_transcript": r.plaud_transcript is not None,
         "has_summary": any(s.source == "local" for s in r.summaries),
@@ -103,6 +106,89 @@ def _base_ctx(request: Request, active: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# library sorting / filtering
+# --------------------------------------------------------------------------- #
+
+_SORT_COLUMNS = {
+    "recorded": PlaudFile.start_time_ms,
+    "name": PlaudFile.filename,
+    "duration": PlaudFile.duration_ms,
+}
+_STATE_VALUES = {s.value for s in FileStatus}
+_ATTENTION_STATES = {FileStatus.error.value, FileStatus.partial.value}
+
+
+def _scene_label(scene: int | None) -> str:
+    if scene is None:
+        return "Unknown source"
+    return f"Source {scene}"
+
+
+def _parse_library_params(
+    q: str | None,
+    sort: str | None,
+    dir: str | None,
+    state: str | None,
+    scene: str | None,
+    view: str | None,
+) -> dict:
+    """Normalize library query params, falling back to defaults on bad input."""
+    sort_key = sort if sort in _SORT_COLUMNS else "recorded"
+    direction = dir if dir in {"asc", "desc"} else "desc"
+    state_val = state if state in _STATE_VALUES else None
+    scene_val: int | None = None
+    if scene not in (None, ""):
+        try:
+            scene_val = int(scene)
+        except (TypeError, ValueError):
+            scene_val = None
+    view_val = view if view in {"all", "trash"} else "all"
+    return {
+        "q": q or "",
+        "sort": sort_key,
+        "dir": direction,
+        "state": state_val,
+        "scene": scene_val,
+        "view": view_val,
+    }
+
+
+def _library_query(params: dict):
+    """Build a PlaudFile select from normalized library params."""
+    column = _SORT_COLUMNS[params["sort"]]
+    order = column.asc() if params["dir"] == "asc" else column.desc()
+    # Stable tiebreaker so equal sort keys keep a deterministic order.
+    stmt = select(PlaudFile).order_by(order, PlaudFile.id.asc())
+    stmt = stmt.where(PlaudFile.is_trash.is_(params["view"] == "trash"))
+    if params["q"]:
+        stmt = stmt.where(PlaudFile.filename.ilike(f"%{params['q']}%"))
+    if params["state"] is not None:
+        stmt = stmt.where(PlaudFile.status == params["state"])
+    if params["scene"] is not None:
+        stmt = stmt.where(PlaudFile.scene == params["scene"])
+    return stmt
+
+
+def _library_facets(session, params: dict) -> dict:
+    """Cheap aggregate context: trash count and distinct capture-source scenes."""
+    trash_count = session.scalar(
+        select(func.count()).select_from(PlaudFile).where(PlaudFile.is_trash.is_(True))
+    ) or 0
+    scene_rows = session.execute(
+        select(PlaudFile.scene, func.count())
+        .where(PlaudFile.is_trash.is_(False))
+        .group_by(PlaudFile.scene)
+        .order_by(PlaudFile.scene)
+    ).all()
+    scenes = [
+        {"value": sc, "label": _scene_label(sc), "count": n, "active": sc == params["scene"]}
+        for sc, n in scene_rows
+        if sc is not None
+    ]
+    return {"trash_count": trash_count, "scenes": scenes}
+
+
+# --------------------------------------------------------------------------- #
 # health + JSON API
 # --------------------------------------------------------------------------- #
 
@@ -113,9 +199,17 @@ def healthz() -> JSONResponse:
 
 
 @app.get("/api/files")
-def api_files() -> JSONResponse:
+def api_files(
+    q: str | None = None,
+    sort: str | None = None,
+    dir: str | None = None,
+    state: str | None = None,
+    scene: str | None = None,
+    view: str | None = None,
+) -> JSONResponse:
+    params = _parse_library_params(q, sort, dir, state, scene, view)
     with session_scope() as session:
-        rows = session.scalars(select(PlaudFile).order_by(PlaudFile.start_time_ms.desc()))
+        rows = session.scalars(_library_query(params).limit(300))
         data = [_file_summary(r) for r in rows]
     return JSONResponse({"files": data})
 
@@ -145,15 +239,30 @@ def _stats(session) -> dict:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request, q: str | None = None):
+def index(
+    request: Request,
+    q: str | None = None,
+    sort: str | None = None,
+    dir: str | None = None,
+    state: str | None = None,
+    scene: str | None = None,
+    view: str | None = None,
+):
+    params = _parse_library_params(q, sort, dir, state, scene, view)
     with session_scope() as session:
-        stmt = select(PlaudFile).order_by(PlaudFile.start_time_ms.desc())
-        if q:
-            stmt = stmt.where(PlaudFile.filename.ilike(f"%{q}%"))
-        rows = list(session.scalars(stmt.limit(300)))
+        rows = list(session.scalars(_library_query(params).limit(300)))
         files = [_file_summary(r) for r in rows]
         stats = _stats(session)
-    ctx = _base_ctx(request, "recordings") | {"files": files, "stats": stats, "q": q or ""}
+        facets = _library_facets(session, params)
+    ctx = _base_ctx(request, "recordings") | {
+        "files": files,
+        "stats": stats,
+        "q": params["q"],
+        "lib": params,
+        "facets": facets,
+        "states": [s.value for s in FileStatus],
+        "attention_states": _ATTENTION_STATES,
+    }
     return templates.TemplateResponse(request=request, name="index.html", context=ctx)
 
 

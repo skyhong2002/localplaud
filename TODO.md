@@ -114,8 +114,12 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 - Match the audited daily navigation model: Home/recent files, Search, all files,
   uncategorized, trash/recovery, folders, capture-source facets, library Ask,
   Templates, Discover/Automation, and Settings with responsive persistence.
-- Add sortable library columns (name, duration, creation date), visible processing
-  state, attention indicators, bulk selection, and safe recovery from trash.
+- ✅ Added sortable library columns (name, duration, recorded date) with direction
+  indicators, processing-state and capture-source filters, an always-visible per-row
+  processing state, error/partial attention indicators, and a read-only trash mirror
+  view with count (localplaud never deletes cloud data). `/` and `/api/files` share
+  the sort/state/scene/view params and fall back safely on bad input. Bulk selection,
+  folders/tags, and uncategorized organization still remain.
 - Add an explicit raw-ASR versus corrected-canonical transcript switch, synchronized
   timestamps/speaker labels, transcript-local search and find/replace, and preserve
   edits independently from the raw artifact.
