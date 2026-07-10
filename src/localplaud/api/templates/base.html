@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}localplaud{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <style>
     /* Design tokens matched to Plaud's shipped web app:
@@ -41,9 +42,11 @@
     /* sidebar */
     .sidebar { width:var(--sidebar-w); flex:none; background:var(--bg); border-right:1px solid var(--border);
       display:flex; flex-direction:column; padding:14px 10px; gap:2px; }
-    .brand { display:flex; align-items:center; gap:9px; padding:6px 8px 12px; font-weight:700; font-size:15px; letter-spacing:-.01em; }
-    .brand .logo { width:26px; height:26px; border-radius:7px; flex:none; display:grid; place-items:center; color:#fff; font-size:14px;
-      background:linear-gradient(150deg,var(--red),var(--red-2)); box-shadow:0 2px 6px rgba(241,67,73,.32); }
+    .brand { display:flex; align-items:center; gap:9px; padding:6px 8px 12px; }
+    .brand svg { width:26px; height:26px; flex:none; border-radius:7px; box-shadow:0 2px 6px rgba(0,122,255,.28); }
+    .wm { font-weight:700; font-size:15.5px; letter-spacing:-.02em; }
+    .wm .a { color:var(--muted); } .wm .b { font-style:normal;
+      background:linear-gradient(120deg,var(--blue),var(--purple)); -webkit-background-clip:text; background-clip:text; color:transparent; }
     .navi { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:var(--radius); color:var(--fg); font-weight:500; }
     .navi .ic { width:18px; text-align:center; font-size:14px; }
     .navi:hover { background:var(--panel); }
@@ -139,7 +142,17 @@
 </head>
 <body>
   <aside class="sidebar">
-    <div class="brand"><span class="logo">◍</span><span class="lbl">localplaud</span></div>
+    <div class="brand">
+      <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="localplaud">
+        <defs><linearGradient id="bg" x1="6" y1="4" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#3D9BFF"/><stop offset=".55" stop-color="#007AFF"/><stop offset="1" stop-color="#8F53ED"/></linearGradient></defs>
+        <rect width="48" height="48" rx="12" fill="url(#bg)"/>
+        <rect x="18" y="9" width="12" height="19" rx="6" fill="#fff"/>
+        <path d="M13.5 22.5a10.5 10.5 0 0 0 21 0" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        <path d="M24 33v5M18.5 38.5h11" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+      <span class="wm lbl"><span class="a">local</span><span class="b">plaud</span></span>
+    </div>
     <a class="navi {% if active=='recordings' %}on{% endif %}" href="/"><span class="ic">🎙️</span><span class="lbl">All files</span></a>
     <a class="navi {% if active=='search' %}on{% endif %}" href="/search"><span class="ic">🔍</span><span class="lbl">Ask &amp; Search</span></a>
     <div class="grow"></div>

@@ -1,4 +1,8 @@
-<h1 align="center">localplaud</h1>
+<p align="center">
+  <img src="src/localplaud/api/static/wordmark.svg" alt="localplaud" height="52">
+</p>
+
+<h1 align="center"></h1>
 
 <p align="center">
   <b>A self-hosted Plaud clone.</b> Keep recording with your physical Plaud device,
