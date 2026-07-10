@@ -160,6 +160,10 @@ generated transcripts as pipeline completion. Explicit `migration` mode can impo
 Plaud Intelligence artifacts for comparison/backfill; imported rows keep their
 provenance and never silently replace a later local transcript.
 
+For Ollama-backed LLMs or embeddings, `localplaud doctor` validates the configured
+model as well as the daemon. A missing model is reported with the exact `ollama pull`
+command; embedding uses Ollama's batch `/api/embed` endpoint when available.
+
 ## ASR providers
 
 ASR remains pluggable, but the subscription-independent quality baseline is local

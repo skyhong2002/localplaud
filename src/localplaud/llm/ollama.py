@@ -22,14 +22,12 @@ class OllamaProvider:
         self.cfg = cfg
 
     def available(self) -> bool:
-        """True if the Ollama server answers on ``/api/tags``."""
-        try:
-            import httpx
+        return self.health()[0]
 
-            resp = httpx.get(f"{self.cfg.host}/api/tags", timeout=5)
-            return resp.status_code == 200
-        except Exception:  # noqa: BLE001 - any failure means unavailable
-            return False
+    def health(self) -> tuple[bool, str]:
+        from ..ollama import model_health
+
+        return model_health(self.cfg.host, self.cfg.model)
 
     def complete(
         self,
@@ -61,6 +59,15 @@ class OllamaProvider:
                 f"cannot reach Ollama at {self.cfg.host}: {exc}"
             ) from exc
         if resp.status_code != 200:
+            if resp.status_code == 404:
+                from ..ollama import response_error
+
+                error = response_error(resp)
+                if "model" in error.lower() and "not found" in error.lower():
+                    raise LLMUnavailable(
+                        f"Ollama model {self.cfg.model!r} is not installed; "
+                        f"run `ollama pull {self.cfg.model}`"
+                    )
             raise LLMError(
                 f"Ollama returned HTTP {resp.status_code}: {resp.text[:500]}"
             )

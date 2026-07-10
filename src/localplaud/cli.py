@@ -394,14 +394,26 @@ def doctor():
     try:
         from .llm.base import build_llm
 
-        row(f"llm:{settings.llm.provider}", build_llm(settings.llm).available())
+        provider = build_llm(settings.llm)
+        health = getattr(provider, "health", None)
+        if callable(health):
+            ok, detail = health()
+            row(f"llm:{settings.llm.provider}", ok, detail)
+        else:
+            row(f"llm:{settings.llm.provider}", provider.available())
     except Exception as exc:  # noqa: BLE001
         row(f"llm:{settings.llm.provider}", False, str(exc)[:60])
 
     try:
         from .embeddings.base import build_embedder
 
-        row(f"embeddings:{settings.embeddings.provider}", build_embedder(settings.embeddings).available())
+        provider = build_embedder(settings.embeddings)
+        health = getattr(provider, "health", None)
+        if callable(health):
+            ok, detail = health()
+            row(f"embeddings:{settings.embeddings.provider}", ok, detail)
+        else:
+            row(f"embeddings:{settings.embeddings.provider}", provider.available())
     except Exception as exc:  # noqa: BLE001
         row(f"embeddings:{settings.embeddings.provider}", False, str(exc)[:60])
 

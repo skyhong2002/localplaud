@@ -18,10 +18,9 @@ log = logging.getLogger(__name__)
 
 
 class OllamaEmbedder:
-    name = "ollama"
-
     def __init__(self, cfg: OllamaEmbeddingsConfig):
         self.cfg = cfg
+        self.name = f"ollama:{cfg.model}"
         self._dim: int | None = None
 
     @property
@@ -31,28 +30,61 @@ class OllamaEmbedder:
         return self._dim
 
     def available(self) -> bool:
-        try:
-            import httpx
+        return self.health()[0]
 
-            return httpx.get(f"{self.cfg.host}/api/tags", timeout=5).status_code == 200
-        except Exception:  # noqa: BLE001
-            return False
+    def health(self) -> tuple[bool, str]:
+        from ..ollama import model_health
+
+        return model_health(self.cfg.host, self.cfg.model)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         import httpx
 
-        vectors: list[list[float]] = []
+        if not texts:
+            return []
+        host = self.cfg.host.rstrip("/")
         try:
             with httpx.Client(timeout=300) as client:
-                for text in texts:
-                    resp = client.post(
-                        f"{self.cfg.host}/api/embeddings",
-                        json={"model": self.cfg.model, "prompt": text},
+                response = client.post(
+                    f"{host}/api/embed",
+                    json={"model": self.cfg.model, "input": texts},
+                )
+                if response.status_code == 404:
+                    from ..ollama import response_error
+
+                    error = response_error(response)
+                    if "model" in error.lower() and "not found" in error.lower():
+                        raise EmbeddingUnavailable(
+                            f"Ollama model {self.cfg.model!r} is not installed; "
+                            f"run `ollama pull {self.cfg.model}`"
+                        )
+                    # Ollama before /api/embed accepted one prompt at a time.
+                    vectors = []
+                    for text in texts:
+                        legacy = client.post(
+                            f"{host}/api/embeddings",
+                            json={"model": self.cfg.model, "prompt": text},
+                        )
+                        if legacy.status_code == 404:
+                            legacy_error = response_error(legacy)
+                            if "model" in legacy_error.lower():
+                                raise EmbeddingUnavailable(
+                                    f"Ollama model {self.cfg.model!r} is not installed; "
+                                    f"run `ollama pull {self.cfg.model}`"
+                                )
+                        legacy.raise_for_status()
+                        vectors.append(legacy.json()["embedding"])
+                    return vectors
+                response.raise_for_status()
+                vectors = response.json()["embeddings"]
+                if len(vectors) != len(texts):
+                    raise EmbeddingError(
+                        f"Ollama returned {len(vectors)} embeddings for {len(texts)} inputs"
                     )
-                    resp.raise_for_status()
-                    vectors.append(resp.json()["embedding"])
+                return vectors
+        except EmbeddingError:
+            raise
         except httpx.HTTPError as exc:
             raise EmbeddingUnavailable(f"Ollama embeddings request failed: {exc}") from exc
-        except (KeyError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             raise EmbeddingError(f"unexpected Ollama embeddings response: {exc}") from exc
-        return vectors

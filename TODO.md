@@ -13,11 +13,11 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 - **Product direction changed**: localplaud must replace the Plaud Intelligence
   subscription workflow. Plaud is retained only for recorder → App → raw-audio
   cloud transport. See `AGENTS.md` and `docs/product-workflow.md`.
-- **Current production is not yet subscription-independent**: it has
-  `prefer_cloud_artifacts = true`, previously imported Plaud artifacts, diarization
-  disabled, and an embedding failure (`bge-m3` is not installed; Ollama returns 404).
-  On the latest inspection the database had 747 downloaded, 1 processing, 6 error,
-  0 done, and 0 indexed chunks. Do not describe production as end-to-end healthy.
+- **Current production is not yet subscription-independent**: its running process
+  started with `prefer_cloud_artifacts = true`, previously imported Plaud artifacts,
+  and diarization disabled. The earlier embedding blocker is repaired on the host
+  (`bge-m3` installed and `/api/embed` smoke-tested), but the service still needs a
+  controlled restart onto the new independent-mode code and backlog verification.
 - Dev env on SkyLabMac: `~/Projects/localplaud` (venv, ffmpeg static, config.toml, `.env`). Claude Code CLI installed (`~/.local/bin/claude`).
 
 ## TODO — prioritized
@@ -47,8 +47,10 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   as `localplaud prepare-independent` and run once on independent-mode startup.
 - Replace the one-file `status` gate with durable per-stage runs and retries. ASR,
   transcript, and notes remain usable if mind map, embedding, or an integration fails.
-- Fix Ollama embeddings with model-level health checks and pull/validate the selected
-  embedding model before processing the backlog.
+- ✅ Fixed Ollama embeddings: model-level health checks now distinguish a healthy
+  daemon from a missing configured model, errors give the exact `ollama pull` action,
+  modern `/api/embed` batches inputs with legacy compatibility, and stored provenance
+  includes the model. Pulled `bge-m3` on SkyLabMac and smoke-tested two 1024-d vectors.
 - Make queue ordering useful: newest recordings first for daily use, controlled
   backlog processing separately, with visible progress and retry policy.
 

@@ -295,7 +295,13 @@ def _health_checks(settings) -> list[dict]:
         (f"embeddings · {settings.embeddings.provider}", lambda: __import__("localplaud.embeddings.base", fromlist=["build_embedder"]).build_embedder(settings.embeddings)),
     ):
         try:
-            add(label, builder().available())
+            provider = builder()
+            health = getattr(provider, "health", None)
+            if callable(health):
+                ok, detail = health()
+                add(label, ok, detail)
+            else:
+                add(label, provider.available())
         except Exception as exc:  # noqa: BLE001
             add(label, False, str(exc)[:50])
     has_creds = bool(settings.plaud.token or settings.plaud.cookie)

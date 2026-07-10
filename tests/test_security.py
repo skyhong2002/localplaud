@@ -66,4 +66,4 @@ def test_ollama_embedder_dispatch():
 
     e = build_embedder(EmbeddingsConfig(provider="ollama"))
     assert isinstance(e, OllamaEmbedder)
-    assert e.name == "ollama"
+    assert e.name == "ollama:bge-m3"
