@@ -210,7 +210,8 @@ Transcript export must allow timestamps and speaker names to be toggled.
 ## Current gaps
 
 As of 2026-07-10, the repository has the core poll/download/process/store/UI skeleton,
-but this document describes the target rather than current parity. Major gaps include
-strict raw-audio-only processing, stage-level state, reliable embeddings, default
+but this document describes the target rather than current parity. Independent mode
+now enforces local transcript provenance and safely preserves/requeues legacy Plaud
+imports. Major remaining gaps include stage-level state, reliable embeddings, default
 diarization, word alignment, editable artifacts, long-form summarization, mind maps,
 single-file Ask, richer organization/export, automation, and UI polish.

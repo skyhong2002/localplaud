@@ -40,8 +40,10 @@ audio download, pluggable local ASR, diarization, LLM notes, embeddings/Q&A, aud
 playback, and a FastAPI Web App. It runs natively and in Docker profiles.
 
 The subscription-replacement experience is **in progress**, not complete. The
-current implementation still needs strict raw-audio-only processing, durable
-stage-level state, the large-v3-turbo + alignment + diarization default path,
+default `independent` artifact mode now refuses Plaud transcripts as pipeline input,
+preserves them as visibly labelled imports, and safely requeues legacy cloud-derived
+rows for local ASR. The implementation still needs durable stage-level state, the
+large-v3-turbo + alignment + diarization default path,
 long-recording summarization, editable transcripts/speakers/notes, mind maps,
 single-file Ask, richer export/organization/automation, and Plaud-level Web App
 polish. Plaud-produced transcripts and summaries may be imported for migration or
@@ -108,6 +110,7 @@ localplaud run
 | `localplaud init` | Create the database + data dirs |
 | `localplaud auth login` / `auth check` | One-time OAuth sign-in / verify the session |
 | `localplaud doctor` | Check ffmpeg + your ASR/LLM/embedding providers + auth |
+| `localplaud prepare-independent [--force]` | Preserve imports and requeue legacy cloud-derived files for local ASR |
 | `localplaud poll [--once]` | Sync the cloud listing + download audio |
 | `localplaud work [--once] [--force]` | Run the pipeline on downloaded recordings |
 | `localplaud run` | Poll + process + serve, all together |
@@ -151,6 +154,11 @@ LOCALPLAUD_PLAUD__COOKIE="Authorization: Bearer ..."
 LOCALPLAUD_ASR__OPENAI__API_KEY="sk-..."
 LOCALPLAUD_DIARIZE__HF_TOKEN="hf_..."
 ```
+
+`pipeline.artifact_mode = "independent"` is the default and accepts only locally
+generated transcripts as pipeline completion. Explicit `migration` mode can import
+Plaud Intelligence artifacts for comparison/backfill; imported rows keep their
+provenance and never silently replace a later local transcript.
 
 ## ASR providers
 

@@ -80,3 +80,36 @@ def test_search_page_renders_empty(monkeypatch, tmp_path):
     assert r.status_code == 200
     # a query with no index / provider shouldn't 500
     assert c.get("/search?q=anything").status_code == 200
+
+
+def test_independent_ui_labels_imported_transcript_without_treating_it_as_local(
+    monkeypatch, tmp_path
+):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, Summary, Transcript
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        file = PlaudFile(id="cloud", filename="Cloud import", status=FileStatus.downloaded)
+        file.transcripts = [
+            Transcript(
+                provider="plaud",
+                source="cloud",
+                text="imported text",
+                segments=[{"text": "imported text", "start": 0.0, "end": 1.0}],
+            )
+        ]
+        file.summaries = [Summary(template="plaud", source="cloud", content_md="note")]
+        s.add(file)
+
+    listing = c.get("/api/files").json()["files"][0]
+    assert listing["has_transcript"] is False
+    assert listing["has_imported_transcript"] is True
+    assert listing["has_summary"] is False
+    assert listing["has_imported_summary"] is True
+
+    detail = c.get("/file/cloud")
+    assert detail.status_code == 200
+    assert "Plaud import" in detail.text
+    assert "canonical result" in detail.text
+    assert "imported text" in detail.text

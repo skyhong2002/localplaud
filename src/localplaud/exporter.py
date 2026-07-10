@@ -54,13 +54,19 @@ def render_markdown(file_id: str) -> str:
         if meta:
             parts += ["*" + " · ".join(meta) + "*", ""]
 
-        for summary in file.summaries:
+        independent = get_settings().pipeline.artifact_mode == "independent"
+        summaries = (
+            [summary for summary in file.summaries if summary.source == "local"]
+            if independent
+            else file.summaries
+        )
+        for summary in summaries:
             heading = f"## {summary.template}"
             if summary.title:
                 heading += f": {summary.title}"
             parts += [heading, "", summary.content_md.strip(), ""]
 
-        transcript = file.transcript
+        transcript = file.local_transcript if independent else file.transcript
         if transcript is not None and transcript.segments:
             parts += ["## Transcript", ""]
             for seg in transcript.segments:

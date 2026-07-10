@@ -29,6 +29,7 @@
 
     <div class="tabs">
       {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}
+      {% if f.imported_transcript %}<button data-panel="imported" class="{% if not f.transcript and not f.summaries %}on{% endif %}">Plaud import ☁</button>{% endif %}
       {% for s in f.summaries %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template|capitalize }}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
     </div>
 
@@ -48,11 +49,30 @@
     </div>
     {% endif %}
 
+    {% if f.imported_transcript %}
+    <div class="tabpanel" data-panel="imported" {% if f.transcript or f.summaries %}hidden{% endif %}>
+      <div class="panel sub" style="margin:8px 0 14px">
+        Imported from Plaud for migration/comparison. Independent processing does not
+        use this transcript as its canonical result.
+      </div>
+      <div class="transcript-import">
+        {% for seg in f.imported_transcript.segments %}
+        <div class="seg" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}">
+          <div class="ts">{{ (seg.start or 0) | mmss }}</div>
+          <div class="txt">
+            {% if seg.speaker %}<span class="who">{{ seg.speaker }}</span><br>{% endif %}{{ seg.text }}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     {% for s in f.summaries %}
     <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %} data-md>{{ s.content_md }}</div>
     {% endfor %}
 
-    {% if not f.transcript and not f.summaries %}
+    {% if not f.transcript and not f.imported_transcript and not f.summaries %}
     <div class="empty"><div class="big">📝</div>Not processed yet — no transcript or notes.</div>
     {% endif %}
   </div></section>

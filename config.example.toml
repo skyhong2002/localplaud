@@ -57,18 +57,23 @@ summarize = true
 index = true                     # build embeddings for Q&A / search
 concurrency = 1                  # files processed in parallel by the worker
 summary_template = "default"     # default | meeting | call | lecture | personal
+# "independent" (default) accepts only raw audio + metadata from Plaud and
+# requires a local transcript. "migration" permits explicitly imported Plaud
+# Intelligence artifacts for comparison/backfill.
+artifact_mode = "independent"
 # Migration/debug only. The subscription-independent workflow keeps this false
-# and derives every artifact from raw audio. A future strict mode will also refuse
-# to reuse previously imported Plaud artifacts.
+# and derives every artifact from raw audio; imported Plaud rows remain separately
+# labelled and are not reused. Effective only in migration mode.
 prefer_cloud_artifacts = false
 
 # --------------------------------------------------------------------------- #
-# ASR — speech recognition. Pluggable; local and cloud are equal choices.
+# ASR — speech recognition. Local turbo is the subscription-independent baseline;
+# cloud providers are explicit operator choices, never a silent paid fallback.
 # --------------------------------------------------------------------------- #
 [asr]
 provider = "faster-whisper"      # faster-whisper | whispercpp | mlx-whisper | openai | deepgram | assemblyai
 language = "auto"                # ISO code (e.g. "en", "zh") or "auto"
-fallback = ["openai"]            # tried in order if the primary can't run
+fallback = []                    # opt in explicitly; avoid surprise paid processing
 
   [asr.faster_whisper]           # local, CPU or NVIDIA CUDA (CTranslate2)
   model = "large-v3-turbo"

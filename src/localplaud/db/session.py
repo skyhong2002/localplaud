@@ -35,9 +35,15 @@ def get_engine() -> Engine:
     return _engine
 
 
-def init_db() -> None:
-    """Create tables if they don't exist."""
-    Base.metadata.create_all(get_engine())
+def init_db() -> dict[str, int] | None:
+    """Create tables and prepare legacy cloud-derived rows when required."""
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    if get_settings().pipeline.artifact_mode == "independent":
+        from .migrations import prepare_independent_mode
+
+        return prepare_independent_mode(engine)
+    return None
 
 
 @contextmanager

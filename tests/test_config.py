@@ -50,7 +50,18 @@ def test_defaults_without_env(monkeypatch, tmp_path):
     assert s.asr.provider == "faster-whisper"
     assert s.plaud.auth_mode == "cookie"
     assert s.pipeline.transcribe is True
+    assert s.pipeline.artifact_mode == "independent"
+    assert s.pipeline.cloud_import_enabled is False
     assert s.diarize.provider == "pyannote"
+
+
+def test_cloud_import_requires_explicit_migration_mode(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__PREFER_CLOUD_ARTIFACTS", "true")
+    assert Settings().pipeline.cloud_import_enabled is False
+
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__ARTIFACT_MODE", "migration")
+    assert Settings().pipeline.cloud_import_enabled is True
 
 
 def test_get_settings_reload(monkeypatch, tmp_path):

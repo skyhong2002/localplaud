@@ -166,11 +166,10 @@ def _download_one(client, file_id: str, raw: dict, settings: Settings) -> bool:
 
             fresh.downloaded_at = datetime.now(UTC)
             fresh.error = None
-        if settings.pipeline.prefer_cloud_artifacts:
+        if settings.pipeline.cloud_import_enabled:
             # The official client already fetched (and cached) the detail
-            # payload for the presigned URL — mirroring Plaud's own
-            # transcript/summary here is nearly free and lets the pipeline
-            # skip local re-transcription.
+            # payload for the presigned URL. Explicit migration mode may retain
+            # Plaud's transcript/summary for comparison or backfill.
             try:
                 _ingest_artifacts_for(client, file_id)
             except Exception as exc:  # noqa: BLE001
@@ -254,7 +253,7 @@ def _ingest_artifacts_for(client, file_id: str) -> bool:
             return False
         filename = row.filename
         has_summary = any(s.template == "plaud" for s in row.summaries)
-        has_transcript = row.transcript is not None
+        has_transcript = any(t.source in {"cloud", "plaud"} for t in row.transcripts)
 
     stored = False
     md = None if has_summary else client.get_cloud_summary_md(file_id)
@@ -284,6 +283,14 @@ def _ingest_artifacts_for(client, file_id: str) -> bool:
                 )
             )
             session.get(PlaudFile, file_id).cloud_is_trans = True
+            # If the operator later returns to independent mode, the one-time
+            # backlog preparation must run again for this newly imported row.
+            from ..db.migrations import INDEPENDENT_MIGRATION_KEY
+            from ..db.models import KeyValue
+
+            marker = session.get(KeyValue, INDEPENDENT_MIGRATION_KEY)
+            if marker is not None:
+                session.delete(marker)
         stored = True
 
     # Remember which filename this check ran under, so we only re-check after
@@ -296,8 +303,9 @@ def _ingest_artifacts_for(client, file_id: str) -> bool:
 
 def ingest_cloud_artifacts(client, settings: Settings) -> int:
     """Mirror Plaud's own transcript (with speakers) and summary (markdown)
-    for files that have them, stored as ``source="cloud"`` rows. The pipeline
-    reuses a mirrored transcript, skipping local re-transcription entirely.
+    for files that have them, stored as ``source="cloud"`` rows. Automatic use is
+    restricted to explicit migration mode; independent mode never treats these
+    rows as canonical pipeline output.
 
     Candidates: files whose cloud flags say an artifact exists but isn't
     mirrored yet, plus files renamed since the last check (Plaud retitles a
@@ -310,12 +318,18 @@ def ingest_cloud_artifacts(client, settings: Settings) -> int:
             missing_summary = r.cloud_is_summary and not any(
                 s.template == "plaud" for s in r.summaries
             )
-            missing_transcript = r.cloud_is_trans and r.transcript is None
+            has_cloud_transcript = any(
+                t.source in {"cloud", "plaud"} for t in r.transcripts
+            )
+            missing_transcript = r.cloud_is_trans and not has_cloud_transcript
             renamed = (
                 bool(r.filename)
                 and not _looks_like_raw_name(r.filename)
                 and (r.raw or {}).get(_ARTIFACT_CHECKED_KEY) != r.filename
-                and (not any(s.template == "plaud" for s in r.summaries) or r.transcript is None)
+                and (
+                    not any(s.template == "plaud" for s in r.summaries)
+                    or not has_cloud_transcript
+                )
             )
             if missing_summary or missing_transcript or renamed:
                 candidates.append(r.id)
@@ -333,7 +347,7 @@ def ingest_cloud_artifacts(client, settings: Settings) -> int:
 def poll_once(settings: Settings | None = None) -> dict:
     """One full poll cycle: sync listing (+ optional apse1 enrichment) +
     download pending (+ mirror Plaud's own transcripts/summaries when
-    ``pipeline.prefer_cloud_artifacts`` is set)."""
+    explicit migration mode is enabled)."""
     settings = settings or get_settings()
     reset_inflight()
     reset_download_errors()
@@ -343,7 +357,7 @@ def poll_once(settings: Settings | None = None) -> dict:
         downloaded = download_pending(client, settings)
         cloud_artifacts = (
             ingest_cloud_artifacts(client, settings)
-            if settings.pipeline.prefer_cloud_artifacts
+            if settings.pipeline.cloud_import_enabled
             else 0
         )
     result = {"new": new + enriched_new, "changed": changed + enriched_changed,

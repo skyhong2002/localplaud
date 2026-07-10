@@ -43,6 +43,28 @@ def init():
     console.print(f"[green]✓[/] Audio dir: [bold]{settings.poller.download_dir}[/]")
 
 
+@app.command("prepare-independent")
+def prepare_independent(
+    force: bool = typer.Option(
+        False, "--force", help="Re-scan even when the migration marker already exists."
+    ),
+):
+    """Preserve Plaud imports and requeue cloud-derived files for local ASR."""
+    from .db.migrations import prepare_independent_mode
+    from .db.models import Base
+    from .db.session import get_engine
+
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    counts = prepare_independent_mode(engine, force=force)
+    console.print(
+        "[green]✓[/] Independent-mode preparation: "
+        f"[bold]{counts['requeued']}[/] requeued, "
+        f"{counts['summaries']} legacy summaries relabelled, "
+        f"{counts['chunks']} stale chunks removed."
+    )
+
+
 @auth_app.command("check")
 def auth_check():
     """Verify your Plaud session works (whoami against the configured provider)."""
@@ -272,12 +294,17 @@ def list_files(limit: int = typer.Option(30, help="Max rows.")):
             select(PlaudFile).order_by(PlaudFile.start_time_ms.desc()).limit(limit)
         )
         for r in rows:
+            transcript = (
+                r.local_transcript
+                if get_settings().pipeline.artifact_mode == "independent"
+                else r.transcript
+            )
             table.add_row(
                 r.id[:10],
                 (r.filename or "")[:32],
                 r.status.value,
-                "✓" if r.transcript else "",
-                "✓" if r.summaries else "",
+                "✓" if transcript else "",
+                "✓" if any(s.source == "local" for s in r.summaries) else "",
             )
     console.print(table)
 

@@ -69,3 +69,87 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
     # With force: everything recomputes.
     process_file("f1", force=True)
     assert counters == {"asr": 2, "sum": 2, "emb": 2}
+
+
+def test_independent_mode_ignores_but_preserves_cloud_transcript(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.models import Transcript as TranscriptRow
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import process_file
+
+    init_db()
+    audio = tmp_path / "cloud.wav"
+    audio.write_bytes(b"RIFFfake")
+    with session_scope() as s:
+        s.add(
+            PlaudFile(
+                id="cloud-only",
+                filename="r",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+                transcripts=[
+                    TranscriptRow(
+                        provider="plaud",
+                        source="cloud",
+                        text="paid cloud text",
+                        segments=[{"text": "paid cloud text", "start": 0.0, "end": 1.0}],
+                    )
+                ],
+            )
+        )
+
+    counters = {"asr": 0, "sum": 0, "emb": 0}
+    _install_fakes(monkeypatch, counters)
+    process_file("cloud-only")
+    assert counters == {"asr": 1, "sum": 1, "emb": 1}
+
+    with session_scope() as s:
+        f = s.get(PlaudFile, "cloud-only")
+        assert {t.source for t in f.transcripts} == {"cloud", "local"}
+        assert f.transcript is not None
+        assert f.transcript.source == "local"
+        assert f.transcript.text == "hello world"
+
+    # Resume uses the local transcript and never falls back to the Plaud copy.
+    process_file("cloud-only")
+    assert counters == {"asr": 1, "sum": 1, "emb": 1}
+
+
+def test_migration_mode_can_explicitly_reuse_cloud_transcript(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__ARTIFACT_MODE", "migration")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__PREFER_CLOUD_ARTIFACTS", "true")
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.models import Transcript as TranscriptRow
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import process_file
+
+    settings = get_settings(reload=True)
+    init_db()
+    audio = tmp_path / "migration.wav"
+    audio.write_bytes(b"RIFFfake")
+    with session_scope() as s:
+        s.add(
+            PlaudFile(
+                id="migration",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+                transcripts=[
+                    TranscriptRow(
+                        provider="plaud",
+                        source="cloud",
+                        text="cloud text",
+                        segments=[{"text": "cloud text", "start": 0.0, "end": 1.0}],
+                    )
+                ],
+            )
+        )
+
+    counters = {"asr": 0, "sum": 0, "emb": 0}
+    _install_fakes(monkeypatch, counters)
+    process_file("migration", settings=settings)
+    assert counters == {"asr": 0, "sum": 1, "emb": 1}
+    with session_scope() as s:
+        assert [t.source for t in s.get(PlaudFile, "migration").transcripts] == ["cloud"]

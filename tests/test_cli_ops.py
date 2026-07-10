@@ -55,3 +55,12 @@ def test_reprocess_missing_file(monkeypatch, tmp_path):
     result = runner.invoke(app, ["reprocess", "nope"])
     assert result.exit_code == 1
     assert "no such file" in result.stdout
+
+
+def test_prepare_independent_command(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.cli import app
+
+    result = runner.invoke(app, ["prepare-independent"])
+    assert result.exit_code == 0
+    assert "Independent-mode preparation" in result.stdout

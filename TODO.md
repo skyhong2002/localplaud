@@ -34,11 +34,17 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 
 ### P0 — Make raw-audio processing production-safe
 
-- Add an explicit `independent`/`raw_audio_only` mode. It must reject Plaud-derived
-  transcripts and summaries even when old rows already exist; keep any imports
-  separately labelled for migration/comparison.
-- Migrate the existing database safely: preserve cloud artifacts, but do not let
-  them satisfy local completion. Queue raw audio for independent processing.
+- ✅ Added default `pipeline.artifact_mode = "independent"`: only `source=local`
+  transcripts satisfy the pipeline. Explicit `migration` mode retains the old
+  comparison/backfill behavior; automatic cloud import requires both migration mode
+  and `prefer_cloud_artifacts = true`.
+- ✅ Changed transcript storage to preserve multiple provenance rows. The canonical
+  Web/API/CLI/export surface prefers local output while labelling Plaud-only imports;
+  independent export excludes paid Plaud artifacts.
+- ✅ Added an idempotent legacy-data preparation: preserve Plaud transcript/notes,
+  relabel local summaries derived from a cloud-only transcript as `legacy`, clear
+  their non-provenanced chunks, and requeue audio for local ASR. Available explicitly
+  as `localplaud prepare-independent` and run once on independent-mode startup.
 - Replace the one-file `status` gate with durable per-stage runs and retries. ASR,
   transcript, and notes remain usable if mind map, embedding, or an integration fails.
 - Fix Ollama embeddings with model-level health checks and pull/validate the selected

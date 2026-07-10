@@ -80,7 +80,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         # --- transcribe (reuse an existing transcript to resume) ------ #
         transcript: Transcript | None = None
         if pcfg.transcribe:
-            existing = _load_transcript(file_id) if not force else None
+            existing = _load_transcript(file_id, settings) if not force else None
             if existing is not None:
                 log.info("Reusing existing transcript for %s", file_id)
                 transcript = existing
@@ -117,15 +117,28 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         raise
 
 
-def _load_transcript(file_id: str) -> Transcript | None:
+def _load_transcript(file_id: str, settings: Settings) -> Transcript | None:
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
-        return _rehydrate_transcript(row.transcript) if row and row.transcript else None
+        if row is None:
+            return None
+        local = [item for item in row.transcripts if item.source == "local"]
+        if settings.pipeline.artifact_mode == "independent":
+            selected = local[-1] if local else None
+        elif settings.pipeline.prefer_cloud_artifacts:
+            cloud = [item for item in row.transcripts if item.source in {"cloud", "plaud"}]
+            selected = cloud[-1] if cloud else (local[-1] if local else None)
+        else:
+            selected = local[-1] if local else None
+        return _rehydrate_transcript(selected) if selected else None
 
 
 def _has_summary(file_id: str, template: str) -> bool:
     with session_scope() as session:
-        return any(s.template == template for s in session.get(PlaudFile, file_id).summaries)
+        return any(
+            s.template == template and s.source == "local"
+            for s in session.get(PlaudFile, file_id).summaries
+        )
 
 
 def _has_chunks(file_id: str) -> bool:
@@ -137,7 +150,13 @@ def _has_chunks(file_id: str) -> bool:
 
 def _persist_transcript(file_id: str, transcript: Transcript) -> None:
     with session_scope() as session:
-        session.execute(delete(TranscriptRow).where(TranscriptRow.file_id == file_id))
+        # Preserve imported Plaud transcripts for comparison/migration. Only the
+        # canonical local ASR result is replaced.
+        session.execute(
+            delete(TranscriptRow).where(
+                TranscriptRow.file_id == file_id, TranscriptRow.source == "local"
+            )
+        )
         session.add(
             TranscriptRow(
                 file_id=file_id,
@@ -157,7 +176,9 @@ def _persist_summary(file_id: str, result: dict) -> None:
     with session_scope() as session:
         session.execute(
             delete(SummaryRow).where(
-                SummaryRow.file_id == file_id, SummaryRow.template == template
+                SummaryRow.file_id == file_id,
+                SummaryRow.template == template,
+                SummaryRow.source == "local",
             )
         )
         session.add(

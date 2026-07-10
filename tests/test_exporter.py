@@ -84,3 +84,27 @@ def test_export_to_file_explicit_dest(seeded_db, tmp_path):
     path = export_to_file(FILE_ID, dest)
     assert path == dest
     assert dest.exists()
+
+
+def test_independent_export_excludes_imported_plaud_artifacts(monkeypatch, tmp_path):
+    _fresh_db(monkeypatch, tmp_path)
+    init_db()
+    with session_scope() as session:
+        file = PlaudFile(id="imported", filename="Imported only")
+        file.transcripts = [
+            Transcript(
+                provider="plaud",
+                source="cloud",
+                text="paid transcript",
+                segments=[{"text": "paid transcript", "start": 0.0, "end": 1.0}],
+            )
+        ]
+        file.summaries = [
+            Summary(template="plaud", source="cloud", content_md="paid note")
+        ]
+        session.add(file)
+
+    md = render_markdown("imported")
+    assert "# Imported only" in md
+    assert "paid transcript" not in md
+    assert "paid note" not in md

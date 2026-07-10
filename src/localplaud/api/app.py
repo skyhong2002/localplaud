@@ -80,6 +80,8 @@ templates.env.filters["mmss"] = _mmss
 
 
 def _file_summary(r: PlaudFile) -> dict:
+    independent = get_settings().pipeline.artifact_mode == "independent"
+    transcript = r.local_transcript if independent else r.transcript
     return {
         "id": r.id,
         "filename": r.filename or r.id[:12],
@@ -87,10 +89,12 @@ def _file_summary(r: PlaudFile) -> dict:
         "duration_ms": r.duration_ms,
         "start_time_ms": r.start_time_ms,
         "scene": r.scene,
-        "has_transcript": r.transcript is not None,
-        "has_summary": bool(r.summaries),
+        "has_transcript": transcript is not None,
+        "has_imported_transcript": r.plaud_transcript is not None,
+        "has_summary": any(s.source == "local" for s in r.summaries),
+        "has_imported_summary": any(s.source in {"cloud", "plaud"} for s in r.summaries),
         "has_audio": bool(r.audio_path),
-        "speakers": (r.transcript.has_speakers if r.transcript else False),
+        "speakers": transcript.has_speakers if transcript else False,
     }
 
 
@@ -190,6 +194,7 @@ def audio(file_id: str):
 
 @app.get("/file/{file_id}", response_class=HTMLResponse)
 def file_detail(request: Request, file_id: str):
+    independent = get_settings().pipeline.artifact_mode == "independent"
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
         if r is None:
@@ -201,16 +206,27 @@ def file_detail(request: Request, file_id: str):
             key=lambda s: (s["template"] != "default", s["template"]),
         )
         transcript = None
+        imported_transcript = None
         speakers: list[str] = []
-        if r.transcript:
-            for seg in r.transcript.segments:
+        canonical_row = r.local_transcript if independent else r.transcript
+        if canonical_row:
+            for seg in canonical_row.segments:
                 sp = seg.get("speaker")
                 if sp and sp not in speakers:
                     speakers.append(sp)
             transcript = {
-                "provider": r.transcript.provider,
-                "language": r.transcript.language,
-                "segments": r.transcript.segments,
+                "provider": canonical_row.provider,
+                "language": canonical_row.language,
+                "source": canonical_row.source,
+                "segments": canonical_row.segments,
+            }
+        imported_row = r.plaud_transcript
+        if imported_row is not None and imported_row is not canonical_row:
+            imported_transcript = {
+                "provider": imported_row.provider,
+                "language": imported_row.language,
+                "source": imported_row.source,
+                "segments": imported_row.segments,
             }
         f = {
             "id": r.id,
@@ -220,6 +236,7 @@ def file_detail(request: Request, file_id: str):
             "start_time_ms": r.start_time_ms,
             "has_audio": bool(r.audio_path and Path(r.audio_path).exists()),
             "transcript": transcript,
+            "imported_transcript": imported_transcript,
             "speakers": speakers,
             "summaries": summaries,
             "error": r.error,

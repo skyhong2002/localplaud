@@ -15,6 +15,8 @@
       <div class="tags">
         {% if f.has_transcript %}<span class="chip on">transcript</span>{% endif %}
         {% if f.has_summary %}<span class="chip on">notes</span>{% endif %}
+        {% if not f.has_transcript and f.has_imported_transcript %}<span class="chip">Plaud import</span>{% endif %}
+        {% if not f.has_summary and f.has_imported_summary %}<span class="chip">Plaud notes</span>{% endif %}
         <span class="st {{ f.status }}">{{ f.status }}</span>
       </div>
     </a>

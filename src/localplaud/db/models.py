@@ -90,8 +90,10 @@ class PlaudFile(Base):
         DateTime(timezone=True), default=_now, onupdate=_now
     )
 
-    transcript: Mapped[Transcript | None] = relationship(
-        back_populates="file", uselist=False, cascade="all, delete-orphan"
+    transcripts: Mapped[list[Transcript]] = relationship(
+        back_populates="file",
+        cascade="all, delete-orphan",
+        order_by="Transcript.id",
     )
     summaries: Mapped[list[Summary]] = relationship(
         back_populates="file", cascade="all, delete-orphan"
@@ -99,6 +101,32 @@ class PlaudFile(Base):
     chunks: Mapped[list[Chunk]] = relationship(
         back_populates="file", cascade="all, delete-orphan"
     )
+
+    @property
+    def local_transcript(self) -> Transcript | None:
+        local = [row for row in self.transcripts if row.source == "local"]
+        return local[-1] if local else None
+
+    @property
+    def plaud_transcript(self) -> Transcript | None:
+        imported = [row for row in self.transcripts if row.source in {"cloud", "plaud"}]
+        return imported[-1] if imported else None
+
+    @property
+    def transcript(self) -> Transcript | None:
+        """Return the canonical transcript without hiding imported provenance.
+
+        A locally generated transcript always wins. Plaud/cloud transcripts remain
+        attached for migration or comparison and are returned only when no local
+        result exists. Pipeline code applies the stricter configured artifact mode
+        before deciding whether an existing transcript may be reused.
+        """
+        return self.local_transcript or self.plaud_transcript
+
+    @transcript.setter
+    def transcript(self, value: Transcript | None) -> None:
+        """Compatibility setter for callers that assign one transcript."""
+        self.transcripts = [] if value is None else [value]
 
 
 class Transcript(Base):
@@ -120,7 +148,7 @@ class Transcript(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
-    file: Mapped[PlaudFile] = relationship(back_populates="transcript")
+    file: Mapped[PlaudFile] = relationship(back_populates="transcripts")
 
 
 class Summary(Base):

@@ -124,9 +124,19 @@ class PipelineConfig(BaseModel):
     # Which summary template to use (default | meeting | call | lecture |
     # personal — see worker/summary_templates.py).
     summary_template: str = "default"
+    # independent: Plaud supplies metadata + raw audio only; only locally
+    # generated transcripts may satisfy the processing pipeline.
+    # migration: allow explicitly imported Plaud Intelligence artifacts for
+    # comparison/backfill. This mode is never the subscription-free default.
+    artifact_mode: Literal["independent", "migration"] = "independent"
     # Migration/debug import only. The independent primary workflow keeps this
-    # false and derives every artifact from raw audio.
+    # false and derives every artifact from raw audio. This compatibility flag
+    # is effective only when artifact_mode = "migration".
     prefer_cloud_artifacts: bool = False
+
+    @property
+    def cloud_import_enabled(self) -> bool:
+        return self.artifact_mode == "migration" and self.prefer_cloud_artifacts
 
 
 # ---- ASR providers ------------------------------------------------------- #

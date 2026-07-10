@@ -1,6 +1,6 @@
 # ADR 0007: Plaud subscription independence and artifact provenance
 
-Status: Accepted
+Status: Accepted; core provenance enforcement implemented 2026-07-10
 
 ## Context
 
@@ -30,9 +30,12 @@ while independently providing the processing and Web App workflow.
 
 ## Consequences
 
-- Setting `prefer_cloud_artifacts=false` is necessary but insufficient while old
-  cloud transcript rows can still be reused. The pipeline and schema need explicit
-  provenance-aware selection.
+- `pipeline.artifact_mode = "independent"` is the default and provenance-aware
+  transcript selection is enforced. `prefer_cloud_artifacts` has an effect only in
+  explicit migration mode.
+- Multiple transcript rows preserve both Plaud imports and the canonical local ASR
+  result. The one-time independent migration requeues cloud-only files, relabels
+  ambiguous local summaries as legacy, and clears their non-provenanced index chunks.
 - Initial backlog processing takes longer because all recordings need local work.
 - Imported Plaud output remains valuable for benchmark comparisons without becoming
   a production dependency.
