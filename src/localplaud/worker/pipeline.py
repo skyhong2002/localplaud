@@ -231,6 +231,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                     file_id,
                     StageName.diarize,
                     provider=settings.diarize.provider,
+                    model=settings.diarize.model,
                     artifact_source="local",
                 )
             except DiarizationUnavailable as exc:

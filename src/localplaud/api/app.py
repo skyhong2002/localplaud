@@ -330,8 +330,11 @@ def _health_checks(settings) -> list[dict]:
         checks.append({"name": name, "ok": ok, "detail": detail})
 
     from ..worker.convert import ffmpeg_available
+    from ..worker.diarize import health as diarization_health
 
     add("ffmpeg", ffmpeg_available(), "on PATH" if ffmpeg_available() else "missing")
+    diarize_ok, diarize_detail = diarization_health(settings.diarize)
+    add(f"diarization · {settings.diarize.provider}", diarize_ok, diarize_detail)
     for label, builder in (
         (f"asr · {settings.asr.provider}", lambda: __import__("localplaud.asr.registry", fromlist=["build_provider"]).build_provider(settings.asr.provider, settings.asr)),
         (f"llm · {settings.llm.provider}", lambda: __import__("localplaud.llm.base", fromlist=["build_llm"]).build_llm(settings.llm)),

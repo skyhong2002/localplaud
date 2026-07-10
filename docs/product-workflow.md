@@ -215,7 +215,8 @@ now enforces local transcript provenance and safely preserves/requeues legacy Pl
 imports. Implemented pipeline stages now persist attempts, provider/model provenance,
 timestamps, and failures; optional-stage errors retain usable transcript/notes and
 can resume from existing artifacts. Ollama embeddings have model-aware health checks
-and modern batch API support. Major remaining gaps include the production speech
-default (large-v3-turbo, VAD, alignment, and diarization), editable artifacts,
-long-form summarization, mind maps, single-file Ask, richer organization/export,
-automation, and UI polish.
+and modern batch API support. MLX large-v3-turbo is smoke-tested on SkyLabMac, and
+the code targets pyannote Community-1, but VAD/alignment plus authenticated
+real-audio diarization verification remain. Other major gaps include editable
+artifacts, long-form summarization, mind maps, single-file Ask, richer
+organization/export, automation, and UI polish.

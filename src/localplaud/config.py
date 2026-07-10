@@ -203,6 +203,7 @@ class AsrConfig(BaseModel):
 
 class DiarizeConfig(BaseModel):
     provider: Literal["pyannote", "none"] = "pyannote"
+    model: str = "pyannote/speaker-diarization-community-1"
     hf_token: str | None = None
     # Optional hints; leave 0/None to auto-detect.
     num_speakers: int | None = None

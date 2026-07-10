@@ -387,6 +387,11 @@ def doctor():
 
     row("ffmpeg", ffmpeg_available(), "on PATH" if ffmpeg_available() else "missing (needed to transcode)")
 
+    from .worker.diarize import health as diarization_health
+
+    diarize_ok, diarize_detail = diarization_health(settings.diarize)
+    row(f"diarization:{settings.diarize.provider}", diarize_ok, diarize_detail)
+
     try:
         from .asr.registry import build_provider
 

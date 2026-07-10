@@ -66,8 +66,11 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   NumPy below 2.5 for mlx-whisper/numba compatibility. SkyLabMac downloaded the
   1.61 GB model and completed a local Metal smoke test with word timestamps.
   CUDA/CPU still needs the equivalent turbo deployment verified on its target host.
-- Add VAD and word-level alignment, then production-quality pyannote diarization and
-  assign speakers to words/segments. Whisper itself is not speaker-aware.
+- ✅ Updated the diarization integration from legacy pyannote 3.1 to the current
+  open-source `speaker-diarization-community-1` API, including word/segment speaker
+  assignment, model provenance, and actionable health checks. SkyLabMac still needs
+  the optional dependency plus acceptance of the gated model terms and a Hugging
+  Face token before real-audio verification. VAD and word-level alignment remain.
 - Persist stable speaker IDs separately from editable display names.
 - Add a custom vocabulary/correction layer for names, specialist terms, Taiwan
   Mandarin, and Mandarin/English code-switching.

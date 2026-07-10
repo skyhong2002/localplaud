@@ -53,6 +53,7 @@ def test_defaults_without_env(monkeypatch, tmp_path):
     assert s.pipeline.artifact_mode == "independent"
     assert s.pipeline.cloud_import_enabled is False
     assert s.diarize.provider == "pyannote"
+    assert s.diarize.model == "pyannote/speaker-diarization-community-1"
 
 
 def test_cloud_import_requires_explicit_migration_mode(monkeypatch, tmp_path):

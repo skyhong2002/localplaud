@@ -24,6 +24,18 @@ class DiarizationUnavailable(DiarizationError):
     pass
 
 
+def health(cfg: DiarizeConfig) -> tuple[bool, str]:
+    if cfg.provider == "none":
+        return False, "disabled; speaker labels will not be generated"
+    try:
+        import pyannote.audio  # noqa: F401
+    except Exception as exc:  # noqa: BLE001 - binary dependency imports can fail broadly
+        return False, f"pyannote.audio unavailable: {exc}"
+    if not cfg.hf_token:
+        return False, "Hugging Face token missing; accept the model terms and set hf_token"
+    return True, f"model {cfg.model} configured"
+
+
 def _load_pipeline(cfg: DiarizeConfig):
     try:
         from pyannote.audio import Pipeline
@@ -35,7 +47,8 @@ def _load_pipeline(cfg: DiarizeConfig):
         )
     try:
         return Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1", use_auth_token=cfg.hf_token
+            cfg.model,
+            token=cfg.hf_token,
         )
     except Exception as exc:  # noqa: BLE001
         raise DiarizationUnavailable(f"could not load pyannote pipeline: {exc}") from exc
@@ -54,10 +67,17 @@ def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig) -> Transcript:
     if cfg.num_speakers:
         kwargs["num_speakers"] = cfg.num_speakers
     log.info("Running pyannote diarization on %s", wav_path)
-    annotation = pipeline(str(wav_path), **kwargs)
+    output = pipeline(str(wav_path), **kwargs)
+    annotation = getattr(output, "speaker_diarization", output)
 
     # Build (start, end, speaker) turns.
-    turns = [(turn.start, turn.end, spk) for turn, _, spk in annotation.itertracks(yield_label=True)]
+    if hasattr(annotation, "itertracks"):
+        turns = [
+            (turn.start, turn.end, spk)
+            for turn, _, spk in annotation.itertracks(yield_label=True)
+        ]
+    else:
+        turns = [(turn.start, turn.end, spk) for turn, spk in annotation]
 
     if not turns:
         # Diarization found nothing (e.g. near-silent audio) — don't claim we

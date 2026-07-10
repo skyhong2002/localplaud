@@ -185,6 +185,11 @@ pipeline of VAD, turbo ASR, word-level alignment, diarization (pyannote or a
 benchmarked equivalent), and speaker assignment. A provider returning only text is
 therefore not considered the complete default experience.
 
+The open-source diarization default is
+`pyannote/speaker-diarization-community-1`. Before first use, accept that gated
+model's Hugging Face terms and set `LOCALPLAUD_DIARIZE__HF_TOKEN`;
+`localplaud doctor` reports missing package/token state explicitly.
+
 | Provider          | Type   | Runs on                    | Diarization |
 | ----------------- | ------ | -------------------------- | ----------- |
 | `faster-whisper`  | local  | CPU / NVIDIA CUDA          | via pyannote |
