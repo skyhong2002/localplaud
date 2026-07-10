@@ -25,6 +25,15 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 
 ## TODO — prioritized
 
+Priority map:
+
+- **P0:** production-safe independent processing; the primary provider/model/profile
+  platform; production speech/diarization; full-coverage notes, mind maps, and Ask.
+- **P1:** expose the P0 capabilities as a complete daily-use Web App, then validate
+  the same product and execution profiles on Apple, NVIDIA, and CPU hosts.
+- **P2:** build AutoFlow and integrations on named P0 profiles and P1 controls; rules
+  orchestrate proven capabilities instead of inventing a second provider system.
+
 ### ✅ DONE (2026-07-10) — Foundation: official Open API and raw audio
 `plaud.provider = "official"` (default): OAuth via the official Plaud CLI
 (`localplaud auth login` wraps it; tokens in `~/.plaud/tokens.json`,
@@ -61,6 +70,82 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   `pipeline.files_per_cycle` so fresh recordings can enter between backlog batches;
   `localplaud work --once` remains the explicit full-backlog path. Stage/status
   counts provide progress; automatic retry backoff policy remains to be added.
+
+### P0 PRIMARY — Provider, model, and execution profiles
+
+**Outcome:** every derived stage can independently use a local model, a cloud API,
+or a remote worker. localplaud resolves those choices into a reusable execution
+profile, records the resolved snapshot on each run, and never crosses a privacy or
+cost boundary through an implicit fallback.
+
+Existing groundwork, not the finished feature:
+
+- ✅ Provider registries/config already exist for ASR, LLMs, and embeddings;
+  OpenAI-compatible `base_url` configuration exists for relevant API paths.
+- ✅ Stage runs and artifacts already retain provider/model provenance, and health
+  checks can distinguish some daemon-level and model-level failures.
+- Missing: a shared capability contract, durable provider/model/profile records,
+  profile resolution, Web management, explicit fallback policy, cost/privacy
+  controls, and a remote GPU worker protocol.
+
+Implement this P0 in the following order:
+
+1. **Stage and capability contracts.** Define a common provider interface for ASR,
+   alignment, diarization, transcript correction, notes, mind maps, embeddings, and
+   Ask. Capabilities must declare supported languages, timestamps/word timestamps,
+   speaker output, streaming/batch behavior, prompt limits, input limits, required
+   hardware, data-egress behavior, and health state. Treat OpenAI-compatible text,
+   audio, and embeddings as three separately declared capabilities; supporting one
+   must not imply the other two.
+2. **Durable provider/model/profile schema.** Store provider connections, model
+   catalog entries, secret references, reusable execution profiles, health checks,
+   and versions in the local database. A profile selects a provider/model and
+   stage-specific options for every enabled stage. Never store API keys directly in
+   ordinary profile or artifact rows.
+3. **Deterministic profile resolution.** Resolve in this order: system default →
+   folder/AutoFlow rule → template default → per-recording override. Persist the
+   fully resolved profile snapshot on every `StageRun` and derived artifact so later
+   settings changes do not rewrite history. Reprocessing may explicitly select a
+   newer profile or preserve the previous one.
+4. **Local hardware profiles.** Ship truthful starting profiles for Apple Silicon
+   (MLX Whisper large-v3-turbo), NVIDIA/CUDA (faster-whisper or verified WhisperX
+   integration plus pyannote), and CPU/other GPU (whisper.cpp or faster-whisper where
+   supported). Detect available hardware, memory, runtimes, and installed models,
+   then recommend rather than silently force a profile. Do not claim acceleration
+   on an unverified backend.
+5. **Cloud and compatible API profiles.** Support OpenAI Audio, text/Responses or
+   chat-compatible generation, and embeddings as explicit capabilities; preserve
+   the existing Deepgram and AssemblyAI ASR paths; and support custom
+   OpenAI-compatible base URL, key reference, model name, headers, timeout, and
+   limits per capability. Add an experimental trusted-single-user `codex-local`
+   text provider only through a supported Codex CLI/app-server boundary: never copy
+   or scrape ChatGPT/Codex auth tokens, never present it as a generic
+   OpenAI-compatible endpoint, and never enable it by default on a public or
+   multi-user deployment.
+6. **Remote GPU worker.** Define a versioned `localplaud-worker` protocol with
+   capability handshake, authenticated job submission, input transfer or signed
+   fetch, progress, cancellation, retry/idempotency, checksummed artifacts, and
+   structured errors. Workers receive only the minimum audio/job data and never
+   Plaud OAuth credentials. Validate both a self-owned NVIDIA host and one rentable
+   GPU deployment path.
+7. **Policy, fallback, and observability.** Profiles declare local-only/no-egress,
+   allowed providers, retry/timeout policy, fallback order, quality floor, and
+   optional cost ceiling. Never silently fall back from local to external. Show the
+   selected and actual provider/model, degraded capability, queue target, latency,
+   audio seconds/tokens, and estimated/actual cost where providers expose enough
+   data.
+8. **API and acceptance matrix.** Add APIs for connections, models, capabilities,
+   profiles, resolution previews, health tests, and per-recording overrides. Migrate
+   the current config into an equivalent default profile without changing existing
+   behavior. Test clean raw-audio completion on Apple local, NVIDIA local, CPU or
+   other supported fallback, OpenAI cloud, one partial OpenAI-compatible service,
+   and one remote worker. Benchmark Taiwan Mandarin and Mandarin/English recordings
+   before changing production defaults.
+
+The backend contracts, persistence, resolver, policy enforcement, and headless APIs
+are P0. The complete Settings/profile editor and per-recording picker are the P1 Web
+surface for this P0 foundation; AutoFlow consumes named profiles in P2 instead of
+embedding raw provider credentials or model settings in each rule.
 
 ### P0 — SOTA speech and speakers
 
@@ -154,17 +239,34 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   audited transcript choices TXT/SRT/DOCX/PDF with timestamp and speaker-label
   toggles, then retain the broader localplaud export targets below.
 - Treat the Web App as the product, not a status viewer. CLI remains setup/ops tooling.
+- Add provider/model/profile management to Settings: connection setup, capability
+  and model health, recommended local profiles, cost/privacy policy, remote workers,
+  resolution preview, defaults, and a per-recording override/reprocess picker. Keep
+  secrets masked and make the actual selected provider visible during processing.
 - Add original localplaud visual design with Plaud-like interaction density and
   information architecture; do not copy Plaud assets.
 - Export audio, TXT/Markdown/SRT/VTT/DOCX/PDF transcripts, Markdown/DOCX/PDF notes,
   and PNG mind maps with speaker/timestamp options (Markdown mind-map export ships
   in the combined Markdown export).
 
+### P1 — Multi-host deployment
+
+- **CCLabPC** (nvplaud.observe.tw, NVIDIA/CUDA): docker `gpu` profile or native;
+  needs user in `docker` group. DNS already points here. Use this host to validate
+  the NVIDIA Local execution profile and worker capability contract.
+- **Oracle** (plaud.skyhong.tw, aarch64 CPU): `cpu` slim image (already builds/runs
+  there) + Caddy vhost; use an explicit CPU or cloud profile rather than assuming GPU
+  acceleration.
+- Pattern to reuse: append a `<domain> { basic_auth … ; reverse_proxy
+  127.0.0.1:8080 }` block to that host's Caddyfile (SkyLabMac already done this way).
+
 ### P2 — Automation and integrations
 
 - Rules matching source, duration, early-transcript keyword, folder/tag, and metadata.
-- Per-rule ASR/diarization/template selection, notification, email, webhook, and
-  export actions with independent retry/history.
+- Per-rule named execution-profile and template selection, notification, email,
+  webhook, and export actions with independent retry/history. Rules may override
+  safe profile fields, but must not duplicate credentials or silently cross the
+  profile's privacy/cost policy.
 - Add a Discover hub for AutoFlow, local applications, and integrations. AutoFlow
   must show enablement, notification state, a readable trigger/action sentence,
   ownership/editability, history, and failures; local rules must be editable on Web,
@@ -174,11 +276,6 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   apps/integrations, support, and version/about. Show integration scopes, health,
   last use, and revoke controls without mixing them with destructive account actions.
 - Native PKCE inside localplaud to remove the Node.js dependency from first login.
-
-### P1 — Deploy the other two machines
-- **CCLabPC** (nvplaud.observe.tw, NVIDIA/CUDA): docker `gpu` profile or native; needs user in `docker` group. DNS already points here.
-- **Oracle** (plaud.skyhong.tw, aarch64 CPU): `cpu` slim image (already builds/runs there) + Caddy vhost; cloud ASR.
-- Pattern to reuse: append a `<domain> { basic_auth … ; reverse_proxy 127.0.0.1:8080 }` block to that host's Caddyfile (SkyLabMac already done this way).
 
 ### Housekeeping
 - Optional: root LaunchDaemon so production starts on boot without login (needs sudo).

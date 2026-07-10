@@ -124,7 +124,46 @@ accessibility require a different design.
 - Long recordings use full-coverage hierarchical summarization; silent truncation is
   forbidden.
 
-### 5. Automation
+### 5. Providers, models, and execution profiles
+
+Provider choice is stage-scoped. ASR, alignment, diarization, transcript correction,
+notes, mind maps, embeddings, and Ask may each use a different local runtime, cloud
+API, or remote worker. The product must not reduce this to one global “AI model”
+setting.
+
+- Reusable execution profiles group the provider, model, device/worker, stage
+  options, fallback policy, privacy boundary, and optional cost ceiling for all
+  enabled stages. Starting profiles include Apple Local, NVIDIA Local, CPU/Other
+  Local, OpenAI Cloud, OpenAI-compatible, and Remote GPU; users can copy and edit
+  them.
+- Profile resolution is deterministic: system default → folder/AutoFlow rule →
+  template default → per-recording override. The UI previews the resolved choices
+  before processing or reprocessing.
+- Providers advertise capabilities and health rather than relying on their names.
+  OpenAI-compatible text generation, audio transcription, and embeddings are
+  independently testable capabilities. A service that implements only one remains
+  valid for that stage without being presented as compatible with the others.
+- Local hardware detection recommends appropriate runtimes and model sizes, but the
+  user remains in control. Apple MLX, NVIDIA/CUDA, CPU, and other verified backends
+  expose their real device, memory, installed-model, and degraded-state information.
+- Remote GPU execution uses a versioned localplaud worker contract with capability
+  discovery, authenticated and idempotent jobs, minimal input access, progress,
+  cancellation, checksummed results, and retryable errors. A worker never receives
+  Plaud account credentials.
+- Profiles explicitly declare whether data may leave the host. Local-only/no-egress
+  mode cannot fall back to a cloud or rented worker. Every other fallback is visible,
+  ordered, and constrained by capability, quality, timeout, and cost policy.
+- Each stage run and artifact stores the resolved profile snapshot plus actual
+  provider, model, version, execution target, configuration/prompt version, timing,
+  and usage/cost data where available. Later profile edits never alter old
+  provenance.
+- An experimental trusted-single-user Codex-backed text provider may use a supported
+  local Codex CLI/app-server integration. It must not scrape or copy auth tokens,
+  masquerade as an OpenAI-compatible API, become an unattended public-server
+  default, or be treated as evidence that OpenAI API usage is included with a
+  ChatGPT/Codex subscription.
+
+### 6. Automation
 
 - Rules match source, duration, title/early-transcript keywords, folder/tag, or other
   explicit metadata.
@@ -139,11 +178,16 @@ accessibility require a different design.
   presenting controls that cannot save.
 - A failed downstream action can retry without rerunning ASR.
 
-### 6. Settings and system health
+### 7. Settings and system health
 
 - Plaud OAuth and last successful sync.
+- Provider connections, separately declared capabilities, model catalog, reusable
+  execution profiles, profile defaults, and resolution preview.
 - ASR model/device, diarization model/token, language defaults, and custom vocabulary.
-- LLM and embedding providers with real model-level health checks.
+- LLM and embedding providers with real model-level health checks, masked secret
+  references, test actions, and explicit data-egress/cost policy.
+- Remote workers with capability, device/memory, queue, version, last health check,
+  and revocation state.
 - Storage use, backup, retention, privacy, authentication, and remote-access settings.
 - Queue/stage status, current job, retry controls, and useful errors.
 - Separate, navigable sections for account/security and active sessions, workspace
@@ -166,6 +210,12 @@ discovered -> downloading -> downloaded -> converting -> transcribing
 every optional integration. Stages retain independent status and may be retried from
 their last valid input. The UI should expose friendly aggregate states while keeping
 detailed diagnostics available.
+
+Before work starts, localplaud resolves and persists the recording's execution
+profile. Each stage dispatches independently to its selected local runtime, cloud
+provider, or remote worker. Retries are idempotent and preserve the resolved profile
+unless the user explicitly chooses another profile; fallback never silently crosses
+the profile's privacy or cost boundary.
 
 The baseline speech stack is Whisper large-v3-turbo plus word alignment and
 production-quality speaker diarization. Speaker labels are derived by the
@@ -206,6 +256,18 @@ Transcript export must allow timestamps and speaker names to be toggled.
 6. A cited Ask answer opens the right recording and seeks to the relevant moment.
 7. The complete daily workflow after OAuth is usable from the Web App on desktop and
    mobile without CLI commands.
+8. The same clean raw recording can complete with an Apple-local profile and with an
+   NVIDIA-local or remote-GPU profile while retaining comparable timestamped,
+   diarized artifact contracts.
+9. OpenAI cloud text/audio/embedding capabilities and an OpenAI-compatible service's
+   partial capabilities are tested independently; unsupported stages are rejected or
+   routed according to the visible profile rather than guessed from the API shape.
+10. A local-only profile never sends audio, transcript, prompts, or embeddings to an
+    external provider, including during retries or health degradation.
+11. Editing a profile does not change the provider/model/configuration provenance of
+    prior stage runs or artifacts.
+12. Retrying or reconnecting a remote worker neither duplicates a completed artifact
+    nor discards a valid result from another stage.
 
 ## Current gaps
 
@@ -247,4 +309,8 @@ stale notes/maps until explicit regeneration, with a labelled raw-versus-correct
 view switch. Plaud-derived edits remain excluded from independent mode. Transcript
 find/replace, dependent-artifact revision links, and a revision history browser
 remain. Other major gaps include editable notes/templates, Ask save-to-note and
-follow-up threads, richer organization/export, automation, and UI polish.
+follow-up threads, richer organization/export, automation, and UI polish. Current
+ASR, LLM, and embedding provider settings are config-time integrations rather than a
+complete provider system: there is no shared capability catalog, durable execution
+profile schema/resolver, Web profile editor, privacy/cost-aware fallback policy, or
+versioned remote GPU worker protocol yet.

@@ -45,6 +45,10 @@ pipeline.
    Store stage-level status, error, provider, model, version, and timestamps.
 6. **The original audio and user edits are never destroyed.** Reprocessing creates
    traceable revisions or replaces only explicitly selected derived artifacts.
+7. **Provider choice is stage-scoped and explicit.** Local, cloud, and remote-worker
+   execution is selected through durable profiles with capability checks, provenance,
+   privacy/cost boundaries, and visible fallback. Never silently send local data to
+   an external provider because a preferred model is unavailable.
 
 The product and Web App acceptance specification is
 [`docs/product-workflow.md`](docs/product-workflow.md). Treat it as the source of
