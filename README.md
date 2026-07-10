@@ -53,17 +53,19 @@ comparison, but are not part of the target primary workflow.
 
 ## How it works
 
-```
-  Plaud device ──sync──► Plaud app ──upload──► Plaud cloud
-                                                   │
-                                    poll + download │  (localplaud, read-only)
-                                                   ▼
-   ┌─────────────────────────── localplaud ───────────────────────────┐
-   │  poller ─► store (audio on disk + SQLite) ─► worker pipeline:     │
-   │      convert ─► ASR ─► align ─► diarize ─► notes/map ─► index     │
-   │                                          │                        │
-   │                  Plaud-like Web App (review/edit/Ask/export)      │
-   └───────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    device["Plaud device"] -->|sync| app["Plaud app"]
+    app -->|upload| cloud["Plaud cloud"]
+    cloud -->|"poll + download · read-only"| poller
+
+    subgraph localplaud["localplaud"]
+        direction TB
+        poller["poller"] --> store["store<br/>audio on disk + SQLite"]
+        store --> convert["convert"] --> asr["ASR"] --> align["align"]
+        align --> diarize["diarize"] --> notes["notes + mind map"]
+        notes --> index["index"] --> web["Web App<br/>review · edit · Ask · export"]
+    end
 ```
 
 - **poller** — polls the Plaud cloud API, detects new or updated files (via
