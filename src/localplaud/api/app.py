@@ -365,6 +365,30 @@ def ask(request: Request, q: str = Form(...)):
     )
 
 
+@app.post("/file/{file_id}/ask", response_class=HTMLResponse)
+def file_ask(request: Request, file_id: str, q: str = Form(...)):
+    """Single-recording Ask: answer grounded only in this recording, with each
+    citation rendered as a playable timestamp (handled by [data-seek] JS)."""
+    with session_scope() as session:
+        r = session.get(PlaudFile, file_id)
+        if r is None:
+            return HTMLResponse("Not found", status_code=404)
+
+    from ..worker.qa import answer
+
+    try:
+        res = answer(q, file_id=file_id)
+    except Exception:  # noqa: BLE001 - embeddings/LLM provider may be unavailable
+        res = {
+            "answer": "Ask is unavailable right now — the embeddings or language "
+            "model provider could not be reached. Check Settings and try again.",
+            "sources": [],
+        }
+    return templates.TemplateResponse(
+        request=request, name="_file_answer.html", context={"q": q, "res": res}
+    )
+
+
 @app.get("/file/{file_id}/export.md")
 def export_markdown(file_id: str):
     """Download a recording's transcript + summaries as Markdown."""

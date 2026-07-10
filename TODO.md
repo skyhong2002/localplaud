@@ -85,8 +85,13 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   transcript size, chunks, and map/reduce call counts.
 - Make templates editable data; support auto selection, per-file custom generation,
   multiple note tabs, provenance, and safe regeneration.
-- Re-index the corrected canonical transcript. Add single-file Ask and whole-library
-  Ask with playable timestamp citations and save-to-note.
+- ✅ Single-file Ask: `/file/{id}/ask` answers grounded only in one recording, with
+  citations rendered as playable timestamp buttons that seek the player; suggested
+  grounded question chips; graceful degrade when unindexed or providers are down.
+- ✅ Whole-library Ask citations now deep-link to `/file/{id}?t={start}` and seek the
+  player on load, so a cited answer opens the recording at the cited moment.
+- Remaining: save-to-note from an Ask answer, grounded follow-up threads, and
+  re-indexing the corrected canonical transcript after edits.
 
 ### P1 — Plaud-like Web App workflow
 

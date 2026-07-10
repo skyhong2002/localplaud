@@ -4,7 +4,7 @@
   <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px">
     <div class="sub" style="font-size:12px; font-weight:650; margin-bottom:5px">SOURCES</div>
     {% for s in res.sources[:5] %}
-    <a class="seg" href="/file/{{ s.file_id }}" style="padding:5px 8px">
+    <a class="seg" href="/file/{{ s.file_id }}{% if s.start is not none %}?t={{ s.start }}{% endif %}" style="padding:5px 8px">
       <div class="ts">{{ s.start | mmss }}</div>
       <div class="txt"><span style="font-weight:600">{{ s.filename }}</span>
         <span class="sub" style="font-size:12px">· {{ '%.2f' % s.score }}</span></div>

@@ -1,0 +1,20 @@
+<div class="panel" style="margin:6px 0 14px; border-color:var(--border2)">
+  <div class="md" data-answer>{{ res.answer }}</div>
+  {% if res.sources %}
+  <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px">
+    <div class="sub" style="font-size:12px; font-weight:650; margin-bottom:5px">MOMENTS</div>
+    {% for s in res.sources[:6] %}
+    <button type="button" class="seg" data-seek="{{ s.start or 0 }}"
+      style="width:100%; text-align:left; background:none; border:none; cursor:pointer; padding:5px 8px; display:flex; gap:8px">
+      <div class="ts">{{ s.start | mmss }}</div>
+      <div class="txt">
+        {% if s.speaker %}<span style="font-weight:600">{{ s.speaker }}</span> {% endif %}{{ s.text | truncate(140) }}
+      </div>
+    </button>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+<script>
+  (function(){ var el=document.querySelector('[data-answer]'); if(el) el.textContent=el.textContent.trim(); })();
+</script>

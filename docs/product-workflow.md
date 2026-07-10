@@ -217,6 +217,9 @@ timestamps, and failures; optional-stage errors retain usable transcript/notes a
 can resume from existing artifacts. Ollama embeddings have model-aware health checks
 and modern batch API support. MLX large-v3-turbo is smoke-tested on SkyLabMac, and
 the code targets pyannote Community-1, but VAD/alignment plus authenticated
-real-audio diarization verification remain. Other major gaps include editable
-artifacts, long-form summarization, mind maps, single-file Ask, richer
-organization/export, automation, and UI polish.
+real-audio diarization verification remain. Single-file Ask now answers grounded
+only in one recording and renders each citation as a playable timestamp that seeks
+the player, and whole-library Ask citations deep-link to the cited moment
+(`/file/{id}?t=`). Other major gaps include editable artifacts, mind maps, Ask
+save-to-note and follow-up threads, richer organization/export, automation, and UI
+polish.

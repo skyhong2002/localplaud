@@ -21,23 +21,33 @@ from ..llm.base import build_llm
 log = logging.getLogger(__name__)
 
 
-def _load_matrix(session, dim: int) -> tuple[list[Chunk], np.ndarray]:
+def _load_matrix(
+    session, dim: int, file_id: str | None = None
+) -> tuple[list[Chunk], np.ndarray]:
     # Only chunks embedded at the query's dimension are comparable; mixing dims
     # (e.g. after switching embeddings.provider) would crash np.stack / the dot
-    # product. Filter to the current embedder's dimension.
-    chunks = list(
-        session.scalars(
-            select(Chunk).where(Chunk.embedding.is_not(None), Chunk.dim == dim)
-        )
-    )
+    # product. Filter to the current embedder's dimension. When ``file_id`` is
+    # set, scope retrieval to a single recording (single-file Ask).
+    stmt = select(Chunk).where(Chunk.embedding.is_not(None), Chunk.dim == dim)
+    if file_id is not None:
+        stmt = stmt.where(Chunk.file_id == file_id)
+    chunks = list(session.scalars(stmt))
     if not chunks:
         return [], np.zeros((0, 0), dtype=np.float32)
     vecs = np.stack([np.frombuffer(c.embedding, dtype=np.float32) for c in chunks])
     return chunks, vecs
 
 
-def retrieve(query: str, top_k: int = 6, settings: Settings | None = None) -> list[dict]:
-    """Return the top_k most relevant chunks as dicts with score + source."""
+def retrieve(
+    query: str,
+    top_k: int = 6,
+    settings: Settings | None = None,
+    file_id: str | None = None,
+) -> list[dict]:
+    """Return the top_k most relevant chunks as dicts with score + source.
+
+    When ``file_id`` is provided, retrieval is scoped to that one recording.
+    """
     settings = settings or get_settings()
     embedder = build_embedder(settings.embeddings)
     qv = np.asarray(embedder.embed([query])[0], dtype=np.float32)
@@ -45,7 +55,7 @@ def retrieve(query: str, top_k: int = 6, settings: Settings | None = None) -> li
 
     results: list[dict] = []
     with session_scope() as session:
-        chunks, mat = _load_matrix(session, dim=len(qv))
+        chunks, mat = _load_matrix(session, dim=len(qv), file_id=file_id)
         if not chunks:
             return []
         norms = mat / (np.linalg.norm(mat, axis=1, keepdims=True) + 1e-8)
@@ -74,6 +84,13 @@ _QA_SYSTEM = (
     "not contain the answer, say so plainly."
 )
 
+_QA_SYSTEM_SINGLE = (
+    "You answer questions about one of the user's own voice recordings, using "
+    "only the provided excerpts from it. Reference the moments you rely on by "
+    "their timestamp (e.g. \"around 2:30\"). If the excerpts do not contain the "
+    "answer, say so plainly rather than guessing."
+)
+
 
 def _format_context(hits: list[dict]) -> str:
     blocks = []
@@ -83,16 +100,32 @@ def _format_context(hits: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
-def answer(query: str, top_k: int = 6, settings: Settings | None = None) -> dict:
-    """Retrieve + answer. Returns {answer, sources}."""
+def answer(
+    query: str,
+    top_k: int = 6,
+    settings: Settings | None = None,
+    file_id: str | None = None,
+) -> dict:
+    """Retrieve + answer. Returns {answer, sources}.
+
+    When ``file_id`` is provided, both retrieval and the answer are scoped to a
+    single recording, and the model is asked to reference moments by timestamp.
+    """
     settings = settings or get_settings()
-    hits = retrieve(query, top_k=top_k, settings=settings)
+    hits = retrieve(query, top_k=top_k, settings=settings, file_id=file_id)
     if not hits:
+        if file_id is not None:
+            return {
+                "answer": "This recording isn't indexed yet — process it first, "
+                "then ask again.",
+                "sources": [],
+            }
         return {"answer": "No indexed recordings yet — run the pipeline first.", "sources": []}
     llm = build_llm(settings.llm)
+    system = _QA_SYSTEM_SINGLE if file_id is not None else _QA_SYSTEM
     prompt = (
         f"Question: {query}\n\nExcerpts:\n---\n{_format_context(hits)}\n---\n\n"
         "Answer the question grounded in the excerpts above."
     )
-    text = llm.complete(prompt, system=_QA_SYSTEM, temperature=0.2, max_tokens=800)
+    text = llm.complete(prompt, system=system, temperature=0.2, max_tokens=800)
     return {"answer": text, "sources": hits}
