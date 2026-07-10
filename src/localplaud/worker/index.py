@@ -63,4 +63,4 @@ def embed_chunks(chunks: list[dict], settings: Settings) -> tuple[list[bytes], s
     vectors = embedder.embed([c["text"] for c in chunks])
     blobs = [np.asarray(v, dtype=np.float32).tobytes() for v in vectors]
     dim = len(vectors[0]) if vectors else 0
-    return blobs, embedder.name, dim
+    return blobs, getattr(embedder, "space_id", embedder.name), dim

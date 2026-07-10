@@ -52,9 +52,11 @@ class StageName(enum.StrEnum):
     transcribe = "transcribe"
     align = "align"
     diarize = "diarize"
+    correct = "correct"
     summarize = "summarize"
     mind_map = "mind_map"
     index = "index"
+    ask = "ask"
 
 
 class StageStatus(enum.StrEnum):
@@ -104,6 +106,18 @@ class PlaudFile(Base):
     wav_path: Mapped[str | None] = mapped_column(String(1024), default=None)  # converted
     downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    processing_token: Mapped[str | None] = mapped_column(String(64), default=None)
+    processing_lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    # Optional named execution profile selected for this recording.  The
+    # resolver still persists a complete immutable snapshot per stage run.
+    execution_profile_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("execution_profiles.id", ondelete="SET NULL"), default=None
+    )
+    profile_context: Mapped[dict] = mapped_column(JSON, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -140,7 +154,18 @@ class PlaudFile(Base):
     @property
     def local_transcript(self) -> Transcript | None:
         local = [row for row in self.transcripts if row.source == "local"]
-        return local[-1] if local else None
+        if not local:
+            return None
+        # Keep the immutable raw ASR output while selecting the furthest valid
+        # speech artifact as the uncorrected canonical transcript.
+        rank = {"raw_asr": 1, "aligned": 2, "diarized": 3, "canonical": 3}
+        return max(local, key=lambda row: (rank.get(row.artifact_kind, 3), row.id or 0))
+
+    @property
+    def raw_asr_transcript(self) -> Transcript | None:
+        rows = [row for row in self.transcripts
+                if row.source == "local" and row.artifact_kind == "raw_asr"]
+        return rows[-1] if rows else None
 
     @property
     def plaud_transcript(self) -> Transcript | None:
@@ -185,11 +210,15 @@ class Transcript(Base):
     language: Mapped[str | None] = mapped_column(String(16), default=None)
     has_speakers: Mapped[bool] = mapped_column(default=False)
     source: Mapped[str] = mapped_column(String(16), default="local")  # local | cloud
+    # Local speech stages are separate durable artifacts. Legacy rows migrate
+    # as canonical; new runs retain raw_asr alongside aligned/diarized output.
+    artifact_kind: Mapped[str] = mapped_column(String(32), default="canonical")
 
     text: Mapped[str] = mapped_column(Text, default="")
     # Full segment list (with words/speakers/timestamps) as JSON — see
     # asr.base.Segment for the shape.
     segments: Mapped[list] = mapped_column(JSON, default=list)
+    profile_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -247,6 +276,7 @@ class TranscriptRevision(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     has_speakers: Mapped[bool] = mapped_column(default=False)
     note: Mapped[str | None] = mapped_column(String(256), default=None)
+    kind: Mapped[str] = mapped_column(String(32), default="user")  # user | vocabulary
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -271,12 +301,18 @@ class Summary(Base):
     llm_provider: Mapped[str | None] = mapped_column(String(64), default=None)
     model: Mapped[str | None] = mapped_column(String(128), default=None)
     source: Mapped[str] = mapped_column(String(16), default="local")  # local | cloud
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    template_version: Mapped[int | None] = mapped_column(Integer, default=None)
+    transcript_revision: Mapped[int | None] = mapped_column(Integer, default=None)
+    profile_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     file: Mapped[PlaudFile] = relationship(back_populates="summaries")
 
-    __table_args__ = (UniqueConstraint("file_id", "template", name="uq_summary_file_template"),)
+    __table_args__ = (
+        UniqueConstraint("file_id", "template", "source", name="uq_summary_file_template_source"),
+    )
 
 
 class Chunk(Base):
@@ -293,10 +329,15 @@ class Chunk(Base):
     end: Mapped[float | None] = mapped_column(Float, default=None)
     speaker: Mapped[str | None] = mapped_column(String(64), default=None)
 
-    embedding_model: Mapped[str | None] = mapped_column(String(128), default=None)
+    # Stable embedding-space identity (provider endpoint + model), not merely
+    # a display model label; retrieval must never mix equal-width spaces.
+    embedding_model: Mapped[str | None] = mapped_column(String(512), default=None)
+    embedding_provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    transcript_revision: Mapped[int | None] = mapped_column(Integer, default=None)
     dim: Mapped[int | None] = mapped_column(Integer, default=None)
     # float32 vector packed as bytes; decode with numpy.frombuffer.
     embedding: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    profile_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -321,9 +362,16 @@ class StageRun(Base):
     model: Mapped[str | None] = mapped_column(String(128), default=None)
     artifact_source: Mapped[str | None] = mapped_column(String(32), default=None)
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Fully resolved provider/model/options/policy at dispatch time.  Historical
+    # runs therefore remain explainable after a profile is edited.
+    profile_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    latency_ms: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimated_cost: Mapped[float | None] = mapped_column(Float, default=None)
+    actual_cost: Mapped[float | None] = mapped_column(Float, default=None)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )
@@ -331,6 +379,190 @@ class StageRun(Base):
     file: Mapped[PlaudFile] = relationship(back_populates="stage_runs")
 
     __table_args__ = (UniqueConstraint("file_id", "stage", name="uq_stage_run_file_stage"),)
+
+
+class StageAttempt(Base):
+    """Immutable execution history; StageRun remains the aggregate/current view."""
+
+    __tablename__ = "stage_attempts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"))
+    stage: Mapped[StageName] = mapped_column(Enum(StageName, native_enum=False, length=32))
+    attempt: Mapped[int] = mapped_column(Integer)
+    status: Mapped[StageStatus] = mapped_column(
+        Enum(StageStatus, native_enum=False, length=20), default=StageStatus.running
+    )
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    artifact_source: Mapped[str | None] = mapped_column(String(32), default=None)
+    profile_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    latency_ms: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimated_cost: Mapped[float | None] = mapped_column(Float, default=None)
+    actual_cost: Mapped[float | None] = mapped_column(Float, default=None)
+    __table_args__ = (UniqueConstraint("file_id", "stage", "attempt",
+                                       name="uq_stage_attempt_file_stage_attempt"),)
+
+
+class ProviderConnection(Base):
+    """A durable provider endpoint. Secrets are referenced, never stored here."""
+
+    __tablename__ = "provider_connections"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    provider_type: Mapped[str] = mapped_column(String(64))
+    base_url: Mapped[str | None] = mapped_column(String(1024), default=None)
+    secret_ref: Mapped[str | None] = mapped_column(String(256), default=None)
+    configuration: Mapped[dict] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class ProviderModel(Base):
+    __tablename__ = "provider_models"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connection_id: Mapped[int] = mapped_column(ForeignKey("provider_connections.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(256))
+    capabilities: Mapped[list] = mapped_column(JSON, default=list)
+    limits: Mapped[dict] = mapped_column(JSON, default=dict)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    __table_args__ = (UniqueConstraint("connection_id", "name", name="uq_provider_model_connection_name"),)
+
+
+class ExecutionProfile(Base):
+    """Reusable stage routing plus explicit privacy, fallback, and cost policy."""
+
+    __tablename__ = "execution_profiles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    description: Mapped[str | None] = mapped_column(Text, default=None)
+    stages: Mapped[dict] = mapped_column(JSON, default=dict)
+    policy: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_system_default: Mapped[bool] = mapped_column(default=False)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class ProviderHealthCheck(Base):
+    __tablename__ = "provider_health_checks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connection_id: Mapped[int] = mapped_column(ForeignKey("provider_connections.id", ondelete="CASCADE"))
+    capability: Mapped[str | None] = mapped_column(String(64), default=None)
+    state: Mapped[str] = mapped_column(String(32), default="unknown")
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class VocabularyTerm(Base):
+    """User-managed correction applied without modifying immutable raw ASR."""
+
+    __tablename__ = "vocabulary_terms"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    term: Mapped[str] = mapped_column(String(256), unique=True)
+    replacement: Mapped[str] = mapped_column(String(256))
+    language: Mapped[str | None] = mapped_column(String(16), default=None)
+    case_sensitive: Mapped[bool] = mapped_column(default=False)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class SpeakerTimeline(Base):
+    """Last stable diarization timeline used to reconcile run-local labels."""
+
+    __tablename__ = "speaker_timelines"
+    file_id: Mapped[str] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"),
+                                         primary_key=True)
+    segments: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class NoteTemplate(Base):
+    __tablename__ = "note_templates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    system_prompt: Mapped[str] = mapped_column(Text)
+    instructions: Mapped[str] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text, default=None)
+    category: Mapped[str | None] = mapped_column(String(64), default=None)
+    language: Mapped[str | None] = mapped_column(String(16), default=None)
+    provenance: Mapped[str] = mapped_column(String(32), default="builtin")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    execution_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("execution_profiles.id", ondelete="SET NULL"), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class SummaryRevision(Base):
+    __tablename__ = "summary_revisions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"))
+    template: Mapped[str] = mapped_column(String(64))
+    revision: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str | None] = mapped_column(String(512), default=None)
+    content_md: Mapped[str] = mapped_column(Text, default="")
+    llm_provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    source: Mapped[str] = mapped_column(String(16), default="local")
+    template_version: Mapped[int | None] = mapped_column(Integer, default=None)
+    transcript_revision: Mapped[int | None] = mapped_column(Integer, default=None)
+    profile_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    __table_args__ = (UniqueConstraint("file_id", "template", "revision",
+                                       name="uq_summary_revision_file_template_revision"),)
+
+
+class AskThread(Base):
+    __tablename__ = "ask_threads"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str | None] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"),
+                                                default=None)
+    title: Mapped[str | None] = mapped_column(String(256), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class AskMessage(Base):
+    __tablename__ = "ask_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("ask_threads.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(String(16))  # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list] = mapped_column(JSON, default=list)
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    profile_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimated_cost: Mapped[float | None] = mapped_column(Float, default=None)
+    actual_cost: Mapped[float | None] = mapped_column(Float, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class LocalNote(Base):
+    __tablename__ = "local_notes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str | None] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"),
+                                                default=None)
+    title: Mapped[str] = mapped_column(String(512))
+    content_md: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(32), default="manual")
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
 class KeyValue(Base):

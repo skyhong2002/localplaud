@@ -7,24 +7,40 @@ from datetime import UTC
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 
 from ..config import get_settings
 from ..db.models import (
+    AskMessage,
+    AskThread,
     Chunk,
+    ExecutionProfile,
     FileStatus,
+    LocalNote,
+    NoteTemplate,
     PlaudFile,
+    ProviderConnection,
+    ProviderHealthCheck,
+    ProviderModel,
     Speaker,
+    StageAttempt,
     StageName,
     StageRun,
     StageStatus,
+    Summary,
     Transcript,
     TranscriptRevision,
+    VocabularyTerm,
 )
 from ..db.session import init_db, session_scope
+from ..providers.hardware import detect_hardware, recommendations
+from ..providers.health import check_provider
+from ..providers.materialize import materialize_snapshot
+from ..providers.resolver import ProfileResolutionError, resolve_profile
 from ..store.speakers import display_names, speaker_keys_from_segments
 
 _HERE = Path(__file__).parent
@@ -49,7 +65,8 @@ async def _auth_gate(request: Request, call_next):
     """If api.auth_token is configured, require it on every request (except the
     health check) via an X-Auth-Token header or ?token= query param."""
     token = get_settings().api.auth_token
-    if token and request.url.path != "/healthz":
+    signed_worker_input = request.url.path.startswith("/api/worker-input/")
+    if token and request.url.path != "/healthz" and not signed_worker_input:
         supplied = request.headers.get("x-auth-token") or request.query_params.get("token")
         if supplied != token:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -225,6 +242,800 @@ def api_files(
     return JSONResponse({"files": data})
 
 
+@app.get("/api/files/{file_id}/stage-runs")
+def api_file_stage_runs(file_id: str) -> JSONResponse:
+    with session_scope() as session:
+        if session.get(PlaudFile, file_id) is None:
+            return JSONResponse({"error": "recording not found"}, status_code=404)
+        runs = list(session.scalars(select(StageRun).where(
+            StageRun.file_id == file_id
+        ).order_by(StageRun.id)))
+        attempts = list(session.scalars(select(StageAttempt).where(
+            StageAttempt.file_id == file_id
+        ).order_by(StageAttempt.id)))
+        data = [{"stage": row.stage.value, "status": row.status.value,
+                 "attempts": row.attempts,
+                 "selected": _public_snapshot(row.profile_snapshot.get("route", {})),
+                 "actual_provider": row.provider, "actual_model": row.model,
+                 "artifact_source": row.artifact_source, "latency_ms": row.latency_ms,
+                 "usage": row.usage, "estimated_cost": row.estimated_cost,
+                 "actual_cost": row.actual_cost,
+                 "detail": row.detail, "error": row.error} for row in runs]
+        history = [{"id": row.id, "stage": row.stage.value, "attempt": row.attempt,
+                    "status": row.status.value,
+                    "selected": _public_snapshot(row.profile_snapshot.get("route", {})),
+                    "actual_provider": row.provider, "actual_model": row.model,
+                    "artifact_source": row.artifact_source, "latency_ms": row.latency_ms,
+                    "usage": row.usage, "estimated_cost": row.estimated_cost,
+                    "actual_cost": row.actual_cost,
+                    "detail": row.detail, "error": row.error} for row in attempts]
+    return JSONResponse({"file_id": file_id, "stages": data, "attempt_history": history})
+
+
+@app.get("/api/worker-input/{file_id}")
+def api_worker_input(file_id: str, expires: int, sha256: str, signature: str):
+    """Serve one short-lived audio object to an authenticated remote worker."""
+    import hashlib
+    import hmac
+    import time
+
+    from ..asr.remote_worker_provider import sign_input
+
+    settings = get_settings()
+    secrets = [value for value in (
+        settings.remote_input.signing_secret,
+        settings.asr.remote_worker.input_signing_secret,
+    ) if value]
+    if not secrets or expires < int(time.time()) or expires > int(time.time()) + 3600:
+        return JSONResponse({"error": "invalid or expired worker input"}, status_code=403)
+    if not any(hmac.compare_digest(signature, sign_input(file_id, expires, sha256, secret))
+               for secret in secrets):
+        return JSONResponse({"error": "invalid or expired worker input"}, status_code=403)
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        path = Path(row.wav_path or row.audio_path) if row and (row.wav_path or row.audio_path) else None
+    if path is None or not path.is_file():
+        return JSONResponse({"error": "worker input not found"}, status_code=404)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if not hmac.compare_digest(digest, sha256):
+        return JSONResponse({"error": "worker input checksum mismatch"}, status_code=409)
+    return FileResponse(path, media_type="audio/wav" if path.suffix == ".wav" else "application/octet-stream")
+
+
+class ProfileInput(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = None
+    stages: dict = Field(default_factory=dict)
+    policy: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class RecordingProfileInput(BaseModel):
+    profile_id: int | None = None
+
+
+class ConnectionInput(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    provider_type: str = Field(min_length=1, max_length=64)
+    base_url: str | None = None
+    secret_ref: str | None = None
+    configuration: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class ModelInput(BaseModel):
+    connection_id: int
+    name: str = Field(min_length=1, max_length=256)
+    capabilities: list[str] = Field(min_length=1)
+    limits: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class VocabularyInput(BaseModel):
+    term: str = Field(min_length=1, max_length=256)
+    replacement: str = Field(min_length=1, max_length=256)
+    language: str | None = Field(default=None, max_length=16)
+    case_sensitive: bool = False
+    enabled: bool = True
+
+
+class TranscriptSegmentEditInput(BaseModel):
+    index: int = Field(ge=0)
+    text: str
+
+
+class TranscriptBulkEditInput(BaseModel):
+    base_revision: int = Field(ge=0)
+    edits: list[TranscriptSegmentEditInput] = Field(min_length=1)
+
+
+class NoteTemplateInput(BaseModel):
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    system_prompt: str = Field(min_length=1)
+    instructions: str = Field(min_length=1)
+    description: str | None = None
+    category: str | None = Field(default=None, max_length=64)
+    language: str | None = Field(default=None, max_length=16)
+    enabled: bool = True
+    execution_profile_id: int | None = None
+
+
+class NoteGenerationInput(BaseModel):
+    template: str = Field(default="auto", min_length=1, max_length=64)
+
+
+class AskThreadInput(BaseModel):
+    file_id: str | None = None
+    title: str | None = Field(default=None, max_length=256)
+
+
+class AskMessageInput(BaseModel):
+    question: str = Field(min_length=1, max_length=10_000)
+
+
+class SaveAnswerInput(BaseModel):
+    title: str | None = Field(default=None, max_length=512)
+
+
+class ProfileContextInput(BaseModel):
+    folder_profile_id: int | None = None
+    rule_profile_id: int | None = None
+    template_profile_id: int | None = None
+
+
+def _profile_json(row: ExecutionProfile) -> dict:
+    return {
+        "id": row.id, "name": row.name, "description": row.description,
+        "stages": row.stages, "policy": row.policy, "enabled": row.enabled,
+        "system_default": row.is_system_default, "version": row.version,
+    }
+
+
+def _contains_inline_secret(value) -> bool:
+    import re
+
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            normalized = re.sub(r"[^a-z0-9]", "", key.lower())
+            if any(marker in normalized for marker in (
+                "apikey", "token", "password", "secret", "authorization",
+                "credential", "cookie", "bearer",
+            )):
+                return True
+            if _contains_inline_secret(nested):
+                return True
+    if isinstance(value, list):
+        return any(_contains_inline_secret(item) for item in value)
+    if isinstance(value, str) and re.match(r"(?i)^\s*(bearer\s+|sk-|hf_)", value):
+        return True
+    return False
+
+
+def _mask_secret_ref(value: str | None) -> str | None:
+    if not value:
+        return None
+    scheme, _, reference = value.partition(":")
+    tail = reference[-4:] if len(reference) >= 4 else "****"
+    return f"{scheme}:****{tail}"
+
+
+def _public_snapshot(value):
+    if isinstance(value, dict):
+        return {
+            key: (_mask_secret_ref(nested) if key == "secret_ref"
+                  else _public_snapshot(nested))
+            for key, nested in value.items()
+        }
+    if isinstance(value, list):
+        return [_public_snapshot(item) for item in value]
+    return value
+
+
+def _provider_url_error(value: str | None) -> str | None:
+    if not value:
+        return None
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname \
+            or parsed.username or parsed.password:
+        return "base_url must be credential-free HTTP(S)"
+    host = parsed.hostname
+    if parsed.scheme == "http" and host not in {"localhost", "127.0.0.1", "::1"}:
+        return "non-loopback provider base_url must use HTTPS"
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(
+            host, parsed.port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )}
+    except OSError:
+        return "provider base_url host cannot be resolved"
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if not ip.is_global and not ip.is_loopback:
+            return "provider base_url resolves to a non-global address"
+    return None
+
+
+_STAGE_CAPABILITY = {
+    "transcribe": "asr", "align": "alignment", "diarize": "diarization",
+    "correct": "correction", "summarize": "notes", "mind_map": "mind_map",
+    "ask": "ask", "index": "embeddings",
+}
+
+
+def _profile_catalog_error(session, stages: dict, policy: dict) -> str | None:
+    candidate = ExecutionProfile(name="validation", stages=stages, policy=policy, enabled=True)
+    default = session.scalar(select(ExecutionProfile).where(ExecutionProfile.is_system_default))
+    for stage, route in stages.items():
+        try:
+            resolved = resolve_profile(
+                stage, system_default=default or candidate,
+                recording_override=candidate if default is not None else None,
+            )
+        except ProfileResolutionError as exc:
+            return str(exc)
+        route = resolved["route"]
+        for item in [route, *route.get("fallback", [])]:
+            if any(key in item for key in ("base_url", "secret_ref")):
+                return "base_url and secret_ref belong on a provider connection, not a profile route"
+            connection_name = item.get("connection", item.get("provider"))
+            connection = session.scalar(select(ProviderConnection).where(
+                ProviderConnection.name == connection_name, ProviderConnection.enabled,
+            ))
+            if connection is None:
+                return f"enabled provider connection {connection_name!r} not found"
+            model_name = item.get("model")
+            capability = _STAGE_CAPABILITY.get(stage)
+            if model_name and capability:
+                model = session.scalar(select(ProviderModel).where(
+                    ProviderModel.connection_id == connection.id,
+                    ProviderModel.name == model_name, ProviderModel.enabled,
+                ))
+                if model is None or capability not in model.capabilities:
+                    return f"model {model_name!r} does not declare {capability!r} capability"
+        try:
+            # Connection metadata is authoritative for egress. Validate the
+            # fully materialized route now so an external connection cannot be
+            # saved under no-egress and fail only when a recording starts.
+            materialize_snapshot(session, resolved)
+        except ProfileResolutionError as exc:
+            return str(exc)
+    return None
+
+
+@app.get("/api/provider-connections")
+def api_provider_connections() -> JSONResponse:
+    with session_scope() as session:
+        rows = list(session.scalars(select(ProviderConnection).order_by(ProviderConnection.name)))
+        data = [{
+            "id": row.id, "name": row.name, "provider_type": row.provider_type,
+            "base_url": row.base_url, "secret_ref": _mask_secret_ref(row.secret_ref),
+            "configuration": row.configuration, "enabled": row.enabled,
+            "version": row.version,
+        } for row in rows]
+    return JSONResponse({"connections": data})
+
+
+@app.post("/api/provider-connections")
+def api_create_provider_connection(payload: ConnectionInput) -> JSONResponse:
+    if payload.secret_ref and not payload.secret_ref.startswith(("env:", "keychain:")):
+        return JSONResponse({"error": "secret_ref must use env: or keychain:"}, status_code=400)
+    if _contains_inline_secret(payload.configuration):
+        return JSONResponse({"error": "inline secrets are forbidden; use secret_ref"}, status_code=400)
+    if error := _provider_url_error(payload.base_url):
+        return JSONResponse({"error": error}, status_code=400)
+    with session_scope() as session:
+        if session.scalar(select(ProviderConnection).where(ProviderConnection.name == payload.name)):
+            return JSONResponse({"error": "connection name already exists"}, status_code=409)
+        row = ProviderConnection(**payload.model_dump())
+        session.add(row)
+        session.flush()
+        data = {"id": row.id, "name": row.name, "provider_type": row.provider_type,
+                "base_url": row.base_url, "secret_ref": _mask_secret_ref(row.secret_ref),
+                "configuration": row.configuration, "enabled": row.enabled, "version": row.version}
+    return JSONResponse(data, status_code=201)
+
+
+@app.put("/api/provider-connections/{connection_id}")
+def api_update_provider_connection(connection_id: int, payload: ConnectionInput) -> JSONResponse:
+    if payload.secret_ref and not payload.secret_ref.startswith(("env:", "keychain:")):
+        return JSONResponse({"error": "secret_ref must use env: or keychain:"}, status_code=400)
+    if _contains_inline_secret(payload.configuration):
+        return JSONResponse({"error": "inline secrets are forbidden; use secret_ref"}, status_code=400)
+    if error := _provider_url_error(payload.base_url):
+        return JSONResponse({"error": error}, status_code=400)
+    with session_scope() as session:
+        row = session.get(ProviderConnection, connection_id)
+        if row is None:
+            return JSONResponse({"error": "connection not found"}, status_code=404)
+        conflict = session.scalar(select(ProviderConnection).where(
+            ProviderConnection.name == payload.name, ProviderConnection.id != connection_id,
+        ))
+        if conflict:
+            return JSONResponse({"error": "connection name already exists"}, status_code=409)
+        for key, value in payload.model_dump().items():
+            setattr(row, key, value)
+        row.version += 1
+        session.flush()
+        data = {"id": row.id, "name": row.name, "provider_type": row.provider_type,
+                "base_url": row.base_url, "secret_ref": _mask_secret_ref(row.secret_ref),
+                "configuration": row.configuration, "enabled": row.enabled,
+                "version": row.version}
+    return JSONResponse(_public_snapshot(data))
+
+
+@app.get("/api/provider-models")
+def api_provider_models() -> JSONResponse:
+    with session_scope() as session:
+        rows = list(session.scalars(select(ProviderModel).order_by(ProviderModel.id)))
+        data = [{"id": row.id, "connection_id": row.connection_id, "name": row.name,
+                 "capabilities": row.capabilities, "limits": row.limits,
+                 "metadata": row.metadata_, "enabled": row.enabled,
+                 "version": row.version} for row in rows]
+    return JSONResponse({"models": data})
+
+
+@app.post("/api/provider-models")
+def api_create_provider_model(payload: ModelInput) -> JSONResponse:
+    from ..providers.contracts import CapabilityKind
+
+    allowed = {item.value for item in CapabilityKind}
+    if not set(payload.capabilities) <= allowed:
+        return JSONResponse({"error": "unknown capability"}, status_code=400)
+    with session_scope() as session:
+        if session.get(ProviderConnection, payload.connection_id) is None:
+            return JSONResponse({"error": "connection not found"}, status_code=404)
+        exists = session.scalar(select(ProviderModel).where(
+            ProviderModel.connection_id == payload.connection_id,
+            ProviderModel.name == payload.name,
+        ))
+        if exists:
+            return JSONResponse({"error": "model already exists for connection"}, status_code=409)
+        values = payload.model_dump()
+        values["metadata_"] = values.pop("metadata")
+        row = ProviderModel(**values)
+        session.add(row)
+        session.flush()
+        data = {"id": row.id, "connection_id": row.connection_id, "name": row.name,
+                "capabilities": row.capabilities, "limits": row.limits,
+                "metadata": row.metadata_, "enabled": row.enabled, "version": row.version}
+    return JSONResponse(data, status_code=201)
+
+
+@app.put("/api/provider-models/{model_id}")
+def api_update_provider_model(model_id: int, payload: ModelInput) -> JSONResponse:
+    from ..providers.contracts import CapabilityKind
+
+    if not set(payload.capabilities) <= {item.value for item in CapabilityKind}:
+        return JSONResponse({"error": "unknown capability"}, status_code=400)
+    with session_scope() as session:
+        row = session.get(ProviderModel, model_id)
+        if row is None:
+            return JSONResponse({"error": "model not found"}, status_code=404)
+        if session.get(ProviderConnection, payload.connection_id) is None:
+            return JSONResponse({"error": "connection not found"}, status_code=404)
+        conflict = session.scalar(select(ProviderModel).where(
+            ProviderModel.connection_id == payload.connection_id,
+            ProviderModel.name == payload.name, ProviderModel.id != model_id,
+        ))
+        if conflict:
+            return JSONResponse({"error": "model already exists for connection"}, status_code=409)
+        values = payload.model_dump()
+        values["metadata_"] = values.pop("metadata")
+        for key, value in values.items():
+            setattr(row, key, value)
+        row.version += 1
+        session.flush()
+        data = {"id": row.id, "connection_id": row.connection_id, "name": row.name,
+                "capabilities": row.capabilities, "limits": row.limits,
+                "metadata": row.metadata_, "enabled": row.enabled, "version": row.version}
+    return JSONResponse(_public_snapshot(data))
+
+
+@app.post("/api/provider-connections/{connection_id}/health")
+def api_test_provider_connection(connection_id: int, capability: str | None = None) -> JSONResponse:
+    with session_scope() as session:
+        row = session.get(ProviderConnection, connection_id)
+        if row is None:
+            return JSONResponse({"error": "connection not found"}, status_code=404)
+        models = list(session.scalars(select(ProviderModel).where(
+            ProviderModel.connection_id == connection_id, ProviderModel.enabled,
+        )))
+        if capability and not any(capability in model.capabilities for model in models):
+            return JSONResponse(
+                {"error": f"connection does not declare capability {capability!r}"},
+                status_code=422,
+            )
+        if row.enabled:
+            state, detail = check_provider(row.provider_type, row.secret_ref, row.base_url)
+        else:
+            state, detail = "unavailable", {"note": "connection is disabled/revoked"}
+        detail = dict(detail) | {
+            "capability": capability,
+            "models": [model.name for model in models
+                       if capability is None or capability in model.capabilities],
+            "base_url_configured": bool(row.base_url),
+            "paid_probe_sent": False,
+            "enabled": row.enabled,
+            "revoked": not row.enabled,
+        }
+        check = ProviderHealthCheck(connection_id=row.id, capability=capability,
+                                    state=state, detail=detail)
+        session.add(check)
+        session.flush()
+        data = {"connection_id": row.id, "capability": capability, "state": state,
+                "detail": detail, "checked_at": check.checked_at.isoformat()}
+    return JSONResponse(data)
+
+
+@app.get("/api/capabilities")
+def api_capabilities() -> JSONResponse:
+    with session_scope() as session:
+        models = list(session.scalars(select(ProviderModel).order_by(ProviderModel.id)))
+        checks = list(session.scalars(
+            select(ProviderHealthCheck).order_by(ProviderHealthCheck.checked_at.desc())
+        ))
+        latest = {}
+        for check in checks:
+            latest.setdefault((check.connection_id, check.capability), {
+                "state": check.state, "detail": check.detail,
+                "checked_at": check.checked_at.isoformat(),
+            })
+        data = [{"connection_id": row.connection_id, "model_id": row.id,
+                 "model": row.name, "capability": capability,
+                 "health": latest.get((row.connection_id, capability), {"state": "unknown"})}
+                for row in models for capability in row.capabilities]
+    return JSONResponse({"capabilities": data})
+
+
+@app.get("/api/hardware")
+def api_hardware() -> JSONResponse:
+    report = detect_hardware()
+    return JSONResponse({"hardware": report.to_dict(), "recommendations": recommendations(report)})
+
+
+@app.get("/api/execution-profiles")
+def api_execution_profiles() -> JSONResponse:
+    with session_scope() as session:
+        rows = list(session.scalars(select(ExecutionProfile).order_by(ExecutionProfile.name)))
+        data = [_profile_json(row) for row in rows]
+    return JSONResponse({"profiles": data})
+
+
+@app.post("/api/execution-profiles")
+def api_create_execution_profile(payload: ProfileInput) -> JSONResponse:
+    if _contains_inline_secret(payload.model_dump()):
+        return JSONResponse({"error": "inline secrets are forbidden; use secret_ref"}, status_code=400)
+    with session_scope() as session:
+        if session.scalar(select(ExecutionProfile).where(ExecutionProfile.name == payload.name)):
+            return JSONResponse({"error": "profile name already exists"}, status_code=409)
+        if error := _profile_catalog_error(session, payload.stages, payload.policy):
+            return JSONResponse({"error": error}, status_code=422)
+        row = ExecutionProfile(**payload.model_dump())
+        session.add(row)
+        session.flush()
+        data = _profile_json(row)
+    return JSONResponse(data, status_code=201)
+
+
+@app.put("/api/execution-profiles/{profile_id}")
+def api_update_execution_profile(profile_id: int, payload: ProfileInput) -> JSONResponse:
+    if _contains_inline_secret(payload.model_dump()):
+        return JSONResponse({"error": "inline secrets are forbidden; use secret_ref"}, status_code=400)
+    with session_scope() as session:
+        row = session.get(ExecutionProfile, profile_id)
+        if row is None:
+            return JSONResponse({"error": "profile not found"}, status_code=404)
+        conflict = session.scalar(select(ExecutionProfile).where(
+            ExecutionProfile.name == payload.name, ExecutionProfile.id != profile_id
+        ))
+        if conflict:
+            return JSONResponse({"error": "profile name already exists"}, status_code=409)
+        if error := _profile_catalog_error(session, payload.stages, payload.policy):
+            return JSONResponse({"error": error}, status_code=422)
+        for key, value in payload.model_dump().items():
+            setattr(row, key, value)
+        row.version += 1
+        session.flush()
+        data = _profile_json(row)
+    return JSONResponse(data)
+
+
+@app.get("/api/execution-profiles/resolve")
+def api_resolve_execution_profile(stage: StageName, file_id: str | None = None) -> JSONResponse:
+    with session_scope() as session:
+        default = session.scalar(select(ExecutionProfile).where(ExecutionProfile.is_system_default))
+        if default is None:
+            return JSONResponse({"error": "system default is not initialized"}, status_code=503)
+        override = None
+        folder_rule = None
+        template_default = None
+        if file_id:
+            file = session.get(PlaudFile, file_id)
+            if file is None:
+                return JSONResponse({"error": "recording not found"}, status_code=404)
+            if file.execution_profile_id:
+                override = session.get(ExecutionProfile, file.execution_profile_id)
+            context = file.profile_context or {}
+            folder_id = context.get("rule_profile_id") or context.get("folder_profile_id")
+            folder_rule = session.get(ExecutionProfile, folder_id) if folder_id else None
+            template_id = context.get("template_profile_id")
+            template_default = session.get(ExecutionProfile, template_id) if template_id else None
+        try:
+            data = materialize_snapshot(session, resolve_profile(
+                stage, system_default=default, folder_rule=folder_rule,
+                template_default=template_default, recording_override=override
+            ))
+        except ProfileResolutionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+    return JSONResponse(_public_snapshot(data))
+
+
+@app.put("/api/files/{file_id}/execution-profile")
+def api_set_recording_profile(file_id: str, payload: RecordingProfileInput) -> JSONResponse:
+    with session_scope() as session:
+        file = session.get(PlaudFile, file_id)
+        if file is None:
+            return JSONResponse({"error": "recording not found"}, status_code=404)
+        if payload.profile_id is not None:
+            profile = session.get(ExecutionProfile, payload.profile_id)
+            if profile is None or not profile.enabled:
+                return JSONResponse({"error": "enabled profile not found"}, status_code=404)
+        file.execution_profile_id = payload.profile_id
+        # Preserve historical/current provenance until a stage really begins a
+        # new attempt. Reused artifacts must not be relabelled as if the new
+        # profile produced them.
+        for run in file.stage_runs:
+            detail = dict(run.detail or {})
+            detail["profile_change_pending"] = True
+            run.detail = detail
+    return JSONResponse({"file_id": file_id, "profile_id": payload.profile_id})
+
+
+@app.put("/api/files/{file_id}/profile-context")
+def api_set_profile_context(file_id: str, payload: ProfileContextInput) -> JSONResponse:
+    with session_scope() as session:
+        file = session.get(PlaudFile, file_id)
+        if file is None:
+            return JSONResponse({"error": "recording not found"}, status_code=404)
+        values = payload.model_dump()
+        for profile_id in (value for value in values.values() if value is not None):
+            profile = session.get(ExecutionProfile, profile_id)
+            if profile is None or not profile.enabled:
+                return JSONResponse({"error": f"enabled profile {profile_id} not found"},
+                                    status_code=404)
+        file.profile_context = values
+        for run in file.stage_runs:
+            detail = dict(run.detail or {})
+            detail["profile_change_pending"] = True
+            run.detail = detail
+    return JSONResponse({"file_id": file_id, "profile_context": values})
+
+
+@app.get("/api/vocabulary")
+def api_vocabulary() -> JSONResponse:
+    with session_scope() as session:
+        rows = list(session.scalars(select(VocabularyTerm).order_by(VocabularyTerm.term)))
+        data = [{"id": row.id, "term": row.term, "replacement": row.replacement,
+                 "language": row.language, "case_sensitive": row.case_sensitive,
+                 "enabled": row.enabled} for row in rows]
+    return JSONResponse({"terms": data})
+
+
+def _invalidate_vocabulary_dependents(session) -> None:
+    session.execute(delete(Chunk))
+    for run in session.scalars(select(StageRun).where(StageRun.stage.in_([
+        StageName.correct, StageName.summarize, StageName.mind_map, StageName.index,
+    ]))):
+        detail = dict(run.detail or {})
+        detail["stale"] = True
+        detail["stale_reason"] = "vocabulary changed"
+        run.detail = detail
+
+
+@app.post("/api/vocabulary")
+def api_create_vocabulary(payload: VocabularyInput) -> JSONResponse:
+    with session_scope() as session:
+        if session.scalar(select(VocabularyTerm).where(VocabularyTerm.term == payload.term)):
+            return JSONResponse({"error": "term already exists"}, status_code=409)
+        row = VocabularyTerm(**payload.model_dump())
+        session.add(row)
+        _invalidate_vocabulary_dependents(session)
+        session.flush()
+        data = {"id": row.id, **payload.model_dump()}
+    return JSONResponse(data, status_code=201)
+
+
+@app.delete("/api/vocabulary/{term_id}")
+def api_delete_vocabulary(term_id: int) -> JSONResponse:
+    with session_scope() as session:
+        row = session.get(VocabularyTerm, term_id)
+        if row is None:
+            return JSONResponse({"error": "term not found"}, status_code=404)
+        session.delete(row)
+        _invalidate_vocabulary_dependents(session)
+    return JSONResponse({"deleted": term_id})
+
+
+def _template_json(row: NoteTemplate) -> dict:
+    return {"id": row.id, "name": row.name, "system_prompt": row.system_prompt,
+            "instructions": row.instructions, "description": row.description,
+            "category": row.category, "language": row.language,
+            "provenance": row.provenance, "version": row.version, "enabled": row.enabled,
+            "execution_profile_id": row.execution_profile_id}
+
+
+@app.get("/api/note-templates")
+def api_note_templates() -> JSONResponse:
+    with session_scope() as session:
+        rows = list(session.scalars(select(NoteTemplate).order_by(NoteTemplate.name)))
+        data = [_template_json(row) for row in rows]
+    return JSONResponse({"templates": data})
+
+
+@app.post("/api/note-templates")
+def api_create_note_template(payload: NoteTemplateInput) -> JSONResponse:
+    with session_scope() as session:
+        if session.scalar(select(NoteTemplate).where(NoteTemplate.name == payload.name)):
+            return JSONResponse({"error": "template already exists"}, status_code=409)
+        if payload.execution_profile_id is not None and session.get(
+            ExecutionProfile, payload.execution_profile_id
+        ) is None:
+            return JSONResponse({"error": "execution profile not found"}, status_code=404)
+        row = NoteTemplate(**payload.model_dump(), provenance="user", version=1)
+        session.add(row)
+        session.flush()
+        data = _template_json(row)
+    return JSONResponse(data, status_code=201)
+
+
+@app.put("/api/note-templates/{template_id}")
+def api_update_note_template(template_id: int, payload: NoteTemplateInput) -> JSONResponse:
+    with session_scope() as session:
+        row = session.get(NoteTemplate, template_id)
+        if row is None:
+            return JSONResponse({"error": "template not found"}, status_code=404)
+        conflict = session.scalar(select(NoteTemplate).where(
+            NoteTemplate.name == payload.name, NoteTemplate.id != template_id,
+        ))
+        if conflict:
+            return JSONResponse({"error": "template already exists"}, status_code=409)
+        if payload.execution_profile_id is not None and session.get(
+            ExecutionProfile, payload.execution_profile_id
+        ) is None:
+            return JSONResponse({"error": "execution profile not found"}, status_code=404)
+        for key, value in payload.model_dump().items():
+            setattr(row, key, value)
+        row.version += 1
+        row.provenance = "user" if row.provenance == "builtin" else row.provenance
+        session.flush()
+        data = _template_json(row)
+    return JSONResponse(data)
+
+
+@app.post("/api/files/{file_id}/notes/generate")
+def api_generate_note(file_id: str, payload: NoteGenerationInput) -> JSONResponse:
+    from ..worker.pipeline import generate_note
+
+    if payload.template != "auto":
+        with session_scope() as session:
+            if session.scalar(select(NoteTemplate).where(
+                NoteTemplate.name == payload.template, NoteTemplate.enabled,
+            )) is None:
+                return JSONResponse({"error": "enabled template not found"}, status_code=404)
+    try:
+        result = generate_note(file_id, payload.template)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"file_id": file_id, "template": result["template"],
+                         "title": result.get("title"), "content_md": result["content_md"],
+                         "provider": result.get("provider"), "model": result.get("model"),
+                         "coverage": result.get("coverage", {})})
+
+
+@app.post("/api/ask/threads")
+def api_create_ask_thread(payload: AskThreadInput) -> JSONResponse:
+    with session_scope() as session:
+        if payload.file_id and session.get(PlaudFile, payload.file_id) is None:
+            return JSONResponse({"error": "recording not found"}, status_code=404)
+        row = AskThread(file_id=payload.file_id, title=payload.title)
+        session.add(row)
+        session.flush()
+        data = {"id": row.id, "file_id": row.file_id, "title": row.title}
+    return JSONResponse(data, status_code=201)
+
+
+@app.get("/api/ask/threads/{thread_id}")
+def api_get_ask_thread(thread_id: int) -> JSONResponse:
+    with session_scope() as session:
+        thread = session.get(AskThread, thread_id)
+        if thread is None:
+            return JSONResponse({"error": "thread not found"}, status_code=404)
+        messages = list(session.scalars(select(AskMessage).where(
+            AskMessage.thread_id == thread_id
+        ).order_by(AskMessage.id)))
+        data = {"id": thread.id, "file_id": thread.file_id, "title": thread.title,
+                "messages": [{"id": row.id, "role": row.role, "content": row.content,
+                              "citations": row.citations, "provider": row.provider,
+                              "model": row.model,
+                              "profile_snapshot": _public_snapshot(row.profile_snapshot),
+                              "usage": row.usage, "estimated_cost": row.estimated_cost,
+                              "actual_cost": row.actual_cost}
+                             for row in messages]}
+    return JSONResponse(data)
+
+
+@app.post("/api/ask/threads/{thread_id}/messages")
+def api_add_ask_message(thread_id: int, payload: AskMessageInput) -> JSONResponse:
+    from ..worker.qa import answer
+
+    with session_scope() as session:
+        thread = session.get(AskThread, thread_id)
+        if thread is None:
+            return JSONResponse({"error": "thread not found"}, status_code=404)
+        prior = list(session.scalars(select(AskMessage).where(
+            AskMessage.thread_id == thread_id
+        ).order_by(AskMessage.id)))
+        session.add(AskMessage(thread_id=thread_id, role="user", content=payload.question))
+        file_id = thread.file_id
+    try:
+        result = answer(payload.question, file_id=file_id,
+                        history=[{"role": row.role, "content": row.content} for row in prior])
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": f"Ask unavailable: {exc}"}, status_code=503)
+    with session_scope() as session:
+        message = AskMessage(
+            thread_id=thread_id, role="assistant", content=result["answer"],
+            citations=result.get("sources", []), provider=result.get("provider"),
+            model=result.get("model"), profile_snapshot=result.get("profile_snapshot", {}),
+            usage=result.get("usage", {}),
+            estimated_cost=result.get("profile_snapshot", {}).get("route", {}).get(
+                "estimated_cost"
+            ),
+        )
+        session.add(message)
+        session.flush()
+        data = {"id": message.id, "role": message.role, "content": message.content,
+                "citations": message.citations, "provider": message.provider,
+                "model": message.model,
+                "profile_snapshot": _public_snapshot(message.profile_snapshot),
+                "usage": message.usage, "estimated_cost": message.estimated_cost,
+                "actual_cost": message.actual_cost}
+    return JSONResponse(_public_snapshot(data), status_code=201)
+
+
+@app.post("/api/ask/messages/{message_id}/save-note")
+def api_save_answer_note(message_id: int, payload: SaveAnswerInput) -> JSONResponse:
+    with session_scope() as session:
+        message = session.get(AskMessage, message_id)
+        if message is None or message.role != "assistant":
+            return JSONResponse({"error": "assistant answer not found"}, status_code=404)
+        thread = session.get(AskThread, message.thread_id)
+        citations_md = "\n".join(
+            f"- [{item.get('filename', item.get('file_id', 'recording'))}]"
+            f"(/file/{item.get('file_id')}?t={item.get('start', 0)})"
+            for item in message.citations
+        )
+        content = message.content + (f"\n\n## Sources\n{citations_md}" if citations_md else "")
+        note = LocalNote(
+            file_id=thread.file_id, title=payload.title or thread.title or "Saved Ask answer",
+            content_md=content, kind="ask-answer",
+            provenance={"thread_id": thread.id, "message_id": message.id,
+                        "citations": message.citations, "provider": message.provider,
+                        "model": message.model, "profile_snapshot": message.profile_snapshot},
+        )
+        session.add(note)
+        session.flush()
+        data = {"id": note.id, "file_id": note.file_id, "title": note.title,
+                "content_md": note.content_md, "kind": note.kind,
+                "provenance": note.provenance}
+    return JSONResponse(_public_snapshot(data), status_code=201)
+
+
 # --------------------------------------------------------------------------- #
 # pages
 # --------------------------------------------------------------------------- #
@@ -342,6 +1153,61 @@ def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) ->
         run.detail = dict(run.detail or {}) | {"stale": True}
 
 
+def _transcript_edit_base(r: PlaudFile):
+    raw_row = _canonical_raw_row(r, get_settings())
+    corrected = _canonical_revision(r, raw_row)
+    if corrected is not None:
+        return (corrected.segments, corrected.has_speakers,
+                corrected.base_transcript_id, corrected.source, corrected.revision)
+    if raw_row is not None:
+        return (raw_row.segments, raw_row.has_speakers, raw_row.id, raw_row.source, 0)
+    return None
+
+
+def _create_transcript_revision(
+    session,
+    r: PlaudFile,
+    *,
+    base_revision: int,
+    segments: list[dict],
+    note: str,
+) -> tuple[int, dict[str, str]]:
+    base = _transcript_edit_base(r)
+    if base is None:
+        raise ValueError("no transcript to edit")
+    _base_segments, has_speakers, base_transcript_id, source, current_revision = base
+    if base_revision != current_revision:
+        raise RuntimeError("transcript changed; reload before saving")
+    next_revision = max((rev.revision for rev in r.transcript_revisions), default=0) + 1
+    joined = "\n".join(
+        (segment.get("text") or "").strip()
+        for segment in segments if (segment.get("text") or "").strip()
+    )
+    session.add(TranscriptRevision(
+        file_id=r.id, base_transcript_id=base_transcript_id,
+        revision=next_revision, source=source, segments=segments, text=joined,
+        has_speakers=has_speakers, note=note[:256], kind="user",
+    ))
+    session.execute(delete(Chunk).where(Chunk.file_id == r.id))
+    _mark_derived_stale(
+        session, r.id, (StageName.summarize, StageName.mind_map, StageName.index),
+    )
+    session.flush()
+    return next_revision, display_names(session, r.id)
+
+
+def _queue_revision_reindex(file_id: str, revision: int, names: dict[str, str]) -> None:
+    import threading
+
+    from ..worker.reindex import reindex_file
+
+    threading.Thread(
+        target=reindex_file, args=(file_id,),
+        kwargs={"expected_revision": revision, "expected_speaker_names": names},
+        daemon=True,
+    ).start()
+
+
 @app.get("/file/{file_id}", response_class=HTMLResponse)
 def file_detail(request: Request, file_id: str, view: str | None = None):
     settings = get_settings()
@@ -357,7 +1223,10 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
         }
         summaries = sorted(
             (
-                {"title": s.title, "content_md": s.content_md, "template": s.template, "source": s.source}
+                {"title": s.title, "content_md": s.content_md, "template": s.template,
+                 "source": s.source, "revision": s.revision,
+                 "transcript_revision": s.transcript_revision,
+                 "template_version": s.template_version}
                 for s in r.summaries
                 if not (
                     s.source == "local"
@@ -415,6 +1284,16 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
                 "source": imported_row.source,
                 "segments": imported_row.segments,
             }
+        revision_history = [{
+            "revision": revision.revision, "kind": revision.kind,
+            "note": revision.note, "created_at": revision.created_at,
+            "summary_count": session.query(Summary).filter_by(
+                file_id=file_id, transcript_revision=revision.revision,
+            ).count(),
+            "chunk_count": session.query(Chunk).filter_by(
+                file_id=file_id, transcript_revision=revision.revision,
+            ).count(),
+        } for revision in reversed(r.transcript_revisions)]
         f = {
             "id": r.id,
             "filename": r.filename or r.id[:12],
@@ -429,6 +1308,7 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
             # Whether both raw and corrected views exist (drives the toggle).
             "has_corrected": corrected is not None,
             "corrected_revision": corrected.revision if corrected is not None else None,
+            "revision_history": revision_history,
             # Edits always build on the latest canonical; hide the edit UI when
             # viewing the raw artifact behind an existing correction chain.
             "can_edit": transcript is not None and (corrected is None or show_corrected),
@@ -601,13 +1481,41 @@ def export_markdown(file_id: str):
     )
 
 
+@app.get("/file/{file_id}/mindmap.png")
+def export_mindmap_png(file_id: str) -> Response:
+    from ..export_mindmap import render_mindmap_png
+
+    with session_scope() as session:
+        file = session.get(PlaudFile, file_id)
+        if file is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        run = session.scalar(select(StageRun).where(
+            StageRun.file_id == file_id, StageRun.stage == StageName.mind_map,
+        ))
+        if run is not None and (run.detail or {}).get("stale"):
+            return JSONResponse({"error": "mind map is stale; regenerate it first"},
+                                status_code=409)
+        mind_map = session.scalar(select(Summary).where(
+            Summary.file_id == file_id, Summary.template == "mind_map",
+            Summary.source == "local",
+        ).order_by(Summary.id.desc()))
+        if mind_map is None:
+            return JSONResponse({"error": "mind map not found"}, status_code=404)
+        title = mind_map.title or file.filename or "Mind map"
+        content = mind_map.content_md
+    png = render_mindmap_png(content, title=title)
+    return Response(
+        png, media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{file_id}-mind-map.png"'},
+    )
+
+
 @app.post("/file/{file_id}/reprocess", response_class=HTMLResponse)
 def reprocess(file_id: str, force: bool = False):
     """Kick off a pipeline re-run for one recording in the background."""
     import threading
 
-    from ..db.models import FileStatus
-    from ..worker.pipeline import process_file
+    from ..worker.pipeline import ProcessingAlreadyRunning, _claim_processing, process_file
 
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
@@ -615,9 +1523,17 @@ def reprocess(file_id: str, force: bool = False):
             return HTMLResponse(
                 '<span style="color:var(--err)">no audio to reprocess</span>', status_code=400
             )
-        r.status = FileStatus.downloaded
+    try:
+        claim_token = _claim_processing(file_id, get_settings())
+    except ProcessingAlreadyRunning:
+        return HTMLResponse(
+            '<span style="color:var(--warn)">already processing</span>', status_code=409
+        )
 
-    threading.Thread(target=process_file, args=(file_id,), kwargs={"force": force}, daemon=True).start()
+    threading.Thread(
+        target=process_file, args=(file_id,),
+        kwargs={"force": force, "claim_token": claim_token}, daemon=True,
+    ).start()
     return HTMLResponse('<span style="color:var(--warn)">re-running… refresh in a moment</span>')
 
 
@@ -687,73 +1603,131 @@ def edit_transcript_segment(
     without rerunning ASR. Summaries are not auto-regenerated — regeneration
     stays an explicit action."""
     import copy
-    import threading
-
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
         if r is None:
             return JSONResponse({"error": "not found"}, status_code=404)
-        settings = get_settings()
-        raw_row = _canonical_raw_row(r, settings)
-        corrected = _canonical_revision(r, raw_row)
-        if corrected is not None:
-            base_segments = corrected.segments
-            has_speakers = corrected.has_speakers
-            base_transcript_id = corrected.base_transcript_id
-            revision_source = corrected.source
-        elif raw_row is not None:
-            base_segments = raw_row.segments
-            has_speakers = raw_row.has_speakers
-            base_transcript_id = raw_row.id
-            revision_source = raw_row.source
-        else:
+        base = _transcript_edit_base(r)
+        if base is None:
             return JSONResponse({"error": "no transcript to edit"}, status_code=400)
-        current_revision = corrected.revision if corrected is not None else 0
+        base_segments, *_rest, current_revision = base
         if base_revision != current_revision:
             return JSONResponse(
                 {"error": "transcript changed; reload before saving"},
                 status_code=409,
             )
-        next_revision = max((rev.revision for rev in r.transcript_revisions), default=0) + 1
         if not 0 <= idx < len(base_segments):
             return JSONResponse({"error": "segment index out of range"}, status_code=400)
         segments = copy.deepcopy(base_segments)
         # Word timings/text describe the raw ASR segment and become invalid once
         # its text is edited. Preserve segment timing/speaker, but clear stale words.
         segments[idx] = dict(segments[idx]) | {"text": text, "words": []}
-        joined = "\n".join(
-            (s.get("text") or "").strip() for s in segments if (s.get("text") or "").strip()
+        next_revision, expected_names = _create_transcript_revision(
+            session, r, base_revision=base_revision, segments=segments,
+            note=f"edited segment {idx}",
         )
-        session.add(
-            TranscriptRevision(
-                file_id=file_id,
-                base_transcript_id=base_transcript_id,
-                revision=next_revision,
-                source=revision_source,
-                segments=segments,
-                text=joined,
-                has_speakers=has_speakers,
-                note=f"edited segment {idx}",
-            )
-        )
-        # Invalidate the index now: stale chunks must not serve search/Ask.
-        session.execute(delete(Chunk).where(Chunk.file_id == file_id))
-        _mark_derived_stale(
-            session,
-            file_id,
-            (StageName.summarize, StageName.mind_map, StageName.index),
-        )
-        expected_names = display_names(session, file_id)
-
-    from ..worker.reindex import reindex_file
-
-    threading.Thread(
-        target=reindex_file,
-        args=(file_id,),
-        kwargs={
-            "expected_revision": next_revision,
-            "expected_speaker_names": expected_names,
-        },
-        daemon=True,
-    ).start()
+    _queue_revision_reindex(file_id, next_revision, expected_names)
     return RedirectResponse(url=f"/file/{file_id}", status_code=303)
+
+
+@app.post("/file/{file_id}/transcript/replace")
+def replace_transcript_text(
+    file_id: str,
+    find: str = Form(...),
+    replacement: str = Form(""),
+    base_revision: int = Form(...),
+    case_sensitive: bool = Form(False),
+):
+    """Literal transcript-wide find/replace as one atomic revision."""
+    import copy
+    import re
+
+    if not find:
+        return JSONResponse({"error": "find text must not be empty"}, status_code=400)
+    with session_scope() as session:
+        r = session.get(PlaudFile, file_id)
+        if r is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        base = _transcript_edit_base(r)
+        if base is None:
+            return JSONResponse({"error": "no transcript to edit"}, status_code=400)
+        base_segments, *_rest, current_revision = base
+        if base_revision != current_revision:
+            return JSONResponse(
+                {"error": "transcript changed; reload before saving"}, status_code=409
+            )
+        pattern = re.compile(re.escape(find), 0 if case_sensitive else re.IGNORECASE)
+        segments = copy.deepcopy(base_segments)
+        replacements = 0
+        for segment in segments:
+            updated, count = pattern.subn(replacement, segment.get("text") or "")
+            if count:
+                segment["text"] = updated
+                segment["words"] = []
+                replacements += count
+        if replacements == 0:
+            return JSONResponse({"error": "find text was not present"}, status_code=400)
+        next_revision, expected_names = _create_transcript_revision(
+            session, r, base_revision=base_revision, segments=segments,
+            note=f"replaced {replacements} occurrence(s) of {find!r}",
+        )
+    _queue_revision_reindex(file_id, next_revision, expected_names)
+    return RedirectResponse(url=f"/file/{file_id}", status_code=303)
+
+
+@app.post("/api/files/{file_id}/transcript/bulk")
+def api_bulk_edit_transcript(
+    file_id: str, payload: TranscriptBulkEditInput
+) -> JSONResponse:
+    """Apply several explicit segment edits as one conflict-checked revision."""
+    import copy
+
+    if len({edit.index for edit in payload.edits}) != len(payload.edits):
+        return JSONResponse({"error": "segment indices must be unique"}, status_code=400)
+    with session_scope() as session:
+        r = session.get(PlaudFile, file_id)
+        if r is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        base = _transcript_edit_base(r)
+        if base is None:
+            return JSONResponse({"error": "no transcript to edit"}, status_code=400)
+        base_segments, *_rest, current_revision = base
+        if payload.base_revision != current_revision:
+            return JSONResponse(
+                {"error": "transcript changed; reload before saving"}, status_code=409
+            )
+        if any(edit.index >= len(base_segments) for edit in payload.edits):
+            return JSONResponse({"error": "segment index out of range"}, status_code=400)
+        segments = copy.deepcopy(base_segments)
+        for edit in payload.edits:
+            segments[edit.index] = dict(segments[edit.index]) | {
+                "text": edit.text, "words": [],
+            }
+        next_revision, expected_names = _create_transcript_revision(
+            session, r, base_revision=payload.base_revision, segments=segments,
+            note=f"bulk edited {len(payload.edits)} segment(s)",
+        )
+    _queue_revision_reindex(file_id, next_revision, expected_names)
+    return JSONResponse({"file_id": file_id, "revision": next_revision,
+                         "edited_segments": len(payload.edits)})
+
+
+@app.get("/api/files/{file_id}/transcript/revisions")
+def api_transcript_revisions(file_id: str) -> JSONResponse:
+    with session_scope() as session:
+        r = session.get(PlaudFile, file_id)
+        if r is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        data = [{
+            "id": revision.id, "revision": revision.revision,
+            "source": revision.source, "kind": revision.kind, "note": revision.note,
+            "base_transcript_id": revision.base_transcript_id,
+            "created_at": revision.created_at.isoformat(),
+            "dependent_summaries": session.query(Summary).filter_by(
+                file_id=file_id, transcript_revision=revision.revision,
+            ).count(),
+            "dependent_chunks": session.query(Chunk).filter_by(
+                file_id=file_id, transcript_revision=revision.revision,
+            ).count(),
+        } for revision in reversed(r.transcript_revisions)]
+    return JSONResponse({"file_id": file_id, "revisions": data})

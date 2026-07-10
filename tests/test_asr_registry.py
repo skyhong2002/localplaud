@@ -70,6 +70,20 @@ def test_build_provider_returns_registered_factory_product(dummy_providers):
     assert provider.available() is True
 
 
+def test_partial_registry_still_loads_builtins(monkeypatch, dummy_providers):
+    calls = []
+
+    def load_all():
+        calls.append(True)
+        registry._BUILTINS_LOADED = True
+
+    monkeypatch.setattr(registry, "_BUILTINS_LOADED", False)
+    monkeypatch.setattr(registry, "_load_builtin_factories", load_all)
+    provider = registry.build_provider("dummy", _cfg("dummy"))
+    assert provider.name == "dummy"
+    assert calls == [True]
+
+
 def test_fallback_when_primary_unavailable(dummy_providers, canned):
     cfg = _cfg("brokenprimary", fallback=["dummy"])
     result = registry.transcribe_with_fallback(AUDIO, cfg)
@@ -80,6 +94,40 @@ def test_no_provider_available_raises(dummy_providers):
     cfg = _cfg("brokenprimary", fallback=["brokenprimary"])
     with pytest.raises(AsrUnavailable):
         registry.transcribe_with_fallback(AUDIO, cfg)
+
+
+def test_fallback_uses_its_own_resolved_model_and_options(canned):
+    seen = {}
+
+    class Broken:
+        def available(self):
+            return False
+
+    class Fallback:
+        def __init__(self, cfg):
+            seen["model"] = cfg.openai.model
+            seen["base_url"] = cfg.openai.base_url
+
+        def available(self):
+            return True
+
+        def transcribe(self, path, language="auto"):
+            seen["language"] = language
+            return canned
+
+    registry._FACTORIES["faster-whisper"] = lambda cfg: Broken()
+    registry._FACTORIES["openai"] = lambda cfg: Fallback(cfg)
+    cfg = AsrConfig(provider="faster-whisper", fallback=["openai"], fallback_routes=[{
+        "provider": "openai", "model": "fallback-audio",
+        "base_url": "https://example.com/v1", "options": {"language": "zh"},
+    }])
+    try:
+        assert registry.transcribe_with_fallback(AUDIO, cfg) is canned
+        assert seen == {"model": "fallback-audio", "base_url": "https://example.com/v1",
+                        "language": "zh"}
+    finally:
+        registry._FACTORIES.pop("faster-whisper", None)
+        registry._FACTORIES.pop("openai", None)
 
 
 def test_mlx_health_explains_dependency_import_failure(monkeypatch):

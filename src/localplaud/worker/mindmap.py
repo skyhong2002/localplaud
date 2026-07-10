@@ -192,7 +192,9 @@ def generate_mind_map(
         "title": None,
         "content_md": content,
         "provider": settings.llm.provider,
-        "model": getattr(getattr(settings.llm, settings.llm.provider, None), "model", None),
+        "model": getattr(getattr(settings.llm, settings.llm.provider.replace("-", "_"), None),
+                         "model", None),
+        "usage": getattr(llm, "usage", {"provider_reported_tokens": False}),
         "detail": {
             "strategy": strategy,
             "transcript_chars": len(transcript_text),

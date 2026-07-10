@@ -117,6 +117,8 @@ def reset_inflight() -> int:
     from sqlalchemy import update
 
     reset = 0
+    from datetime import UTC, datetime
+
     with session_scope() as session:
         reset += session.execute(
             update(PlaudFile)
@@ -125,8 +127,13 @@ def reset_inflight() -> int:
         ).rowcount
         reset += session.execute(
             update(PlaudFile)
-            .where(PlaudFile.status == FileStatus.processing)
-            .values(status=FileStatus.downloaded)
+            .where(
+                PlaudFile.status == FileStatus.processing,
+                (PlaudFile.processing_lease_until.is_(None))
+                | (PlaudFile.processing_lease_until <= datetime.now(UTC)),
+            )
+            .values(status=FileStatus.downloaded, processing_token=None,
+                    processing_lease_until=None)
         ).rowcount
     if reset:
         log.info("Reset %d in-flight file(s) after restart", reset)

@@ -18,10 +18,10 @@ class LocalEmbedder:
     """Embeds with a sentence-transformers model, loaded lazily on first use
     and cached for the lifetime of the instance."""
 
-    name = "local"
-
     def __init__(self, cfg: LocalEmbeddingsConfig) -> None:
         self.cfg = cfg
+        self.name = "local"
+        self.space_id = f"local:{cfg.model}"
         self._model: Any = None
 
     def _load(self) -> Any:

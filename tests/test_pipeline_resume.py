@@ -18,12 +18,15 @@ def _reset_db(monkeypatch, tmp_path):
 
 
 def _install_fakes(monkeypatch, counters):
-    from localplaud.asr.base import Segment, Transcript
+    from localplaud.asr.base import Segment, Transcript, Word
 
     def fake_asr(wav, settings):
         counters["asr"] += 1
         return Transcript(
-            segments=[Segment(text="hello world", start=0.0, end=1.0, speaker="SPEAKER_00")],
+            segments=[Segment(text="hello world", start=0.0, end=1.0,
+                              speaker="SPEAKER_00",
+                              words=[Word(text="hello", start=0.0, end=0.5,
+                                          speaker="SPEAKER_00")])],
             language="en", provider="fake", has_speakers=True,
         )
 
@@ -49,7 +52,7 @@ def _install_fakes(monkeypatch, counters):
 
 def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
-    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
+    from localplaud.db.models import FileStatus, PlaudFile, StageAttempt, StageName, StageStatus
     from localplaud.db.session import init_db, session_scope
     from localplaud.worker.pipeline import process_file
 
@@ -69,13 +72,30 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
         f = s.get(PlaudFile, "f1")
         assert f.status == FileStatus.done
         assert f.transcript is not None and len(f.summaries) == 2 and len(f.chunks) == 1
+        assert [row.artifact_kind for row in f.transcripts] == ["raw_asr", "aligned"]
+        assert f.raw_asr_transcript is not None
+        assert f.local_transcript.artifact_kind == "aligned"
         stages = {run.stage: run for run in f.stage_runs}
         assert stages[StageName.convert].status == StageStatus.skipped
         assert stages[StageName.transcribe].attempts == 1
         assert stages[StageName.transcribe].status == StageStatus.completed
+        from localplaud.config import get_settings
+
+        assert (
+            stages[StageName.transcribe].profile_snapshot["route"]["provider"]
+            == get_settings().asr.provider
+        )
+        # The system boundary permits explicitly selected cloud/worker starters;
+        # the active default route itself remains the configured local provider.
+        assert stages[StageName.transcribe].profile_snapshot["policy"]["no_egress"] is False
+        assert stages[StageName.transcribe].profile_snapshot["route"]["egress"] == "local_only"
         assert stages[StageName.diarize].detail["provided_by_asr"] is True
         assert stages[StageName.summarize].attempts == 1
         assert stages[StageName.index].attempts == 1
+        history = list(s.query(StageAttempt).filter_by(file_id="f1",
+                                                       stage=StageName.transcribe))
+        assert len(history) == 1
+        assert history[0].profile_snapshot == stages[StageName.transcribe].profile_snapshot
 
     # Second run without force: all stages skipped (artifacts reused).
     process_file("f1")
@@ -94,6 +114,30 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
         assert stages[StageName.transcribe].attempts == 2
         assert stages[StageName.summarize].attempts == 2
         assert stages[StageName.index].attempts == 2
+        history = list(s.query(StageAttempt).filter_by(file_id="f1",
+                                                       stage=StageName.transcribe).order_by(
+                                                           StageAttempt.attempt))
+        assert [item.attempt for item in history] == [1, 2]
+        assert all(item.status == StageStatus.completed for item in history)
+
+
+def test_processing_claim_is_atomic(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import ProcessingAlreadyRunning, _claim_processing
+
+    init_db()
+    audio = tmp_path / "claim.wav"
+    audio.write_bytes(b"RIFFfake")
+    with session_scope() as session:
+        session.add(PlaudFile(id="claim", status=FileStatus.downloaded,
+                              audio_path=str(audio)))
+    token = _claim_processing("claim", get_settings())
+    assert token
+    with pytest.raises(ProcessingAlreadyRunning):
+        _claim_processing("claim", get_settings())
 
 
 def test_index_failure_keeps_transcript_and_summary(monkeypatch, tmp_path):
@@ -128,6 +172,68 @@ def test_index_failure_keeps_transcript_and_summary(monkeypatch, tmp_path):
         assert index_run.status == StageStatus.failed
         assert index_run.attempts == 1
         assert "embedding model unavailable" in index_run.error
+
+
+def test_pipeline_error_schedules_bounded_exponential_retry(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__RETRY_BASE_SECONDS", "10")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__RETRY_MAX_ATTEMPTS", "2")
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import process_file
+
+    settings = get_settings(reload=True)
+    init_db()
+    audio = tmp_path / "retry.wav"
+    audio.write_bytes(b"RIFFfake")
+    with session_scope() as session:
+        session.add(PlaudFile(id="retry", status=FileStatus.downloaded, audio_path=str(audio)))
+    monkeypatch.setattr("localplaud.worker.pipeline.transcribe.run_asr",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("temporary")))
+    with pytest.raises(RuntimeError, match="temporary"):
+        process_file("retry", settings)
+    with session_scope() as session:
+        row = session.get(PlaudFile, "retry")
+        assert row.status == FileStatus.error
+        assert row.retry_count == 1
+        assert row.retry_after is not None
+    with pytest.raises(RuntimeError, match="temporary"):
+        process_file("retry", settings)
+    with session_scope() as session:
+        row = session.get(PlaudFile, "retry")
+        assert row.retry_count == 2
+        assert row.retry_after is None
+
+
+def test_profile_change_only_resolves_on_a_real_new_attempt(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import ExecutionProfile, FileStatus, PlaudFile, StageName
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import _begin_stage, _finish_stage
+
+    init_db()
+    with session_scope() as session:
+        file = PlaudFile(id="profile-change", status=FileStatus.downloaded)
+        session.add(file)
+    _begin_stage("profile-change", StageName.transcribe)
+    _finish_stage("profile-change", StageName.transcribe, provider="faster-whisper")
+    with session_scope() as session:
+        file = session.get(PlaudFile, "profile-change")
+        run = file.stage_runs[0]
+        old_snapshot = run.profile_snapshot
+        override = session.query(ExecutionProfile).filter_by(name="apple-local").one()
+        file.execution_profile_id = override.id
+        run.detail = {"profile_change_pending": True}
+    # A reuse completion does not rewrite who selected/produced the artifact.
+    _finish_stage("profile-change", StageName.transcribe, provider="faster-whisper",
+                  detail={"reused": True, "profile_change_pending": True})
+    with session_scope() as session:
+        assert session.get(PlaudFile, "profile-change").stage_runs[0].profile_snapshot == old_snapshot
+    _begin_stage("profile-change", StageName.transcribe)
+    with session_scope() as session:
+        run = session.get(PlaudFile, "profile-change").stage_runs[0]
+        assert run.profile_snapshot["route"]["provider"] == "mlx-whisper"
 
 
 def test_asr_failure_marks_core_pipeline_error(monkeypatch, tmp_path):

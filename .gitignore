@@ -50,5 +50,7 @@ caddy_config/
 GOAL_CONDITION.md
 GOAL_PROMPT.md
 .claude/settings.local.json
+.claude/launch.json
+.claude/worktrees/
 HANDOFF.md
 .claude/launch.json

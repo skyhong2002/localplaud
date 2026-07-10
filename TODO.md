@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-10)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (197 tests passing locally).
+  Active development is merged directly to `main` (259 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -61,15 +61,21 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   artifact source, timestamps, and errors. ASR is persisted before optional work;
   diarization, notes, and indexing failures produce an actionable `partial` state
   without discarding usable artifacts. Web detail/status pages expose diagnostics,
-  and Resume retries only missing/failed work while Rebuild all is explicit.
+  and Resume retries only missing/failed work while Rebuild all is explicit. Raw ASR,
+  aligned, and diarized outputs are retained as separate artifacts; an atomic durable
+  processing lease rejects duplicate Web/daemon/multi-process claims.
 - ✅ Fixed Ollama embeddings: model-level health checks now distinguish a healthy
   daemon from a missing configured model, errors give the exact `ollama pull` action,
   modern `/api/embed` batches inputs with legacy compatibility, and stored provenance
-  includes the model. Pulled `bge-m3` on SkyLabMac and smoke-tested two 1024-d vectors.
+  includes the provider endpoint/model embedding-space identity, so equal-width
+  vectors from incompatible models are never mixed. Pulled `bge-m3` on SkyLabMac and
+  smoke-tested two 1024-d vectors.
 - ✅ Queue is newest-first, and daemon work is bounded by configurable
   `pipeline.files_per_cycle` so fresh recordings can enter between backlog batches;
   `localplaud work --once` remains the explicit full-backlog path. Stage/status
-  counts provide progress; automatic retry backoff policy remains to be added.
+  counts provide progress. ✅ Added bounded exponential retry scheduling with
+  durable retry count/deadline; terminal failures stop retrying at the configured
+  ceiling.
 
 ### P0 PRIMARY — Provider, model, and execution profiles
 
@@ -78,15 +84,36 @@ or a remote worker. localplaud resolves those choices into a reusable execution
 profile, records the resolved snapshot on each run, and never crosses a privacy or
 cost boundary through an implicit fallback.
 
-Existing groundwork, not the finished feature:
+Backend implementation status:
 
 - ✅ Provider registries/config already exist for ASR, LLMs, and embeddings;
   OpenAI-compatible `base_url` configuration exists for relevant API paths.
 - ✅ Stage runs and artifacts already retain provider/model provenance, and health
   checks can distinguish some daemon-level and model-level failures.
-- Missing: a shared capability contract, durable provider/model/profile records,
-  profile resolution, Web management, explicit fallback policy, cost/privacy
-  controls, and a remote GPU worker protocol.
+- ✅ Added shared capability contracts, durable provider/model/profile/health
+  records, deterministic layered resolution, masked secret references, explicit
+  no-egress/allowed-provider/quality/timeout/cost/fallback checks (including every
+  fallback), immutable `StageAttempt`
+  snapshots, and headless management/observability APIs.
+- ✅ Added truthful Apple/NVIDIA/CPU, OpenAI Cloud, partial OpenAI-compatible, and
+  Remote GPU starting profiles plus conservative hardware detection; profiles are
+  recommendations and are never silently selected. Placeholder compatible/worker
+  endpoints must be explicitly configured and health-checked.
+- ✅ Added separately declared OpenAI-compatible audio/text/embedding capabilities,
+  custom base URL/headers/timeout/input limits, and disabled-by-default experimental
+  `codex-local` through an ephemeral read-only Codex CLI boundary. OpenAI Audio
+  dispatch now follows model-specific response shapes: `whisper-1` verbose word
+  timestamps, GPT-4o transcription JSON, and diarized speaker segments, without
+  inventing unsupported timestamp precision.
+- ✅ Added remote-worker protocol v1 and reference durable server: HMAC handshake,
+  idempotent jobs, signed file-scoped fetch, progress/cancellation, structured
+  retryable errors, expiring claim leases/heartbeats, crashed-runner recovery,
+  stale-owner rejection, checksum validation, and a remote ASR adapter with no
+  Plaud credentials.
+- Remaining external acceptance: authenticated pyannote on real audio, NVIDIA/CPU
+  host execution, a separately isolated rentable GPU, and consented Taiwan Mandarin
+  / Mandarin-English benchmark runs. The code/harness must not be mistaken for
+  those real-world acceptance results.
 
 Implement this P0 in the following order:
 
@@ -170,17 +197,21 @@ embedding raw provider credentials or model settings in each rule.
   implemented here** — Whisper's own word timestamps are currently the alignment
   source, and a whisperX-style wav2vec2 forced aligner needs per-language models
   plus a Mandarin/code-switch accuracy evaluation, so it must be benchmarked on real
-  user recordings first.
+  user recordings first. A real `align` stage now validates Whisper word timestamps
+  and optionally dispatches WhisperX; missing alignment is visibly degraded.
 - ✅ Persist stable speaker IDs separately from editable display names: `speakers`
   rows mirror the diarization keys per recording, renames are upserted from the
   Web detail page (legend inline forms), and flow into transcript view, regenerated
   notes/indexes, Ask, and Markdown export. A rename invalidates stale derived
-  artifacts and re-indexes without ASR. Remaining: reconcile identities safely
-  across diarization reruns because `SPEAKER_00` labels are run-local.
-- Add a custom vocabulary/correction layer for names, specialist terms, Taiwan
-  Mandarin, and Mandarin/English code-switching.
-- Establish a benchmark set from consented user-owned recordings: WER/CER, diarization
-  error, timestamp quality, hallucination rate, runtime, and memory.
+  artifacts and re-indexes without ASR. ✅ Added conservative time-overlap identity
+  reconciliation plus a durable speaker timeline across intermediate speaker-less ASR.
+- ✅ Added durable custom vocabulary/correction data and an independently resumable
+  correction stage. Automatic corrections create provenance-preserving revisions
+  and never overwrite a later user revision.
+- ✅ Added a privacy-safe `benchmark-speech` harness for consented user-owned data:
+  WER/CER, DER proxy, timestamp MAE, insertion/hallucination proxy, runtime/RTF, and
+  peak memory with fail-closed thresholds. The private benchmark set and real runs
+  remain external acceptance work and are never committed.
 
 ### P0 — Full-transcript notes and usable knowledge
 
@@ -193,24 +224,28 @@ embedding raw provider credentials or model settings in each rule.
   the same bounded map/reduce chunking (existing local notes are structural context
   only). Stored as a provenanced `mind_map` note, resumable/degradable like other
   optional stages, rendered as a collapsible tree tab in the Web detail page, and
-  included in Markdown export. PNG mind-map export remains.
-- Make templates editable data; support auto selection, per-file custom generation,
-  multiple note tabs, provenance, and safe regeneration.
+  included in Markdown export. ✅ Added a full-outline local PNG renderer/download
+  with hierarchical connectors, long-node wrapping, and CJK-capable font fallback.
+- ✅ Templates are editable/versioned database records with auto selection,
+  per-file generation, multiple template tabs, profile/transcript provenance, and
+  safe regeneration history.
 - ✅ Single-file Ask: `/file/{id}/ask` answers grounded only in one recording, with
   citations rendered as playable timestamp buttons that seek the player; suggested
   grounded question chips; graceful degrade when unindexed or providers are down.
 - ✅ Whole-library Ask citations now deep-link to `/file/{id}?t={start}` and seek the
   player on load, so a cited answer opens the recording at the cited moment.
-- Remaining: save-to-note from an Ask answer and grounded follow-up threads.
+- ✅ Added durable single-file/library Ask threads with grounded follow-up history,
+  provider/profile provenance, and save-to-local-note with playable source links.
 - ✅ Transcript corrections as revisions: inline per-segment editing on the Web
   detail page creates immutable `transcript_revisions` on top of the untouched raw
   ASR row; the latest revision is the canonical transcript for summaries, indexing,
   and export, edits survive re-ASR, and each edit hides/invalidates stale notes and
   maps while rebuilding the embedding index in the background without rerunning ASR
   (notes/map regeneration stays explicit through Resume). Provenance prevents edits
-  of Plaud imports from satisfying independent mode. Remaining: transcript
-  find/replace, multi-segment/bulk edits, dependent-artifact revision links, and a
-  revision history browser.
+  of Plaud imports from satisfying independent mode. ✅ Added transcript-wide literal
+  find/replace, conflict-checked multi-segment bulk edits, a visible/API revision
+  history, and transcript-revision links on notes, maps, indexed chunks, and Ask
+  citations.
 
 ### P1 — Plaud-like Web App workflow
 
@@ -228,8 +263,8 @@ embedding raw provider credentials or model settings in each rule.
   folders/tags, and uncategorized organization still remain.
 - ✅ (partial) Explicit raw-ASR versus corrected-canonical transcript switch with
   synchronized timestamps/speaker labels is live, and edits are preserved
-  independently from the raw artifact. Remaining: transcript-local search and
-  find/replace.
+  independently from the raw artifact. Transcript-wide find/replace and bulk-edit
+  APIs are live. Remaining P1 polish: client-side transcript-local navigation/search.
 - Add file Ask suggested questions and reusable local skills (action items, task
   table, insights), plus grounded follow-ups and save-to-note.
 - Build template My Space and Explore surfaces with search, categories/scenarios,

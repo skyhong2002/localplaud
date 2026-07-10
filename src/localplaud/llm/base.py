@@ -68,4 +68,12 @@ def build_llm(cfg: LlmConfig) -> LLMProvider:
         from .anthropic_llm import AnthropicLLM
 
         return AnthropicLLM(cfg.anthropic)
+    if cfg.provider == "codex-local":
+        from .codex_local import CodexLocalProvider
+
+        return CodexLocalProvider(cfg.codex_local)
+    if cfg.provider == "remote-worker":
+        from .remote_worker import RemoteWorkerLLM
+
+        return RemoteWorkerLLM(cfg.remote_worker)
     raise LLMUnavailable(f"unknown LLM provider: {cfg.provider!r}")

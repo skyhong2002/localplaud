@@ -52,11 +52,12 @@ def _seed_two_files():
         s.add(PlaudFile(id="r1", filename="Recording One"))
         s.add(PlaudFile(id="r2", filename="Recording Two"))
         s.add(Chunk(file_id="r1", idx=0, text="r1 relevant", start=12.0, end=15.0,
-                    speaker="SPEAKER_00", embedding=hit.tobytes(), dim=2))
+                    speaker="SPEAKER_00", embedding=hit.tobytes(), dim=2,
+                    embedding_model="fake"))
         s.add(Chunk(file_id="r1", idx=1, text="r1 offtopic", start=40.0, end=42.0,
-                    embedding=miss.tobytes(), dim=2))
+                    embedding=miss.tobytes(), dim=2, embedding_model="fake"))
         s.add(Chunk(file_id="r2", idx=0, text="r2 relevant", start=3.0, end=6.0,
-                    embedding=hit.tobytes(), dim=2))
+                    embedding=hit.tobytes(), dim=2, embedding_model="fake"))
 
 
 def test_retrieve_scopes_to_file(monkeypatch, tmp_path):

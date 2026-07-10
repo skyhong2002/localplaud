@@ -21,6 +21,7 @@ class OpenAILLM:
 
     def __init__(self, cfg: OpenAILlmConfig) -> None:
         self.cfg = cfg
+        self.usage = {"input_tokens": 0, "output_tokens": 0, "provider_reported_tokens": True}
 
     def available(self) -> bool:
         """True if an API key is configured."""
@@ -42,7 +43,11 @@ class OpenAILLM:
                 "OpenAI LLM: the 'openai' package is not installed"
             ) from exc
 
-        client = OpenAI(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None)
+        if self.cfg.max_input_chars is not None and len(prompt) > self.cfg.max_input_chars:
+            raise LLMError("OpenAI LLM input exceeds configured max_input_chars")
+        client = OpenAI(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None,
+                        default_headers=self.cfg.headers or None,
+                        timeout=self.cfg.timeout_seconds)
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -54,6 +59,9 @@ class OpenAILLM:
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        if getattr(resp, "usage", None):
+            self.usage["input_tokens"] += getattr(resp.usage, "prompt_tokens", 0) or 0
+            self.usage["output_tokens"] += getattr(resp.usage, "completion_tokens", 0) or 0
         content = resp.choices[0].message.content
         if content is None:
             raise LLMError("OpenAI LLM: empty completion")

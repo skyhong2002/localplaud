@@ -11,7 +11,10 @@ from __future__ import annotations
 import logging
 
 from ..asr.base import Transcript
+from ..asr.remote_worker_provider import _parse_transcript
 from ..config import DiarizeConfig
+from ..providers.remote_inference import run_remote_audio_json
+from .align import _payload
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +30,11 @@ class DiarizationUnavailable(DiarizationError):
 def health(cfg: DiarizeConfig) -> tuple[bool, str]:
     if cfg.provider == "none":
         return False, "disabled; speaker labels will not be generated"
+    if cfg.provider == "remote-worker":
+        configured = bool(cfg.base_url and cfg.token and cfg.model)
+        return configured, (
+            "remote worker configured" if configured else "remote worker not configured"
+        )
     try:
         import pyannote.audio  # noqa: F401
     except Exception as exc:  # noqa: BLE001 - binary dependency imports can fail broadly
@@ -54,13 +62,27 @@ def _load_pipeline(cfg: DiarizeConfig):
         raise DiarizationUnavailable(f"could not load pyannote pipeline: {exc}") from exc
 
 
-def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig) -> Transcript:
+def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig, remote_input=None) -> Transcript:
     """Return ``transcript`` with speaker labels filled in. If diarization is
     disabled or unavailable, returns it unchanged."""
     if cfg.provider == "none":
         return transcript
     if transcript.has_speakers:
         return transcript
+    if cfg.provider == "remote-worker":
+        if remote_input is None:
+            raise DiarizationUnavailable("remote input signing is not configured")
+        try:
+            data = run_remote_audio_json(
+                cfg, remote_input, wav_path, "diarization",
+                {"transcript": _payload(transcript), "num_speakers": cfg.num_speakers},
+            )
+            result = _parse_transcript(data, cfg.model)
+        except Exception as exc:
+            raise DiarizationUnavailable(f"remote diarization failed: {exc}") from exc
+        if not result.has_speakers:
+            raise DiarizationUnavailable("remote diarization returned no speaker labels")
+        return result
 
     pipeline = _load_pipeline(cfg)
     kwargs = {}

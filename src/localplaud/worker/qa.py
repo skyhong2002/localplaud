@@ -8,27 +8,33 @@ the source recordings.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 
 import numpy as np
 from sqlalchemy import select
 
 from ..config import Settings, get_settings
-from ..db.models import Chunk, PlaudFile
+from ..db.models import Chunk, ExecutionProfile, PlaudFile, StageName
 from ..db.session import session_scope
 from ..embeddings.base import build_embedder
 from ..llm.base import build_llm
+from ..providers.materialize import materialize_snapshot
+from ..providers.resolver import resolve_profile
+from ..providers.routing import settings_for_route
 
 log = logging.getLogger(__name__)
 
 
 def _load_matrix(
-    session, dim: int, file_id: str | None = None
+    session, dim: int, embedding_model: str, file_id: str | None = None
 ) -> tuple[list[Chunk], np.ndarray]:
-    # Only chunks embedded at the query's dimension are comparable; mixing dims
-    # (e.g. after switching embeddings.provider) would crash np.stack / the dot
-    # product. Filter to the current embedder's dimension. When ``file_id`` is
-    # set, scope retrieval to a single recording (single-file Ask).
-    stmt = select(Chunk).where(Chunk.embedding.is_not(None), Chunk.dim == dim)
+    # Vectors are comparable only inside the same embedding space. Equal
+    # dimensions are insufficient: unrelated models commonly emit the same
+    # width. embedding_model is therefore a provider/endpoint/model identity.
+    stmt = select(Chunk).where(
+        Chunk.embedding.is_not(None), Chunk.dim == dim,
+        Chunk.embedding_model == embedding_model,
+    )
     if file_id is not None:
         stmt = stmt.where(Chunk.file_id == file_id)
     chunks = list(session.scalars(stmt))
@@ -55,7 +61,11 @@ def retrieve(
 
     results: list[dict] = []
     with session_scope() as session:
-        chunks, mat = _load_matrix(session, dim=len(qv), file_id=file_id)
+        chunks, mat = _load_matrix(
+            session, dim=len(qv),
+            embedding_model=getattr(embedder, "space_id", embedder.name),
+            file_id=file_id,
+        )
         if not chunks:
             return []
         norms = mat / (np.linalg.norm(mat, axis=1, keepdims=True) + 1e-8)
@@ -73,6 +83,7 @@ def retrieve(
                     "speaker": c.speaker,
                     "file_id": c.file_id,
                     "filename": f.filename if f else c.file_id,
+                    "transcript_revision": c.transcript_revision,
                 }
             )
     return results
@@ -105,6 +116,7 @@ def answer(
     top_k: int = 6,
     settings: Settings | None = None,
     file_id: str | None = None,
+    history: list[dict] | None = None,
 ) -> dict:
     """Retrieve + answer. Returns {answer, sources}.
 
@@ -112,7 +124,33 @@ def answer(
     single recording, and the model is asked to reference moments by timestamp.
     """
     settings = settings or get_settings()
-    hits = retrieve(query, top_k=top_k, settings=settings, file_id=file_id)
+    with session_scope() as session:
+        default = session.scalar(select(ExecutionProfile).where(ExecutionProfile.is_system_default))
+        if default is None:
+            raise RuntimeError("execution profiles are not initialized")
+        override = None
+        folder_rule = None
+        template_default = None
+        if file_id is not None:
+            file = session.get(PlaudFile, file_id)
+            if file is not None and file.execution_profile_id is not None:
+                override = session.get(ExecutionProfile, file.execution_profile_id)
+            context = file.profile_context or {} if file is not None else {}
+            folder_id = context.get("rule_profile_id") or context.get("folder_profile_id")
+            folder_rule = session.get(ExecutionProfile, folder_id) if folder_id else None
+            template_id = context.get("template_profile_id")
+            template_default = session.get(ExecutionProfile, template_id) \
+                if template_id else None
+        profile_snapshot = materialize_snapshot(session, resolve_profile(
+            StageName.ask, system_default=default, folder_rule=folder_rule,
+            template_default=template_default, recording_override=override
+        ))
+        index_snapshot = materialize_snapshot(session, resolve_profile(
+            StageName.index, system_default=default, folder_rule=folder_rule,
+            template_default=template_default, recording_override=override
+        ))
+    index_settings = settings_for_route(settings, StageName.index, index_snapshot)
+    hits = retrieve(query, top_k=top_k, settings=index_settings, file_id=file_id)
     if not hits:
         if file_id is not None:
             return {
@@ -121,11 +159,37 @@ def answer(
                 "sources": [],
             }
         return {"answer": "No indexed recordings yet — run the pipeline first.", "sources": []}
-    llm = build_llm(settings.llm)
     system = _QA_SYSTEM_SINGLE if file_id is not None else _QA_SYSTEM
+    conversation = ""
+    if history:
+        conversation = "Previous grounded conversation:\n" + "\n".join(
+            f"{item['role']}: {item['content']}" for item in history[-8:]
+        ) + "\n\n"
     prompt = (
+        conversation +
         f"Question: {query}\n\nExcerpts:\n---\n{_format_context(hits)}\n---\n\n"
         "Answer the question grounded in the excerpts above."
     )
-    text = llm.complete(prompt, system=system, temperature=0.2, max_tokens=800)
-    return {"answer": text, "sources": hits}
+    routes = [profile_snapshot["route"], *profile_snapshot["route"].get("fallback", [])]
+    last_error = None
+    for candidate_index, route in enumerate(routes):
+        candidate = deepcopy(profile_snapshot)
+        candidate["route"] = deepcopy(route) | {"fallback": []}
+        routed = settings_for_route(settings, StageName.ask, candidate)
+        try:
+            llm = build_llm(routed.llm)
+            text = llm.complete(
+                prompt, system=system, temperature=0.2, max_tokens=800
+            )
+            fallback_index = candidate_index
+            break
+        except Exception as exc:  # noqa: BLE001 - explicit ordered fallback boundary
+            last_error = exc
+    else:
+        raise RuntimeError(f"all Ask providers failed: {last_error}") from last_error
+    provider = routed.llm.provider
+    model = getattr(getattr(routed.llm, provider.replace("-", "_")), "model", None)
+    return {"answer": text, "sources": hits, "provider": provider, "model": model,
+            "profile_snapshot": profile_snapshot, "fallback_index": fallback_index,
+            "index_profile_snapshot": index_snapshot,
+            "usage": getattr(llm, "usage", {})}

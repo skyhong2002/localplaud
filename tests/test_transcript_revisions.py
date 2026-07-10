@@ -227,6 +227,66 @@ def test_detail_view_toggle_raw_vs_corrected(monkeypatch, tmp_path):
     assert 'class="editbtn"' not in raw.text  # no edits from the raw view
 
 
+def test_web_reprocess_rejects_an_active_durable_claim(monkeypatch, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    audio = tmp_path / "busy.wav"
+    audio.write_bytes(b"RIFFfake")
+    with session_scope() as session:
+        session.add(PlaudFile(
+            id="busy", filename="Busy", status=FileStatus.processing,
+            audio_path=str(audio), processing_token="active-owner",
+            processing_lease_until=datetime.now(UTC) + timedelta(hours=1),
+        ))
+    response = c.post("/file/busy/reprocess")
+    assert response.status_code == 409
+    assert "already processing" in response.text
+
+
+def test_find_replace_bulk_edit_and_revision_history(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _mute_reindex(monkeypatch)
+
+    replaced = c.post(
+        "/file/r1/transcript/replace",
+        data={"find": "l", "replacement": "L", "base_revision": 0,
+              "case_sensitive": "true"},
+        follow_redirects=False,
+    )
+    assert replaced.status_code == 303
+    bulk = c.post("/api/files/r1/transcript/bulk", json={
+        "base_revision": 1,
+        "edits": [{"index": 0, "text": "bulk first"},
+                  {"index": 1, "text": "bulk second"}],
+    })
+    assert bulk.status_code == 200
+    assert bulk.json() == {"file_id": "r1", "revision": 2, "edited_segments": 2}
+
+    from localplaud.db.models import TranscriptRevision
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        revisions = list(session.scalars(select(TranscriptRevision).order_by(
+            TranscriptRevision.revision
+        )))
+        assert [revision.note for revision in revisions] == [
+            "replaced 3 occurrence(s) of 'l'", "bulk edited 2 segment(s)"
+        ]
+        assert revisions[-1].text == "bulk first\nbulk second"
+
+    history = c.get("/api/files/r1/transcript/revisions")
+    assert history.status_code == 200
+    assert [item["revision"] for item in history.json()["revisions"]] == [2, 1]
+    page = c.get("/file/r1")
+    assert "Find and replace transcript" in page.text
+    assert "Transcript revision history (2)" in page.text
+
+
 def test_reindex_file_rebuilds_chunks_from_corrected_transcript(monkeypatch, tmp_path):
     from localplaud.worker.reindex import reindex_file  # real fn, before muting
 
@@ -251,6 +311,7 @@ def test_reindex_file_rebuilds_chunks_from_corrected_transcript(monkeypatch, tmp
                                               StageRun.stage == StageName.index))
         assert chunks and "hello, team!" in chunks[0].text  # corrected text indexed
         assert all(chunk.embedding_model == "fake-embed" for chunk in chunks)
+        assert all(chunk.transcript_revision == 1 for chunk in chunks)
         assert run.status == StageStatus.completed
 
 

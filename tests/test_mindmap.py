@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from localplaud.asr.base import Segment, Transcript
+from localplaud.asr.base import Segment, Transcript, Word
 from localplaud.worker.mindmap import _normalize_outline, generate_mind_map
 
 
@@ -146,7 +146,10 @@ def _install_fakes(monkeypatch, counters):
     def fake_asr(wav, settings):
         counters["asr"] += 1
         return Transcript(
-            segments=[Segment(text="hello world", start=0.0, end=1.0, speaker="SPEAKER_00")],
+            segments=[Segment(text="hello world", start=0.0, end=1.0,
+                              speaker="SPEAKER_00",
+                              words=[Word(text="hello", start=0.0, end=0.5,
+                                          speaker="SPEAKER_00")])],
             language="en", provider="fake", has_speakers=True,
         )
 

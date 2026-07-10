@@ -20,6 +20,7 @@ class OllamaProvider:
 
     def __init__(self, cfg: OllamaConfig) -> None:
         self.cfg = cfg
+        self.usage = {"input_tokens": 0, "output_tokens": 0, "provider_reported_tokens": True}
 
     def available(self) -> bool:
         return self.health()[0]
@@ -78,7 +79,10 @@ class OllamaProvider:
             raise LLMError(
                 f"Ollama returned HTTP {resp.status_code}: {resp.text[:500]}"
             )
-        content = resp.json().get("message", {}).get("content", "")
+        payload = resp.json()
+        self.usage["input_tokens"] += payload.get("prompt_eval_count", 0) or 0
+        self.usage["output_tokens"] += payload.get("eval_count", 0) or 0
+        content = payload.get("message", {}).get("content", "")
         if not content.strip():
             raise LLMError("Ollama LLM returned an empty completion")
         return content

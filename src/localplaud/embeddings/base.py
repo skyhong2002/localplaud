@@ -65,4 +65,8 @@ def build_embedder(cfg: EmbeddingsConfig) -> Embedder:
         from .ollama_embed import OllamaEmbedder
 
         return OllamaEmbedder(cfg.ollama)
+    if cfg.provider == "remote-worker":
+        from .remote_worker import RemoteWorkerEmbedder
+
+        return RemoteWorkerEmbedder(cfg.remote_worker)
     raise EmbeddingUnavailable(f"unknown embedding provider: {cfg.provider!r}")

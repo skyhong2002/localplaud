@@ -72,6 +72,24 @@ def test_speaker_keys_from_segments_order_and_words():
     assert speaker_keys_from_segments([]) == []
 
 
+def test_reconcile_speaker_keys_survives_run_local_label_swap():
+    from localplaud.store.speakers import reconcile_speaker_keys
+
+    previous = [
+        {"text": "Alice", "start": 0, "end": 5, "speaker": "SPEAKER_00", "words": []},
+        {"text": "Bob", "start": 5, "end": 10, "speaker": "SPEAKER_01", "words": []},
+    ]
+    rerun = [
+        {"text": "Alice again", "start": 0, "end": 5, "speaker": "SPEAKER_01",
+         "words": [{"text": "Alice", "start": 0, "end": 1, "speaker": "SPEAKER_01"}]},
+        {"text": "Bob again", "start": 5, "end": 10, "speaker": "SPEAKER_00", "words": []},
+    ]
+    reconciled, mapping = reconcile_speaker_keys(previous, rerun)
+    assert mapping == {"SPEAKER_01": "SPEAKER_00", "SPEAKER_00": "SPEAKER_01"}
+    assert [row["speaker"] for row in reconciled] == ["SPEAKER_00", "SPEAKER_01"]
+    assert reconciled[0]["words"][0]["speaker"] == "SPEAKER_00"
+
+
 def test_sync_preserves_display_names_across_repersist(monkeypatch, tmp_path):
     _client(monkeypatch, tmp_path)
     Speaker = _seed()
@@ -101,6 +119,32 @@ def test_sync_preserves_display_names_across_repersist(monkeypatch, tmp_path):
             select(Speaker).where(Speaker.file_id == "r1").order_by(Speaker.id))}
     # rename preserved, old keys never deleted, new key inserted without a name
     assert rows == {"SPEAKER_00": "Alice", "SPEAKER_01": None, "SPEAKER_02": None}
+
+
+def test_persist_reconciles_after_intermediate_raw_asr(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.asr.base import Segment, Transcript
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import _persist_transcript
+
+    # A force rebuild first persists speaker-less ASR, then the new diarization
+    # returns run-local labels in the opposite order.
+    _persist_transcript("r1", Transcript(segments=[
+        Segment(text="Alice", start=1, end=2), Segment(text="Bob", start=2, end=3),
+        Segment(text="Alice", start=3, end=4),
+    ], provider="fake", has_speakers=False))
+    _persist_transcript("r1", Transcript(segments=[
+        Segment(text="Alice", start=1, end=2, speaker="SPEAKER_01"),
+        Segment(text="Bob", start=2, end=3, speaker="SPEAKER_00"),
+        Segment(text="Alice", start=3, end=4, speaker="SPEAKER_01"),
+    ], provider="fake", has_speakers=True))
+    with session_scope() as session:
+        transcript = session.get(PlaudFile, "r1").local_transcript
+        assert [row["speaker"] for row in transcript.segments] == [
+            "SPEAKER_00", "SPEAKER_01", "SPEAKER_00"
+        ]
 
 
 def test_rename_endpoint_upsert_clear_and_validation(monkeypatch, tmp_path):

@@ -119,10 +119,13 @@ Coverage notes:
 
 def summarize(transcript: AsrTranscript, settings: Settings) -> dict:
     """Return {title, content_md, provider, model, template}."""
-    from .summary_templates import render_prompt
+    from .summary_templates import get_template, render_prompt
 
     llm = build_llm(settings.llm)
     template = settings.pipeline.summary_template
+    auto_selected = template == "auto"
+    if auto_selected:
+        template = auto_select_template(transcript)
     transcript_text = _render_transcript(transcript)
     chunk_chars = settings.pipeline.summary_chunk_chars
     chunks = _chunk_text(transcript_text, chunk_chars)
@@ -170,22 +173,35 @@ def summarize(transcript: AsrTranscript, settings: Settings) -> dict:
             "complete transcript:\n\n" + "\n\n".join(notes)
         )
     system, prompt = render_prompt(template, source_text)
+    template_version = get_template(template).version
     content = llm.complete(prompt, system=system, temperature=0.2, max_tokens=1500)
     title = _extract_title(content)
     return {
         "title": title,
         "content_md": content,
         "provider": settings.llm.provider,
-        "model": getattr(getattr(settings.llm, settings.llm.provider, None), "model", None),
+        "model": getattr(getattr(settings.llm, settings.llm.provider.replace("-", "_"), None),
+                         "model", None),
         "template": template,
+        "template_version": template_version,
+        "usage": getattr(llm, "usage", {"provider_reported_tokens": False}),
         "coverage": {
             "strategy": strategy,
             "transcript_chars": len(transcript_text),
             "chunks": len(chunks),
             "map_calls": map_calls,
             "reduce_calls": reduce_calls,
+            "auto_selected_template": template if auto_selected else None,
         },
     }
+
+
+def auto_select_template(transcript: AsrTranscript) -> str:
+    if len(transcript.speakers) >= 2:
+        return "meeting"
+    if len(transcript.text) >= 20_000:
+        return "lecture"
+    return "default"
 
 
 def _extract_title(md: str) -> str | None:

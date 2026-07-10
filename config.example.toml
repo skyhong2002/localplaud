@@ -52,12 +52,18 @@ database_url = "sqlite:///./data/localplaud.db"
 # Local processing stages to run after each download.
 convert = true                   # opus -> 16kHz mono wav (needs ffmpeg)
 transcribe = true
+align = true
 diarize = true
+correct = true
 summarize = true
 mind_map = true                  # nested Markdown outline rendered as a tree in the Web App
 index = true                     # build embeddings for Q&A / search
 concurrency = 1                  # files processed in parallel by the worker
 files_per_cycle = 1              # daemon batch; newest first so fresh files stay responsive
+retry_max_attempts = 3
+retry_base_seconds = 60
+retry_max_seconds = 3600
+processing_lease_seconds = 86400 # cross-process duplicate guard; crashed claims expire
 summary_chunk_chars = 12000      # full transcript is hierarchically summarized above this size
 summary_template = "default"     # default | meeting | call | lecture | personal
 # "independent" (default) accepts only raw audio + metadata from Plaud and
@@ -74,7 +80,7 @@ prefer_cloud_artifacts = false
 # cloud providers are explicit operator choices, never a silent paid fallback.
 # --------------------------------------------------------------------------- #
 [asr]
-provider = "faster-whisper"      # faster-whisper | whispercpp | mlx-whisper | openai | deepgram | assemblyai
+provider = "faster-whisper"      # faster-whisper | whispercpp | mlx-whisper | openai | deepgram | assemblyai | remote-worker
 language = "auto"                # ISO code (e.g. "en", "zh") or "auto"
 fallback = []                    # opt in explicitly; avoid surprise paid processing
 
@@ -108,6 +114,10 @@ fallback = []                    # opt in explicitly; avoid surprise paid proces
   [asr.openai]                   # cloud
   # api_key via LOCALPLAUD_ASR__OPENAI__API_KEY
   model = "whisper-1"
+  timeout_seconds = 120
+  # base_url = "https://api.openai.com/v1"
+  # max_input_bytes = 26214400
+  # headers = { X-Custom-Header = "value" }
 
   [asr.deepgram]                 # cloud, does speaker diarization server-side
   # api_key via LOCALPLAUD_ASR__DEEPGRAM__API_KEY
@@ -118,12 +128,33 @@ fallback = []                    # opt in explicitly; avoid surprise paid proces
   # api_key via LOCALPLAUD_ASR__ASSEMBLYAI__API_KEY
   speaker_labels = true
 
+  [asr.remote_worker]            # trusted, self-owned worker protocol v1
+  base_url = ""
+  # token via LOCALPLAUD_ASR__REMOTE_WORKER__TOKEN
+  model = "large-v3-turbo"
+  input_base_url = ""
+  # input_signing_secret via LOCALPLAUD_ASR__REMOTE_WORKER__INPUT_SIGNING_SECRET
+  input_url_ttl_seconds = 600
+  timeout_seconds = 3600
+  poll_interval_seconds = 2
+
+[align]
+provider = "whisper-timestamps" # whisper-timestamps | whisperx | remote-worker | none
+device = "auto"                 # auto | cpu | cuda | mps
+# model = "..."                 # optional WhisperX aligner override
+models_by_language = {}          # e.g. { zh = "model-id", en = "model-id" }
+
+[remote_input]                   # shared signed audio input for remote speech stages
+base_url = ""                   # this localplaud's worker-reachable public URL
+# signing_secret via LOCALPLAUD_REMOTE_INPUT__SIGNING_SECRET
+url_ttl_seconds = 600
+
 # --------------------------------------------------------------------------- #
 # Diarization — only used when the ASR provider didn't already return speakers.
 # Cloud ASR (deepgram/assemblyai) return speakers directly, so this is skipped.
 # --------------------------------------------------------------------------- #
 [diarize]
-provider = "pyannote"            # required for the default Plaud-like speaker workflow
+provider = "pyannote"            # pyannote | remote-worker | none
 model = "pyannote/speaker-diarization-community-1"
 # hf_token via LOCALPLAUD_DIARIZE__HF_TOKEN (needed to download pyannote models)
 # num_speakers = 2               # optional hint; omit to auto-detect
@@ -132,7 +163,7 @@ model = "pyannote/speaker-diarization-community-1"
 # LLM — used for summaries / structured notes and Q&A answers.
 # --------------------------------------------------------------------------- #
 [llm]
-provider = "ollama"              # ollama | openai | anthropic
+provider = "ollama"              # ollama | openai | anthropic | codex-local
 
   [llm.ollama]                   # local, no API key
   host = "http://localhost:11434"
@@ -141,10 +172,26 @@ provider = "ollama"              # ollama | openai | anthropic
   [llm.openai]
   # api_key via LOCALPLAUD_LLM__OPENAI__API_KEY
   model = "gpt-4o-mini"
+  timeout_seconds = 120
+  # base_url = "https://api.openai.com/v1"
+  # max_input_chars = 120000
+  # headers = { X-Custom-Header = "value" }
 
   [llm.anthropic]
   # api_key via LOCALPLAUD_LLM__ANTHROPIC__API_KEY
   model = "claude-haiku-4-5"
+
+  [llm.codex_local]
+  enabled = false                # experimental; never enabled automatically
+  binary = "codex"
+  timeout_seconds = 300
+
+  [llm.remote_worker]
+  base_url = ""
+  # token is resolved from the selected provider connection secret_ref
+  model = ""
+  capability = "notes"
+  timeout_seconds = 600
 
 # --------------------------------------------------------------------------- #
 # Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.
@@ -162,6 +209,16 @@ provider = "local"               # local (sentence-transformers) | ollama | open
   [embeddings.openai]
   # api_key via LOCALPLAUD_EMBEDDINGS__OPENAI__API_KEY
   model = "text-embedding-3-small"
+  timeout_seconds = 120
+  # base_url = "https://api.openai.com/v1"
+  # max_input_chars = 8000
+  # headers = { X-Custom-Header = "value" }
+
+  [embeddings.remote_worker]
+  base_url = ""
+  model = ""
+  dim = 1024
+  timeout_seconds = 600
 
 [api]
 # Loopback by default so a stray `localplaud run` isn't LAN-exposed. Docker

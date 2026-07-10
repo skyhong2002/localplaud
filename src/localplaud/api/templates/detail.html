@@ -71,6 +71,36 @@
         {% endif %}
       </div>
       {% endif %}
+      {% if f.can_edit %}
+      <details class="panel" style="margin:8px 0 12px">
+        <summary style="cursor:pointer;font-weight:650">Find and replace transcript</summary>
+        <form method="post" action="/file/{{ f.id }}/transcript/replace"
+              style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:10px;align-items:end">
+          <input type="hidden" name="base_revision" value="{{ f.transcript.revision or 0 }}">
+          <label class="sub">Find<input name="find" required aria-label="Find transcript text"></label>
+          <label class="sub">Replace<input name="replacement" aria-label="Replacement text"></label>
+          <button class="btn sec" type="submit">Replace all</button>
+          <label class="sub" style="grid-column:1 / -1">
+            <input type="checkbox" name="case_sensitive" value="true"> Case-sensitive
+          </label>
+        </form>
+      </details>
+      {% endif %}
+      {% if f.revision_history %}
+      <details class="panel" style="margin:8px 0 12px">
+        <summary style="cursor:pointer;font-weight:650">Transcript revision history ({{ f.revision_history|length }})</summary>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+          {% for rev in f.revision_history %}
+          <div class="sub">
+            <strong>Rev {{ rev.revision }}</strong> · {{ rev.kind }}
+            {% if rev.note %} · {{ rev.note }}{% endif %}
+            · {{ rev.summary_count }} note/map artifact(s)
+            · {{ rev.chunk_count }} indexed chunk(s)
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
       {% if f.speakers %}
       <div class="legend" id="legend">
         {% for sp in f.speakers %}
@@ -128,7 +158,10 @@
     {% endif %}
 
     {% for s in notes %}
-    <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %} data-md>{{ s.content_md }}</div>
+    <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %}>
+      <div class="sub" style="margin-bottom:8px">Note rev {{ s.revision }}{% if s.transcript_revision is not none %} · based on transcript rev {{ s.transcript_revision }}{% endif %}{% if s.template_version %} · template v{{ s.template_version }}{% endif %}</div>
+      <div data-md>{{ s.content_md }}</div>
+    </div>
     {% endfor %}
 
     {% if mindmaps %}
@@ -144,7 +177,9 @@
       <div style="display:flex; gap:7px; margin-top:10px">
         <button type="button" class="btn sec" id="mm-expand" style="padding:6px 10px; font-size:12px">Expand all</button>
         <button type="button" class="btn sec" id="mm-collapse" style="padding:6px 10px; font-size:12px">Collapse all</button>
+        <a class="btn sec" href="/file/{{ f.id }}/mindmap.png" style="padding:6px 10px; font-size:12px">Download PNG</a>
       </div>
+      <div class="sub" style="margin:8px 0">Mind map rev {{ mindmaps[0].revision }}{% if mindmaps[0].transcript_revision is not none %} · based on transcript rev {{ mindmaps[0].transcript_revision }}{% endif %}</div>
       <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
       <div id="mindmap-tree" class="mindmap"></div>
     </div>

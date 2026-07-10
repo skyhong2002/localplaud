@@ -116,7 +116,9 @@ class PipelineConfig(BaseModel):
 
     convert: bool = True  # opus -> 16kHz mono wav for ASR
     transcribe: bool = True
+    align: bool = True
     diarize: bool = True
+    correct: bool = True  # durable vocabulary/name correction after speaker assignment
     summarize: bool = True
     mind_map: bool = True  # nested Markdown outline rendered as a tree
     index: bool = True  # embeddings for Q&A / semantic search
@@ -125,6 +127,12 @@ class PipelineConfig(BaseModel):
     # The daemon yields after a small newest-first batch so fresh recordings
     # are discovered promptly instead of sitting behind a months-long backlog.
     files_per_cycle: int = 1
+    retry_max_attempts: int = Field(default=3, ge=1, le=100)
+    retry_base_seconds: int = Field(default=60, ge=1)
+    retry_max_seconds: int = Field(default=3600, ge=1)
+    # Durable cross-process claim. A crashed worker becomes reclaimable after
+    # this interval; normal stage work refreshes by completing within one day.
+    processing_lease_seconds: int = Field(default=86_400, ge=300)
     # Character budget per LLM call. Longer transcripts are covered through
     # hierarchical map/reduce notes instead of being truncated.
     summary_chunk_chars: int = 12_000
@@ -169,6 +177,9 @@ class OpenAIAsrConfig(BaseModel):
     api_key: str | None = None
     base_url: str | None = None
     model: str = "whisper-1"
+    headers: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: float = 120
+    max_input_bytes: int | None = None
 
 
 class DeepgramConfig(BaseModel):
@@ -180,6 +191,23 @@ class DeepgramConfig(BaseModel):
 class AssemblyAIConfig(BaseModel):
     api_key: str | None = None
     speaker_labels: bool = True
+
+
+class RemoteWorkerAsrConfig(BaseModel):
+    base_url: str = ""
+    token: str | None = None
+    model: str = "large-v3-turbo"
+    input_base_url: str = ""
+    input_signing_secret: str | None = None
+    input_url_ttl_seconds: int = Field(default=600, gt=0, le=3600)
+    timeout_seconds: float = Field(default=3600, gt=0)
+    poll_interval_seconds: float = Field(default=2, gt=0, le=60)
+
+
+class RemoteInputConfig(BaseModel):
+    base_url: str = ""
+    signing_secret: str | None = None
+    url_ttl_seconds: int = Field(default=600, gt=0, le=3600)
 
 
 class VadConfig(BaseModel):
@@ -206,7 +234,8 @@ class VadConfig(BaseModel):
 
 
 AsrProviderName = Literal[
-    "faster-whisper", "whispercpp", "mlx-whisper", "openai", "deepgram", "assemblyai"
+    "faster-whisper", "whispercpp", "mlx-whisper", "openai", "deepgram", "assemblyai",
+    "remote-worker"
 ]
 
 
@@ -219,6 +248,7 @@ class AsrConfig(BaseModel):
     provider: AsrProviderName = "faster-whisper"
     language: str = "auto"  # ISO code (e.g. "en", "zh") or "auto"
     fallback: list[AsrProviderName] = Field(default_factory=list)
+    fallback_routes: list[dict[str, Any]] = Field(default_factory=list, exclude=True)
 
     vad: VadConfig = Field(default_factory=VadConfig)
     faster_whisper: FasterWhisperConfig = Field(default_factory=FasterWhisperConfig)
@@ -227,14 +257,33 @@ class AsrConfig(BaseModel):
     openai: OpenAIAsrConfig = Field(default_factory=OpenAIAsrConfig)
     deepgram: DeepgramConfig = Field(default_factory=DeepgramConfig)
     assemblyai: AssemblyAIConfig = Field(default_factory=AssemblyAIConfig)
+    remote_worker: RemoteWorkerAsrConfig = Field(default_factory=RemoteWorkerAsrConfig)
 
 
 class DiarizeConfig(BaseModel):
-    provider: Literal["pyannote", "none"] = "pyannote"
+    provider: Literal["pyannote", "remote-worker", "none"] = "pyannote"
     model: str = "pyannote/speaker-diarization-community-1"
     hf_token: str | None = None
     # Optional hints; leave 0/None to auto-detect.
     num_speakers: int | None = None
+    base_url: str = ""
+    token: str | None = None
+    timeout_seconds: float = 3600
+    poll_interval_seconds: float = 2
+
+
+class AlignConfig(BaseModel):
+    provider: Literal["whisper-timestamps", "whisperx", "remote-worker", "none"] = "whisper-timestamps"
+    device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
+    model: str | None = None
+    # Optional explicit WhisperX aligner overrides by detected language
+    # (`zh`, `en`, `zh-TW`, or `default`). Unlisted languages use WhisperX's
+    # own language-aware model selection.
+    models_by_language: dict[str, str] = Field(default_factory=dict)
+    base_url: str = ""
+    token: str | None = None
+    timeout_seconds: float = 3600
+    poll_interval_seconds: float = 2
 
 
 # ---- LLM (summaries + Q&A) ----------------------------------------------- #
@@ -249,6 +298,9 @@ class OpenAILlmConfig(BaseModel):
     api_key: str | None = None
     base_url: str | None = None
     model: str = "gpt-4o-mini"
+    headers: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: float = 120
+    max_input_chars: int | None = None
 
 
 class AnthropicLlmConfig(BaseModel):
@@ -256,11 +308,30 @@ class AnthropicLlmConfig(BaseModel):
     model: str = "claude-haiku-4-5"
 
 
+class CodexLocalConfig(BaseModel):
+    enabled: bool = False
+    binary: str = "codex"
+    model: str | None = None
+    timeout_seconds: float = 300
+
+
+class RemoteTextConfig(BaseModel):
+    base_url: str = ""
+    token: str | None = None
+    model: str = ""
+    capability: Literal["notes", "mind_map", "ask", "correction"] = "notes"
+    timeout_seconds: float = 600
+    poll_interval_seconds: float = 2
+
+
 class LlmConfig(BaseModel):
-    provider: Literal["ollama", "openai", "anthropic"] = "ollama"
+    provider: Literal["ollama", "openai", "anthropic", "codex-local", "remote-worker"] = "ollama"
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     openai: OpenAILlmConfig = Field(default_factory=OpenAILlmConfig)
     anthropic: AnthropicLlmConfig = Field(default_factory=AnthropicLlmConfig)
+    codex_local: CodexLocalConfig = Field(default_factory=CodexLocalConfig)
+    remote_worker: RemoteTextConfig = Field(default_factory=RemoteTextConfig)
+    correction_provider: str | None = Field(default=None, exclude=True)
 
 
 # ---- Embeddings (Q&A / search) ------------------------------------------- #
@@ -274,6 +345,9 @@ class OpenAIEmbeddingsConfig(BaseModel):
     api_key: str | None = None
     base_url: str | None = None
     model: str = "text-embedding-3-small"
+    headers: dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: float = 120
+    max_input_chars: int | None = None
 
 
 class OllamaEmbeddingsConfig(BaseModel):
@@ -283,11 +357,21 @@ class OllamaEmbeddingsConfig(BaseModel):
     model: str = "bge-m3"
 
 
+class RemoteEmbeddingsConfig(BaseModel):
+    base_url: str = ""
+    token: str | None = None
+    model: str = ""
+    dim: int = Field(default=1024, gt=0)
+    timeout_seconds: float = 600
+    poll_interval_seconds: float = 2
+
+
 class EmbeddingsConfig(BaseModel):
-    provider: Literal["local", "openai", "ollama"] = "local"
+    provider: Literal["local", "openai", "ollama", "remote-worker"] = "local"
     local: LocalEmbeddingsConfig = Field(default_factory=LocalEmbeddingsConfig)
     openai: OpenAIEmbeddingsConfig = Field(default_factory=OpenAIEmbeddingsConfig)
     ollama: OllamaEmbeddingsConfig = Field(default_factory=OllamaEmbeddingsConfig)
+    remote_worker: RemoteEmbeddingsConfig = Field(default_factory=RemoteEmbeddingsConfig)
 
 
 class ApiConfig(BaseModel):
@@ -340,6 +424,8 @@ class Settings(BaseSettings):
     store: StoreConfig = Field(default_factory=StoreConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     asr: AsrConfig = Field(default_factory=AsrConfig)
+    align: AlignConfig = Field(default_factory=AlignConfig)
+    remote_input: RemoteInputConfig = Field(default_factory=RemoteInputConfig)
     diarize: DiarizeConfig = Field(default_factory=DiarizeConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)

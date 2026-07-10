@@ -21,6 +21,7 @@ class OllamaEmbedder:
     def __init__(self, cfg: OllamaEmbeddingsConfig):
         self.cfg = cfg
         self.name = f"ollama:{cfg.model}"
+        self.space_id = f"ollama:{cfg.host.rstrip('/')}:{cfg.model}"
         self._dim: int | None = None
 
     @property

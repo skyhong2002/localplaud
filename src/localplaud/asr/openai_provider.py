@@ -11,6 +11,18 @@ from .registry import register
 log = logging.getLogger(__name__)
 
 
+def _wav_duration(path: Path) -> float | None:
+    if path.suffix.lower() != ".wav":
+        return None
+    try:
+        import wave
+
+        with wave.open(str(path), "rb") as audio:
+            return audio.getnframes() / audio.getframerate()
+    except (OSError, wave.Error, ZeroDivisionError):
+        return None
+
+
 class OpenAIProvider:
     name = "openai"
 
@@ -29,18 +41,34 @@ class OpenAIProvider:
         except ImportError as exc:
             raise AsrUnavailable("openai package is not installed") from exc
 
-        client = OpenAI(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None)
+        if self.cfg.max_input_bytes is not None and audio_path.stat().st_size > self.cfg.max_input_bytes:
+            raise AsrError("OpenAI ASR input exceeds configured max_input_bytes")
+        client = OpenAI(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None,
+                        default_headers=self.cfg.headers or None,
+                        timeout=self.cfg.timeout_seconds)
         log.info("Transcribing with OpenAI model %s", self.cfg.model)
         try:
             with open(audio_path, "rb") as fh:
                 kwargs = {}
                 if language != "auto":
                     kwargs["language"] = language
+                if self.cfg.model == "whisper-1":
+                    kwargs |= {
+                        "response_format": "verbose_json",
+                        "timestamp_granularities": ["segment", "word"],
+                    }
+                elif "diarize" in self.cfg.model:
+                    kwargs |= {
+                        "response_format": "diarized_json",
+                        "chunking_strategy": "auto",
+                    }
+                else:
+                    # GPT-4o transcription models support json/text, not
+                    # whisper-1's verbose timestamp response.
+                    kwargs["response_format"] = "json"
                 resp = client.audio.transcriptions.create(
                     model=self.cfg.model,
                     file=fh,
-                    response_format="verbose_json",
-                    timestamp_granularities=["segment", "word"],
                     **kwargs,
                 )
         except AsrError:
@@ -48,9 +76,11 @@ class OpenAIProvider:
         except Exception as exc:
             raise AsrError(f"OpenAI transcription failed: {exc}") from exc
 
+        raw_segments = getattr(resp, "segments", None) or []
         segments = [
-            Segment(text=seg.text, start=seg.start, end=seg.end)
-            for seg in (getattr(resp, "segments", None) or [])
+            Segment(text=seg.text, start=seg.start, end=seg.end,
+                    speaker=getattr(seg, "speaker", None))
+            for seg in raw_segments
         ]
         # The API returns words as a flat list; attach each word to the segment
         # whose time span contains its midpoint.
@@ -61,13 +91,19 @@ class OpenAIProvider:
                     seg.words.append(Word(text=w.word, start=w.start, end=w.end))
                     break
 
+        duration = getattr(resp, "duration", None) or _wav_duration(audio_path)
+        if not segments and getattr(resp, "text", None):
+            # Preserve the transcript without inventing timestamp precision.
+            # The durable alignment stage will surface this as degraded.
+            segments = [Segment(text=resp.text, start=0.0, end=duration or 0.0)]
+
         return Transcript(
             segments=segments,
             language=getattr(resp, "language", None),
-            duration=getattr(resp, "duration", None),
+            duration=duration,
             provider=self.name,
             model=self.cfg.model,
-            has_speakers=False,
+            has_speakers=any(segment.speaker for segment in segments),
         )
 
 

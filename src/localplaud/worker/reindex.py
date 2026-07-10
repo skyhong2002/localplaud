@@ -21,6 +21,7 @@ from .pipeline import (
     _finish_stage,
     _load_transcript,
     _persist_chunks,
+    _run_with_fallback,
     _select_raw_transcript,
 )
 
@@ -68,14 +69,22 @@ def reindex_file(
             if loaded is None:
                 raise ValueError(f"no canonical transcript to index for {file_id}")
             transcript, _source = loaded
-            model_name = _persist_chunks(file_id, transcript, settings)
+            ((model_name, actual_provider), _routed, route, fallback_index) = \
+                _run_with_fallback(
+                    file_id, StageName.index, settings,
+                    lambda routed: (
+                        _persist_chunks(file_id, transcript, routed),
+                        routed.embeddings.provider,
+                    ),
+                )
             _finish_stage(
                 file_id,
                 StageName.index,
-                provider=settings.embeddings.provider,
+                provider=actual_provider,
                 model=model_name,
                 artifact_source="local",
-                detail={},
+                detail={"fallback_index": fallback_index,
+                        "selected_connection": route.get("connection")},
             )
             return True
         except Exception as exc:  # noqa: BLE001 - transcript/notes remain usable

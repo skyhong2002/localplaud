@@ -20,6 +20,7 @@ class AnthropicLLM:
 
     def __init__(self, cfg: AnthropicLlmConfig) -> None:
         self.cfg = cfg
+        self.usage = {"input_tokens": 0, "output_tokens": 0, "provider_reported_tokens": True}
 
     def available(self) -> bool:
         """True if an API key is configured."""
@@ -49,6 +50,9 @@ class AnthropicLLM:
             system=system if system is not None else anthropic.NOT_GIVEN,
             messages=[{"role": "user", "content": prompt}],
         )
+        if getattr(resp, "usage", None):
+            self.usage["input_tokens"] += getattr(resp.usage, "input_tokens", 0) or 0
+            self.usage["output_tokens"] += getattr(resp.usage, "output_tokens", 0) or 0
         return "".join(
             block.text
             for block in resp.content

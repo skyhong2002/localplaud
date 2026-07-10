@@ -15,6 +15,8 @@ def _reset_db(monkeypatch, tmp_path):
 
 def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
+    from datetime import UTC, datetime, timedelta
+
     from localplaud.db.models import FileStatus, PlaudFile
     from localplaud.db.session import init_db, session_scope
     from localplaud.poller.poll import reset_inflight
@@ -23,6 +25,9 @@ def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
     with session_scope() as s:
         s.add(PlaudFile(id="dl", status=FileStatus.downloading))
         s.add(PlaudFile(id="pr", status=FileStatus.processing, audio_path="/x"))
+        s.add(PlaudFile(id="active", status=FileStatus.processing, audio_path="/x",
+                        processing_token="owner",
+                        processing_lease_until=datetime.now(UTC) + timedelta(hours=1)))
         s.add(PlaudFile(id="ok", status=FileStatus.done))
 
     n = reset_inflight()
@@ -30,6 +35,8 @@ def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
     with session_scope() as s:
         assert s.get(PlaudFile, "dl").status == FileStatus.discovered
         assert s.get(PlaudFile, "pr").status == FileStatus.downloaded
+        assert s.get(PlaudFile, "active").status == FileStatus.processing
+        assert s.get(PlaudFile, "active").processing_token == "owner"
         assert s.get(PlaudFile, "ok").status == FileStatus.done  # untouched
 
 

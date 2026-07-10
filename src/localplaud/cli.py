@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sys
 import time
+from pathlib import Path
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -20,6 +22,29 @@ app = typer.Typer(
 auth_app = typer.Typer(help="Manage your Plaud session.")
 app.add_typer(auth_app, name="auth")
 console = Console()
+
+
+@app.command("benchmark-speech")
+def benchmark_speech(
+    manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+    output: Annotated[Path | None, typer.Option("--output", "-o", dir_okay=False)] = None,
+):
+    """Evaluate consented local speech artifacts without exposing transcript text."""
+    from .benchmark import run_manifest, write_report
+
+    try:
+        report = write_report(manifest, output) if output else run_manifest(manifest)
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]✗ Benchmark invalid:[/] {exc}")
+        raise typer.Exit(2) from exc
+    status = "[green]PASS[/]" if report["passed"] else "[red]FAIL[/]"
+    console.print(f"{status} · {len(report['cases'])} case(s) · {report['dataset_name']}")
+    for metric, value in report["aggregate"].items():
+        console.print(f"  {metric}: {'n/a' if value is None else f'{value:.4f}'}")
+    if output:
+        console.print(f"Numeric-only report: [bold]{output}[/]")
+    if not report["passed"]:
+        raise typer.Exit(1)
 
 
 @app.callback()

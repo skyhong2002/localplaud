@@ -2,7 +2,15 @@
 
 import localplaud.config as config
 import localplaud.db.session as db_session
-from localplaud.db.models import FileStatus, PlaudFile, Transcript
+from localplaud.db.models import (
+    Chunk,
+    ExecutionProfile,
+    FileStatus,
+    PlaudFile,
+    ProviderConnection,
+    ProviderModel,
+    Transcript,
+)
 from localplaud.db.session import init_db, session_scope
 
 
@@ -26,6 +34,22 @@ def test_init_and_roundtrip_with_relationship(monkeypatch, tmp_path):
     assert db_file.exists()
 
     with session_scope() as session:
+        default_profile = session.query(ExecutionProfile).filter_by(is_system_default=True).one()
+        assert default_profile.stages["transcribe"]["provider"] == "faster-whisper"
+        assert default_profile.policy["no_egress"] is False
+        assert default_profile.policy["system_boundary_version"] == 1
+        assert {p.name for p in session.query(ExecutionProfile)} >= {
+            "system-default", "apple-local", "nvidia-local", "cpu-local",
+            "openai-cloud", "openai-compatible", "remote-gpu",
+        }
+        assert session.query(ProviderConnection).filter_by(name="mlx-whisper").one()
+        assert session.query(ProviderConnection).filter_by(name="openai-cloud").one()
+        assert session.query(ProviderConnection).filter_by(name="openai-compatible").one()
+        assert session.query(ProviderConnection).filter_by(name="remote-gpu").one()
+        capabilities = {capability for model in session.query(ProviderModel)
+                        for capability in model.capabilities}
+        assert {"asr", "alignment", "diarization", "notes", "mind_map",
+                "ask", "embeddings", "correction"} <= capabilities
         f = PlaudFile(
             id="dab5c6ca728964152f32d93ed76c1950",
             filename="2026-07-09 15:38:57",
@@ -75,3 +99,19 @@ def test_session_scope_rolls_back_on_error(monkeypatch, tmp_path):
 
     with session_scope() as session:
         assert session.get(PlaudFile, "rollback-me") is None
+
+
+def test_init_upgrades_legacy_embedding_space_labels(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALPLAUD_EMBEDDINGS__PROVIDER", "ollama")
+    _fresh_db(monkeypatch, tmp_path)
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="legacy-space", filename="legacy"))
+        session.add(Chunk(file_id="legacy-space", idx=0, text="x",
+                          embedding_model="ollama", embedding_provider=None))
+
+    init_db()
+    with session_scope() as session:
+        chunk = session.query(Chunk).filter_by(file_id="legacy-space").one()
+        assert chunk.embedding_provider == "ollama"
+        assert chunk.embedding_model == "ollama:http://localhost:11434:bge-m3"

@@ -11,6 +11,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from ..db.models import NoteTemplate
+
 log = logging.getLogger(__name__)
 
 # Every system prompt shares the same ground rules Plaud-style notes need:
@@ -26,6 +32,7 @@ class SummaryTemplate:
     name: str
     system: str
     instructions: str  # the markdown-section instructions block
+    version: int = 1
 
 
 TEMPLATES: dict[str, SummaryTemplate] = {
@@ -146,11 +153,34 @@ Transcript:
 
 def get_template(name: str) -> SummaryTemplate:
     """Look up a template case-insensitively; unknown names fall back to "default"."""
+    try:
+        from ..db.session import session_scope
+
+        with session_scope() as session:
+            row = session.scalar(select(NoteTemplate).where(
+                NoteTemplate.name == name.strip().lower(), NoteTemplate.enabled
+            ))
+            if row is not None:
+                return SummaryTemplate(row.name, row.system_prompt, row.instructions, row.version)
+    except SQLAlchemyError:
+        # Pure prompt/unit-test use before init_db remains supported.
+        pass
     template = TEMPLATES.get(name.strip().lower())
     if template is None:
         log.warning("unknown summary template %r, falling back to 'default'", name)
         return TEMPLATES["default"]
     return template
+
+
+def bootstrap_templates(session: Session) -> None:
+    """Copy built-ins into editable data once, without overwriting user edits."""
+    existing = set(session.scalars(select(NoteTemplate.name)))
+    for name, template in TEMPLATES.items():
+        if name not in existing:
+            session.add(NoteTemplate(name=name, system_prompt=template.system,
+                                     instructions=template.instructions,
+                                     description=f"Built-in {name} notes template",
+                                     category=name, provenance="builtin", version=1))
 
 
 def render_prompt(template_name: str, transcript_text: str) -> tuple[str, str]:

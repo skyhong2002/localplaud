@@ -275,9 +275,13 @@ As of 2026-07-10, the repository has the core poll/download/process/store/UI ske
 but this document describes the target rather than current parity. Independent mode
 now enforces local transcript provenance and safely preserves/requeues legacy Plaud
 imports. Implemented pipeline stages now persist attempts, provider/model provenance,
-timestamps, and failures; optional-stage errors retain usable transcript/notes and
-can resume from existing artifacts. Ollama embeddings have model-aware health checks
-and modern batch API support. The recordings library now supports sortable
+timestamps, and failures; raw ASR, aligned, and diarized transcript artifacts are
+stored separately, and a durable cross-process lease prevents duplicate reprocessing
+from racing destructive derived-artifact replacement. Optional-stage errors retain
+usable transcript/notes and can resume from existing artifacts. Embedding retrieval
+is isolated by provider endpoint and model identity rather than vector dimension
+alone. Ollama embeddings have model-aware health checks and modern batch API support.
+The recordings library now supports sortable
 name/duration/recorded columns, processing-state and capture-source filters, per-row
 processing state with error/partial attention indicators, and a read-only trash
 mirror view; folders/tags, uncategorized organization, and bulk operations remain.
@@ -287,30 +291,39 @@ default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-times
 region offsetting; faster-whisper's native bundled VAD filter), and degrades honestly
 to whole-file transcription with a visible health note when the optional `vad` extra
 is absent — but it still needs a real Taiwan Mandarin / code-switch benchmark before
-being enabled by default. Word-level forced alignment is still not implemented:
-Whisper's own word timestamps remain the alignment source, and a whisperX-style
-wav2vec2 aligner needs per-language models and a real-recording accuracy evaluation
-first. Authenticated real-audio diarization verification also remains. Single-file
+being enabled by default. Alignment is now a durable stage: the default validates
+Whisper word timestamps and visibly degrades when they are absent; optional WhisperX
+forced alignment supports exact/base-language model overrides with WhisperX's own
+language-aware default, but still needs a Mandarin/code-switch real-recording
+evaluation. Authenticated real-audio
+diarization verification also remains. Single-file
 Ask now answers grounded only in one recording and renders each citation as a
 playable timestamp that seeks the player, and whole-library Ask citations deep-link
 to the cited moment (`/file/{id}?t=`). Long transcripts are summarized with full
 coverage through bounded hierarchical map/reduce. Mind maps are generated from the
 canonical transcript as full-coverage Markdown outlines, rendered as a collapsible
-tree in the recording workspace, and included in Markdown export; PNG mind-map
-export remains. Speaker identities are now persisted
+tree in the recording workspace, included in Markdown export, and downloadable as
+a locally rendered full-outline PNG. Templates are editable/versioned records with auto selection,
+per-file generation, safe regeneration history, and profile/transcript provenance.
+Ask supports durable grounded follow-up threads and save-to-local-note. Speaker
+identities are now persisted
 per recording with stable diarization keys and user-editable display names
 (renamed from the Web detail page and applied in transcript view, regenerated
-artifacts, Ask, and export); safe identity reconciliation across diarization reruns
-remains because provider speaker labels are run-local. Transcript corrections are
+artifacts, Ask, and export); a durable speaker timeline and conservative temporal
+overlap matching reconcile run-local labels across diarization reruns. Transcript corrections are
 stored as provenance-preserving revisions: per-segment
 inline edits create a corrected canonical transcript on top of the immutable raw
 ASR row, survive re-ASR, re-index in the background without rerunning ASR, and hide
 stale notes/maps until explicit regeneration, with a labelled raw-versus-corrected
-view switch. Plaud-derived edits remain excluded from independent mode. Transcript
-find/replace, dependent-artifact revision links, and a revision history browser
-remain. Other major gaps include editable notes/templates, Ask save-to-note and
-follow-up threads, richer organization/export, automation, and UI polish. Current
-ASR, LLM, and embedding provider settings are config-time integrations rather than a
-complete provider system: there is no shared capability catalog, durable execution
-profile schema/resolver, Web profile editor, privacy/cost-aware fallback policy, or
-versioned remote GPU worker protocol yet.
+view switch. Plaud-derived edits remain excluded from independent mode. Literal
+find/replace and multi-segment bulk edits create one conflict-checked revision;
+revision history exposes the dependent note/map/index counts, and Ask citations carry
+the transcript revision they retrieved. The backend now has
+a shared capability catalog, durable connection/model/profile schema, deterministic
+resolver, immutable attempt snapshots, privacy/quality/timeout/cost checks applied
+equally to primary and fallback routes, headless APIs,
+hardware recommendations, and remote-worker protocol v1. Remaining P0 evidence is
+external acceptance: real Taiwan Mandarin/code-switch benchmarks, authenticated
+pyannote, Apple/NVIDIA/CPU host matrix runs, and self-owned plus rentable remote GPU
+validation. P1 still needs the complete profile Settings editor and broader
+organization/export/UI polish; automation remains P2.

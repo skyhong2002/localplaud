@@ -42,14 +42,22 @@ playback, and a FastAPI Web App. It runs natively and in Docker profiles.
 The subscription-replacement experience is **in progress**, not complete. The
 default `independent` artifact mode now refuses Plaud transcripts as pipeline input,
 preserves them as visibly labelled imports, and safely requeues legacy cloud-derived
-rows for local ASR. Durable stage records preserve attempts, provider/model
-provenance, timing, and actionable failures; optional-stage failures retain usable
-transcripts and notes for targeted resume. The implementation still needs the
-large-v3-turbo + alignment + diarization default path,
-long-recording summarization, editable transcripts/speakers/notes, mind maps,
-single-file Ask, richer export/organization/automation, and Plaud-level Web App
-polish. Plaud-produced transcripts and summaries may be imported for migration or
-comparison, but are not part of the target primary workflow.
+rows for local ASR. Durable stage records and immutable attempt history preserve
+resolved profiles, provider/model provenance, timing, retry state, and actionable
+failures; optional-stage failures retain usable transcripts and notes for targeted
+resume. Raw ASR, alignment, and diarization artifacts are retained separately;
+durable processing leases prevent duplicate workers, and retrieval never compares
+vectors from different embedding spaces. The backend now includes durable
+provider/model/execution profiles, explicit privacy/quality/timeout/cost/fallback
+policy, Apple/NVIDIA/CPU/OpenAI/compatible/remote-GPU starting profiles, separate
+stage capabilities, a versioned remote-worker protocol,
+word-alignment validation, vocabulary revisions, stable-speaker reconciliation,
+editable/versioned note templates, full-coverage notes/maps, and grounded Ask
+threads with save-to-note. Production acceptance on real Taiwan Mandarin audio,
+authenticated pyannote, and the target NVIDIA/CPU hosts is still required before
+P0 can be called complete. P1 Web workflow and export/organization polish remain.
+Plaud-produced transcripts and summaries may be imported for migration or
+comparison, but are not part of the primary workflow.
 
 ## How it works
 
@@ -116,6 +124,7 @@ localplaud run
 | `localplaud init` | Create the database + data dirs |
 | `localplaud auth login` / `auth check` | One-time OAuth sign-in / verify the session |
 | `localplaud doctor` | Check ffmpeg + your ASR/LLM/embedding providers + auth |
+| `localplaud benchmark-speech <manifest>` | Run privacy-safe speech acceptance metrics |
 | `localplaud prepare-independent [--force]` | Preserve imports and requeue legacy cloud-derived files for local ASR |
 | `localplaud poll [--once]` | Sync the cloud listing + download audio |
 | `localplaud work [--once] [--force]` | Run the pipeline on downloaded recordings |
@@ -198,6 +207,12 @@ model's Hugging Face terms and set `LOCALPLAUD_DIARIZE__HF_TOKEN`;
 | `assemblyai`      | cloud  | any                        | built-in    |
 
 See [ADR 0003](docs/adr/0003-pluggable-asr.md) for the target quality contract.
+Before changing a production speech default, use the consent/ownership-gated
+[speech benchmark harness](docs/speech-benchmark.md). Provider/model/profile APIs
+and remote-worker v1 are documented in
+[execution profiles and remote workers](docs/execution-profiles.md).
+Current code-versus-real-host evidence is tracked in the
+[P0 acceptance matrix](docs/p0-acceptance-matrix.md).
 
 ## Deploying to your own machines
 
