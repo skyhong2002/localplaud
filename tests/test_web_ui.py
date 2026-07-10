@@ -4,9 +4,9 @@ from __future__ import annotations
 
 
 def _client(monkeypatch, tmp_path):
-    import localplaud.db.session as db_session
     from fastapi.testclient import TestClient
 
+    import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'ui.db'}")
