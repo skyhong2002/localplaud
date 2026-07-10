@@ -75,6 +75,11 @@ Uses `Dockerfile.cuda` (CUDA 12.4 + faster-whisper on GPU + pyannote for
 diarization). Verify the GPU is visible: `docker compose exec localplaud-gpu nvidia-smi`.
 Set `[asr] provider = "faster-whisper"`, `device = "cuda"`.
 
+> **Running CUDA natively (no Docker)**: the NVIDIA driver alone isn't enough —
+> CTranslate2 needs cuBLAS and cuDNN 9. Install the `cuda` extra
+> (`uv sync --extra cuda`), which pulls `nvidia-cublas-cu12` + `nvidia-cudnn-cu12`,
+> and ensure they're on `LD_LIBRARY_PATH`. The Docker image bundles them already.
+
 ### 3. Oracle Cloud (aarch64, 2 vCPU) → `plaud.skyhong.tw`
 
 The always-on poller/downloader. Too weak for local Whisper, so it uses a
@@ -85,6 +90,16 @@ cloud ASR API:
 # .env: LOCALPLAUD_ASR__PROVIDER=deepgram + LOCALPLAUD_ASR__DEEPGRAM__API_KEY=...
 docker compose --profile cpu up -d --build
 ```
+
+## Securing an exposed instance
+
+The UI has no auth of its own beyond an optional shared token. If it's reachable
+from anything but localhost:
+
+- Set `LOCALPLAUD_API__AUTH_TOKEN` (required on every request), **and/or**
+- Add `basic_auth` to the `Caddyfile` in front of `reverse_proxy`.
+
+See [ADR 0006](adr/0006-security-posture.md).
 
 ## Operating it
 

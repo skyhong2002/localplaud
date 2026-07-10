@@ -170,7 +170,12 @@ ruff check . && pytest
 - Secrets (Plaud session, API keys, HF token) go in `.env` or environment
   variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
   and `*.token` are git-ignored.
-- localplaud only ever issues **read-only** requests against the Plaud cloud.
+- localplaud only ever issues **read-only** requests against the Plaud cloud,
+  and refuses to fetch non-`https` or private-IP URLs (SSRF-guarded), with
+  bounded downloads.
+- The web UI binds to `127.0.0.1` by default. **Before exposing it**, set
+  `api.auth_token` (or `LOCALPLAUD_API__AUTH_TOKEN`) and/or put auth in front
+  (Caddy `basic_auth`). See [ADR 0006](docs/adr/0006-security-posture.md).
 
 ## License
 
