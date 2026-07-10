@@ -29,13 +29,47 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 # --------------------------------------------------------------------------- #
 
 
-class PlaudConfig(BaseModel):
-    """How to reach and authenticate against the Plaud cloud API.
+class PlaudOfficialConfig(BaseModel):
+    """The official Plaud Open API (platform.plaud.ai) with sanctioned OAuth.
 
-    ``api_base`` is region-specific (the browser stores it in localStorage as
-    ``pld_plaud_user_api_domain``). Read it from your own browser — do not
-    assume the default matches your account.
+    The one-time browser sign-in happens through the official Plaud CLI
+    (``localplaud auth login`` wraps it); after that, localplaud reads and
+    auto-refreshes the token set in ``tokens_path``. No secrets needed for the
+    default public client.
     """
+
+    api_base: str = "https://platform.plaud.ai/developer/api"
+    refresh_url: str = (
+        "https://platform.plaud.ai/developer/api/oauth/third-party/access-token/refresh"
+    )
+    # Token cache written by the official CLI (`plaud login`).
+    tokens_path: Path = Path("~/.plaud/tokens.json")
+    request_timeout_seconds: float = 30.0
+
+
+class PlaudConfig(BaseModel):
+    """How to reach and authenticate against the Plaud cloud.
+
+    ``provider`` picks the client:
+
+    - ``official`` (default) — the sanctioned Open API with auto-refreshing
+      OAuth (see ``official``). No more pasting browser sessions.
+    - ``apse1`` — the reverse-engineered web API, driven by a pasted browser
+      session (``cookie``/``token``/``extra_headers``).
+
+    When the provider is ``official`` and apse1 credentials are ALSO present,
+    the poller uses apse1 as an optional enrichment source for change-detection
+    fields the Open API lacks (``version``/``file_md5``/``edit_time``/
+    ``is_trash``) — disable with ``apse1_enrichment = false``.
+
+    ``api_base`` (apse1) is region-specific (the browser stores it in
+    localStorage as ``pld_plaud_user_api_domain``). Read it from your own
+    browser — do not assume the default matches your account.
+    """
+
+    provider: Literal["official", "apse1"] = "official"
+    official: PlaudOfficialConfig = Field(default_factory=PlaudOfficialConfig)
+    apse1_enrichment: bool = True
 
     api_base: str = "https://api-apse1.plaud.ai"
     # "cookie": paste a session cookie/token from the browser (most reliable).
@@ -55,10 +89,12 @@ class PlaudConfig(BaseModel):
     # Extra request headers if a particular account/region needs them.
     extra_headers: dict[str, str] = Field(default_factory=dict)
 
-    # Network politeness.
+    # Network politeness. The Plaud edge rejects non-browser User-Agents with
+    # 403, so default to a browser UA (override via plaud.user_agent if needed).
     request_timeout_seconds: float = 30.0
     user_agent: str = (
-        "localplaud/0.1 (+https://github.com/skyhong2002/localplaud)"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
     )
 
 
@@ -85,8 +121,11 @@ class PipelineConfig(BaseModel):
     index: bool = True  # embeddings for Q&A / semantic search
     # Number of files processed concurrently by the worker.
     concurrency: int = 1
-    # Re-use Plaud's own transcript/summary when the cloud already made one,
-    # instead of recomputing locally. Set false to always redo locally.
+    # Which summary template to use (default | meeting | call | lecture |
+    # personal — see worker/summary_templates.py).
+    summary_template: str = "default"
+    # Migration/debug import only. The independent primary workflow keeps this
+    # false and derives every artifact from raw audio.
     prefer_cloud_artifacts: bool = False
 
 
@@ -94,19 +133,19 @@ class PipelineConfig(BaseModel):
 
 
 class FasterWhisperConfig(BaseModel):
-    model: str = "large-v3"
+    model: str = "large-v3-turbo"
     device: Literal["auto", "cpu", "cuda"] = "auto"
     compute_type: Literal["auto", "int8", "int8_float16", "float16", "float32"] = "auto"
 
 
 class WhisperCppConfig(BaseModel):
     binary: str = "whisper-cli"  # from whisper.cpp; uses Metal on Apple Silicon
-    model_path: Path = Path("./models/ggml-large-v3.bin")
+    model_path: Path = Path("./models/ggml-large-v3-turbo.bin")
     extra_args: list[str] = Field(default_factory=list)
 
 
 class MlxWhisperConfig(BaseModel):
-    model: str = "mlx-community/whisper-large-v3-mlx"
+    model: str = "mlx-community/whisper-large-v3-turbo"
 
 
 class OpenAIAsrConfig(BaseModel):
@@ -132,10 +171,10 @@ AsrProviderName = Literal[
 
 
 class AsrConfig(BaseModel):
-    """ASR is fully pluggable. Local and cloud providers are equal first-class
-    choices — pick whichever gives the best accuracy / speaker separation for
-    your machine, not just as a fallback. ``fallback`` providers are tried in
-    order if the primary can't run (e.g. no GPU, model missing)."""
+    """ASR is pluggable, with local Whisper large-v3-turbo as the default
+    subscription-independent quality baseline. ``fallback`` names providers tried
+    in order when the primary is unavailable; paid cloud fallback requires explicit
+    operator configuration."""
 
     provider: AsrProviderName = "faster-whisper"
     language: str = "auto"  # ISO code (e.g. "en", "zh") or "auto"
@@ -195,15 +234,30 @@ class OpenAIEmbeddingsConfig(BaseModel):
     model: str = "text-embedding-3-small"
 
 
+class OllamaEmbeddingsConfig(BaseModel):
+    """Local embeddings via Ollama — no torch/sentence-transformers needed."""
+
+    host: str = "http://localhost:11434"
+    model: str = "bge-m3"
+
+
 class EmbeddingsConfig(BaseModel):
-    provider: Literal["local", "openai"] = "local"
+    provider: Literal["local", "openai", "ollama"] = "local"
     local: LocalEmbeddingsConfig = Field(default_factory=LocalEmbeddingsConfig)
     openai: OpenAIEmbeddingsConfig = Field(default_factory=OpenAIEmbeddingsConfig)
+    ollama: OllamaEmbeddingsConfig = Field(default_factory=OllamaEmbeddingsConfig)
 
 
 class ApiConfig(BaseModel):
-    host: str = "0.0.0.0"
+    # Loopback by default so an accidental `localplaud run` isn't exposed to the
+    # LAN. In Docker this is overridden to 0.0.0.0 (the container sits behind
+    # Caddy and its port isn't published).
+    host: str = "127.0.0.1"
     port: int = 8080
+    # Optional shared secret. When set, every request must present it as an
+    # ``X-Auth-Token`` header or ``?token=`` query param. Prefer putting real
+    # auth (e.g. Caddy basic_auth) in front; this is a lightweight backstop.
+    auth_token: str | None = None
     # Used to build absolute links behind a reverse proxy; set per machine.
     public_url: str | None = None
 

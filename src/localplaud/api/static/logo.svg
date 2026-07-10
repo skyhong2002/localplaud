@@ -1,0 +1,19 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="localplaud">
+  <defs>
+    <linearGradient id="lp-g" x1="6" y1="4" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3D9BFF"/>
+      <stop offset="0.55" stop-color="#007AFF"/>
+      <stop offset="1" stop-color="#8F53ED"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="12" fill="url(#lp-g)"/>
+  <!-- mic capsule -->
+  <rect x="18" y="9" width="12" height="19" rx="6" fill="#fff"/>
+  <!-- cradle -->
+  <path d="M13.5 22.5a10.5 10.5 0 0 0 21 0" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <!-- stem + base -->
+  <path d="M24 33v5" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M18.5 38.5h11" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <!-- "local" node: a small dot marking the base, hinting on-device -->
+  <circle cx="24" cy="15.5" r="1.6" fill="#007AFF" opacity="0.55"/>
+</svg>

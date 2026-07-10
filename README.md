@@ -1,9 +1,13 @@
-<h1 align="center">localplaud</h1>
+<p align="center">
+  <img src="src/localplaud/api/static/wordmark.svg" alt="localplaud" height="52">
+</p>
+
+<h1 align="center"></h1>
 
 <p align="center">
-  <b>A self-hosted Plaud clone.</b> Keep recording with your physical Plaud device,
-  but mirror everything to a machine you own and run your own transcription,
-  speaker diarization, summaries, and Q&amp;A — your audio never leaves home.
+  <b>A self-hosted replacement for the Plaud Intelligence workflow.</b> Keep using
+  your physical Plaud recorder and its raw-audio upload path; localplaud takes over
+  transcription, speakers, notes, search, Ask, and export on machines you control.
 </p>
 
 <p align="center">
@@ -18,16 +22,30 @@
 
 ## Why
 
-Plaud's hardware is great; its cloud is a black box. **localplaud** treats the
-official Plaud cloud as the source of truth for your *raw audio* and rebuilds
-everything the cloud does — download, transcode, transcribe, diarize,
-summarize, template notes, and ask-your-recordings search — on hardware you
-control. It is a **mirror + local processing layer**, not a replacement for the
-Plaud device or its app.
+Plaud's hardware and device sync are useful; its paid Intelligence workflow should
+be optional. **localplaud** treats the official Plaud cloud as a transport and source
+of truth for *raw audio* only, then independently rebuilds the useful workflow —
+download, transcode, transcribe, align, diarize, correct, summarize, map, search,
+Ask, and export — on hardware you control. It replaces the subscription processing
+experience, not the recorder or the App's device-upload role.
 
-> You keep using the Plaud device and its app exactly as before. localplaud
-> polls the Plaud cloud on a schedule, pulls down new/changed recordings, and
-> processes them locally.
+> Record and upload as usual, but do not need to press Plaud's Generate button.
+> localplaud polls the read-only Open API, downloads the audio, and owns every
+> derived artifact. See the [target product workflow](docs/product-workflow.md).
+
+## Status
+
+The core skeleton works: OAuth polling through **Plaud's official Open API**, raw
+audio download, pluggable local ASR, diarization, LLM notes, embeddings/Q&A, audio
+playback, and a FastAPI Web App. It runs natively and in Docker profiles.
+
+The subscription-replacement experience is **in progress**, not complete. The
+current implementation still needs strict raw-audio-only processing, durable
+stage-level state, the large-v3-turbo + alignment + diarization default path,
+long-recording summarization, editable transcripts/speakers/notes, mind maps,
+single-file Ask, richer export/organization/automation, and Plaud-level Web App
+polish. Plaud-produced transcripts and summaries may be imported for migration or
+comparison, but are not part of the target primary workflow.
 
 ## How it works
 
@@ -38,9 +56,9 @@ Plaud device or its app.
                                                    ▼
    ┌─────────────────────────── localplaud ───────────────────────────┐
    │  poller ─► store (audio on disk + SQLite) ─► worker pipeline:     │
-   │             convert ─► transcribe ─► diarize ─► summarize ─► index │
+   │      convert ─► ASR ─► align ─► diarize ─► notes/map ─► index     │
    │                                          │                        │
-   │                              api / web UI (search + Q&A)          │
+   │                  Plaud-like Web App (review/edit/Ask/export)      │
    └───────────────────────────────────────────────────────────────────┘
 ```
 
@@ -48,10 +66,10 @@ Plaud device or its app.
   `version`/`version_ms`), downloads the `.opus` audio.
 - **store** — audio bytes on the filesystem; metadata, transcripts, summaries
   and embeddings in SQLite.
-- **worker** — the local pipeline: `opus → wav` (ffmpeg) → ASR → diarization →
-  LLM summary/notes → embeddings for Q&A.
-- **api / ui** — a small FastAPI + HTMX app to browse, search, and ask
-  questions across your recordings.
+- **worker** — the independent pipeline: audio → Whisper large-v3-turbo → word
+  alignment → speaker diarization → notes/mind map → embeddings.
+- **api / ui** — the primary daily-use Web App: browse, listen, review, edit,
+  regenerate, organize, Ask, and export.
 
 ## Quickstart
 
@@ -69,10 +87,8 @@ uv sync --extra faster-whisper          # local ASR, CPU/CUDA
 cp config.example.toml config.toml      # edit to taste
 cp .env.example .env                    # put secrets here (git-ignored)
 
-# tell localplaud how to reach your Plaud account (see "Your Plaud session")
-#   -> set LOCALPLAUD_PLAUD__COOKIE / auth headers in .env
-
 localplaud init                         # create the database
+localplaud auth login                   # one-time browser OAuth (official API)
 localplaud auth check                   # verify your Plaud session works
 localplaud poll --once                  # pull the file list + download audio
 localplaud work --once                  # run the pipeline on downloaded files
@@ -85,23 +101,43 @@ Or run everything as a daemon (poll on a schedule + process continuously):
 localplaud run
 ```
 
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `localplaud init` | Create the database + data dirs |
+| `localplaud auth login` / `auth check` | One-time OAuth sign-in / verify the session |
+| `localplaud doctor` | Check ffmpeg + your ASR/LLM/embedding providers + auth |
+| `localplaud poll [--once]` | Sync the cloud listing + download audio |
+| `localplaud work [--once] [--force]` | Run the pipeline on downloaded recordings |
+| `localplaud run` | Poll + process + serve, all together |
+| `localplaud ls` / `status` | List recordings / counts by stage |
+| `localplaud ask "…"` | Q&A across all transcripts |
+| `localplaud reprocess <id>` | Re-run the pipeline on one recording |
+| `localplaud export <id> [-o …]` | Export a recording to Markdown |
+| `localplaud serve` | Web UI only |
+
 ### Your Plaud session
 
-localplaud never sees your Plaud password unless you give it one. Auth is still
-being finalized (Plaud uses header-token auth, not a simple cookie), so the
-supported route today is **paste your browser session**:
+localplaud never sees your Plaud password. The default provider is **Plaud's
+official Open API**: run `localplaud auth login` once — it opens your browser
+for OAuth (via the official Plaud CLI, Node.js ≥ 20) and caches an
+auto-refreshing token set in `~/.plaud/tokens.json`. That's it; the session
+keeps itself alive.
 
-1. Log in to <https://web.plaud.ai> in your browser.
-2. Open DevTools → Network, click any recording, and find an authenticated
-   request to `api-*.plaud.ai` (e.g. `GET /user/me`).
-3. Copy its `Authorization` header (and the Plaud client headers) into `.env`
-   as described in `.env.example`.
-4. Also copy your region's API host from the console:
-   `localStorage.getItem("pld_plaud_user_api_domain")` → set `plaud.api_base`.
-5. `localplaud auth check` confirms it works.
+Optionally, you can *also* paste a legacy web session (`api-*.plaud.ai`).
+localplaud then enriches its sync metadata with fields the Open API doesn't
+expose (`version`, `file_md5`, `edit_time`, `is_trash`) — useful for detecting
+edits/deletions faster, but not required:
 
-See [`docs/plaud-api.md`](docs/plaud-api.md) for the reverse-engineered API
-details and the current open questions.
+1. Log in to <https://web.plaud.ai>, open DevTools → Network, and find an
+   authenticated request to `api-*.plaud.ai` (e.g. `GET /user/me`).
+2. Copy it as cURL and run `localplaud auth import` to turn it into `.env`
+   lines (this session expires after ~14 h).
+3. Setting `plaud.provider = "apse1"` makes this the primary provider instead.
+
+`localplaud auth check` confirms whichever provider is configured. See
+[`docs/plaud-api.md`](docs/plaud-api.md) for API details.
 
 ## Configuration
 
@@ -118,11 +154,16 @@ LOCALPLAUD_DIARIZE__HF_TOKEN="hf_..."
 
 ## ASR providers
 
-ASR is fully pluggable, and **local and cloud engines are equal first-class
-choices** — pick whichever gives you the best accuracy / speaker separation,
-not just as a weak-machine fallback. Set `asr.provider`, list `asr.fallback`
-providers to try if the primary can't run, and drop in API keys for the cloud
-options.
+ASR remains pluggable, but the subscription-independent quality baseline is local
+**Whisper large-v3-turbo**. On Apple Silicon the target model is
+`mlx-community/whisper-large-v3-turbo`; on CUDA/CPU use the equivalent
+faster-whisper/CTranslate2 model. Cloud ASR remains an explicit operator choice,
+not a silent fallback.
+
+Whisper does not identify speakers. Plaud-like speaker results require a complete
+pipeline of VAD, turbo ASR, word-level alignment, diarization (pyannote or a
+benchmarked equivalent), and speaker assignment. A provider returning only text is
+therefore not considered the complete default experience.
 
 | Provider          | Type   | Runs on                    | Diarization |
 | ----------------- | ------ | -------------------------- | ----------- |
@@ -132,6 +173,8 @@ options.
 | `openai`          | cloud  | any                        | via pyannote |
 | `deepgram`        | cloud  | any                        | built-in    |
 | `assemblyai`      | cloud  | any                        | built-in    |
+
+See [ADR 0003](docs/adr/0003-pluggable-asr.md) for the target quality contract.
 
 ## Deploying to your own machines
 
@@ -145,7 +188,7 @@ on very different hardware:
 | `cpu`   | small/cloud CPU boxes | cloud ASR API                         |
 
 A bundled Caddy reverse proxy terminates HTTPS for your domain automatically.
-See [Deployment](#deploying-to-your-own-machines) below and `docs/deploy.md`.
+See [`docs/deploy.md`](docs/deploy.md).
 
 ## Development
 
@@ -159,7 +202,12 @@ ruff check . && pytest
 - Secrets (Plaud session, API keys, HF token) go in `.env` or environment
   variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
   and `*.token` are git-ignored.
-- localplaud only ever issues **read-only** requests against the Plaud cloud.
+- localplaud only ever issues **read-only** requests against the Plaud cloud,
+  and refuses to fetch non-`https` or private-IP URLs (SSRF-guarded), with
+  bounded downloads.
+- The web UI binds to `127.0.0.1` by default. **Before exposing it**, set
+  `api.auth_token` (or `LOCALPLAUD_API__AUTH_TOKEN`) and/or put auth in front
+  (Caddy `basic_auth`). See [ADR 0006](docs/adr/0006-security-posture.md).
 
 ## License
 

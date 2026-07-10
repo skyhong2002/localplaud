@@ -1,0 +1,10 @@
+# DOMAIN and ACME_EMAIL come from .env (see .env.example).
+# Caddy provisions HTTPS certificates for {$DOMAIN} automatically
+# via Let's Encrypt.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	reverse_proxy app:8080
+}

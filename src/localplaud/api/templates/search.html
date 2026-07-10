@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Search — localplaud{% endblock %}
+{% block body %}
+<div class="content"><div class="pane-inner">
+<h1 class="page">Ask &amp; Search</h1>
+<form method="get" action="/search" class="ask">
+  <input class="search-input" name="q" value="{{ q }}" autofocus
+         placeholder="Search across every transcript by meaning…">
+  <button class="btn" type="submit">Search</button>
+</form>
+
+{% if q and not groups %}
+<div class="empty"><div class="big">🔍</div>No matches for “{{ q }}”.<br>
+  <span class="sub">Recordings need to be indexed first (embeddings), or the embedding provider isn't available.</span>
+</div>
+{% elif groups %}
+<div class="sub" style="margin:6px 2px 14px">{{ groups|length }} recording(s) matched.</div>
+<div class="list">
+  {% for g in groups %}
+  <div class="panel" style="padding:14px 16px">
+    <a class="name" style="font-weight:650" href="/file/{{ g.file_id }}">{{ g.filename }}</a>
+    {% for h in g.hits[:3] %}
+    <a class="seg" href="/file/{{ g.file_id }}" style="text-decoration:none">
+      <div class="ts">{{ h.start | mmss }}</div>
+      <div class="txt sub">{% if h.speaker %}<span style="color:var(--accent);font-weight:600">{{ h.speaker }}</span> {% endif %}{{ h.text[:220] }}{% if h.text|length > 220 %}…{% endif %}</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty"><div class="big">🔎</div>Search your recordings by meaning, not just keywords.</div>
+{% endif %}
+</div></div>
+{% endblock %}

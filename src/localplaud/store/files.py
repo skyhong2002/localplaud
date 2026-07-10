@@ -10,13 +10,24 @@ re-derive:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ..config import get_settings
 
+# Plaud file ids are hex-ish tokens. Validate before using an id in a path so a
+# malicious/MITM'd cloud response can't traverse out of the download dir.
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def _safe_id(file_id: str) -> str:
+    if not _ID_RE.match(file_id):
+        raise ValueError(f"unsafe file id: {file_id!r}")
+    return file_id
+
 
 def file_dir(file_id: str) -> Path:
-    d = Path(get_settings().poller.download_dir) / file_id
+    d = Path(get_settings().poller.download_dir) / _safe_id(file_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
 

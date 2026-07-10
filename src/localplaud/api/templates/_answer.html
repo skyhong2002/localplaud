@@ -1,0 +1,18 @@
+<div class="panel" style="margin:6px 0 14px; border-color:var(--border2)">
+  <div class="md" data-answer>{{ res.answer }}</div>
+  {% if res.sources %}
+  <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px">
+    <div class="sub" style="font-size:12px; font-weight:650; margin-bottom:5px">SOURCES</div>
+    {% for s in res.sources[:5] %}
+    <a class="seg" href="/file/{{ s.file_id }}" style="padding:5px 8px">
+      <div class="ts">{{ s.start | mmss }}</div>
+      <div class="txt"><span style="font-weight:600">{{ s.filename }}</span>
+        <span class="sub" style="font-size:12px">· {{ '%.2f' % s.score }}</span></div>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+<script>
+  (function(){ var el=document.querySelector('[data-answer]'); if(el) el.textContent=el.textContent.trim(); })();
+</script>

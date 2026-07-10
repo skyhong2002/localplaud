@@ -1,0 +1,8 @@
+<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="localplaud">
+  <!-- Monochrome mark: inherits `color` via currentColor. -->
+  <rect x="1" y="1" width="46" height="46" rx="12" fill="none" stroke="currentColor" stroke-width="2" opacity="0.25"/>
+  <rect x="18" y="9" width="12" height="19" rx="6" fill="currentColor"/>
+  <path d="M13.5 22.5a10.5 10.5 0 0 0 21 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <path d="M24 33v5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <path d="M18.5 38.5h11" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+</svg>

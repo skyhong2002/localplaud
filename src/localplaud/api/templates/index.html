@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="shell">
+  {% set active_id = None %}
+  {% include "_filelist.html" %}
+  <section class="pane"><div class="pane-inner">
+    <h1 class="page">Recordings</h1>
+    <div class="sub">Your Plaud cloud, mirrored locally.</div>
+
+    <div class="stats">
+      <div class="tile"><div class="k">Files</div><div class="v">{{ stats.total }}</div></div>
+      <div class="tile"><div class="k">Processed</div><div class="v">{{ stats.done }}</div></div>
+      <div class="tile"><div class="k">In progress</div><div class="v">{{ stats.processing }}</div></div>
+      <div class="tile"><div class="k">Total audio</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
+    </div>
+
+    <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin">
+      <input name="q" placeholder="Ask Plaud anything about your recordings…" autocomplete="off" required>
+      <button class="btn" type="submit">Ask</button>
+    </form>
+    <div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">thinking…</div>
+    <div id="answer"></div>
+
+    {% if not files %}
+    <div class="empty"><div class="big">🎙️</div>
+      No recordings yet.<br>Run <code>localplaud auth import</code> then <code>localplaud poll --once</code> to sync.
+    </div>
+    {% else %}
+    <div class="sub" style="margin-top:18px">← Pick a recording from the list to read its transcript and notes.</div>
+    {% endif %}
+  </div></section>
+</div>
+{% endblock %}

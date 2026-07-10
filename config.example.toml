@@ -9,24 +9,34 @@
 # .env are git-ignored.
 
 [plaud]
+# Which Plaud cloud client to use:
+#   "official" (default) — Plaud's sanctioned Open API with OAuth that
+#       auto-refreshes. One-time setup: `localplaud auth login` (opens your
+#       browser once, tokens land in ~/.plaud/tokens.json). Recommended.
+#   "apse1"    — the reverse-engineered web API, driven by a browser session
+#       you paste (expires ~14h; see README "Your Plaud session").
+provider = "official"
+
+# When the provider is "official" AND an apse1 browser session is also
+# configured (see below), the poller additionally reads the legacy listing to
+# fill change-detection fields the Open API lacks (version / file_md5 /
+# edit_time / is_trash). Purely optional.
+apse1_enrichment = true
+
+# ---- apse1 (legacy / enrichment) settings ---------------------------------- #
 # API host for YOUR account/region. Find it in the browser devtools console:
 #   localStorage.getItem("pld_plaud_user_api_domain")
 # Do not assume the default below matches your region.
 api_base = "https://api-apse1.plaud.ai"
 
-# Authentication route:
-#   "cookie" — paste the browser session cookie/token (most reliable today).
-#   "login"  — programmatic email/password login (only if your account supports it).
-auth_mode = "cookie"
-
-# For auth_mode = "cookie": set the cookie via the env var
-#   LOCALPLAUD_PLAUD__COOKIE   (preferred, keeps it out of this file)
-# or uncomment below. See README "Getting your Plaud session".
+# Session paste route: set the session via env vars (preferred, keeps it out
+# of this file) — LOCALPLAUD_PLAUD__TOKEN / LOCALPLAUD_PLAUD__COOKIE.
 # cookie = "paste-cookie-header-value-here"
 
-# For auth_mode = "login" (env vars preferred for the password):
-# email = "you@example.com"
-# password = "..."   # better: LOCALPLAUD_PLAUD__PASSWORD
+  [plaud.official]
+  # Defaults work for everyone; override only if Plaud changes its platform.
+  # api_base = "https://platform.plaud.ai/developer/api"
+  # tokens_path = "~/.plaud/tokens.json"
 
 [poller]
 enabled = true
@@ -45,8 +55,12 @@ transcribe = true
 diarize = true
 summarize = true
 index = true                     # build embeddings for Q&A / search
-concurrency = 1
-prefer_cloud_artifacts = false   # true = reuse Plaud's own transcript/summary when present
+concurrency = 1                  # files processed in parallel by the worker
+summary_template = "default"     # default | meeting | call | lecture | personal
+# Migration/debug only. The subscription-independent workflow keeps this false
+# and derives every artifact from raw audio. A future strict mode will also refuse
+# to reuse previously imported Plaud artifacts.
+prefer_cloud_artifacts = false
 
 # --------------------------------------------------------------------------- #
 # ASR — speech recognition. Pluggable; local and cloud are equal choices.
@@ -57,16 +71,16 @@ language = "auto"                # ISO code (e.g. "en", "zh") or "auto"
 fallback = ["openai"]            # tried in order if the primary can't run
 
   [asr.faster_whisper]           # local, CPU or NVIDIA CUDA (CTranslate2)
-  model = "large-v3"
+  model = "large-v3-turbo"
   device = "auto"                # auto | cpu | cuda
   compute_type = "auto"          # auto | int8 | int8_float16 | float16 | float32
 
   [asr.whispercpp]               # local, uses Metal on Apple Silicon
   binary = "whisper-cli"
-  model_path = "./models/ggml-large-v3.bin"
+  model_path = "./models/ggml-large-v3-turbo.bin"
 
   [asr.mlx_whisper]              # local, Apple Silicon (MLX / Metal)
-  model = "mlx-community/whisper-large-v3-mlx"
+  model = "mlx-community/whisper-large-v3-turbo"
 
   [asr.openai]                   # cloud
   # api_key via LOCALPLAUD_ASR__OPENAI__API_KEY
@@ -86,7 +100,7 @@ fallback = ["openai"]            # tried in order if the primary can't run
 # Cloud ASR (deepgram/assemblyai) return speakers directly, so this is skipped.
 # --------------------------------------------------------------------------- #
 [diarize]
-provider = "pyannote"            # pyannote | none
+provider = "pyannote"            # required for the default Plaud-like speaker workflow
 # hf_token via LOCALPLAUD_DIARIZE__HF_TOKEN (needed to download pyannote models)
 # num_speakers = 2               # optional hint; omit to auto-detect
 
@@ -112,16 +126,25 @@ provider = "ollama"              # ollama | openai | anthropic
 # Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.
 # --------------------------------------------------------------------------- #
 [embeddings]
-provider = "local"               # local (sentence-transformers) | openai
+provider = "local"               # local (sentence-transformers) | ollama | openai
 
   [embeddings.local]
   model = "sentence-transformers/all-MiniLM-L6-v2"
+
+  [embeddings.ollama]            # local, no torch — just a running Ollama daemon
+  host = "http://localhost:11434"
+  model = "bge-m3"
 
   [embeddings.openai]
   # api_key via LOCALPLAUD_EMBEDDINGS__OPENAI__API_KEY
   model = "text-embedding-3-small"
 
 [api]
-host = "0.0.0.0"
+# Loopback by default so a stray `localplaud run` isn't LAN-exposed. Docker
+# overrides this to 0.0.0.0 (it sits behind Caddy).
+host = "127.0.0.1"
 port = 8080
+# Optional shared secret: when set, every request needs it as an X-Auth-Token
+# header or ?token= param. Prefer real auth (Caddy basic_auth) in front.
+# auth_token via LOCALPLAUD_API__AUTH_TOKEN
 # public_url = "https://plaud.observe.tw"   # set to your domain behind the reverse proxy

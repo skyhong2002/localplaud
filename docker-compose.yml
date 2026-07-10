@@ -1,0 +1,101 @@
+# localplaud — one compose file, three hardware profiles. Pick ONE per host:
+#
+#   docker compose --profile cpu up -d --build   # CPU box / cloud VM — use a cloud ASR provider
+#   docker compose --profile gpu up -d --build   # NVIDIA host — local faster-whisper on CUDA
+#   docker compose --profile mac up -d --build   # Apple Silicon — see the note below
+#
+# Before first start:
+#   cp .env.example .env                 # DOMAIN, ACME_EMAIL, Plaud cookie, API keys
+#   cp config.example.toml config.toml   # pipeline / provider settings
+#
+# Caddy terminates HTTPS for $DOMAIN (automatic Let's Encrypt certificates)
+# and proxies to whichever app service is active — they all share the network
+# alias "app" on port 8080, and only one app profile runs at a time.
+#
+# macOS note: containers cannot reach the Metal GPU, so the `mac` profile is
+# meant to run with a cloud ASR provider (set LOCALPLAUD_ASR__PROVIDER in .env).
+# For on-device Metal ASR (mlx-whisper / whisper.cpp), run the app natively:
+#     uv run localplaud run
+# and use compose only for Caddy (`docker compose --profile mac up -d caddy`,
+# pointing the Caddyfile at host.docker.internal:8080 instead of app:8080).
+# In-container, host services like Ollama are reachable at
+# http://host.docker.internal:11434.
+
+x-localplaud: &localplaud
+  env_file: .env
+  volumes:
+    - ./data:/app/data
+    - ./config.toml:/app/config.toml:ro
+  expose:
+    - "8080"
+  restart: unless-stopped
+  networks:
+    default:
+      aliases:
+        - app
+
+services:
+  localplaud-cpu:
+    <<: *localplaud
+    profiles: ["cpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Slim, cloud-only image: no faster-whisper/torch (pointless on a CPU box
+      # and very slow to build on weak ARM). Use cloud ASR/LLM/embeddings —
+      # set the providers + API keys in .env / config.toml.
+      args:
+        EXTRAS: "cloud"
+
+  localplaud-gpu:
+    <<: *localplaud
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  localplaud-mac:
+    <<: *localplaud
+    profiles: ["mac"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  caddy:
+    image: caddy:2
+    profiles: ["cpu", "gpu", "mac"]
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    # Loose dependencies: only the app service of the active profile starts;
+    # the others are skipped (required: false).
+    depends_on:
+      localplaud-cpu:
+        condition: service_started
+        required: false
+      localplaud-gpu:
+        condition: service_started
+        required: false
+      localplaud-mac:
+        condition: service_started
+        required: false
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

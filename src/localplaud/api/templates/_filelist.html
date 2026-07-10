@@ -1,0 +1,25 @@
+<nav class="filelist {% if active_id %}has-active{% endif %}">
+  <div class="fl-top">
+    <div class="fl-title">All files</div>
+    <form method="get" action="/" style="margin-top:10px">
+      <input class="fl-search" name="q" value="{{ q or '' }}" placeholder="Search files…" autocomplete="off">
+    </form>
+  </div>
+  <div class="fl-scroll">
+    {% for f in files %}
+    <a class="card {% if f.id == active_id %}on{% endif %}" href="/file/{{ f.id }}">
+      <div class="ct">{{ f.filename }}</div>
+      <div class="cm">
+        <span>{{ f.start_time_ms | dt }}</span><span>·</span><span>{{ f.duration_ms | dur }}</span>
+      </div>
+      <div class="tags">
+        {% if f.has_transcript %}<span class="chip on">transcript</span>{% endif %}
+        {% if f.has_summary %}<span class="chip on">notes</span>{% endif %}
+        <span class="st {{ f.status }}">{{ f.status }}</span>
+      </div>
+    </a>
+    {% else %}
+    <div class="empty" style="padding:40px 12px"><div class="big">🎙️</div>No recordings yet.</div>
+    {% endfor %}
+  </div>
+</nav>

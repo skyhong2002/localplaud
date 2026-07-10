@@ -9,7 +9,7 @@ filesystem; everything else lives here.
 from __future__ import annotations
 
 import enum
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
@@ -28,14 +28,14 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
     pass
 
 
-class FileStatus(str, enum.Enum):
+class FileStatus(enum.StrEnum):
     """Local lifecycle of a file, independent of the cloud's own flags."""
 
     discovered = "discovered"  # seen in the cloud listing, not yet downloaded
@@ -90,13 +90,13 @@ class PlaudFile(Base):
         DateTime(timezone=True), default=_now, onupdate=_now
     )
 
-    transcript: Mapped["Transcript | None"] = relationship(
+    transcript: Mapped[Transcript | None] = relationship(
         back_populates="file", uselist=False, cascade="all, delete-orphan"
     )
-    summaries: Mapped[list["Summary"]] = relationship(
+    summaries: Mapped[list[Summary]] = relationship(
         back_populates="file", cascade="all, delete-orphan"
     )
-    chunks: Mapped[list["Chunk"]] = relationship(
+    chunks: Mapped[list[Chunk]] = relationship(
         back_populates="file", cascade="all, delete-orphan"
     )
 
