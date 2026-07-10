@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import get_settings
-from .db.models import PlaudFile
+from .db.models import PlaudFile, StageName
 from .db.session import session_scope
 from .store.speakers import display_names
 
@@ -55,12 +55,29 @@ def render_markdown(file_id: str) -> str:
         if meta:
             parts += ["*" + " · ".join(meta) + "*", ""]
 
-        independent = get_settings().pipeline.artifact_mode == "independent"
+        settings = get_settings()
+        independent = settings.pipeline.artifact_mode == "independent"
+        stale_stages = {
+            run.stage
+            for run in file.stage_runs
+            if (run.detail or {}).get("stale")
+        }
         summaries = (
             [summary for summary in file.summaries if summary.source == "local"]
             if independent
             else file.summaries
         )
+        summaries = [
+            summary
+            for summary in summaries
+            if not (
+                summary.source == "local"
+                and (
+                    (summary.template == "mind_map" and StageName.mind_map in stale_stages)
+                    or (summary.template != "mind_map" and StageName.summarize in stale_stages)
+                )
+            )
+        ]
         mind_maps = [s for s in summaries if s.template == "mind_map"]
         for summary in summaries:
             if summary.template == "mind_map":
@@ -78,12 +95,21 @@ def render_markdown(file_id: str) -> str:
             parts += ["## Mind map", "", outline, ""]
 
         # Corrected canonical transcript wins; the raw ASR row is the fallback.
-        corrected = file.corrected_transcript
+        if independent:
+            raw = file.local_transcript
+        elif settings.pipeline.prefer_cloud_artifacts:
+            raw = file.plaud_transcript or file.local_transcript
+        else:
+            raw = file.local_transcript
+        corrected = (
+            file.corrected_transcript_for_source(raw.source)
+            if raw is not None
+            else None
+        )
         if corrected is not None:
             segments = corrected.segments
         else:
-            transcript = file.local_transcript if independent else file.transcript
-            segments = transcript.segments if transcript is not None else None
+            segments = raw.segments if raw is not None else None
         if segments:
             names = display_names(session, file.id)
             parts += ["## Transcript", ""]

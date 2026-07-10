@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from sqlalchemy import select
 
 
@@ -27,6 +29,18 @@ SEGMENTS = [
     {"text": "hi there", "start": 2.0, "end": 3.0, "speaker": "SPEAKER_01", "words": []},
     {"text": "sounds good", "start": 3.0, "end": 4.0, "speaker": "SPEAKER_00", "words": []},
 ]
+
+
+def _mute_reindex(monkeypatch):
+    import localplaud.worker.reindex as reindex_mod
+
+    calls = []
+    monkeypatch.setattr(
+        reindex_mod,
+        "reindex_file",
+        lambda file_id, settings=None, **kwargs: calls.append((file_id, kwargs)),
+    )
+    return calls
 
 
 def _seed(file_id: str = "r1"):
@@ -91,6 +105,7 @@ def test_sync_preserves_display_names_across_repersist(monkeypatch, tmp_path):
 
 def test_rename_endpoint_upsert_clear_and_validation(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
+    _mute_reindex(monkeypatch)
     Speaker = _seed()
     from localplaud.db.session import session_scope
 
@@ -121,6 +136,7 @@ def test_rename_endpoint_upsert_clear_and_validation(monkeypatch, tmp_path):
 
 def test_detail_page_shows_display_name_and_falls_back_to_key(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
+    _mute_reindex(monkeypatch)
     _seed()
     c.post("/file/r1/speakers", data={"key": "SPEAKER_00", "name": "Alice"},
            follow_redirects=False)
@@ -137,6 +153,7 @@ def test_detail_page_shows_display_name_and_falls_back_to_key(monkeypatch, tmp_p
 
 def test_export_uses_display_names(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
+    _mute_reindex(monkeypatch)
     _seed()
     c.post("/file/r1/speakers", data={"key": "SPEAKER_00", "name": "Alice"},
            follow_redirects=False)
@@ -144,3 +161,42 @@ def test_export_uses_display_names(monkeypatch, tmp_path):
     assert "**[00:01] Alice:** hello team" in md
     assert "**[00:02] SPEAKER_01:** hi there" in md  # unnamed key unchanged
     assert "SPEAKER_00" not in md
+
+
+def test_rename_invalidates_derived_artifacts_and_names_canonical(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    calls = _mute_reindex(monkeypatch)
+    _seed()
+
+    from localplaud.config import get_settings
+    from localplaud.db.models import Chunk, PlaudFile, StageName, StageStatus, Summary
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import _load_transcript
+
+    with session_scope() as s:
+        s.add(Chunk(file_id="r1", idx=0, text="old index"))
+        s.add(Summary(file_id="r1", template="default", source="local", content_md="old"))
+
+    response = c.post(
+        "/file/r1/speakers",
+        data={"key": "SPEAKER_00", "name": "Alice"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    transcript, source = _load_transcript("r1", get_settings())
+    assert source == "local"
+    assert transcript.segments[0].speaker == "Alice"
+    with session_scope() as s:
+        row = s.get(PlaudFile, "r1")
+        assert row.chunks == []
+        runs = {run.stage: run for run in row.stage_runs}
+        for stage in (StageName.summarize, StageName.mind_map, StageName.index):
+            assert runs[stage].status == StageStatus.pending
+            assert runs[stage].detail["stale"] is True
+
+    deadline = time.monotonic() + 2
+    while not calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert calls and calls[0][0] == "r1"
+    assert calls[0][1]["expected_speaker_names"] == {"SPEAKER_00": "Alice"}

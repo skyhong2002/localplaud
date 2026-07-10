@@ -86,9 +86,10 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   user recordings first.
 - ✅ Persist stable speaker IDs separately from editable display names: `speakers`
   rows mirror the diarization keys per recording, renames are upserted from the
-  Web detail page (legend inline forms), survive re-ASR/re-diarization, and flow
-  into the transcript view and Markdown export. Remaining: propagate names into
-  newly generated summaries/Ask answers automatically.
+  Web detail page (legend inline forms), and flow into transcript view, regenerated
+  notes/indexes, Ask, and Markdown export. A rename invalidates stale derived
+  artifacts and re-indexes without ASR. Remaining: reconcile identities safely
+  across diarization reruns because `SPEAKER_00` labels are run-local.
 - Add a custom vocabulary/correction layer for names, specialist terms, Taiwan
   Mandarin, and Mandarin/English code-switching.
 - Establish a benchmark set from consented user-owned recordings: WER/CER, diarization
@@ -117,10 +118,12 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 - ✅ Transcript corrections as revisions: inline per-segment editing on the Web
   detail page creates immutable `transcript_revisions` on top of the untouched raw
   ASR row; the latest revision is the canonical transcript for summaries, indexing,
-  and export, edits survive re-ASR, and each edit invalidates and rebuilds the
-  embedding index in the background without rerunning ASR (summary regeneration
-  stays explicit). Remaining: transcript find/replace, multi-segment/bulk edits,
-  and a revision history browser.
+  and export, edits survive re-ASR, and each edit hides/invalidates stale notes and
+  maps while rebuilding the embedding index in the background without rerunning ASR
+  (notes/map regeneration stays explicit through Resume). Provenance prevents edits
+  of Plaud imports from satisfying independent mode. Remaining: transcript
+  find/replace, multi-segment/bulk edits, dependent-artifact revision links, and a
+  revision history browser.
 
 ### P1 — Plaud-like Web App workflow
 

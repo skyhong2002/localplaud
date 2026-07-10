@@ -63,7 +63,11 @@ def _mute_reindex(monkeypatch):
     import localplaud.worker.reindex as reindex_mod
 
     calls: list[str] = []
-    monkeypatch.setattr(reindex_mod, "reindex_file", lambda file_id, settings=None: calls.append(file_id))
+    monkeypatch.setattr(
+        reindex_mod,
+        "reindex_file",
+        lambda file_id, settings=None, **kwargs: calls.append(file_id),
+    )
     return calls
 
 
@@ -81,7 +85,7 @@ def test_segment_edit_creates_revision_and_invalidates_index(monkeypatch, tmp_pa
     )
     from localplaud.db.session import session_scope
 
-    r = c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!"},
+    r = c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!", "base_revision": 0},
                follow_redirects=False)
     assert r.status_code == 303
     assert r.headers["location"] == "/file/r1"
@@ -114,7 +118,7 @@ def test_segment_edit_creates_revision_and_invalidates_index(monkeypatch, tmp_pa
     assert calls == ["r1"]  # background re-index was kicked off
 
     # a second edit stacks revision 2 on top of revision 1
-    r = c.post("/file/r1/transcript/segments/1", data={"text": "let us start"},
+    r = c.post("/file/r1/transcript/segments/1", data={"text": "let us start", "base_revision": 1},
                follow_redirects=False)
     assert r.status_code == 303
     with session_scope() as s:
@@ -129,10 +133,10 @@ def test_segment_edit_validation(monkeypatch, tmp_path):
     _seed()
     _mute_reindex(monkeypatch)
     # index out of range
-    assert c.post("/file/r1/transcript/segments/99", data={"text": "x"},
+    assert c.post("/file/r1/transcript/segments/99", data={"text": "x", "base_revision": 0},
                   follow_redirects=False).status_code == 400
     # unknown file
-    assert c.post("/file/nope/transcript/segments/0", data={"text": "x"},
+    assert c.post("/file/nope/transcript/segments/0", data={"text": "x", "base_revision": 0},
                   follow_redirects=False).status_code == 404
     # file without any transcript
     from localplaud.db.models import PlaudFile
@@ -140,7 +144,7 @@ def test_segment_edit_validation(monkeypatch, tmp_path):
 
     with session_scope() as s:
         s.add(PlaudFile(id="bare", filename="bare"))
-    assert c.post("/file/bare/transcript/segments/0", data={"text": "x"},
+    assert c.post("/file/bare/transcript/segments/0", data={"text": "x", "base_revision": 0},
                   follow_redirects=False).status_code == 400
 
 
@@ -154,7 +158,7 @@ def test_load_transcript_returns_corrected_canonical(monkeypatch, tmp_path):
     loaded = _load_transcript("r1", get_settings())
     assert loaded is not None and loaded[0].segments[0].text == "hello team"
 
-    c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!"},
+    c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!", "base_revision": 0},
            follow_redirects=False)
     transcript, source = _load_transcript("r1", get_settings())
     assert source == "local"
@@ -168,7 +172,7 @@ def test_repersist_asr_keeps_user_revisions(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
     _mute_reindex(monkeypatch)
-    c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!"},
+    c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!", "base_revision": 0},
            follow_redirects=False)
 
     from localplaud.asr.base import Segment, Transcript
@@ -205,7 +209,7 @@ def test_detail_view_toggle_raw_vs_corrected(monkeypatch, tmp_path):
     assert "?view=raw" not in page.text
     assert 'class="editbtn"' in page.text
 
-    c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!"},
+    c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!", "base_revision": 0},
            follow_redirects=False)
 
     # default view is now the corrected canonical transcript
@@ -229,7 +233,7 @@ def test_reindex_file_rebuilds_chunks_from_corrected_transcript(monkeypatch, tmp
     c = _client(monkeypatch, tmp_path)
     _seed(with_index=True)
     _mute_reindex(monkeypatch)  # keeps the endpoint's background thread inert
-    c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!"},
+    c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!", "base_revision": 0},
            follow_redirects=False)
 
     import localplaud.worker.index as index_mod
@@ -269,3 +273,219 @@ def test_reindex_file_failure_is_durable(monkeypatch, tmp_path):
                                               StageRun.stage == StageName.index))
         assert run.status == StageStatus.failed
         assert "embedding model unavailable" in run.error
+
+
+def test_force_rebuild_uses_preserved_corrected_canonical_downstream(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _mute_reindex(monkeypatch)
+    c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "corrected canonical", "base_revision": 0},
+        follow_redirects=False,
+    )
+
+    from localplaud.asr.base import Segment, Transcript
+    from localplaud.config import get_settings
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import process_file
+
+    audio = tmp_path / "force.wav"
+    audio.write_bytes(b"RIFFfake")
+    with session_scope() as s:
+        s.get(PlaudFile, "r1").audio_path = str(audio)
+
+    seen = {}
+
+    monkeypatch.setattr(
+        "localplaud.worker.pipeline.transcribe.run_asr",
+        lambda wav, settings: Transcript(
+            segments=[Segment(text="new raw ASR", start=0.0, end=1.0, speaker="SPEAKER_00")],
+            provider="fake",
+            has_speakers=True,
+        ),
+    )
+
+    def fake_summary(transcript, settings):
+        seen["summary"] = transcript.text
+        return {
+            "title": "T",
+            "content_md": "# T",
+            "provider": "fake",
+            "model": "m",
+            "template": settings.pipeline.summary_template,
+        }
+
+    def fake_mindmap(transcript, settings, summary_md=None):
+        seen["mindmap"] = transcript.text
+        return {
+            "template": "mind_map",
+            "content_md": "# T\n- point",
+            "provider": "fake",
+            "model": "m",
+            "detail": {},
+        }
+
+    def fake_embed(chunks, settings):
+        seen["index"] = " ".join(chunk["text"] for chunk in chunks)
+        return [b"\x00\x00\x80?" for _ in chunks], "fake", 1
+
+    monkeypatch.setattr("localplaud.worker.pipeline.summarize.summarize", fake_summary)
+    monkeypatch.setattr("localplaud.worker.pipeline.mindmap.generate_mind_map", fake_mindmap)
+    monkeypatch.setattr("localplaud.worker.pipeline.index.embed_chunks", fake_embed)
+
+    process_file("r1", settings=get_settings(), force=True)
+    assert seen == {
+        "summary": "corrected canonical\nlet's start",
+        "mindmap": "corrected canonical\nlet's start",
+        "index": "corrected canonical let's start",
+    }
+
+
+def test_cloud_derived_revision_never_satisfies_independent_mode(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__ARTIFACT_MODE", "migration")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__PREFER_CLOUD_ARTIFACTS", "true")
+    c = _client(monkeypatch, tmp_path)
+    _mute_reindex(monkeypatch)
+
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile, Transcript, TranscriptRevision
+    from localplaud.db.session import session_scope
+    from localplaud.exporter import render_markdown
+    from localplaud.worker.pipeline import _load_transcript
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="cloud", filename="Cloud", status=FileStatus.done))
+        s.add(
+            Transcript(
+                file_id="cloud",
+                provider="plaud",
+                source="cloud",
+                text="paid cloud text",
+                segments=[{"text": "paid cloud text", "start": 0.0, "end": 1.0}],
+            )
+        )
+
+    response = c.post(
+        "/file/cloud/transcript/segments/0",
+        data={"text": "edited cloud text", "base_revision": 0},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    with session_scope() as s:
+        revision = s.scalar(select(TranscriptRevision).where(TranscriptRevision.file_id == "cloud"))
+        assert revision.source == "cloud"
+
+    transcript, source = _load_transcript("cloud", get_settings())
+    assert source == "cloud"
+    assert transcript.text == "edited cloud text"
+
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__ARTIFACT_MODE", "independent")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__PREFER_CLOUD_ARTIFACTS", "false")
+    independent = get_settings(reload=True)
+    assert _load_transcript("cloud", independent) is None
+    assert "edited cloud text" not in render_markdown("cloud")
+    page = c.get("/file/cloud")
+    assert "edited cloud text" not in page.text
+
+
+def test_stale_edit_is_rejected_without_losing_first_revision(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _mute_reindex(monkeypatch)
+
+    first = c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "first edit", "base_revision": 0},
+        follow_redirects=False,
+    )
+    stale = c.post(
+        "/file/r1/transcript/segments/1",
+        data={"text": "stale edit", "base_revision": 0},
+        follow_redirects=False,
+    )
+    assert first.status_code == 303
+    assert stale.status_code == 409
+
+    from localplaud.db.models import TranscriptRevision
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        revisions = list(s.scalars(select(TranscriptRevision)))
+        assert len(revisions) == 1
+        assert revisions[0].segments[0]["text"] == "first edit"
+        assert revisions[0].segments[1]["text"] == "let's start"
+
+
+def test_edit_hides_stale_notes_and_marks_regeneration_pending(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _mute_reindex(monkeypatch)
+
+    from localplaud.db.models import PlaudFile, StageName, StageStatus, Summary
+    from localplaud.db.session import session_scope
+    from localplaud.exporter import render_markdown
+    from localplaud.worker.pipeline import _has_summary
+
+    with session_scope() as s:
+        s.add(
+            Summary(
+                file_id="r1",
+                template="default",
+                source="local",
+                content_md="STALE NOTE",
+            )
+        )
+        s.add(
+            Summary(
+                file_id="r1",
+                template="mind_map",
+                source="local",
+                content_md="# STALE MAP\n- old",
+            )
+        )
+
+    response = c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "fresh correction", "base_revision": 0},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "STALE NOTE" not in c.get("/file/r1").text
+    assert "STALE NOTE" not in render_markdown("r1")
+    assert "STALE MAP" not in render_markdown("r1")
+    assert _has_summary("r1", "default") is False
+    assert _has_summary("r1", "mind_map") is False
+
+    with session_scope() as s:
+        runs = {run.stage: run for run in s.get(PlaudFile, "r1").stage_runs}
+        for stage in (StageName.summarize, StageName.mind_map, StageName.index):
+            assert runs[stage].status == StageStatus.pending
+            assert runs[stage].detail["stale"] is True
+
+
+def test_superseded_background_reindex_is_fenced(monkeypatch, tmp_path):
+    from localplaud.worker.reindex import reindex_file
+
+    c = _client(monkeypatch, tmp_path)
+    _seed(with_index=True)
+    _mute_reindex(monkeypatch)
+    c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "newest", "base_revision": 0},
+        follow_redirects=False,
+    )
+
+    import localplaud.worker.index as index_mod
+    called = False
+
+    def should_not_embed(chunks, settings):
+        nonlocal called
+        called = True
+        raise AssertionError("superseded job must not embed")
+
+    monkeypatch.setattr(index_mod, "embed_chunks", should_not_embed)
+    assert reindex_file("r1", expected_revision=0) is False
+    assert called is False

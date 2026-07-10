@@ -141,6 +141,30 @@ def _rehydrate_revision(rev: TranscriptRevision, base: TranscriptRow | None) -> 
     )
 
 
+def _select_raw_transcript(row: PlaudFile, settings: Settings) -> TranscriptRow | None:
+    """Select the raw transcript allowed by the configured artifact mode."""
+    local = [item for item in row.transcripts if item.source == "local"]
+    if settings.pipeline.artifact_mode == "independent":
+        return local[-1] if local else None
+    if settings.pipeline.prefer_cloud_artifacts:
+        cloud = [item for item in row.transcripts if item.source in {"cloud", "plaud"}]
+        return cloud[-1] if cloud else (local[-1] if local else None)
+    return local[-1] if local else None
+
+
+def _apply_speaker_display_names(
+    transcript: Transcript, names: dict[str, str]
+) -> Transcript:
+    """Use editable names in derived artifacts without mutating stored segments."""
+    for segment in transcript.segments:
+        if segment.speaker:
+            segment.speaker = names.get(segment.speaker, segment.speaker)
+        for word in segment.words:
+            if word.speaker:
+                word.speaker = names.get(word.speaker, word.speaker)
+    return transcript
+
+
 def process_file(file_id: str, settings: Settings | None = None, force: bool = False) -> None:
     settings = settings or get_settings()
     pcfg = settings.pipeline
@@ -261,6 +285,13 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                 _fail_stage(file_id, StageName.diarize, exc)
                 partial_errors.append(f"diarize: {exc}")
 
+        # A force rebuild may replace the raw row while preserving user edits.
+        # Reload the configured canonical lane before all derived stages so notes,
+        # mind maps and the search index never drift from corrected transcript UI.
+        canonical = _load_transcript(file_id, settings)
+        if canonical is not None:
+            transcript, transcript_source = canonical
+
         # --- summarize (skip if this template's summary already exists) #
         if pcfg.summarize and transcript is not None:
             if force or not _has_summary(file_id, pcfg.summary_template):
@@ -343,6 +374,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         provider=settings.embeddings.provider,
                         model=model_name,
                         artifact_source="local",
+                        detail={},
                     )
                 except Exception as exc:  # noqa: BLE001 - notes remain usable
                     log.exception("Indexing failed for %s", file_id)
@@ -382,32 +414,45 @@ def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str]
         row = session.get(PlaudFile, file_id)
         if row is None:
             return None
-        # User corrections are the canonical transcript for every downstream
-        # stage; the raw ASR row stays untouched underneath them.
-        corrected = row.corrected_transcript
+        selected = _select_raw_transcript(row, settings)
+        selected_source = selected.source if selected is not None else "local"
+        # Corrections only win in the same provenance lane selected by artifact
+        # mode. A cloud-derived edit never satisfies independent mode.
+        corrected = row.corrected_transcript_for_source(selected_source)
         if corrected is not None:
             base = (
                 session.get(TranscriptRow, corrected.base_transcript_id)
                 if corrected.base_transcript_id is not None
                 else None
             )
-            return (_rehydrate_revision(corrected, base), "local")
-        local = [item for item in row.transcripts if item.source == "local"]
-        if settings.pipeline.artifact_mode == "independent":
-            selected = local[-1] if local else None
-        elif settings.pipeline.prefer_cloud_artifacts:
-            cloud = [item for item in row.transcripts if item.source in {"cloud", "plaud"}]
-            selected = cloud[-1] if cloud else (local[-1] if local else None)
-        else:
-            selected = local[-1] if local else None
-        return (_rehydrate_transcript(selected), selected.source) if selected else None
+            transcript = _rehydrate_revision(corrected, base)
+            names = {
+                speaker.key: speaker.display_name
+                for speaker in row.speakers
+                if speaker.display_name
+            }
+            return (_apply_speaker_display_names(transcript, names), corrected.source)
+        if selected is None:
+            return None
+        transcript = _rehydrate_transcript(selected)
+        names = {
+            speaker.key: speaker.display_name
+            for speaker in row.speakers
+            if speaker.display_name
+        }
+        return (_apply_speaker_display_names(transcript, names), selected.source)
 
 
 def _has_summary(file_id: str, template: str) -> bool:
     with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        stage = StageName.mind_map if template == "mind_map" else StageName.summarize
+        run = next((item for item in row.stage_runs if item.stage == stage), None)
+        if run is not None and (run.detail or {}).get("stale"):
+            return False
         return any(
             s.template == template and s.source == "local"
-            for s in session.get(PlaudFile, file_id).summaries
+            for s in row.summaries
         )
 
 

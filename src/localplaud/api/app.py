@@ -312,28 +312,67 @@ def audio(file_id: str):
     return FileResponse(path, media_type=_AUDIO_MIME.get(ext, "application/octet-stream"))
 
 
-def _canonical_raw_row(r: PlaudFile, independent: bool) -> Transcript | None:
-    """The raw ASR transcript row the UI treats as canonical (pre-corrections)."""
-    return r.local_transcript if independent else r.transcript
+def _canonical_raw_row(r: PlaudFile, settings) -> Transcript | None:
+    """The raw transcript selected by configured provenance rules."""
+    if settings.pipeline.artifact_mode == "independent":
+        return r.local_transcript
+    if settings.pipeline.prefer_cloud_artifacts:
+        return r.plaud_transcript or r.local_transcript
+    return r.local_transcript
+
+
+def _canonical_revision(r: PlaudFile, raw_row: Transcript | None):
+    """Latest correction in the selected raw transcript's provenance lane."""
+    source = raw_row.source if raw_row is not None else "local"
+    return r.corrected_transcript_for_source(source)
+
+
+def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) -> None:
+    """Preserve derived rows but make stale artifacts ineligible for reuse/UI."""
+    for stage in stages:
+        run = session.scalar(
+            select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
+        )
+        if run is None:
+            run = StageRun(file_id=file_id, stage=stage, attempts=0, detail={})
+            session.add(run)
+        run.status = StageStatus.pending
+        run.error = None
+        run.completed_at = None
+        run.detail = dict(run.detail or {}) | {"stale": True}
 
 
 @app.get("/file/{file_id}", response_class=HTMLResponse)
 def file_detail(request: Request, file_id: str, view: str | None = None):
-    independent = get_settings().pipeline.artifact_mode == "independent"
+    settings = get_settings()
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
         if r is None:
             return HTMLResponse("Not found", status_code=404)
         # Default template first, then the rest.
+        stale_stages = {
+            run.stage
+            for run in r.stage_runs
+            if (run.detail or {}).get("stale")
+        }
         summaries = sorted(
-            ({"title": s.title, "content_md": s.content_md, "template": s.template, "source": s.source}
-             for s in r.summaries),
+            (
+                {"title": s.title, "content_md": s.content_md, "template": s.template, "source": s.source}
+                for s in r.summaries
+                if not (
+                    s.source == "local"
+                    and (
+                        (s.template == "mind_map" and StageName.mind_map in stale_stages)
+                        or (s.template != "mind_map" and StageName.summarize in stale_stages)
+                    )
+                )
+            ),
             key=lambda s: (s["template"] != "default", s["template"]),
         )
         transcript = None
         imported_transcript = None
-        raw_row = _canonical_raw_row(r, independent)
-        corrected = r.corrected_transcript
+        raw_row = _canonical_raw_row(r, settings)
+        corrected = _canonical_revision(r, raw_row)
         # Canonical segments (latest correction wins) drive the speaker legend.
         canonical_segments = (
             corrected.segments if corrected is not None
@@ -587,13 +626,15 @@ def rename_speaker(file_id: str, key: str = Form(...), name: str = Form("")):
     """Set (or clear, with an empty name) the display name for one stable
     speaker key. The key itself never changes — it is the diarization label
     stored inside the transcript segments."""
+    import threading
+
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
         if r is None:
             return JSONResponse({"error": "not found"}, status_code=404)
-        independent = get_settings().pipeline.artifact_mode == "independent"
-        corrected = r.corrected_transcript
-        raw_row = _canonical_raw_row(r, independent)
+        settings = get_settings()
+        raw_row = _canonical_raw_row(r, settings)
+        corrected = _canonical_revision(r, raw_row)
         segments = (
             corrected.segments if corrected is not None
             else (raw_row.segments if raw_row is not None else [])
@@ -608,11 +649,38 @@ def rename_speaker(file_id: str, key: str = Form(...), name: str = Form("")):
             session.add(Speaker(file_id=file_id, key=key, display_name=clean))
         else:
             existing.display_name = clean
+        session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+        _mark_derived_stale(
+            session,
+            file_id,
+            (StageName.summarize, StageName.mind_map, StageName.index),
+        )
+        expected_revision = corrected.revision if corrected is not None else 0
+        expected_names = display_names(session, file_id) | ({key: clean} if clean else {})
+        if not clean:
+            expected_names.pop(key, None)
+
+    from ..worker.reindex import reindex_file
+
+    threading.Thread(
+        target=reindex_file,
+        args=(file_id,),
+        kwargs={
+            "expected_revision": expected_revision,
+            "expected_speaker_names": expected_names,
+        },
+        daemon=True,
+    ).start()
     return RedirectResponse(url=f"/file/{file_id}", status_code=303)
 
 
 @app.post("/file/{file_id}/transcript/segments/{idx}")
-def edit_transcript_segment(file_id: str, idx: int, text: str = Form(...)):
+def edit_transcript_segment(
+    file_id: str,
+    idx: int,
+    text: str = Form(...),
+    base_revision: int = Form(...),
+):
     """Correct one transcript segment. Creates the next TranscriptRevision on
     top of the current canonical transcript (latest revision, else the raw
     local ASR row, which is never modified), then re-indexes in the background
@@ -625,25 +693,34 @@ def edit_transcript_segment(file_id: str, idx: int, text: str = Form(...)):
         r = session.get(PlaudFile, file_id)
         if r is None:
             return JSONResponse({"error": "not found"}, status_code=404)
-        independent = get_settings().pipeline.artifact_mode == "independent"
-        corrected = r.corrected_transcript
-        raw_row = _canonical_raw_row(r, independent)
+        settings = get_settings()
+        raw_row = _canonical_raw_row(r, settings)
+        corrected = _canonical_revision(r, raw_row)
         if corrected is not None:
             base_segments = corrected.segments
             has_speakers = corrected.has_speakers
-            next_revision = corrected.revision + 1
             base_transcript_id = corrected.base_transcript_id
+            revision_source = corrected.source
         elif raw_row is not None:
             base_segments = raw_row.segments
             has_speakers = raw_row.has_speakers
-            next_revision = 1
             base_transcript_id = raw_row.id
+            revision_source = raw_row.source
         else:
             return JSONResponse({"error": "no transcript to edit"}, status_code=400)
+        current_revision = corrected.revision if corrected is not None else 0
+        if base_revision != current_revision:
+            return JSONResponse(
+                {"error": "transcript changed; reload before saving"},
+                status_code=409,
+            )
+        next_revision = max((rev.revision for rev in r.transcript_revisions), default=0) + 1
         if not 0 <= idx < len(base_segments):
             return JSONResponse({"error": "segment index out of range"}, status_code=400)
         segments = copy.deepcopy(base_segments)
-        segments[idx] = dict(segments[idx]) | {"text": text}
+        # Word timings/text describe the raw ASR segment and become invalid once
+        # its text is edited. Preserve segment timing/speaker, but clear stale words.
+        segments[idx] = dict(segments[idx]) | {"text": text, "words": []}
         joined = "\n".join(
             (s.get("text") or "").strip() for s in segments if (s.get("text") or "").strip()
         )
@@ -652,6 +729,7 @@ def edit_transcript_segment(file_id: str, idx: int, text: str = Form(...)):
                 file_id=file_id,
                 base_transcript_id=base_transcript_id,
                 revision=next_revision,
+                source=revision_source,
                 segments=segments,
                 text=joined,
                 has_speakers=has_speakers,
@@ -660,16 +738,22 @@ def edit_transcript_segment(file_id: str, idx: int, text: str = Form(...)):
         )
         # Invalidate the index now: stale chunks must not serve search/Ask.
         session.execute(delete(Chunk).where(Chunk.file_id == file_id))
-        run = session.scalar(
-            select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == StageName.index)
+        _mark_derived_stale(
+            session,
+            file_id,
+            (StageName.summarize, StageName.mind_map, StageName.index),
         )
-        if run is None:
-            run = StageRun(file_id=file_id, stage=StageName.index, attempts=0, detail={})
-            session.add(run)
-        run.status = StageStatus.pending
-        run.error = None
+        expected_names = display_names(session, file_id)
 
     from ..worker.reindex import reindex_file
 
-    threading.Thread(target=reindex_file, args=(file_id,), daemon=True).start()
+    threading.Thread(
+        target=reindex_file,
+        args=(file_id,),
+        kwargs={
+            "expected_revision": next_revision,
+            "expected_speaker_names": expected_names,
+        },
+        daemon=True,
+    ).start()
     return RedirectResponse(url=f"/file/{file_id}", status_code=303)

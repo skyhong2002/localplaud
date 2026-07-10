@@ -168,6 +168,11 @@ class PlaudFile(Base):
         """Latest user-corrected revision, or ``None`` when no edits exist."""
         return self.transcript_revisions[-1] if self.transcript_revisions else None
 
+    def corrected_transcript_for_source(self, source: str) -> TranscriptRevision | None:
+        """Latest correction derived from the requested artifact source."""
+        matches = [row for row in self.transcript_revisions if row.source == source]
+        return matches[-1] if matches else None
+
 
 class Transcript(Base):
     __tablename__ = "transcripts"
@@ -235,6 +240,8 @@ class TranscriptRevision(Base):
     )
 
     revision: Mapped[int] = mapped_column(Integer, default=1)
+    # Editing an imported Plaud transcript must retain cloud provenance.
+    source: Mapped[str] = mapped_column(String(16), default="local")
     # Same shape as Transcript.segments (see asr.base.Segment).
     segments: Mapped[list] = mapped_column(JSON, default=list)
     text: Mapped[str] = mapped_column(Text, default="")
@@ -244,6 +251,10 @@ class TranscriptRevision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     file: Mapped[PlaudFile] = relationship(back_populates="transcript_revisions")
+
+    __table_args__ = (
+        UniqueConstraint("file_id", "revision", name="uq_transcript_revision_file_revision"),
+    )
 
 
 class Summary(Base):

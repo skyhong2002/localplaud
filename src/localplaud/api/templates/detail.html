@@ -93,6 +93,7 @@
             {% if f.can_edit %}
             <button class="editbtn" type="button" title="Edit this segment" aria-label="Edit segment text">✎</button>
             <form class="segedit" method="post" action="/file/{{ f.id }}/transcript/segments/{{ loop.index0 }}" hidden>
+              <input type="hidden" name="base_revision" value="{{ f.transcript.revision or 0 }}">
               <textarea name="text" rows="2">{{ seg.text }}</textarea>
               <div class="actions">
                 <button class="btn" type="submit">Save</button>
