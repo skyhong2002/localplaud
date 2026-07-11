@@ -192,6 +192,22 @@ def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_pat
     assert "Plaud account" in r.text
     assert "Native S256 PKCE · no Node.js" in r.text
     assert "localplaud auth login" in r.text
+    assert 'class="settings-nav" aria-label="Settings sections"' in r.text
+    for target in (
+        "plaud-account",
+        "hardware-profiles",
+        "vocabulary",
+        "note-templates",
+        "connections",
+        "remote-workers",
+        "webhook-integrations",
+        "email-integrations",
+    ):
+        assert f'href="#{target}"' in r.text
+        assert f'id="{target}"' in r.text
+    assert ".settings-page{max-width:1180px!important}" in r.text
+    assert "grid-template-columns:180px minmax(0,1fr)" in r.text
+    assert "@media(max-width:820px)" in r.text
     status = c.get("/api/plaud/auth/status").json()
     assert status == {
         "ok": False,

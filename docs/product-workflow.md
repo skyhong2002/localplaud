@@ -216,6 +216,12 @@ no recording data. AutoFlow messages have stable Message-ID and delivery IDs; pa
 hash, attempts, health, last use, and errors remain independently retryable without
 rerunning processing or local rule actions. See [`email-integrations.md`](email-integrations.md).
 
+Settings now groups its implemented account, processing, vocabulary, template,
+provider/profile, remote-worker, and authorized-integration controls behind a
+responsive section navigator with a direct system-health destination. Active-session,
+workspace-personalization, locale, private-backup, and support/about surfaces remain
+explicitly unfinished rather than being represented by non-functional controls.
+
 The recording workspace now has a sticky custom player backed by locally generated
 and cached ffmpeg waveform envelopes. Playback state survives tab switches and stays
 synchronized with transcript segments; seek, speed, skip, deep links, and keyboard

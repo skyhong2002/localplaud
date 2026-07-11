@@ -180,7 +180,8 @@ def test_provider_read_api(monkeypatch, tmp_path):
         assert "transcribe" in preview.json()["resolved"]["stages"]
         settings_page = client.get("/settings")
         assert settings_page.status_code == 200
-        assert "Providers &amp; execution profiles" in settings_page.text
+        assert "<h1 class=\"page\">Settings</h1>" in settings_page.text
+        assert 'aria-label="Settings sections"' in settings_page.text
 
 
 def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, tmp_path):

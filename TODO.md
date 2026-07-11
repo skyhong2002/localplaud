@@ -399,10 +399,13 @@ embedding raw provider credentials or model settings in each rule.
   notification inbox with an unread badge. Settings now includes authorized webhook
   and SMTP email catalogs. Remaining: broader local applications catalog and externally
   owned read-only rules.
-- Add settings sections for account/security and active sessions, workspace
-  personalization, locale/preferences, vocabulary, private sync/backup, authorized
-  apps/integrations, support, and version/about. Show integration scopes, health,
-  last use, and revoke controls without mixing them with destructive account actions.
+- ✅ Settings now has a responsive, navigable information architecture for Plaud
+  account state, processing recommendations, vocabulary, templates, provider/model/
+  profile setup, remote workers, authorized webhooks/email, and system health. The
+  desktop section rail remains visible while scrolling and becomes a contained
+  horizontal section list on mobile. Remaining product sections are active sessions,
+  workspace personalization, locale/preferences, private sync/backup, and
+  support/version information.
 - ✅ Added native loopback S256 PKCE inside localplaud. First login no longer needs
   Node.js or the Plaud CLI; state, two-minute expiry, public-client exchange,
   atomic `0600` token storage, auto-refresh, CLI-compatible schema, and actionable
