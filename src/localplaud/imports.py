@@ -114,6 +114,12 @@ def _run_plaud_metadata_import(run_id: str, settings: Settings) -> None:
                 except Exception as exc:  # noqa: BLE001 - continue the catalog import
                     failed = True
                     last_error = f"{dto.id}: {exc}"[:2000]
+                try:
+                    from .automations import evaluate_recording
+
+                    evaluate_recording(dto.id)
+                except Exception:  # noqa: BLE001 - importing must survive rule failures
+                    pass
                 _advance_run(
                     run_id,
                     is_new=is_new,

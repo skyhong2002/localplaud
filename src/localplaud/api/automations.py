@@ -1,0 +1,215 @@
+"""AutoFlow rule CRUD, dry-run, execution, and history API."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import delete, select
+
+from ..automations import (
+    evaluate_library,
+    evaluate_recording,
+    match_rule,
+    rule_sentence,
+    validate_rule_references,
+)
+from ..db.models import AutomationRule, AutomationRun, PlaudFile
+from ..db.session import session_scope
+
+router = APIRouter(prefix="/api/automations", tags=["automations"])
+
+
+class TriggerBody(BaseModel):
+    origin: Literal["plaud", "local"] | None = None
+    title_contains: str | None = Field(default=None, max_length=200)
+    min_duration_minutes: float | None = Field(default=None, ge=0, le=24 * 60)
+    max_duration_minutes: float | None = Field(default=None, ge=0, le=24 * 60)
+    folder_id: int | None = Field(default=None, gt=0)
+    tag_id: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def duration_order(self):
+        if (
+            self.min_duration_minutes is not None
+            and self.max_duration_minutes is not None
+            and self.min_duration_minutes > self.max_duration_minutes
+        ):
+            raise ValueError("minimum duration cannot exceed maximum duration")
+        return self
+
+
+class ActionsBody(BaseModel):
+    note_template_key: str | None = Field(default=None, max_length=64)
+    profile_id: int | None = Field(default=None, gt=0)
+    folder_id: int | None = Field(default=None, gt=0)
+    add_tag_ids: list[int] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def has_action(self):
+        if not any(
+            [self.note_template_key, self.profile_id, self.folder_id, self.add_tag_ids]
+        ):
+            raise ValueError("at least one action is required")
+        return self
+
+
+class RuleBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    enabled: bool = True
+    priority: int = Field(default=100, ge=0, le=10_000)
+    trigger: TriggerBody = Field(default_factory=TriggerBody)
+    actions: ActionsBody
+    notify: bool = False
+
+
+def _serialize_rule(row: AutomationRule, run_count: int = 0, last_run=None) -> dict:
+    return {
+        "id": row.id,
+        "name": row.name,
+        "enabled": row.enabled,
+        "priority": row.priority,
+        "version": row.version,
+        "trigger": row.trigger or {},
+        "actions": row.actions or {},
+        "notify": row.notify,
+        "sentence": rule_sentence(row),
+        "run_count": run_count,
+        "last_run": last_run,
+    }
+
+
+@router.get("/rules")
+def list_rules() -> dict:
+    with session_scope() as session:
+        rows = list(
+            session.scalars(
+                select(AutomationRule).order_by(AutomationRule.priority, AutomationRule.id)
+            )
+        )
+        output = []
+        for row in rows:
+            runs = list(
+                session.scalars(
+                    select(AutomationRun)
+                    .where(AutomationRun.rule_id == row.id)
+                    .order_by(AutomationRun.created_at.desc())
+                )
+            )
+            last = runs[0] if runs else None
+            output.append(
+                _serialize_rule(
+                    row,
+                    len(runs),
+                    {
+                        "status": last.status,
+                        "file_id": last.file_id,
+                        "created_at": last.created_at.isoformat(),
+                    }
+                    if last
+                    else None,
+                )
+            )
+        return {"rules": output}
+
+
+@router.post("/rules", status_code=201)
+def create_rule(body: RuleBody) -> dict:
+    trigger, actions = body.trigger.model_dump(exclude_none=True), body.actions.model_dump(exclude_none=True)
+    try:
+        validate_rule_references(trigger, actions)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    with session_scope() as session:
+        row = AutomationRule(
+            name=body.name.strip(), enabled=body.enabled, priority=body.priority,
+            trigger=trigger, actions=actions, notify=body.notify,
+        )
+        session.add(row)
+        session.flush()
+        return _serialize_rule(row)
+
+
+@router.put("/rules/{rule_id}")
+def update_rule(rule_id: int, body: RuleBody) -> dict:
+    trigger, actions = body.trigger.model_dump(exclude_none=True), body.actions.model_dump(exclude_none=True)
+    try:
+        validate_rule_references(trigger, actions)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    with session_scope() as session:
+        row = session.get(AutomationRule, rule_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="rule not found")
+        row.name, row.enabled, row.priority = body.name.strip(), body.enabled, body.priority
+        row.trigger, row.actions, row.notify = trigger, actions, body.notify
+        row.version += 1
+        session.flush()
+        return _serialize_rule(row)
+
+
+@router.post("/rules/{rule_id}/toggle")
+def toggle_rule(rule_id: int) -> dict:
+    with session_scope() as session:
+        row = session.get(AutomationRule, rule_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="rule not found")
+        row.enabled = not row.enabled
+        return {"id": row.id, "enabled": row.enabled}
+
+
+@router.delete("/rules/{rule_id}")
+def delete_rule(rule_id: int) -> dict:
+    with session_scope() as session:
+        row = session.get(AutomationRule, rule_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="rule not found")
+        session.execute(delete(AutomationRun).where(AutomationRun.rule_id == rule_id))
+        session.delete(row)
+    return {"deleted": True}
+
+
+@router.post("/rules/{rule_id}/dry-run")
+def dry_run_rule(rule_id: int, limit: int = 100) -> dict:
+    with session_scope() as session:
+        rule = session.get(AutomationRule, rule_id)
+        if rule is None:
+            raise HTTPException(status_code=404, detail="rule not found")
+        recordings = list(session.scalars(select(PlaudFile).order_by(PlaudFile.start_time_ms.desc())))
+        matches = []
+        for recording in recordings:
+            matched, reasons = match_rule(rule, recording)
+            if matched:
+                matches.append({"file_id": recording.id, "filename": recording.filename, "reasons": reasons})
+            if len(matches) >= min(max(limit, 1), 500):
+                break
+        return {"rule_id": rule_id, "matches": matches, "count": len(matches), "mutated": False}
+
+
+@router.post("/run")
+def run_automations_now(limit: int | None = None) -> dict:
+    return {"recordings_changed": evaluate_library(limit), "status": "completed"}
+
+
+@router.get("/runs")
+def list_runs(rule_id: int | None = None, limit: int = 100) -> dict:
+    with session_scope() as session:
+        stmt = select(AutomationRun).order_by(AutomationRun.created_at.desc()).limit(min(max(limit, 1), 500))
+        if rule_id is not None:
+            stmt = stmt.where(AutomationRun.rule_id == rule_id)
+        rows = list(session.scalars(stmt))
+        return {"runs": [{"id": row.id, "rule_id": row.rule_id, "rule_version": row.rule_version, "file_id": row.file_id, "status": row.status, "matched": row.matched, "detail": row.detail or {}, "error": row.error, "created_at": row.created_at.isoformat()} for row in rows]}
+
+
+@router.post("/runs/{run_id}/retry")
+def retry_run(run_id: int) -> dict:
+    with session_scope() as session:
+        run = session.get(AutomationRun, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        if run.status != "failed":
+            raise HTTPException(status_code=409, detail="only failed runs can be retried")
+        file_id = run.file_id
+        session.delete(run)
+    return {"results": evaluate_recording(file_id)}

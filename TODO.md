@@ -321,15 +321,17 @@ embedding raw provider credentials or model settings in each rule.
 
 ### P2 — Automation and integrations
 
-- Rules matching source, duration, early-transcript keyword, folder/tag, and metadata.
-- Per-rule named execution-profile and template selection, notification, email,
-  webhook, and export actions with independent retry/history. Rules may override
-  safe profile fields, but must not duplicate credentials or silently cross the
-  profile's privacy/cost policy.
-- Add a Discover hub for AutoFlow, local applications, and integrations. AutoFlow
-  must show enablement, notification state, a readable trigger/action sentence,
-  ownership/editability, history, and failures; local rules must be editable on Web,
-  while externally owned rules are clearly read-only.
+- ✅ Added executable local AutoFlow rules matching source, title keyword, duration,
+  folder, and tag. Rules have priority, enable/disable, readable trigger/action
+  sentences, mutation-free dry-run, versioned idempotency, metadata-sync hooks, and
+  per-recording success/failure history with retry semantics.
+- ✅ Rule actions can select a named execution profile and note template or move/add
+  organization metadata; validation prevents dangling references. Remaining actions:
+  notification delivery, email, webhook, and export with independent downstream retry.
+- ✅ Added a Discover hub for locally owned/editable AutoFlow rules, create/edit/
+  delete controls, Run now, history, and notification intent. Remaining: local
+  applications/integration catalog, externally owned read-only rules, and actual
+  notification delivery.
 - Add settings sections for account/security and active sessions, workspace
   personalization, locale/preferences, vocabulary, private sync/backup, authorized
   apps/integrations, support, and version/about. Show integration scopes, health,

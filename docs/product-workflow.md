@@ -187,6 +187,12 @@ setting.
   presenting controls that cannot save.
 - A failed downstream action can retry without rerunning ASR.
 
+The local AutoFlow foundation now executes source/title/duration/folder/tag rules
+after metadata sync. Actions can select a note template or execution profile and
+move/tag recordings. Rules are ordered, versioned, idempotent, dry-runnable, locally
+editable, and retain per-recording history; notification delivery and external
+integration actions remain future work.
+
 ### 7. Settings and system health
 
 - Plaud OAuth and last successful sync.

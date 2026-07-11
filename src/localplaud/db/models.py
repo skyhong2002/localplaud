@@ -445,6 +445,51 @@ class ImportRun(Base):
     )
 
 
+class AutomationRule(Base):
+    """Locally owned AutoFlow rule with explicit trigger/action JSON."""
+
+    __tablename__ = "automation_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120))
+    enabled: Mapped[bool] = mapped_column(default=True, index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=100, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    trigger: Mapped[dict] = mapped_column(JSON, default=dict)
+    actions: Mapped[dict] = mapped_column(JSON, default=dict)
+    notify: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class AutomationRun(Base):
+    """One idempotent evaluation/application of a rule version to a recording."""
+
+    __tablename__ = "automation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[int] = mapped_column(
+        ForeignKey("automation_rules.id", ondelete="CASCADE"), index=True
+    )
+    rule_version: Mapped[int] = mapped_column(Integer)
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    matched: Mapped[bool] = mapped_column(default=False)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "rule_id", "rule_version", "file_id", name="uq_automation_run_rule_version_file"
+        ),
+    )
+
+
 class Chunk(Base):
     """A retrievable text chunk with its embedding, for Q&A / semantic search."""
 

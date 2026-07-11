@@ -38,6 +38,7 @@ from ..db.session import init_db, session_scope
 from ..remote.server import resume_pending_jobs
 from ..remote.server import router as worker_router
 from ..store.speakers import display_names, speaker_keys_from_segments
+from .automations import router as automations_router
 from .imports import router as imports_router
 from .note_templates import _item as note_template_item
 from .note_templates import router as note_templates_router
@@ -65,6 +66,7 @@ app.include_router(providers_router)
 app.include_router(note_templates_router)
 app.include_router(notes_router)
 app.include_router(imports_router)
+app.include_router(automations_router)
 app.include_router(worker_router)
 
 _static = _HERE / "static"
@@ -601,6 +603,36 @@ def template_library(
         "template_items": items,
     }
     return templates.TemplateResponse(request=request, name="templates.html", context=ctx)
+
+
+@app.get("/discover", response_class=HTMLResponse)
+def discover_automations(request: Request):
+    from .automations import list_rules, list_runs
+
+    with session_scope() as session:
+        organization = _organization_summary(session)
+        profiles = [
+            {"id": row.id, "name": row.name, "version": row.version}
+            for row in session.scalars(
+                select(ExecutionProfile).order_by(ExecutionProfile.name, ExecutionProfile.version.desc())
+            )
+        ]
+        note_templates = [
+            {"key": row.key, "name": row.name, "version": row.version}
+            for row in session.scalars(
+                select(NoteTemplate)
+                .where(NoteTemplate.is_active.is_(True))
+                .order_by(NoteTemplate.name)
+            )
+        ]
+    ctx = _base_ctx(request, "discover") | {
+        "automation_rules": list_rules()["rules"],
+        "automation_runs": list_runs(limit=50)["runs"],
+        "organization": organization,
+        "profiles": profiles,
+        "note_templates": note_templates,
+    }
+    return templates.TemplateResponse(request=request, name="discover.html", context=ctx)
 
 
 _AUDIO_MIME = {"mp3": "audio/mpeg", "opus": "audio/ogg", "wav": "audio/wav", "m4a": "audio/mp4"}

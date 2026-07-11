@@ -441,5 +441,12 @@ def poll_once(settings: Settings | None = None) -> dict:
         )
     result = {"new": new + enriched_new, "changed": changed + enriched_changed,
               "downloaded": downloaded, "cloud_artifacts": cloud_artifacts}
+    try:
+        from ..automations import evaluate_library
+
+        result["automated"] = evaluate_library()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("AutoFlow evaluation failed after poll: %s", exc)
+        result["automated"] = 0
     log.info("Poll cycle complete: %s", result)
     return result
