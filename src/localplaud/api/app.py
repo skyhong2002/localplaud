@@ -5,11 +5,14 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import UTC
 from pathlib import Path
+from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, update
 
@@ -41,6 +44,11 @@ from ..db.models import (
     recording_tags,
 )
 from ..db.session import init_db, session_scope
+from ..preferences import (
+    get_workspace_preferences,
+    save_workspace_preferences,
+    validate_timezone,
+)
 from ..remote.server import resume_pending_jobs
 from ..remote.server import router as worker_router
 from ..store.speakers import display_names, speaker_keys_from_segments
@@ -105,12 +113,17 @@ async def _auth_gate(request: Request, call_next):
 # --------------------------------------------------------------------------- #
 
 
-def _fmt_dt(ms: int | None) -> str:
+@pass_context
+def _fmt_dt(context, ms: int | None) -> str:
     if not ms:
         return ""
     from datetime import datetime
 
-    return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%b %d, %Y · %H:%M")
+    preferences = context.get("workspace_preferences") or {}
+    timezone = ZoneInfo(preferences.get("timezone", "UTC"))
+    hour_cycle = preferences.get("hour_cycle", "24")
+    pattern = "%b %d, %Y · %I:%M %p" if hour_cycle == "12" else "%b %d, %Y · %H:%M"
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).astimezone(timezone).strftime(pattern)
 
 
 def _fmt_dur(ms: int | None) -> str:
@@ -185,11 +198,13 @@ def _base_ctx(request: Request, active: str) -> dict:
                 Notification.read_at.is_(None), Notification.dismissed_at.is_(None)
             )
         ) or 0
+        workspace_preferences = get_workspace_preferences(session)
     return {
         "request": request,
         "active": active,
         "public_url": get_settings().api.public_url,
         "unread_notifications": unread_notifications,
+        "workspace_preferences": workspace_preferences,
     }
 
 
@@ -321,6 +336,39 @@ def _library_facets(session, params: dict) -> dict:
 # --------------------------------------------------------------------------- #
 # health + JSON API
 # --------------------------------------------------------------------------- #
+
+
+class WorkspacePreferencesBody(BaseModel):
+    workspace_name: str = Field(min_length=1, max_length=80)
+    theme: Literal["system", "light", "dark"] = "system"
+    density: Literal["comfortable", "compact"] = "comfortable"
+    timezone: str = Field(min_length=1, max_length=64)
+    hour_cycle: Literal["12", "24"] = "24"
+
+    @field_validator("workspace_name")
+    @classmethod
+    def clean_workspace_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Workspace name is required")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        return validate_timezone(value)
+
+
+@app.get("/api/preferences/workspace")
+def workspace_preferences_get():
+    with session_scope() as session:
+        return get_workspace_preferences(session)
+
+
+@app.put("/api/preferences/workspace")
+def workspace_preferences_update(body: WorkspacePreferencesBody):
+    with session_scope() as session:
+        return save_workspace_preferences(session, body.model_dump())
 
 
 @app.get("/healthz")

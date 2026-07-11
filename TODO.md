@@ -403,8 +403,10 @@ embedding raw provider credentials or model settings in each rule.
   account state, processing recommendations, vocabulary, templates, provider/model/
   profile setup, remote workers, authorized webhooks/email, and system health. The
   desktop section rail remains visible while scrolling and becomes a contained
-  horizontal section list on mobile. Remaining product sections are active sessions,
-  workspace personalization, locale/preferences, private sync/backup, and
+  horizontal section list on mobile. Durable workspace preferences now apply the
+  workspace name, system/light/dark theme, comfortable/compact density, IANA
+  timezone, and 12/24-hour clock across browsers. Remaining product sections are
+  active sessions, translated interface locale, private sync/backup, and
   support/version information.
 - ✅ Added native loopback S256 PKCE inside localplaud. First login no longer needs
   Node.js or the Plaud CLI; state, two-minute expiry, public-client exchange,

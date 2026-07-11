@@ -219,8 +219,14 @@ rerunning processing or local rule actions. See [`email-integrations.md`](email-
 Settings now groups its implemented account, processing, vocabulary, template,
 provider/profile, remote-worker, and authorized-integration controls behind a
 responsive section navigator with a direct system-health destination. Active-session,
-workspace-personalization, locale, private-backup, and support/about surfaces remain
+translated-interface locale, private-backup, and support/about surfaces remain
 explicitly unfinished rather than being represented by non-functional controls.
+
+Workspace display preferences are durable local data rather than browser-only state:
+the chosen workspace name, system/light/dark theme, comfortable/compact density,
+IANA timezone, and 12/24-hour clock apply to every browser using the instance. Invalid
+timezones are rejected before persistence. Interface-language selection remains
+unavailable until the corresponding translations exist.
 
 The recording workspace now has a sticky custom player backed by locally generated
 and cached ffmpeg waveform envelopes. Playback state survives tab switches and stays

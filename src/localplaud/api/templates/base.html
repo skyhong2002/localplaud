@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-density="{{ workspace_preferences.density }}"{% if workspace_preferences.theme != 'system' %} data-theme="{{ workspace_preferences.theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -24,13 +24,20 @@
       --sidebar-w:216px; --list-w:300px;
     }
     @media (prefers-color-scheme: dark) {
-      :root {
+      :root:not([data-theme="light"]) {
         --blue:#3b95ff; --blue-soft:#12233b; --blue-br:#1e3a5c;
         --red-soft:#3a1b1c;
         --bg:#161618; --panel:#1e1e21; --panel2:#26262a;
         --border:#2c2c31; --border2:#3a3a41; --fg:#ececee; --muted:#9a9aa2; --faint:#6e6e77;
         --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
       }
+    }
+    :root[data-theme="dark"] {
+      --blue:#3b95ff; --blue-soft:#12233b; --blue-br:#1e3a5c;
+      --red-soft:#3a1b1c;
+      --bg:#161618; --panel:#1e1e21; --panel2:#26262a;
+      --border:#2c2c31; --border2:#3a3a41; --fg:#ececee; --muted:#9a9aa2; --faint:#6e6e77;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
     }
     :root[data-theme="dark"]{color-scheme:dark;} :root[data-theme="light"]{color-scheme:light;}
     * { box-sizing:border-box; }
@@ -82,6 +89,11 @@
     /* single-column pages (search/status) */
     .content { flex:1; overflow-y:auto; }
     .content .pane-inner { max-width:820px; }
+    :root[data-density="compact"] .navi{padding-block:5px}
+    :root[data-density="compact"] .card{padding:8px 10px}
+    :root[data-density="compact"] .tile{padding:10px 12px}
+    :root[data-density="compact"] .pane-inner,
+    :root[data-density="compact"] .main>.content{padding-top:18px}
 
     /* file cards */
     .card { display:block; padding:11px 12px; background:var(--panel); border:1px solid var(--border);
@@ -216,7 +228,7 @@
     <div class="grow"></div>
     <a class="navi {% if active=='settings' %}on{% endif %}" href="/settings"><span class="ic">⚙️</span><span class="lbl">Settings</span></a>
     <a class="navi {% if active=='status' %}on{% endif %}" href="/status"><span class="ic">🩺</span><span class="lbl">Status</span></a>
-    <div class="foot lbl">self-hosted</div>
+    <div class="foot lbl">{{ workspace_preferences.workspace_name }} · self-hosted</div>
   </aside>
   {% block body %}{% endblock %}
   <div class="import-backdrop" id="import-backdrop" hidden>
