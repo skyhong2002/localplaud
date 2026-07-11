@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,18 @@ from .models import Chunk, FileStatus, KeyValue, PlaudFile, Transcript
 
 INDEPENDENT_MIGRATION_KEY = "migration.independent-artifacts.v1"
 _PLAUD_SOURCES = {"cloud", "plaud"}
+
+
+def migrate_stage_run_snapshot_column(engine: Engine) -> bool:
+    """Add the JSON provenance snapshot to pre-profile SQLite databases."""
+    if engine.dialect.name != "sqlite" or "stage_runs" not in inspect(engine).get_table_names():
+        return False
+    columns = {column["name"] for column in inspect(engine).get_columns("stage_runs")}
+    if "resolved_profile_snapshot" in columns:
+        return False
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE stage_runs ADD COLUMN resolved_profile_snapshot JSON"))
+    return True
 
 
 def _legacy_template(template: str, used: set[str], row_id: int) -> str:

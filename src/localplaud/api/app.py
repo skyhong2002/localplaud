@@ -26,6 +26,7 @@ from ..db.models import (
 )
 from ..db.session import init_db, session_scope
 from ..store.speakers import display_names, speaker_keys_from_segments
+from .providers import router as providers_router
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
@@ -38,6 +39,7 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
+app.include_router(providers_router)
 
 _static = _HERE / "static"
 if _static.exists():
