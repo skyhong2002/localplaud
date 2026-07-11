@@ -14,6 +14,54 @@ INDEPENDENT_MIGRATION_KEY = "migration.independent-artifacts.v1"
 _PLAUD_SOURCES = {"cloud", "plaud"}
 
 
+def migrate_organization_schema(engine: Engine) -> list[str]:
+    """Add local folder/tag metadata to an existing SQLite library."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    existing = set(inspector.get_table_names())
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        if "plaud_files" in existing:
+            columns = {column["name"] for column in inspector.get_columns("plaud_files")}
+            if "folder_id" not in columns:
+                connection.execute(
+                    text("ALTER TABLE plaud_files ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL")
+                )
+                migrated.append("plaud_files.folder_id")
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS folders (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(80) NOT NULL,
+                color VARCHAR(64),
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(80) NOT NULL,
+                color VARCHAR(64),
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS recording_tags (
+                file_id VARCHAR(64) NOT NULL REFERENCES plaud_files(id) ON DELETE CASCADE,
+                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                PRIMARY KEY (file_id, tag_id)
+            )
+        """))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_plaud_files_folder_id ON plaud_files (folder_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_recording_tags_tag_id ON recording_tags (tag_id)"))
+    for table in ("folders", "tags", "recording_tags"):
+        if table not in existing:
+            migrated.append(table)
+    return migrated
+
+
 def migrate_profile_snapshot_columns(engine: Engine) -> list[str]:
     """Add immutable profile provenance to existing SQLite artifact tables."""
     if engine.dialect.name != "sqlite":

@@ -40,9 +40,10 @@ def init_db() -> dict[str, int] | None:
     engine = get_engine()
     Base.metadata.create_all(engine)
     from ..providers.service import bootstrap_default_profile
-    from .migrations import migrate_profile_snapshot_columns
+    from .migrations import migrate_organization_schema, migrate_profile_snapshot_columns
 
     migrate_profile_snapshot_columns(engine)
+    migrate_organization_schema(engine)
     with Session(engine) as session:
         bootstrap_default_profile(session, get_settings())
         session.commit()

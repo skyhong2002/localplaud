@@ -6,25 +6,29 @@ from contextlib import asynccontextmanager
 from datetime import UTC
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import delete, func, select
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import delete, func, select, update
 
 from ..config import get_settings
 from ..db.models import (
     Chunk,
     ExecutionProfile,
     FileStatus,
+    Folder,
     PlaudFile,
     RecordingProfileOverride,
     Speaker,
     StageName,
     StageRun,
     StageStatus,
+    Tag,
     Transcript,
     TranscriptRevision,
+    recording_tags,
 )
 from ..db.session import init_db, session_scope
 from ..remote.server import resume_pending_jobs
@@ -119,6 +123,15 @@ def _file_summary(r: PlaudFile) -> dict:
         "has_imported_summary": any(s.source in {"cloud", "plaud"} for s in r.summaries),
         "has_audio": bool(r.audio_path),
         "speakers": transcript.has_speakers if transcript else False,
+        "folder": (
+            {"id": r.folder.id, "name": r.folder.name, "color": r.folder.color}
+            if r.folder is not None
+            else None
+        ),
+        "tags": [
+            {"id": tag.id, "name": tag.name, "color": tag.color}
+            for tag in sorted(r.tags, key=lambda tag: (tag.name.casefold(), tag.id))
+        ],
     }
 
 
@@ -152,6 +165,8 @@ def _parse_library_params(
     state: str | None,
     scene: str | None,
     view: str | None,
+    folder: str | None = None,
+    tag: str | None = None,
 ) -> dict:
     """Normalize library query params, falling back to defaults on bad input."""
     sort_key = sort if sort in _SORT_COLUMNS else "recorded"
@@ -163,7 +178,12 @@ def _parse_library_params(
             scene_val = int(scene)
         except (TypeError, ValueError):
             scene_val = None
-    view_val = view if view in {"all", "trash"} else "all"
+    view_val = view if view in {"all", "trash", "uncategorized"} else "all"
+    def optional_int(value: str | None) -> int | None:
+        try:
+            return int(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
     return {
         "q": q or "",
         "sort": sort_key,
@@ -171,6 +191,8 @@ def _parse_library_params(
         "state": state_val,
         "scene": scene_val,
         "view": view_val,
+        "folder": optional_int(folder),
+        "tag": optional_int(tag),
     }
 
 
@@ -181,12 +203,18 @@ def _library_query(params: dict):
     # Stable tiebreaker so equal sort keys keep a deterministic order.
     stmt = select(PlaudFile).order_by(order, PlaudFile.id.asc())
     stmt = stmt.where(PlaudFile.is_trash.is_(params["view"] == "trash"))
+    if params["view"] == "uncategorized":
+        stmt = stmt.where(PlaudFile.folder_id.is_(None), ~PlaudFile.tags.any())
     if params["q"]:
         stmt = stmt.where(PlaudFile.filename.ilike(f"%{params['q']}%"))
     if params["state"] is not None:
         stmt = stmt.where(PlaudFile.status == params["state"])
     if params["scene"] is not None:
         stmt = stmt.where(PlaudFile.scene == params["scene"])
+    if params["folder"] is not None:
+        stmt = stmt.where(PlaudFile.folder_id == params["folder"])
+    if params["tag"] is not None:
+        stmt = stmt.where(PlaudFile.tags.any(Tag.id == params["tag"]))
     return stmt
 
 
@@ -227,12 +255,169 @@ def api_files(
     state: str | None = None,
     scene: str | None = None,
     view: str | None = None,
+    folder: str | None = None,
+    tag: str | None = None,
 ) -> JSONResponse:
-    params = _parse_library_params(q, sort, dir, state, scene, view)
+    params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag)
     with session_scope() as session:
         rows = session.scalars(_library_query(params).limit(300))
         data = [_file_summary(r) for r in rows]
     return JSONResponse({"files": data})
+
+
+class OrganizationItemBody(BaseModel):
+    name: str
+    color: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("name must not be empty")
+        if len(value) > 80:
+            raise ValueError("name must be at most 80 characters")
+        return value
+
+
+class OrganizeFilesBody(BaseModel):
+    file_ids: list[str] = Field(min_length=1)
+    folder_id: int | None = None
+    add_tag_ids: list[int] = Field(default_factory=list)
+    remove_tag_ids: list[int] = Field(default_factory=list)
+
+
+def _organization_item(row: Folder | Tag) -> dict:
+    return {"id": row.id, "name": row.name, "color": row.color}
+
+
+def _require_unique_name(session, model, name: str, *, exclude_id: int | None = None) -> None:
+    stmt = select(model.id).where(func.lower(model.name) == name.lower())
+    if exclude_id is not None:
+        stmt = stmt.where(model.id != exclude_id)
+    if session.scalar(stmt) is not None:
+        raise HTTPException(status_code=409, detail="name already exists")
+
+
+@app.get("/api/organization")
+def api_organization() -> dict:
+    with session_scope() as session:
+        folders = list(session.scalars(select(Folder).order_by(func.lower(Folder.name), Folder.id)))
+        tags = list(session.scalars(select(Tag).order_by(func.lower(Tag.name), Tag.id)))
+        folder_counts = dict(
+            session.execute(
+                select(PlaudFile.folder_id, func.count(PlaudFile.id))
+                .where(PlaudFile.is_trash.is_(False), PlaudFile.folder_id.is_not(None))
+                .group_by(PlaudFile.folder_id)
+            ).all()
+        )
+        tag_counts = dict(
+            session.execute(
+                select(recording_tags.c.tag_id, func.count(recording_tags.c.file_id))
+                .join(PlaudFile, PlaudFile.id == recording_tags.c.file_id)
+                .where(PlaudFile.is_trash.is_(False))
+                .group_by(recording_tags.c.tag_id)
+            ).all()
+        )
+        return {
+            "folders": [_organization_item(row) | {"count": folder_counts.get(row.id, 0)} for row in folders],
+            "tags": [_organization_item(row) | {"count": tag_counts.get(row.id, 0)} for row in tags],
+        }
+
+
+def _create_organization_item(model, body: OrganizationItemBody) -> dict:
+    with session_scope() as session:
+        _require_unique_name(session, model, body.name)
+        row = model(name=body.name, color=body.color)
+        session.add(row)
+        session.flush()
+        return _organization_item(row)
+
+
+def _update_organization_item(model, item_id: int, body: OrganizationItemBody) -> dict:
+    with session_scope() as session:
+        row = session.get(model, item_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="not found")
+        _require_unique_name(session, model, body.name, exclude_id=item_id)
+        row.name = body.name
+        row.color = body.color
+        session.flush()
+        return _organization_item(row)
+
+
+@app.post("/api/folders", status_code=201)
+def create_folder(body: OrganizationItemBody) -> dict:
+    return _create_organization_item(Folder, body)
+
+
+@app.patch("/api/folders/{item_id}")
+def update_folder(item_id: int, body: OrganizationItemBody) -> dict:
+    return _update_organization_item(Folder, item_id, body)
+
+
+@app.delete("/api/folders/{item_id}")
+def delete_folder(item_id: int) -> dict:
+    with session_scope() as session:
+        row = session.get(Folder, item_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="not found")
+        session.execute(update(PlaudFile).where(PlaudFile.folder_id == item_id).values(folder_id=None))
+        session.delete(row)
+    return {"deleted": True}
+
+
+@app.post("/api/tags", status_code=201)
+def create_tag(body: OrganizationItemBody) -> dict:
+    return _create_organization_item(Tag, body)
+
+
+@app.patch("/api/tags/{item_id}")
+def update_tag(item_id: int, body: OrganizationItemBody) -> dict:
+    return _update_organization_item(Tag, item_id, body)
+
+
+@app.delete("/api/tags/{item_id}")
+def delete_tag(item_id: int) -> dict:
+    with session_scope() as session:
+        row = session.get(Tag, item_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="not found")
+        session.execute(delete(recording_tags).where(recording_tags.c.tag_id == item_id))
+        session.delete(row)
+    return {"deleted": True}
+
+
+@app.post("/api/files/organize")
+def organize_files(body: OrganizeFilesBody) -> dict:
+    folder_requested = "folder_id" in body.model_fields_set
+    if not folder_requested and not body.add_tag_ids and not body.remove_tag_ids:
+        raise HTTPException(status_code=422, detail="at least one mutation is required")
+    file_ids = list(dict.fromkeys(body.file_ids))
+    add_ids = set(body.add_tag_ids)
+    remove_ids = set(body.remove_tag_ids)
+    with session_scope() as session:
+        files = list(session.scalars(select(PlaudFile).where(PlaudFile.id.in_(file_ids))))
+        if {row.id for row in files} != set(file_ids):
+            raise HTTPException(status_code=404, detail="one or more files were not found")
+        folder = None
+        if folder_requested and body.folder_id is not None:
+            folder = session.get(Folder, body.folder_id)
+            if folder is None:
+                raise HTTPException(status_code=404, detail="folder not found")
+        requested_tag_ids = add_ids | remove_ids
+        tags = list(session.scalars(select(Tag).where(Tag.id.in_(requested_tag_ids)))) if requested_tag_ids else []
+        if {tag.id for tag in tags} != requested_tag_ids:
+            raise HTTPException(status_code=404, detail="one or more tags were not found")
+        tags_by_id = {tag.id: tag for tag in tags}
+        for row in files:
+            if folder_requested:
+                row.folder = folder
+            if remove_ids:
+                row.tags = [tag for tag in row.tags if tag.id not in remove_ids]
+            existing = {tag.id for tag in row.tags}
+            row.tags.extend(tags_by_id[tag_id] for tag_id in sorted(add_ids - existing))
+    return {"updated": len(files)}
 
 
 # --------------------------------------------------------------------------- #
@@ -268,8 +453,10 @@ def index(
     state: str | None = None,
     scene: str | None = None,
     view: str | None = None,
+    folder: str | None = None,
+    tag: str | None = None,
 ):
-    params = _parse_library_params(q, sort, dir, state, scene, view)
+    params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag)
     with session_scope() as session:
         rows = list(session.scalars(_library_query(params).limit(300)))
         files = [_file_summary(r) for r in rows]

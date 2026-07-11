@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Column,
     DateTime,
     Enum,
     Float,
@@ -21,6 +22,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Table,
     Text,
     UniqueConstraint,
 )
@@ -45,6 +47,46 @@ class FileStatus(enum.StrEnum):
     partial = "partial"  # core transcript usable; one or more downstream stages degraded
     done = "done"  # pipeline complete
     error = "error"
+
+
+recording_tags = Table(
+    "recording_tags",
+    Base.metadata,
+    Column(
+        "file_id", String(64), ForeignKey("plaud_files.id", ondelete="CASCADE"), primary_key=True
+    ),
+    Column(
+        "tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    ),
+)
+
+
+class Folder(Base):
+    __tablename__ = "folders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(80))
+    color: Mapped[str | None] = mapped_column(String(64), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    recordings: Mapped[list[PlaudFile]] = relationship(back_populates="folder")
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(80))
+    color: Mapped[str | None] = mapped_column(String(64), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    recordings: Mapped[list[PlaudFile]] = relationship(
+        secondary=recording_tags, back_populates="tags"
+    )
 
 
 class StageName(enum.StrEnum):
@@ -104,6 +146,9 @@ class PlaudFile(Base):
     wav_path: Mapped[str | None] = mapped_column(String(1024), default=None)  # converted
     downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    folder_id: Mapped[int | None] = mapped_column(
+        ForeignKey("folders.id", ondelete="SET NULL"), default=None, index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -135,6 +180,10 @@ class PlaudFile(Base):
         back_populates="file",
         cascade="all, delete-orphan",
         order_by="TranscriptRevision.revision",
+    )
+    folder: Mapped[Folder | None] = relationship(back_populates="recordings")
+    tags: Mapped[list[Tag]] = relationship(
+        secondary=recording_tags, back_populates="recordings", order_by="Tag.id"
     )
 
     @property
