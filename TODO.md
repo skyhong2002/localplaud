@@ -115,8 +115,12 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
   Credential-shaped Plaud/provider fields are rejected recursively and bearer tokens
   remain environment-only. Pipeline dispatch covers transcribe, diarize, notes, mind
   maps, and embeddings.
-- Remaining: validate the worker on CCLabPC NVIDIA/CUDA and one rentable GPU host,
-  then add explicit cross-provider fallback/cost accounting and benchmark acceptance.
+- ✅ CCLabPC NVIDIA acceptance: the CUDA image now pins a compatible PyTorch 2.8 /
+  CUDA 12.8 / TorchCodec 0.7 / pyannote 4 stack. The image imports cleanly, sees the
+  RTX 5060 through NVIDIA Container Toolkit, and completed an authenticated v1
+  capability handshake without interrupting the existing processing container.
+- Remaining: validate one rentable GPU host, then add explicit cross-provider
+  fallback/cost accounting and benchmark acceptance.
 
 Implement this P0 in the following order:
 
