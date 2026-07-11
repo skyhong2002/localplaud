@@ -31,7 +31,8 @@ COPY src ./src
 # this, pip replaces an older torch with an unrelated latest CUDA wheel.
 RUN pip install torch==2.8.0 torchaudio==2.8.0 \
         --index-url https://download.pytorch.org/whl/cu128 \
-    && pip install ".[faster-whisper,diarize,cloud,local-llm]"
+    && pip install ".[faster-whisper,diarize,cloud,local-llm]" \
+    && pip install torchcodec==0.7
 
 RUN useradd --create-home --uid 1000 localplaud
 WORKDIR /app
