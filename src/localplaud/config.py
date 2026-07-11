@@ -144,14 +144,18 @@ class PipelineConfig(BaseModel):
     # migration: allow explicitly imported Plaud Intelligence artifacts for
     # comparison/backfill. This mode is never the subscription-free default.
     artifact_mode: Literal["independent", "migration"] = "independent"
-    # Migration/debug import only. The independent primary workflow keeps this
-    # false and derives every artifact from raw audio. This compatibility flag
-    # is effective only when artifact_mode = "migration".
+    # Migration/debug selection only. This compatibility flag is effective only
+    # when artifact_mode = "migration" and controls canonical selection.
     prefer_cloud_artifacts: bool = False
+    # Mirror already-generated Plaud transcripts and notes for reference without
+    # allowing them to satisfy or replace the independent local pipeline.
+    mirror_cloud_artifacts: bool = False
 
     @property
     def cloud_import_enabled(self) -> bool:
-        return self.artifact_mode == "migration" and self.prefer_cloud_artifacts
+        return self.mirror_cloud_artifacts or (
+            self.artifact_mode == "migration" and self.prefer_cloud_artifacts
+        )
 
 
 # ---- ASR providers ------------------------------------------------------- #

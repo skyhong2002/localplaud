@@ -55,6 +55,8 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
+_sync_lock = __import__("threading").Lock()
+_sync_state: dict[str, object] = {"running": False, "result": None, "error": None}
 
 _static = _HERE / "static"
 if _static.exists():
@@ -1287,7 +1289,8 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
         r = session.get(PlaudFile, file_id)
         if r is None:
             return HTMLResponse("Not found", status_code=404)
-        # Default template first, then the rest.
+        # Put meeting notes first. Imported Plaud notes remain visibly labelled,
+        # but are useful as the initial view when no local meeting note exists.
         stale_stages = {
             run.stage
             for run in r.stage_runs
@@ -1308,8 +1311,20 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
                     )
                 )
             ),
-            key=lambda s: (s["template"] != "default", s["template"]),
+            key=lambda s: (
+                0 if s["template"] == "meeting" and s["source"] == "local" else
+                1 if s["template"] == "plaud" and s["source"] == "cloud" else
+                2 if s["template"] == "default" else
+                3 if s["template"] != "mind_map" else 4,
+                s["template"],
+            ),
         )
+        generation_templates = [
+            {"name": row.name, "description": row.description or "Generate a new note"}
+            for row in session.scalars(
+                select(NoteTemplate).where(NoteTemplate.enabled).order_by(NoteTemplate.name)
+            )
+        ]
         transcript = None
         imported_transcript = None
         raw_row = _canonical_raw_row(r, settings)
@@ -1385,6 +1400,7 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
             # viewing the raw artifact behind an existing correction chain.
             "can_edit": transcript is not None and (corrected is None or show_corrected),
             "summaries": summaries,
+            "generation_templates": generation_templates,
             "error": r.error,
             "stages": [
                 {
@@ -1402,6 +1418,33 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
         }
     ctx = _base_ctx(request, "allfiles") | {"f": f}
     return templates.TemplateResponse(request=request, name="detail.html", context=ctx)
+
+
+def _run_sync() -> None:
+    from ..poller.poll import poll_once
+
+    try:
+        result = poll_once(get_settings())
+        _sync_state.update(running=False, result=result, error=None)
+    except Exception as exc:  # noqa: BLE001 - reported to the operator in the UI
+        _sync_state.update(running=False, result=None, error=str(exc))
+    finally:
+        _sync_lock.release()
+
+
+@app.post("/api/sync")
+def api_sync() -> JSONResponse:
+    """Start one Plaud discovery/download/import cycle without requiring CLI use."""
+    if not _sync_lock.acquire(blocking=False):
+        return JSONResponse({"running": True, "message": "Sync is already running"}, status_code=409)
+    _sync_state.update(running=True, result=None, error=None)
+    __import__("threading").Thread(target=_run_sync, daemon=True).start()
+    return JSONResponse({"running": True, "message": "Sync started"}, status_code=202)
+
+
+@app.get("/api/sync/status")
+def api_sync_status() -> JSONResponse:
+    return JSONResponse(dict(_sync_state))
 
 
 @app.get("/status", response_class=HTMLResponse)

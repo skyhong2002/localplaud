@@ -65,6 +65,17 @@ def test_cloud_import_requires_explicit_migration_mode(monkeypatch, tmp_path):
     assert Settings().pipeline.cloud_import_enabled is True
 
 
+def test_cloud_mirror_can_be_enabled_without_changing_canonical_mode(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__MIRROR_CLOUD_ARTIFACTS", "true")
+
+    settings = Settings()
+
+    assert settings.pipeline.artifact_mode == "independent"
+    assert settings.pipeline.prefer_cloud_artifacts is False
+    assert settings.pipeline.cloud_import_enabled is True
+
+
 def test_get_settings_reload(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import localplaud.config as config

@@ -71,6 +71,10 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "Resume" in r.text and "Rebuild all" in r.text
     assert ".segedit[hidden] { display:none; }" in r.text
     assert ".sb-group { flex-direction:row; flex:none; }" in r.text
+    assert ".doc { max-width:960px" in r.text
+    assert 'data-panel="sum-0" class="on"' in r.text
+    assert 'data-panel="transcript" class=""' in r.text
+    assert 'id="generate-overlay"' in r.text
 
 
 def test_status_page_renders(monkeypatch, tmp_path):
@@ -134,6 +138,17 @@ def test_independent_ui_labels_imported_transcript_without_treating_it_as_local(
 
     detail = c.get("/file/cloud")
     assert detail.status_code == 200
-    assert "Plaud import" in detail.text
-    assert "canonical result" in detail.text
+    assert "Meeting notes ☁" in detail.text
+    assert "Plaud transcript ☁" in detail.text
+    assert "local processing remains independent" in detail.text
     assert "imported text" in detail.text
+
+
+def test_add_audio_explains_and_starts_browser_sync(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    page = c.get("/")
+
+    assert "You never need to press Plaud's Generate button" in page.text
+    assert 'id="sync-now"' in page.text
+    assert "New files appear in All files and the recent-file sidebar" in page.text
+    assert c.get("/api/sync/status").status_code == 200

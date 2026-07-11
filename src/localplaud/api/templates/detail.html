@@ -20,12 +20,16 @@
   .menu button:hover, .menu a:hover { background:var(--hover); }
   .menu .sep { border-top:1px solid var(--border); margin:5px 4px; }
 
-  .doc { max-width:640px; margin:0 auto; padding:18px 24px 120px; }
+  .doc { max-width:960px; margin:0 auto; padding:22px 32px 120px; }
   .tabs { display:flex; align-items:center; gap:18px; padding:2px 0 10px; }
   .tabs button { background:none; border:0; padding:4px 2px; cursor:pointer; font-size:13.5px; color:var(--muted); font-weight:500; }
   .tabs button.on { color:var(--fg); font-weight:600; }
   .tabs .plus { border:0; background:var(--hover); border-radius:7px; width:24px; height:24px; display:inline-flex;
     align-items:center; justify-content:center; color:var(--fg2); }
+  .generate-card { display:grid; grid-template-columns:42px 1fr auto; align-items:center; gap:12px; padding:12px 0; border-top:1px solid var(--border); }
+  .generate-card:first-of-type { border-top:0; }
+  .generate-icon { width:38px; height:38px; border-radius:10px; display:grid; place-items:center; background:var(--hover); }
+  .generate-dialog { width:min(560px,calc(100vw - 40px)); }
 
   /* player */
   .player { padding:6px 0 14px; border-bottom:1px solid var(--border); margin-bottom:10px; }
@@ -139,11 +143,11 @@
   {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
 
   <div class="tabs">
-    {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}
-    {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template|capitalize }}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
-    {% if mindmaps %}<button data-panel="mindmap" class="{% if not f.transcript and not notes %}on{% endif %}">Mind map</button>{% endif %}
-    {% if f.imported_transcript %}<button data-panel="imported" class="{% if not f.transcript and not f.summaries %}on{% endif %}">Plaud import ☁</button>{% endif %}
-    <button class="plus" title="Generate more notes from Settings templates" aria-disabled="true">
+    {% if f.transcript %}<button data-panel="transcript" class="{% if not notes %}on{% endif %}">Transcript</button>{% endif %}
+    {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if loop.first %}on{% endif %}">{% if s.template == 'plaud' %}Meeting notes{% else %}{{ s.template|replace('_',' ')|capitalize }}{% endif %}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
+    {% if mindmaps %}<button data-panel="mindmap" class="{% if not notes and not f.transcript %}on{% endif %}">Mind map</button>{% endif %}
+    {% if f.imported_transcript %}<button data-panel="imported" class="{% if not notes and not f.transcript %}on{% endif %}">Plaud transcript ☁</button>{% endif %}
+    <button class="plus" id="generate-open" title="Generate transcript or a new note">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
     </button>
   </div>
@@ -197,7 +201,7 @@
 
   <!-- ============ Transcript ============ -->
   {% if f.transcript %}
-  <div class="tabpanel" data-panel="transcript">
+  <div class="tabpanel" data-panel="transcript" {% if notes %}hidden{% endif %}>
     <div class="h-title">{{ f.filename }}</div>
     <div class="h-meta">
       {{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}
@@ -313,7 +317,7 @@
 
   <!-- ============ Plaud import ============ -->
   {% if f.imported_transcript %}
-  <div class="tabpanel" data-panel="imported" {% if f.transcript or f.summaries %}hidden{% endif %}>
+  <div class="tabpanel" data-panel="imported" {% if notes or f.transcript %}hidden{% endif %}>
     <div class="pillrow"><span class="pill">
       Imported from Plaud for migration/comparison. Independent processing does not
       use this transcript as its canonical result.
@@ -334,16 +338,16 @@
 
   <!-- ============ Notes ============ -->
   {% for s in notes %}
-  <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %}>
+  <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if not loop.first %}hidden{% endif %}>
     <div class="h-title">{{ s.title or f.filename }}</div>
-    <div class="h-meta">Note rev {{ s.revision }}{% if s.transcript_revision is not none %} · based on transcript rev {{ s.transcript_revision }}{% endif %}{% if s.template_version %} · template v{{ s.template_version }}{% endif %}{% if s.source=='cloud' %} · imported from Plaud{% endif %}</div>
+    <div class="h-meta">Note rev {{ s.revision }}{% if s.transcript_revision is not none %} · based on transcript rev {{ s.transcript_revision }}{% endif %}{% if s.template_version %} · template v{{ s.template_version }}{% endif %}{% if s.source=='cloud' %} · imported from Plaud for reference · local processing remains independent{% endif %}</div>
     <div data-md>{{ s.content_md }}</div>
   </div>
   {% endfor %}
 
   <!-- ============ Mind map ============ -->
   {% if mindmaps %}
-  <div class="tabpanel" data-panel="mindmap" {% if f.transcript or notes %}hidden{% endif %}>
+  <div class="tabpanel" data-panel="mindmap" {% if notes or f.transcript %}hidden{% endif %}>
     <div style="display:flex; gap:7px; margin-top:10px">
       <button type="button" class="btn sec" id="mm-expand" style="padding:5px 10px; font-size:12px">Expand all</button>
       <button type="button" class="btn sec" id="mm-collapse" style="padding:5px 10px; font-size:12px">Collapse all</button>
@@ -356,9 +360,32 @@
   {% endif %}
 
   {% if not f.transcript and not f.imported_transcript and not f.summaries %}
-  <div class="empty"><div class="big">📝</div>Not processed yet — no transcript or notes.</div>
+  <div class="panel" style="margin-top:20px;padding:24px">
+    <div class="h-title" style="font-size:22px">Turn this recording into notes</div>
+    <p class="sub">The audio is ready. Run local processing to transcribe, align speakers, create meeting notes and index the recording for Ask. Plaud Intelligence is not required.</p>
+    <button class="btn" hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML">Generate locally</button>
+  </div>
   {% endif %}
 </div></div>
+
+<div class="overlay" id="generate-overlay" hidden>
+  <div class="modal dialog generate-dialog" role="dialog" aria-label="Generate from recording">
+    <button class="x" data-generate-close>✕</button>
+    <h3>Generate from this recording</h3>
+    <p class="sub">Local processing uses the downloaded audio and your configured providers. Existing Plaud artifacts stay in separate, labelled reference tabs.</p>
+    <div class="generate-card">
+      <span class="generate-icon">✦</span><div><strong>Full local processing</strong><div class="sub" style="font-size:12.5px">Transcript → alignment → speakers → meeting notes → search index</div></div>
+      <button class="btn sec" hx-post="/file/{{ f.id }}/reprocess" hx-target="#generate-status" hx-swap="innerHTML">Run</button>
+    </div>
+    {% for t in f.generation_templates %}
+    <div class="generate-card">
+      <span class="generate-icon">▤</span><div><strong>{{ t.name|replace('_',' ')|capitalize }}</strong><div class="sub" style="font-size:12.5px">{{ t.description }}</div></div>
+      <button class="btn sec note-generate" data-template="{{ t.name }}">Generate</button>
+    </div>
+    {% endfor %}
+    <div id="generate-status" class="sub" style="font-size:13px;margin-top:10px"></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -410,6 +437,20 @@
   document.querySelectorAll('.tabs button[data-panel]').forEach(b => b.onclick = () => {
     document.querySelectorAll('.tabs button[data-panel]').forEach(x=>x.classList.remove('on')); b.classList.add('on');
     panels.forEach(p => p.hidden = p.dataset.panel !== b.dataset.panel);
+  });
+
+  const generateOverlay=document.getElementById('generate-overlay');
+  document.getElementById('generate-open').onclick=()=>{ generateOverlay.hidden=false; };
+  generateOverlay.onclick=e=>{ if(e.target===generateOverlay) generateOverlay.hidden=true; };
+  generateOverlay.querySelector('[data-generate-close]').onclick=()=>{ generateOverlay.hidden=true; };
+  document.querySelectorAll('.note-generate').forEach(btn=>btn.onclick=async()=>{
+    const status=document.getElementById('generate-status'); btn.disabled=true; status.textContent='Generating…';
+    try {
+      const response=await fetch('/api/files/{{ f.id }}/notes/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({template:btn.dataset.template})});
+      const data=await response.json();
+      if(!response.ok) throw new Error(data.error||'Generation failed');
+      status.textContent='Note generated. Reloading…'; location.reload();
+    } catch(error) { status.textContent=error.message; btn.disabled=false; }
   });
 
   // "..." topbar menu

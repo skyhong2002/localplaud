@@ -354,8 +354,8 @@ def ingest_cloud_artifacts(client, settings: Settings) -> int:
 
 def poll_once(settings: Settings | None = None) -> dict:
     """One full poll cycle: sync listing (+ optional apse1 enrichment) +
-    download pending (+ mirror Plaud's own transcripts/summaries when
-    explicit migration mode is enabled)."""
+    download pending (+ optionally mirror Plaud's own transcripts/summaries
+    into their provenance-preserving comparison lane)."""
     settings = settings or get_settings()
     reset_inflight()
     reset_download_errors()

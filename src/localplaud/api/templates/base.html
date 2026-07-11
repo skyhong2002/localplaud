@@ -280,11 +280,14 @@
     <div class="modal dialog" role="dialog" aria-label="Add audio">
       <button class="x" data-close>✕</button>
       <h3>Add audio</h3>
-      <p class="sub" style="margin:0 0 10px">
-        localplaud syncs recordings automatically: record with your Plaud device, let the
-        Plaud app upload it, and the poller downloads the raw audio and processes it locally.
-      </p>
-      <p class="sub" style="margin:0">To sync manually, run <code>localplaud poll --once</code>.</p>
+      <p class="sub" style="margin:0 0 16px">A new recording reaches localplaud in four steps. You never need to press Plaud's Generate button.</p>
+      <ol style="margin:0 0 18px;padding-left:20px;display:grid;gap:10px;font-size:13.5px">
+        <li><strong>Record</strong> with your Plaud device.</li>
+        <li><strong>Sync</strong> it to the official Plaud app so the raw audio uploads.</li>
+        <li><strong>Discover</strong> — localplaud downloads the raw audio; any existing Plaud transcript or meeting note is mirrored as a labelled reference.</li>
+        <li><strong>Generate locally</strong> — transcription, speakers, notes and Ask are created by your configured localplaud pipeline.</li>
+      </ol>
+      <div style="display:flex;align-items:center;gap:10px"><button class="btn" id="sync-now">Sync now</button><span class="sub" id="sync-status" style="font-size:13px">New files appear in All files and the recent-file sidebar.</span></div>
     </div>
   </div>
 
@@ -341,6 +344,24 @@
     });
     document.getElementById('add-audio-btn').onclick = () => show(document.getElementById('add-audio-overlay'));
     document.getElementById('explore-btn').onclick = () => show(document.getElementById('explore-overlay'));
+    document.getElementById('sync-now').onclick = async e => {
+      const btn=e.currentTarget, status=document.getElementById('sync-status');
+      btn.disabled=true; status.textContent='Looking for new Plaud recordings…';
+      try {
+        const response=await fetch('/api/sync',{method:'POST'}), data=await response.json();
+        if(!response.ok && response.status!==409) throw new Error(data.error||'Sync could not start');
+        const poll=setInterval(async()=>{
+          const current=await fetch('/api/sync/status').then(r=>r.json());
+          if(current.running) return;
+          clearInterval(poll); btn.disabled=false;
+          if(current.error) status.textContent='Sync failed: '+current.error;
+          else {
+            const result=current.result||{};
+            status.textContent=`Sync complete — ${result.new||0} new, ${result.downloaded||0} downloaded, ${result.cloud_artifacts||0} Plaud artifact set(s) mirrored.`;
+          }
+        },1000);
+      } catch(error) { status.textContent=error.message; btn.disabled=false; }
+    };
 
     // workspace popover
     const wsBtn = document.getElementById('ws-btn'), wsMenu = document.getElementById('ws-menu');
