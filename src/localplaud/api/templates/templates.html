@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Templates — localplaud{% endblock %}
+{% block body %}
+<main class="main"><div class="content" style="max-width:1120px">
+  <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
+    <div><h1 class="page">Templates</h1><p class="sub" style="margin:5px 0 0">Structured notes with immutable versions and reproducible prompts.</p></div>
+    <button class="btn" id="new-template" type="button">＋ New template</button>
+  </div>
+  <div class="tabs" style="margin-top:22px">
+    <a href="/templates?tab=my" class="{% if tab=='my' %}on{% endif %}" style="text-decoration:none;padding:10px 13px">My Space</a>
+    <a href="/templates?tab=explore" class="{% if tab=='explore' %}on{% endif %}" style="text-decoration:none;padding:10px 13px">Explore</a>
+  </div>
+  <form method="get" action="/templates" style="display:flex;gap:8px;margin:14px 0;flex-wrap:wrap">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <input class="search-input" name="q" value="{{ q }}" placeholder="Search templates, scenarios, or categories" style="flex:1;min-width:260px">
+    <button class="btn sec" type="submit">Search</button>
+  </form>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
+    <a class="chip {% if not category %}on{% endif %}" href="/templates?tab={{ tab }}{% if q %}&q={{ q }}{% endif %}">All</a>
+    {% for item in categories %}<a class="chip {% if category==item %}on{% endif %}" href="/templates?tab={{ tab }}&category={{ item }}{% if q %}&q={{ q }}{% endif %}">{{ item }}</a>{% endfor %}
+  </div>
+  {% if template_items %}
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">
+    {% for template in template_items %}
+    <article class="panel" style="padding:16px;display:flex;flex-direction:column;min-height:210px">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+        <div><span class="chip">{{ template.category }}</span> <span class="chip">{{ template.scenario }}</span></div>
+        <span class="sub" style="font-size:11px">v{{ template.version }}</span>
+      </div>
+      <h3 style="margin:14px 0 5px;font-size:17px">{{ template.name }}</h3>
+      <p class="sub" style="font-size:13px;line-height:1.5;margin:0">{{ template.description }}</p>
+      <div class="sub" style="font-size:11.5px;margin-top:10px">by {{ template.author }}{% if template.popularity %} · {{ template.popularity }}% popular{% endif %}</div>
+      <div style="display:flex;gap:7px;margin-top:auto;padding-top:15px">
+        <button class="btn sec template-view" type="button" data-key="{{ template.key }}" style="padding:7px 10px">View</button>
+        {% if template.is_builtin %}<button class="btn template-copy" type="button" data-key="{{ template.key }}" style="padding:7px 10px">Copy to My Space</button>{% else %}<button class="btn template-edit" type="button" data-key="{{ template.key }}" style="padding:7px 10px">New version</button>{% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty"><div class="big">▦</div>No templates match this view.</div>{% endif %}
+</div></main>
+
+<div class="import-backdrop" id="template-backdrop" hidden>
+  <section class="import-modal" style="width:min(720px,100%);min-height:0;max-height:90vh" role="dialog" aria-modal="true">
+    <div class="import-head"><span id="template-modal-title">Template</span><button class="import-close" id="template-close" type="button">×</button></div>
+    <form id="template-form" class="import-body" style="gap:10px;overflow:auto">
+      <label>Key<input class="search-input" name="key" required pattern="[a-z0-9][a-z0-9-]{0,63}" style="width:100%;margin-top:4px"></label>
+      <label>Name<input class="search-input" name="name" required maxlength="80" style="width:100%;margin-top:4px"></label>
+      <label>System prompt<textarea class="search-input" name="system_prompt" required rows="5" style="width:100%;margin-top:4px;resize:vertical"></textarea></label>
+      <label>Note structure / instructions<textarea class="search-input" name="instructions" required rows="10" style="width:100%;margin-top:4px;resize:vertical"></textarea></label>
+      <div id="template-form-status" class="sub" style="font-size:12px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn sec" id="template-cancel" type="button">Cancel</button><button class="btn" type="submit">Save template</button></div>
+    </form>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const TEMPLATE_ITEMS={{ template_items|tojson }},byKey=Object.fromEntries(TEMPLATE_ITEMS.map(item=>[item.key,item]));
+const backdrop=document.getElementById('template-backdrop'),form=document.getElementById('template-form'),title=document.getElementById('template-modal-title'),status=document.getElementById('template-form-status');let mode='create',sourceKey=null;
+function openTemplate(nextMode,key=null){mode=nextMode;sourceKey=key;form.reset();status.textContent='';const item=key?byKey[key]:null;form.elements.key.disabled=false;form.elements.system_prompt.readOnly=false;form.elements.instructions.readOnly=false;form.querySelector('[type=submit]').hidden=false;if(nextMode==='create'){title.textContent='New template';}else if(nextMode==='copy'){title.textContent=`Copy ${item.name}`;form.elements.key.value=`my-${item.key}`;form.elements.name.value=`${item.name} copy`;form.elements.system_prompt.value=item.system_prompt;form.elements.instructions.value=item.instructions;}else{form.elements.key.value=item.key;form.elements.name.value=item.name;form.elements.system_prompt.value=item.system_prompt;form.elements.instructions.value=item.instructions;if(nextMode==='view'){title.textContent=item.name;form.elements.key.disabled=true;form.elements.name.readOnly=true;form.elements.system_prompt.readOnly=true;form.elements.instructions.readOnly=true;form.querySelector('[type=submit]').hidden=true;}else{title.textContent=`New version of ${item.name}`;form.elements.key.disabled=true;}}backdrop.hidden=false;}
+document.getElementById('new-template').onclick=()=>openTemplate('create');document.querySelectorAll('.template-view').forEach(button=>button.onclick=()=>openTemplate('view',button.dataset.key));document.querySelectorAll('.template-copy').forEach(button=>button.onclick=()=>openTemplate('copy',button.dataset.key));document.querySelectorAll('.template-edit').forEach(button=>button.onclick=()=>openTemplate('edit',button.dataset.key));
+function closeTemplate(){backdrop.hidden=true;}document.getElementById('template-close').onclick=closeTemplate;document.getElementById('template-cancel').onclick=closeTemplate;backdrop.addEventListener('click',event=>{if(event.target===backdrop)closeTemplate();});
+form.addEventListener('submit',async event=>{event.preventDefault();const data=new FormData(form),body={key:data.get('key'),name:data.get('name'),system_prompt:data.get('system_prompt'),instructions:data.get('instructions')};let url='/api/note-templates',method='POST';if(mode==='edit'){url=`/api/note-templates/${sourceKey}`;method='PUT';delete body.key;}if(mode==='copy'){url=`/api/note-templates/${sourceKey}/copy`;body={key:body.key,name:body.name};}const response=await fetch(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)}),result=await response.json();if(response.ok){status.textContent='Saved. Reloading…';location.href='/templates?tab=my';}else status.textContent=result.detail?.[0]?.msg||result.detail||'Could not save template';});
+</script>
+{% endblock %}

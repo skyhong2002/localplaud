@@ -286,9 +286,10 @@ embedding raw provider credentials or model settings in each rule.
   the exact raw transcript id/source plus revision they consumed.
 - Add file Ask suggested questions and reusable local skills (action items, task
   table, insights), plus grounded follow-ups and save-to-note.
-- Build template My Space and Explore surfaces with search, categories/scenarios,
-  first-party/community provenance, authorship, descriptions, and versioned install
-  or copy-to-workspace behavior.
+- ✅ Built dedicated Templates My Space and Explore surfaces with search,
+  categories/scenarios, first-party/personal provenance, authorship, descriptions,
+  popularity signals, prompt preview, immutable new-version editing, and
+  copy-to-workspace behavior. Community/remote catalog ingestion remains optional.
 - ✅ Consolidated recording exports in one modal: canonical transcript TXT/SRT/VTT
   with timestamp and speaker-label toggles, notes Markdown/TXT,
   combined Markdown archive, and original audio. Remaining broader targets: MP3/WAV

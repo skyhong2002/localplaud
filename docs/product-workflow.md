@@ -326,7 +326,10 @@ find/replace, historical previews, and non-destructive restore-as-new-revision a
 implemented. Summaries, mind maps, embedding chunks, and stage runs persist their
 exact input transcript lineage; notes and processing details expose it in the Web UI.
 Saved Ask answers are editable note bodies with durable follow-up threads.
-Other major gaps include automatic template selection, richer export, automation,
-and UI polish. Provider/model/profile management and the versioned remote-worker protocol
+The Templates workspace now separates My Space and Explore, with server-side search,
+scenario/category browsing, provenance, descriptions, authorship/popularity signals,
+prompt preview, immutable version editing, and copy-to-workspace. Other major gaps
+include automatic template selection, automation, and UI polish.
+Provider/model/profile management and the versioned remote-worker protocol
 are implemented; cross-provider fallback/cost accounting and the remaining hardware
 acceptance matrix are still open.

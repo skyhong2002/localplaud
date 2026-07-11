@@ -82,6 +82,43 @@ def test_builtin_bootstrap_and_versioned_crud(monkeypatch, tmp_path):
     assert client.delete("/api/note-templates/default").status_code == 409
 
 
+def test_catalog_metadata_and_copy_to_my_space(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    meeting = next(
+        row
+        for row in client.get("/api/note-templates").json()["templates"]
+        if row["key"] == "meeting"
+    )
+    assert meeting["category"] == "Work"
+    assert meeting["scenario"] == "Meetings"
+    assert meeting["provenance"] == "first-party"
+    copied = client.post(
+        "/api/note-templates/meeting/copy",
+        json={"key": "my-meeting", "name": "My meeting"},
+    )
+    assert copied.status_code == 201
+    assert copied.json()["provenance"] == "personal"
+    assert copied.json()["system_prompt"] == meeting["system_prompt"]
+    assert client.post(
+        "/api/note-templates/meeting/copy",
+        json={"key": "my-meeting", "name": "Duplicate"},
+    ).status_code == 409
+
+
+def test_templates_workspace_search_and_tabs(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    page = client.get("/templates")
+    assert page.status_code == 200
+    assert "My Space" in page.text and "Explore" in page.text
+    assert "Copy to My Space" in page.text
+    assert "Decisions, owners, action items" in page.text
+    assert 'id="template-form"' in page.text
+    education = client.get("/templates?tab=explore&category=Education")
+    assert "Lecture" in education.text and "Meeting" not in education.text
+    searched = client.get("/templates?tab=explore&q=voice+memos")
+    assert "Personal" in searched.text and "Lecture" not in searched.text
+
+
 def test_recording_selection_marks_notes_stale_and_archive_resets(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     from localplaud.db.models import PlaudFile, StageName, StageRun, StageStatus

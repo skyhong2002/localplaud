@@ -13,6 +13,13 @@ from ..db.session import session_scope
 
 router = APIRouter(prefix="/api", tags=["note-templates"])
 _KEY = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+_CATALOG = {
+    "default": {"category": "General", "scenario": "Any recording", "description": "Balanced summary, key points, and action items.", "author": "localplaud", "popularity": 100},
+    "meeting": {"category": "Work", "scenario": "Meetings", "description": "Decisions, owners, action items, and unresolved questions.", "author": "localplaud", "popularity": 96},
+    "call": {"category": "Work", "scenario": "Calls", "description": "Purpose, commitments, sentiment, and follow-ups from a call.", "author": "localplaud", "popularity": 84},
+    "lecture": {"category": "Education", "scenario": "Lectures", "description": "Concept-focused study notes with review questions.", "author": "localplaud", "popularity": 91},
+    "personal": {"category": "Personal", "scenario": "Voice memos", "description": "A concise TL;DR, highlights, and personal to-dos.", "author": "localplaud", "popularity": 79},
+}
 
 
 class TemplateBody(BaseModel):
@@ -44,7 +51,21 @@ class RecordingTemplateBody(BaseModel):
     key: str | None = None
 
 
+class CopyTemplateBody(BaseModel):
+    key: str = Field(min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+
+    @field_validator("key")
+    @classmethod
+    def validate_key(cls, value: str) -> str:
+        value = value.strip().lower()
+        if not _KEY.fullmatch(value):
+            raise ValueError("key must contain lowercase letters, numbers, and hyphens")
+        return value
+
+
 def _item(row: NoteTemplate) -> dict:
+    catalog = _CATALOG.get(row.key, {})
     return {
         "id": row.id,
         "key": row.key,
@@ -54,6 +75,14 @@ def _item(row: NoteTemplate) -> dict:
         "instructions": row.instructions,
         "is_builtin": row.is_builtin,
         "is_active": row.is_active,
+        "category": catalog.get("category", "Custom"),
+        "scenario": catalog.get("scenario", "Workspace"),
+        "description": catalog.get(
+            "description", next((line.strip("# ") for line in row.instructions.splitlines() if line.strip()), "Custom structured notes")
+        ),
+        "author": catalog.get("author", "Local workspace"),
+        "popularity": catalog.get("popularity"),
+        "provenance": "first-party" if row.is_builtin else "personal",
     }
 
 
@@ -64,6 +93,33 @@ def list_note_templates(include_history: bool = False) -> dict:
         if not include_history:
             stmt = stmt.where(NoteTemplate.is_active.is_(True))
         return {"templates": [_item(row) for row in session.scalars(stmt)]}
+
+
+@router.post("/note-templates/{key}/copy", status_code=201)
+def copy_note_template(key: str, body: CopyTemplateBody) -> dict:
+    """Copy an active template into an independently versioned personal template."""
+    with session_scope() as session:
+        source = session.scalar(
+            select(NoteTemplate).where(
+                NoteTemplate.key == key, NoteTemplate.is_active.is_(True)
+            )
+        )
+        if source is None:
+            raise HTTPException(status_code=404, detail="template not found")
+        if session.scalar(select(NoteTemplate.id).where(NoteTemplate.key == body.key)):
+            raise HTTPException(status_code=409, detail="template key already exists")
+        row = NoteTemplate(
+            key=body.key,
+            version=1,
+            name=body.name or f"{source.name} copy",
+            system_prompt=source.system_prompt,
+            instructions=source.instructions,
+            is_builtin=False,
+            is_active=True,
+        )
+        session.add(row)
+        session.flush()
+        return _item(row)
 
 
 @router.post("/note-templates", status_code=201)
