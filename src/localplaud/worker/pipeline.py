@@ -14,6 +14,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -38,7 +39,12 @@ from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
 from ..providers.service import resolve_recording_profile
-from ..providers.usage import estimate_cost, normalize_usage, pricing_for_stage
+from ..providers.usage import (
+    enforce_cost_ceiling,
+    estimate_cost,
+    normalize_usage,
+    pricing_for_stage,
+)
 from ..remote.client import RemoteWorkerClient
 from ..remote.protocol import InputReference, JobStage, JobSubmitRequest
 from ..store.files import wav_path
@@ -203,19 +209,19 @@ def _set_stage(
         snapshot = _PROFILE_SNAPSHOT.get()
         if snapshot is not None:
             run.resolved_profile_snapshot = snapshot
+        profile_stage = "embed" if stage == StageName.index else stage.value
         if begin_attempt:
             run.attempts = (run.attempts or 0) + 1
             run.started_at = now
             run.completed_at = None
-            selection = (snapshot or {}).get("stages", {}).get(stage.value) or {}
+            selection = (snapshot or {}).get("stages", {}).get(profile_stage) or {}
             session.add(
                 StageAttempt(
                     file_id=file_id,
                     stage=stage,
                     attempt=run.attempts,
                     status=StageStatus.running,
-                    provider=(selection.get("connection") or "").split(":", 1)[-1]
-                    or None,
+                    provider=(selection.get("connection") or "").split(":", 1)[-1] or None,
                     model=selection.get("model"),
                     resolved_profile_snapshot=snapshot,
                     started_at=now,
@@ -252,7 +258,7 @@ def _set_stage(
                     started = started.replace(tzinfo=UTC)
                 latency_ms = max(0, int((now - started).total_seconds() * 1000))
                 normalized = normalize_usage(usage)
-                pricing = pricing_for_stage(session, snapshot, stage.value)
+                pricing = pricing_for_stage(session, snapshot, profile_stage)
                 cost = estimate_cost(normalized, pricing)
                 attempt.status = status
                 attempt.provider = run.provider or attempt.provider
@@ -357,6 +363,25 @@ def _audio_seconds(row: PlaudFile, transcript: Transcript | None = None) -> floa
     return float(row.duration_ms or 0) / 1000
 
 
+def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
+    with session_scope() as session:
+        return enforce_cost_ceiling(session, file_id, stage, snapshot, usage)
+
+
+def _llm_projected_usage(transcript: Transcript, settings: Settings) -> dict:
+    chars = len(transcript.text)
+    chunks = max(1, math.ceil(chars / settings.pipeline.summary_chunk_chars))
+    reduce_calls = math.ceil(chunks / 8) if chunks > 1 else 0
+    requests = chunks + reduce_calls + 1 if chunks > 1 else 1
+    max_output_tokens = chunks * 1200 + reduce_calls * 1200 + 1500 if chunks > 1 else 1500
+    return {
+        "input_chars": math.ceil(chars * (1.5 if chunks > 1 else 1.0)),
+        "output_tokens": max_output_tokens,
+        "requests": requests,
+        "projection": True,
+    }
+
+
 def reset_pipeline_retry(row: PlaudFile) -> None:
     """Reset consecutive retry state for a manual retry or a successful run."""
     row.pipeline_retry_count = 0
@@ -459,6 +484,8 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             else:
                 _begin_stage(file_id, StageName.transcribe)
                 try:
+                    projected_usage = {"audio_seconds": _audio_seconds(row)}
+                    cost_budget = _cost_guard(file_id, "transcribe", snapshot, projected_usage)
                     if _remote_selection(snapshot, "transcribe"):
                         payload = _run_remote_stage(
                             file_id, snapshot, "transcribe", [_remote_audio_input(wav)]
@@ -480,6 +507,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         provider=transcript.provider,
                         model=transcript.model,
                         artifact_source="local",
+                        detail={"cost_budget": cost_budget},
                         usage={
                             "audio_seconds": _audio_seconds(row, transcript),
                             "output_chars": len(transcript.text),
@@ -512,6 +540,11 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         else:
             _begin_stage(file_id, StageName.diarize)
             try:
+                projected_usage = {
+                    "audio_seconds": _audio_seconds(row, transcript),
+                    "input_chars": len(transcript.text),
+                }
+                cost_budget = _cost_guard(file_id, "diarize", snapshot, projected_usage)
                 if _remote_selection(snapshot, "diarize"):
                     payload = _run_remote_stage(
                         file_id,
@@ -543,6 +576,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         else diarize_settings.diarize.model
                     ),
                     artifact_source="local",
+                    detail={"cost_budget": cost_budget},
                     usage={
                         "audio_seconds": _audio_seconds(row, transcript),
                         "input_chars": len(transcript.text),
@@ -599,6 +633,8 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             if force or not _has_summary(file_id, template_key):
                 _begin_stage(file_id, StageName.summarize)
                 try:
+                    projected_usage = _llm_projected_usage(transcript, summarize_settings)
+                    cost_budget = _cost_guard(file_id, "summarize", snapshot, projected_usage)
                     if _remote_selection(snapshot, "summarize"):
                         result = _run_remote_stage(
                             file_id,
@@ -627,6 +663,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                             "coverage": result.get("coverage", {}),
                             "transcript": transcript_lineage,
                             "auto_template": auto_recommendation,
+                            "cost_budget": cost_budget,
                         },
                         usage={
                             "input_chars": len(transcript.text),
@@ -665,6 +702,8 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             if force or not _has_summary(file_id, "mind_map"):
                 _begin_stage(file_id, StageName.mind_map)
                 try:
+                    projected_usage = _llm_projected_usage(transcript, mind_map_settings)
+                    cost_budget = _cost_guard(file_id, "mind_map", snapshot, projected_usage)
                     summary_md = _load_summary_md(file_id, template_key)
                     if _remote_selection(snapshot, "mind_map"):
                         result = _run_remote_stage(
@@ -691,6 +730,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         | {
                             "transcript": transcript_lineage,
                             "auto_template": auto_recommendation,
+                            "cost_budget": cost_budget,
                         },
                         usage={
                             "input_chars": len(transcript.text),
@@ -725,6 +765,12 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             if force or not _has_chunks(file_id):
                 _begin_stage(file_id, StageName.index)
                 try:
+                    projected_usage = {
+                        "input_chars": len(transcript.text),
+                        "input_items": len(transcript.segments),
+                        "projection": True,
+                    }
+                    cost_budget = _cost_guard(file_id, "embed", snapshot, projected_usage)
                     if _remote_selection(snapshot, "embed"):
                         payload = _run_remote_stage(
                             file_id,
@@ -747,7 +793,10 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         ),
                         model=model_name,
                         artifact_source="local",
-                        detail={"transcript": transcript_lineage},
+                        detail={
+                            "transcript": transcript_lineage,
+                            "cost_budget": cost_budget,
+                        },
                         usage={
                             "input_chars": len(transcript.text),
                             "input_items": len(transcript.segments),

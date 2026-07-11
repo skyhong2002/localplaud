@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-11)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (282 tests passing locally).
+  Active development is merged directly to `main` (284 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -122,6 +122,11 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
   Recording details expose attempt history and totals; Status aggregates execution
   hours/cost, and model setup accepts explicit token/audio price metadata. Missing
   rates honestly produce zero rather than invented prices.
+- ✅ Profile cost ceilings now enforce a pre-egress reservation boundary. Cloud and
+  remote stages with a ceiling require explicit catalog pricing or an explicit free
+  declaration; conservative audio/text/output projections are checked against all
+  prior attempt cost before the provider call. Rejections make zero provider calls,
+  remain traceable failures, and can Resume after selecting a new policy/profile.
 - ✅ Added authenticated `localplaud-worker` protocol v1: versioned capability
   handshake, durable/idempotent jobs, progress, cancellation, structured retryable
   errors, minimum typed inputs, restart recovery, and SHA-256 artifact verification.
@@ -133,7 +138,7 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
   RTX 5060 through NVIDIA Container Toolkit, and completed an authenticated v1
   capability handshake without interrupting the existing processing container.
 - Remaining: validate one rentable GPU host, then add explicit cross-provider
-  fallback, cost-ceiling enforcement, and benchmark acceptance.
+  fallback and benchmark acceptance.
 
 Implement this P0 in the following order:
 

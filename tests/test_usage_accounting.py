@@ -161,3 +161,187 @@ def test_stage_attempt_migration_is_idempotent(tmp_path):
         connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
     assert migrate_stage_attempt_schema(engine) == ["stage_attempts"]
     assert migrate_stage_attempt_schema(engine) == []
+
+
+def test_external_cost_ceiling_requires_pricing_and_reserves_budget(tmp_path):
+    from sqlalchemy.orm import Session
+
+    from localplaud.db.models import (
+        Base,
+        ModelCatalogEntry,
+        PlaudFile,
+        ProviderConnection,
+        StageAttempt,
+        StageName,
+        StageStatus,
+    )
+    from localplaud.providers.usage import CostPolicyError, enforce_cost_ceiling
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'policy.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(PlaudFile(id="budget", filename="Budget"))
+        connection = ProviderConnection(
+            key="asr:priced-cloud",
+            name="Priced cloud",
+            provider_type="openai",
+            execution_target="cloud",
+            data_egress=True,
+        )
+        session.add(connection)
+        session.flush()
+        model = ModelCatalogEntry(
+            connection_id=connection.id,
+            model_key="audio-model",
+            display_name="Audio model",
+            capabilities={"metadata": {}},
+        )
+        session.add(model)
+        session.add(
+            StageAttempt(
+                file_id="budget",
+                stage=StageName.summarize,
+                attempt=1,
+                status=StageStatus.completed,
+                estimated_cost_usd=0.005,
+                usage={},
+            )
+        )
+        session.commit()
+        snapshot = {
+            "policy": {"cost_ceiling": 0.02},
+            "stages": {
+                "transcribe": {
+                    "connection": connection.key,
+                    "model": model.model_key,
+                    "execution_target": "cloud",
+                }
+            },
+        }
+        with pytest.raises(CostPolicyError, match="cost is unknown"):
+            enforce_cost_ceiling(session, "budget", "transcribe", snapshot, {"audio_seconds": 60})
+
+        snapshot["stages"]["transcribe"]["execution_target"] = "local"
+        local = enforce_cost_ceiling(
+            session, "budget", "transcribe", snapshot, {"audio_seconds": 60}
+        )
+        assert local["projected_usd"] == 0
+        snapshot["stages"]["transcribe"]["execution_target"] = "cloud"
+        model.capabilities = {"metadata": {"pricing": {"free": True}}}
+        session.flush()
+        free = enforce_cost_ceiling(
+            session, "budget", "transcribe", snapshot, {"audio_seconds": 60}
+        )
+        assert free["projected_usd"] == 0
+
+        model.capabilities = {"metadata": {"pricing": {"audio_per_minute_usd": 0.01}}}
+        session.flush()
+        allowed = enforce_cost_ceiling(
+            session, "budget", "transcribe", snapshot, {"audio_seconds": 60}
+        )
+        assert allowed["spent_usd"] == pytest.approx(0.005)
+        assert allowed["projected_usd"] == pytest.approx(0.01)
+        assert allowed["after_projection_usd"] == pytest.approx(0.015)
+        snapshot["policy"]["cost_ceiling"] = 0.014
+        with pytest.raises(CostPolicyError, match="would exceed"):
+            enforce_cost_ceiling(session, "budget", "transcribe", snapshot, {"audio_seconds": 60})
+
+
+def test_pipeline_blocks_provider_call_then_resumes_under_new_ceiling(monkeypatch, tmp_path):
+    settings = _reset(monkeypatch, tmp_path)
+    import localplaud.worker.pipeline as pipeline
+    from localplaud.asr.base import Segment, Transcript
+    from localplaud.db.models import (
+        ExecutionProfile,
+        FileStatus,
+        ModelCatalogEntry,
+        PlaudFile,
+        ProviderConnection,
+        StageAttempt,
+    )
+    from localplaud.db.session import session_scope
+    from localplaud.providers.usage import CostPolicyError
+
+    audio = tmp_path / "ceiling.wav"
+    audio.write_bytes(b"RIFF")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="ceiling",
+                filename="Ceiling",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+                duration_ms=60_000,
+            )
+        )
+        profile = session.scalar(select(ExecutionProfile).where(ExecutionProfile.is_system_default))
+        profile.no_egress = False
+        profile.privacy_policy = "allow-egress"
+        profile.cost_ceiling = 0.01
+        connection = session.scalar(
+            select(ProviderConnection).where(ProviderConnection.key == "asr:faster-whisper")
+        )
+        connection.execution_target = "cloud"
+        connection.data_egress = True
+        model = session.scalar(
+            select(ModelCatalogEntry).where(
+                ModelCatalogEntry.connection_id == connection.id,
+                ModelCatalogEntry.model_key == settings.asr.faster_whisper.model,
+            )
+        )
+        capability = dict(model.capabilities)
+        capability["execution_target"] = "cloud"
+        capability["data_egress"] = True
+        capability["metadata"] = {"pricing": {"audio_per_minute_usd": 0.02}}
+        model.capabilities = capability
+
+    calls = 0
+
+    def fake_asr(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return Transcript(
+            segments=[Segment(text="allowed", start=0, end=60)],
+            duration=60,
+            language="en",
+            provider="faster-whisper",
+            model=settings.asr.faster_whisper.model,
+        )
+
+    monkeypatch.setattr(pipeline.transcribe, "run_asr", fake_asr)
+    with pytest.raises(CostPolicyError, match="would exceed"):
+        pipeline.process_file("ceiling", settings)
+    assert calls == 0
+    from fastapi.testclient import TestClient
+
+    from localplaud.api.app import app
+
+    client = TestClient(app)
+    blocked_page = client.get("/file/ceiling")
+    assert blocked_page.status_code == 200
+    assert "Cost boundary" in blocked_page.text
+    assert "would exceed" in blocked_page.text
+    budget = client.get("/api/files/ceiling/usage").json()["budget"]
+    assert budget["ceiling_usd"] == pytest.approx(0.01)
+    assert budget["remaining_usd"] == pytest.approx(0.01)
+    with session_scope() as session:
+        attempts = list(
+            session.scalars(select(StageAttempt).where(StageAttempt.file_id == "ceiling"))
+        )
+        assert len(attempts) == 1 and attempts[0].status == "failed"
+        assert "would exceed" in attempts[0].error
+        session.scalar(
+            select(ExecutionProfile).where(ExecutionProfile.is_system_default)
+        ).cost_ceiling = 0.03
+    pipeline.process_file("ceiling", settings)
+    assert calls == 1
+    with session_scope() as session:
+        attempts = list(
+            session.scalars(
+                select(StageAttempt)
+                .where(StageAttempt.file_id == "ceiling")
+                .order_by(StageAttempt.attempt)
+            )
+        )
+        assert [item.status.value for item in attempts] == ["failed", "completed"]
+        assert attempts[1].estimated_cost_usd == pytest.approx(0.02)

@@ -59,6 +59,7 @@
       </select>
       <button class="btn sec" type="submit" style="padding:8px 12px">Use profile</button>
       <span class="sub" style="font-size:12px">Applied on the next Resume or Rebuild.</span>
+      {% if f.budget.ceiling_usd is not none %}<div class="sub" style="font-size:11.5px;flex-basis:100%">Cost boundary · ${{ f.budget.spent_usd }} spent · ${{ f.budget.remaining_usd }} remaining of ${{ f.budget.ceiling_usd }}{% if f.budget.exceeded %} · <span style="color:var(--red)">ceiling exceeded; choose another profile before resuming</span>{% endif %}</div>{% endif %}
     </form>
     {% endif %}
 

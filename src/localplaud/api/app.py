@@ -334,6 +334,9 @@ def api_files(
 
 @app.get("/api/files/{file_id}/usage")
 def file_usage(file_id: str) -> dict:
+    from ..providers.service import resolve_recording_profile
+    from ..providers.usage import cost_budget_status
+
     with session_scope() as session:
         if session.get(PlaudFile, file_id) is None:
             raise HTTPException(status_code=404, detail="recording not found")
@@ -343,6 +346,9 @@ def file_usage(file_id: str) -> dict:
                 .where(StageAttempt.file_id == file_id)
                 .order_by(StageAttempt.id)
             )
+        )
+        budget = cost_budget_status(
+            session, file_id, resolve_recording_profile(session, file_id).to_dict()
         )
     attempts = [
         {
@@ -367,6 +373,7 @@ def file_usage(file_id: str) -> dict:
             "latency_ms": sum(row.latency_ms or 0 for row in rows),
             "estimated_cost_usd": round(sum(row.estimated_cost_usd or 0 for row in rows), 6),
         },
+        "budget": budget,
     }
 
 
@@ -1225,6 +1232,12 @@ def file_detail(
             override.profile_id
             if override is not None
             else next((profile.id for profile in profile_rows if profile.is_system_default), None)
+        )
+        from ..providers.service import resolve_recording_profile
+        from ..providers.usage import cost_budget_status
+
+        f["budget"] = cost_budget_status(
+            session, file_id, resolve_recording_profile(session, file_id).to_dict()
         )
         f["note_templates"] = [
             {

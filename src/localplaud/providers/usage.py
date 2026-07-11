@@ -7,7 +7,11 @@ import math
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..db.models import ModelCatalogEntry, ProviderConnection
+from ..db.models import ModelCatalogEntry, ProviderConnection, StageAttempt
+
+
+class CostPolicyError(RuntimeError):
+    """Raised before egress when a profile cost boundary cannot be satisfied."""
 
 
 def normalize_usage(usage: dict | None) -> dict:
@@ -66,3 +70,57 @@ def estimate_cost(usage: dict, pricing: dict) -> float:
         * float(pricing.get("audio_per_minute_usd") or 0)
     )
     return round(total, 8)
+
+
+def cost_budget_status(session: Session, file_id: str, snapshot: dict | None) -> dict:
+    ceiling = ((snapshot or {}).get("policy") or {}).get("cost_ceiling")
+    from sqlalchemy import func
+
+    spent = float(
+        session.scalar(
+            select(func.coalesce(func.sum(StageAttempt.estimated_cost_usd), 0)).where(
+                StageAttempt.file_id == file_id
+            )
+        )
+        or 0
+    )
+    return {
+        "ceiling_usd": ceiling,
+        "spent_usd": round(spent, 8),
+        "remaining_usd": (None if ceiling is None else round(max(0.0, float(ceiling) - spent), 8)),
+        "exceeded": ceiling is not None and spent > float(ceiling),
+    }
+
+
+def enforce_cost_ceiling(
+    session: Session,
+    file_id: str,
+    stage: str,
+    snapshot: dict | None,
+    projected_usage: dict,
+) -> dict:
+    """Reserve a conservative priced stage estimate before provider invocation."""
+    budget = cost_budget_status(session, file_id, snapshot)
+    if budget["ceiling_usd"] is None:
+        return budget | {"projected_usd": 0.0, "enforced": False}
+    selection = (snapshot or {}).get("stages", {}).get(stage) or {}
+    pricing = pricing_for_stage(session, snapshot, stage)
+    external = selection.get("execution_target") in {"cloud", "remote_worker"}
+    if external and not pricing:
+        raise CostPolicyError(
+            f"{stage} cost is unknown for {selection.get('connection')}:{selection.get('model')}; "
+            "add model pricing or mark it free before data leaves this host"
+        )
+    projected = estimate_cost(projected_usage, pricing)
+    total = budget["spent_usd"] + projected
+    if total > float(budget["ceiling_usd"]) + 1e-12:
+        raise CostPolicyError(
+            f"{stage} would exceed the ${float(budget['ceiling_usd']):.6g} recording ceiling "
+            f"(${budget['spent_usd']:.6g} spent + ${projected:.6g} projected)"
+        )
+    return budget | {
+        "projected_usd": projected,
+        "after_projection_usd": round(total, 8),
+        "enforced": True,
+        "pricing": pricing,
+    }
