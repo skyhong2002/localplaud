@@ -69,7 +69,7 @@ class PlaudConfig(BaseModel):
 
     provider: Literal["official", "apse1"] = "official"
     official: PlaudOfficialConfig = Field(default_factory=PlaudOfficialConfig)
-    apse1_enrichment: bool = True
+    apse1_enrichment: bool = False
 
     api_base: str = "https://api-apse1.plaud.ai"
     # "cookie": paste a session cookie/token from the browser (most reliable).

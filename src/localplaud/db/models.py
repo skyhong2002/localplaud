@@ -68,20 +68,6 @@ class StageStatus(enum.StrEnum):
     skipped = "skipped"
 
 
-class PlaudFolder(Base):
-    """Read-only mirror of a Plaud Web filetag/folder."""
-
-    __tablename__ = "plaud_folders"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String(512))
-    position: Mapped[int] = mapped_column(Integer, default=0)
-    raw: Mapped[dict] = mapped_column(JSON, default=dict)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_now, onupdate=_now
-    )
-
-
 class PlaudFile(Base):
     __tablename__ = "plaud_files"
 

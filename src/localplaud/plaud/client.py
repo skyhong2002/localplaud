@@ -203,35 +203,6 @@ class PlaudClient:
             if page.data_file_total and skip >= page.data_file_total:
                 break
 
-    def list_folders(self) -> list[dict]:
-        """Return Plaud Web filetags (displayed as folders), read-only."""
-        payload = self._get_json("/filetag/")
-
-        def candidates(value):
-            if isinstance(value, list):
-                if all(isinstance(item, dict) for item in value):
-                    yield value
-                for item in value:
-                    yield from candidates(item)
-            elif isinstance(value, dict):
-                for item in value.values():
-                    yield from candidates(item)
-
-        for rows in candidates(payload):
-            normalized = []
-            for position, row in enumerate(rows):
-                folder_id = row.get("id") or row.get("filetag_id") or row.get("tag_id")
-                name = row.get("name") or row.get("filetag_name") or row.get("tag_name")
-                if folder_id and name:
-                    normalized.append({
-                        "id": str(folder_id), "name": str(name),
-                        "position": int(row.get("sort") or row.get("position") or position),
-                        "raw": row,
-                    })
-            if normalized:
-                return normalized
-        return []
-
     # ---- detail (transcript + summary) --------------------------------- #
 
     def get_detail(self, file_id: str) -> dict:

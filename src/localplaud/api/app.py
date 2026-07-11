@@ -24,7 +24,6 @@ from ..db.models import (
     LocalNote,
     NoteTemplate,
     PlaudFile,
-    PlaudFolder,
     ProviderConnection,
     ProviderHealthCheck,
     ProviderModel,
@@ -142,19 +141,11 @@ def _base_ctx(request: Request, active: str) -> dict:
         trash_count = session.scalar(
             select(func.count()).select_from(PlaudFile).where(PlaudFile.is_trash.is_(True))
         ) or 0
-        folders = []
-        for folder in session.scalars(select(PlaudFolder).order_by(PlaudFolder.position, PlaudFolder.name)):
-            count = sum(
-                1 for row in session.scalars(select(PlaudFile).where(PlaudFile.is_trash.is_(False)))
-                if folder.id in ((row.raw or {}).get("filetag_id_list") or [])
-            )
-            folders.append({"id": folder.id, "name": folder.name, "count": count})
     return {
         "request": request,
         "active": active,
         "public_url": get_settings().api.public_url,
         "counts": {"all": all_count, "trash": trash_count},
-        "folders": folders,
     }
 
 
@@ -259,13 +250,10 @@ def api_files(
     state: str | None = None,
     scene: str | None = None,
     view: str | None = None,
-    folder: str | None = None,
 ) -> JSONResponse:
     params = _parse_library_params(q, sort, dir, state, scene, view)
     with session_scope() as session:
-        rows = list(session.scalars(_library_query(params).limit(300)))
-        if folder:
-            rows = [r for r in rows if folder in ((r.raw or {}).get("filetag_id_list") or [])]
+        rows = session.scalars(_library_query(params).limit(300))
         data = [_file_summary(r) for r in rows]
     return JSONResponse({"files": data})
 
@@ -1132,18 +1120,14 @@ def file_list(
     state: str | None = None,
     scene: str | None = None,
     view: str | None = None,
-    folder: str | None = None,
 ):
     if categoryId == "trash":
         view = "trash"
     params = _parse_library_params(q, sort, dir, state, scene, view)
     with session_scope() as session:
         rows = list(session.scalars(_library_query(params).limit(300)))
-        if folder:
-            rows = [r for r in rows if folder in ((r.raw or {}).get("filetag_id_list") or [])]
         files = [_file_summary(r) for r in rows]
         facets = _library_facets(session, params)
-        selected_folder = session.get(PlaudFolder, folder) if folder else None
     in_trash = params["view"] == "trash"
     ctx = _base_ctx(request, "trash" if in_trash else "allfiles") | {
         "files": files,
@@ -1153,8 +1137,7 @@ def file_list(
         "states": [s.value for s in FileStatus],
         "attention_states": _ATTENTION_STATES,
         "category": "trash" if in_trash else "allFiles",
-        "page_title": "Trash" if in_trash else (selected_folder.name if selected_folder else "All files"),
-        "selected_folder": folder,
+        "page_title": "Trash" if in_trash else "All files",
     }
     return templates.TemplateResponse(request=request, name="filelist.html", context=ctx)
 

@@ -21,7 +21,7 @@ provider = "official"
 # configured (see below), the poller additionally reads the legacy listing to
 # fill change-detection fields the Open API lacks (version / file_md5 /
 # edit_time / is_trash). Purely optional.
-apse1_enrichment = true
+apse1_enrichment = false
 
 # ---- apse1 (legacy / enrichment) settings ---------------------------------- #
 # API host for YOUR account/region. Find it in the browser devtools console:

@@ -15,7 +15,7 @@ from datetime import UTC
 from sqlalchemy import select
 
 from ..config import Settings, get_settings
-from ..db.models import FileStatus, PlaudFile, PlaudFolder
+from ..db.models import FileStatus, PlaudFile
 from ..db.session import session_scope
 from ..plaud import make_plaud_client
 from ..plaud.models import PlaudFileDTO
@@ -234,31 +234,10 @@ def enrich_from_apse1(settings: Settings) -> tuple[int, int]:
 
     try:
         with PlaudClient(cfg) as legacy:
-            result = sync_file_list(legacy, settings)
-            sync_folders(legacy)
-            return result
+            return sync_file_list(legacy, settings)
     except Exception as exc:  # noqa: BLE001
         log.warning("apse1 enrichment failed (continuing without it): %s", exc)
         return (0, 0)
-
-
-def sync_folders(client) -> int:
-    """Mirror Plaud filetag names; memberships live in each file DTO's raw data."""
-    folders = client.list_folders()
-    with session_scope() as session:
-        incoming = {folder["id"] for folder in folders}
-        for folder in folders:
-            row = session.get(PlaudFolder, folder["id"])
-            if row is None:
-                row = PlaudFolder(id=folder["id"], name=folder["name"])
-                session.add(row)
-            row.name = folder["name"]
-            row.position = folder["position"]
-            row.raw = folder["raw"]
-        for row in session.scalars(select(PlaudFolder)):
-            if row.id not in incoming:
-                session.delete(row)
-    return len(folders)
 
 
 def _looks_like_raw_name(name: str) -> bool:

@@ -87,20 +87,3 @@ def test_sync_redownloads_when_md5_changes(monkeypatch, tmp_path):
     assert (new, changed) == (0, 1)
     with session_scope() as s:
         assert s.get(PlaudFile, "f1").status == FileStatus.discovered  # not "downloaded"
-
-
-def test_sync_folders_mirrors_catalog(monkeypatch, tmp_path):
-    _reset_db(monkeypatch, tmp_path)
-    from localplaud.db.models import PlaudFolder
-    from localplaud.db.session import init_db, session_scope
-    from localplaud.poller.poll import sync_folders
-
-    init_db()
-
-    class FakeClient:
-        def list_folders(self):
-            return [{"id": "team", "name": "Team", "position": 2, "raw": {"id": "team"}}]
-
-    assert sync_folders(FakeClient()) == 1
-    with session_scope() as session:
-        assert session.get(PlaudFolder, "team").name == "Team"

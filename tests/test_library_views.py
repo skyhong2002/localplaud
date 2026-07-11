@@ -124,22 +124,6 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     assert "Source 1" in r.text  # capture-source facet
 
 
-def test_sidebar_folder_filters_files(monkeypatch, tmp_path):
-    c = _client(monkeypatch, tmp_path)
-    _seed()
-    from localplaud.db.models import PlaudFolder
-    from localplaud.db.session import session_scope
-
-    with session_scope() as session:
-        session.add(PlaudFolder(id="work", name="Work", position=0))
-        row = session.get(__import__("localplaud.db.models", fromlist=["PlaudFile"]).PlaudFile, "b")
-        row.raw = {"filetag_id_list": ["work"]}
-
-    page = c.get("/file-list?categoryId=allFiles&folder=work")
-    assert page.status_code == 200
-    assert "Work" in page.text and "Bravo call" in page.text
-    assert "Alpha meeting" not in page.text
-    assert _ids(c, "?folder=work") == ["b"]
 
 
 def test_index_trash_view_shows_banner(monkeypatch, tmp_path):
