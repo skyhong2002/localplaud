@@ -56,7 +56,7 @@ def match_rule(rule: AutomationRule, recording: PlaudFile) -> tuple[bool, list[s
             return False, []
         reasons.append(f"source={origin}")
     if keyword := str(trigger.get("title_contains") or "").strip():
-        if keyword.casefold() not in (recording.filename or "").casefold():
+        if keyword.casefold() not in recording.display_title.casefold():
             return False, []
         reasons.append(f'title contains "{keyword}"')
     duration_minutes = (recording.duration_ms or 0) / 60_000

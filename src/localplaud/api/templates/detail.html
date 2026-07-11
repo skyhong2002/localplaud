@@ -8,7 +8,12 @@
     <a class="backlink" href="/">← All files</a>
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap">
       <div>
-        <h1 class="page">{{ f.filename }}</h1>
+        <form id="recording-title-form" style="display:flex;align-items:center;gap:7px;max-width:min(680px,80vw)">
+          <input id="recording-title" value="{{ f.filename }}" maxlength="512" aria-label="Recording title" style="font:inherit;font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--fg);background:transparent;border:1px solid transparent;border-radius:6px;padding:3px 5px;min-width:180px;flex:1">
+          <button class="btn sec" type="submit" style="padding:6px 9px">Save title</button>
+          {% if f.local_title %}<button class="btn sec" id="clear-local-title" type="button" style="padding:6px 9px">Use Plaud title</button>{% endif %}
+        </form>
+        {% if f.local_title %}<div class="sub" style="font-size:11.5px;margin:2px 5px">Plaud title: {{ f.cloud_filename or 'Untitled' }}</div>{% endif %}
         <div class="sub" style="margin-top:2px">
           {{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}
           {% if f.transcript %} · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %} · {{ f.transcript.kind }}{% if f.transcript.revision %} rev {{ f.transcript.revision }}{% endif %}{% endif %}
@@ -307,6 +312,8 @@
 
 {% block scripts %}
 <script>
+  document.getElementById('recording-title-form')?.addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('recording-title'),button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:input.value})}),data=await response.json();if(response.ok)location.reload();else{button.disabled=false;button.textContent=data.detail||'Save failed';}});
+  document.getElementById('clear-local-title')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:null})});if(response.ok)location.reload();else event.currentTarget.disabled=false;});
   const findInput=document.getElementById('transcript-find');
   if(findInput){
     const segments=[...document.querySelectorAll('#transcript .seg')],count=document.getElementById('find-count');let matches=[],position=-1;

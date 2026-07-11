@@ -24,6 +24,11 @@ def migrate_organization_schema(engine: Engine) -> list[str]:
     with engine.begin() as connection:
         if "plaud_files" in existing:
             columns = {column["name"] for column in inspector.get_columns("plaud_files")}
+            if "local_title" not in columns:
+                connection.execute(
+                    text("ALTER TABLE plaud_files ADD COLUMN local_title VARCHAR(512)")
+                )
+                migrated.append("plaud_files.local_title")
             if "folder_id" not in columns:
                 connection.execute(
                     text("ALTER TABLE plaud_files ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL")

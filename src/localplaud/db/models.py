@@ -117,6 +117,7 @@ class PlaudFile(Base):
 
     # ---- Cloud metadata (from GET /file/simple/web) ----
     filename: Mapped[str] = mapped_column(String(512), default="")
+    local_title: Mapped[str | None] = mapped_column(String(512), default=None)
     fullname: Mapped[str | None] = mapped_column(String(512), default=None)
     filesize: Mapped[int | None] = mapped_column(BigInteger, default=None)
     file_md5: Mapped[str | None] = mapped_column(String(64), default=None)
@@ -191,6 +192,10 @@ class PlaudFile(Base):
     tags: Mapped[list[Tag]] = relationship(
         secondary=recording_tags, back_populates="recordings", order_by="Tag.id"
     )
+
+    @property
+    def display_title(self) -> str:
+        return self.local_title or self.filename or self.id[:12]
 
     @property
     def local_transcript(self) -> Transcript | None:

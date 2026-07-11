@@ -301,7 +301,7 @@ def list_files(limit: int = typer.Option(30, help="Max rows.")):
             )
             table.add_row(
                 r.id[:10],
-                (r.filename or "")[:32],
+                r.display_title[:32],
                 r.status.value,
                 "✓" if transcript else "",
                 "✓" if any(s.source == "local" for s in r.summaries) else "",

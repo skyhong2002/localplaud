@@ -287,6 +287,9 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Replaced the native audio control with a responsive persistent player: locally
   generated/cached waveform, click/range seek, play/pause, −10/+30 seconds, playback
   speed, keyboard controls, deep-link seeking, and active transcript synchronization.
+- ✅ Added durable local recording-title overrides with inline edit/revert. Plaud
+  keeps its latest cloud title separately; local names survive sync and consistently
+  drive library sort/search, detail, Ask/search citations, automation, CLI, and export.
 - Add file Ask suggested questions and reusable local skills (action items, task
   table, insights), plus grounded follow-ups and save-to-note.
 - ✅ Built dedicated Templates My Space and Explore surfaces with search,

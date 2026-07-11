@@ -60,7 +60,7 @@ def _recording_data(file_id: str) -> dict:
             {"title": note.title, "content": note.content_md} for note in file.user_notes
         ]
         return {
-            "title": file.filename or file.id,
+            "title": file.display_title,
             "segments": segments,
             "speaker_names": names,
             "notes": notes,

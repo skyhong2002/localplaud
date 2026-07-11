@@ -181,7 +181,7 @@ def dry_run_rule(rule_id: int, limit: int = 100) -> dict:
         for recording in recordings:
             matched, reasons = match_rule(rule, recording)
             if matched:
-                matches.append({"file_id": recording.id, "filename": recording.filename, "reasons": reasons})
+                matches.append({"file_id": recording.id, "filename": recording.display_title, "reasons": reasons})
             if len(matches) >= min(max(limit, 1), 500):
                 break
         return {"rule_id": rule_id, "matches": matches, "count": len(matches), "mutated": False}

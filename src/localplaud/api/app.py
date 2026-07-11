@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 
 from ..ask_threads import thread_to_dict
 from ..config import get_settings
@@ -125,7 +125,9 @@ def _file_summary(r: PlaudFile) -> dict:
     transcript = r.local_transcript if independent else r.transcript
     return {
         "id": r.id,
-        "filename": r.filename or r.id[:12],
+        "filename": r.display_title,
+        "cloud_filename": r.filename,
+        "local_title": r.local_title,
         "status": r.status.value,
         "duration_ms": r.duration_ms,
         "start_time_ms": r.start_time_ms,
@@ -162,7 +164,7 @@ def _base_ctx(request: Request, active: str) -> dict:
 
 _SORT_COLUMNS = {
     "recorded": PlaudFile.start_time_ms,
-    "name": PlaudFile.filename,
+    "name": func.coalesce(PlaudFile.local_title, PlaudFile.filename),
     "duration": PlaudFile.duration_ms,
 }
 _STATE_VALUES = {s.value for s in FileStatus}
@@ -225,7 +227,10 @@ def _library_query(params: dict):
     if params["view"] == "uncategorized":
         stmt = stmt.where(PlaudFile.folder_id.is_(None), ~PlaudFile.tags.any())
     if params["q"]:
-        stmt = stmt.where(PlaudFile.filename.ilike(f"%{params['q']}%"))
+        pattern = f"%{params['q']}%"
+        stmt = stmt.where(
+            or_(PlaudFile.local_title.ilike(pattern), PlaudFile.filename.ilike(pattern))
+        )
     if params["state"] is not None:
         stmt = stmt.where(PlaudFile.status == params["state"])
     if params["scene"] is not None:
@@ -322,6 +327,17 @@ class OrganizeFilesBody(BaseModel):
     folder_id: int | None = None
     add_tag_ids: list[int] = Field(default_factory=list)
     remove_tag_ids: list[int] = Field(default_factory=list)
+
+
+class RecordingTitleBody(BaseModel):
+    title: str | None = Field(default=None, max_length=512)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
 
 def _organization_item(row: Folder | Tag) -> dict:
@@ -464,6 +480,22 @@ def organize_files(body: OrganizeFilesBody) -> dict:
             existing = {tag.id for tag in row.tags}
             row.tags.extend(tags_by_id[tag_id] for tag_id in sorted(add_ids - existing))
     return {"updated": len(files)}
+
+
+@app.patch("/api/files/{file_id}/title")
+def update_recording_title(file_id: str, body: RecordingTitleBody) -> dict:
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="recording not found")
+        row.local_title = body.title
+        session.flush()
+        return {
+            "file_id": row.id,
+            "title": row.display_title,
+            "local_title": row.local_title,
+            "cloud_title": row.filename,
+        }
 
 
 # --------------------------------------------------------------------------- #
@@ -806,7 +838,9 @@ def file_detail(
             }
         f = {
             "id": r.id,
-            "filename": r.filename or r.id[:12],
+            "filename": r.display_title,
+            "cloud_filename": r.filename,
+            "local_title": r.local_title,
             "status": r.status.value,
             "duration_ms": r.duration_ms,
             "start_time_ms": r.start_time_ms,
@@ -945,7 +979,10 @@ def status_page(request: Request):
         )
         recent_stage_issues = list(
             session.execute(
-                select(StageRun, PlaudFile.filename)
+                select(
+                    StageRun,
+                    func.coalesce(PlaudFile.local_title, PlaudFile.filename),
+                )
                 .join(PlaudFile, PlaudFile.id == StageRun.file_id)
                 .where(StageRun.status.in_([StageStatus.degraded, StageStatus.failed]))
                 .order_by(StageRun.updated_at.desc())
@@ -1028,7 +1065,7 @@ def notes_page(request: Request):
             if row.file_id and row.file_id not in file_names:
                 recording = session.get(PlaudFile, row.file_id)
                 if recording is not None:
-                    file_names[row.file_id] = recording.filename
+                    file_names[row.file_id] = recording.display_title
         notes = [
             {
                 "id": row.id,

@@ -72,7 +72,7 @@ def retrieve(
                     "end": c.end,
                     "speaker": c.speaker,
                     "file_id": c.file_id,
-                    "filename": f.filename if f else c.file_id,
+                    "filename": f.display_title if f else c.file_id,
                 }
             )
     return results

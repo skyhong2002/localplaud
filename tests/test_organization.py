@@ -49,9 +49,12 @@ def test_additive_organization_migration_is_idempotent(tmp_path):
     second = migrate_organization_schema(engine)
     inspector = inspect(engine)
     assert "plaud_files.folder_id" in first
+    assert "plaud_files.local_title" in first
     assert second == []
     assert {"folders", "tags", "recording_tags"}.issubset(inspector.get_table_names())
-    assert "folder_id" in {column["name"] for column in inspector.get_columns("plaud_files")}
+    assert {"folder_id", "local_title"} <= {
+        column["name"] for column in inspector.get_columns("plaud_files")
+    }
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT id FROM plaud_files")) == "kept"
 

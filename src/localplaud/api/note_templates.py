@@ -245,7 +245,7 @@ def recording_note_template_recommendation(file_id: str) -> dict:
         recording = session.get(PlaudFile, file_id)
         if recording is None:
             raise HTTPException(status_code=404, detail="recording not found")
-        title, duration_ms = recording.filename or "", recording.duration_ms
+        title, duration_ms = recording.display_title, recording.duration_ms
     loaded = _load_transcript(file_id, get_settings())
     transcript_text = loaded[0].text if loaded is not None else ""
     recommendation = recommend_template(

@@ -479,7 +479,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             from ..template_auto import recommend_template
 
             auto_recommendation = recommend_template(
-                title=row.filename or "",
+                title=row.display_title,
                 transcript=transcript.text if transcript is not None else "",
                 duration_ms=row.duration_ms,
             )

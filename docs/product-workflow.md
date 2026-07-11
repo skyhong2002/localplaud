@@ -198,6 +198,11 @@ and cached ffmpeg waveform envelopes. Playback state survives tab switches and s
 synchronized with transcript segments; seek, speed, skip, deep links, and keyboard
 controls share one audio element.
 
+Recording titles have a separate local override: editing never mutates Plaud and is
+not overwritten by later metadata sync. The latest cloud title remains visible and
+can be restored with one action; every local user-facing/search/export surface uses
+the override consistently.
+
 ### 7. Settings and system health
 
 - Plaud OAuth and last successful sync.

@@ -44,7 +44,7 @@ def render_markdown(file_id: str) -> str:
         if file is None:
             raise ValueError(f"no such file: {file_id}")
 
-        parts: list[str] = [f"# {file.filename or file.id}", ""]
+        parts: list[str] = [f"# {file.display_title}", ""]
 
         meta: list[str] = []
         if file.start_time_ms is not None:
