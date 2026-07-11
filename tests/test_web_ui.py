@@ -10,6 +10,7 @@ def _client(monkeypatch, tmp_path):
     from localplaud.config import get_settings
 
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'ui.db'}")
+    monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "audio"))
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
     get_settings(reload=True)
@@ -152,3 +153,31 @@ def test_add_audio_explains_and_starts_browser_sync(monkeypatch, tmp_path):
     assert 'id="sync-now"' in page.text
     assert "New files appear in All files and the recent-file sidebar" in page.text
     assert c.get("/api/sync/status").status_code == 200
+
+
+def test_import_audio_appears_in_library_without_cloud(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+
+    response = c.post(
+        "/api/files/import",
+        files=[("files", ("customer-call.mp3", b"ID3-local-audio", "audio/mpeg"))],
+        data={"process": "false"},
+    )
+
+    assert response.status_code == 201
+    imported = response.json()["files"][0]
+    listing = c.get("/api/files").json()["files"]
+    assert any(row["id"] == imported["id"] and row["filename"] == "customer-call" for row in listing)
+    detail = c.get(f"/file/{imported['id']}")
+    assert detail.status_code == 200
+    assert "Turn this recording into notes" in detail.text
+
+
+def test_import_audio_rejects_non_audio_extension(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    response = c.post(
+        "/api/files/import",
+        files=[("files", ("notes.txt", b"not audio", "text/plain"))],
+        data={"process": "false"},
+    )
+    assert response.status_code == 415

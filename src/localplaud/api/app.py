@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -1445,6 +1445,72 @@ def api_sync() -> JSONResponse:
 @app.get("/api/sync/status")
 def api_sync_status() -> JSONResponse:
     return JSONResponse(dict(_sync_state))
+
+
+_IMPORT_AUDIO_EXTENSIONS = {"mp3", "m4a", "wav", "aac", "flac", "ogg", "opus", "mp4"}
+_MAX_IMPORTED_AUDIO_BYTES = 2 * 1024 * 1024 * 1024
+
+
+@app.post("/api/files/import")
+async def api_import_audio(
+    files: list[UploadFile] = File(...),  # noqa: B008 - FastAPI dependency declaration
+    process: bool = Form(default=True),  # noqa: B008 - FastAPI dependency declaration
+) -> JSONResponse:
+    """Import user-owned audio directly into localplaud, without Plaud cloud."""
+    from datetime import datetime
+    from uuid import uuid4
+
+    from ..store.files import file_dir
+
+    if not files:
+        return JSONResponse({"error": "choose at least one audio file"}, status_code=400)
+    imported: list[dict] = []
+    for upload in files:
+        display_name = Path(upload.filename or "recording").name
+        ext = Path(display_name).suffix.lstrip(".").lower()
+        if ext not in _IMPORT_AUDIO_EXTENSIONS:
+            return JSONResponse(
+                {"error": f"unsupported audio format: {display_name}"}, status_code=415
+            )
+        file_id = f"local-{uuid4().hex}"
+        destination = file_dir(file_id) / f"audio.{ext}"
+        size = 0
+        try:
+            with destination.open("wb") as output:
+                while chunk := await upload.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > _MAX_IMPORTED_AUDIO_BYTES:
+                        raise ValueError(f"audio file exceeds 2 GiB: {display_name}")
+                    output.write(chunk)
+        except (OSError, ValueError) as exc:
+            destination.unlink(missing_ok=True)
+            return JSONResponse({"error": str(exc)}, status_code=413)
+        finally:
+            await upload.close()
+
+        now = datetime.now(UTC)
+        with session_scope() as session:
+            session.add(PlaudFile(
+                id=file_id,
+                filename=Path(display_name).stem or "Imported recording",
+                fullname=display_name,
+                filesize=size,
+                start_time_ms=int(now.timestamp() * 1000),
+                status=FileStatus.downloaded,
+                audio_path=str(destination),
+                downloaded_at=now,
+                raw={"source": "local_upload", "original_filename": display_name},
+            ))
+        imported.append({"id": file_id, "filename": display_name})
+
+        if process:
+            from ..worker.pipeline import process_file
+
+            __import__("threading").Thread(
+                target=process_file, args=(file_id,), daemon=True
+            ).start()
+
+    return JSONResponse({"files": imported, "processing_started": process}, status_code=201)
 
 
 @app.get("/status", response_class=HTMLResponse)

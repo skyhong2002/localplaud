@@ -146,6 +146,9 @@
     .dialog h3 { margin:0 0 8px; font-size:19px; font-weight:600; }
     .dialog .x { position:absolute; top:14px; right:14px; background:none; border:0; color:var(--muted); cursor:pointer; font-size:16px; padding:4px 8px; border-radius:8px; }
     .dialog .x:hover { background:var(--hover); }
+    .upload-drop { border:1.5px dashed var(--border2); border-radius:12px; padding:22px; text-align:center; cursor:pointer; background:#fafafa; }
+    .upload-drop:hover, .upload-drop.drag { border-color:var(--fg2); background:var(--hover); }
+    .upload-files { margin:10px 0; font-size:12.5px; color:var(--muted); max-height:90px; overflow:auto; }
     /* workspace popover */
     .ws-menu { position:fixed; z-index:70; top:86px; left:16px; width:210px; background:#fff; border-radius:12px;
       box-shadow:var(--shadow-pop); padding:6px; }
@@ -280,7 +283,17 @@
     <div class="modal dialog" role="dialog" aria-label="Add audio">
       <button class="x" data-close>✕</button>
       <h3>Add audio</h3>
-      <p class="sub" style="margin:0 0 16px">A new recording reaches localplaud in four steps. You never need to press Plaud's Generate button.</p>
+      <p class="sub" style="margin:0 0 14px">Import audio from this computer, or sync recordings through your connected Plaud source.</p>
+      <input id="audio-file-input" type="file" accept="audio/*,.mp3,.m4a,.wav,.aac,.flac,.ogg,.opus,.mp4" multiple hidden>
+      <div class="upload-drop" id="audio-drop" tabindex="0">
+        <strong>Choose audio files</strong>
+        <div class="sub" style="font-size:12.5px;margin-top:5px">or drag and drop MP3, M4A, WAV, AAC, FLAC, OGG, OPUS or MP4</div>
+      </div>
+      <div class="upload-files" id="audio-files"></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0 14px"><input type="checkbox" id="audio-process" checked> Generate transcript and meeting notes after import</label>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><button class="btn" id="audio-import" disabled>Import</button><span class="sub" id="audio-import-status" style="font-size:13px"></span></div>
+      <div style="border-top:1px solid var(--border);padding-top:14px">
+      <p class="sub" style="margin:0 0 12px">Or record with your Plaud device and sync its raw audio. You never need to press Plaud's Generate button.</p>
       <ol style="margin:0 0 18px;padding-left:20px;display:grid;gap:10px;font-size:13.5px">
         <li><strong>Record</strong> with your Plaud device.</li>
         <li><strong>Sync</strong> it to the official Plaud app so the raw audio uploads.</li>
@@ -288,6 +301,7 @@
         <li><strong>Generate locally</strong> — transcription, speakers, notes and Ask are created by your configured localplaud pipeline.</li>
       </ol>
       <div style="display:flex;align-items:center;gap:10px"><button class="btn" id="sync-now">Sync now</button><span class="sub" id="sync-status" style="font-size:13px">New files appear in All files and the recent-file sidebar.</span></div>
+      </div>
     </div>
   </div>
 
@@ -344,6 +358,28 @@
     });
     document.getElementById('add-audio-btn').onclick = () => show(document.getElementById('add-audio-overlay'));
     document.getElementById('explore-btn').onclick = () => show(document.getElementById('explore-overlay'));
+    const audioInput=document.getElementById('audio-file-input'), audioDrop=document.getElementById('audio-drop');
+    const audioFiles=document.getElementById('audio-files'), audioImport=document.getElementById('audio-import');
+    let selectedAudio=[];
+    const setAudioFiles=files=>{ selectedAudio=[...files]; audioImport.disabled=!selectedAudio.length;
+      audioFiles.textContent=selectedAudio.map(f=>f.name).join(' · '); };
+    audioDrop.onclick=()=>audioInput.click();
+    audioDrop.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();audioInput.click();} };
+    audioInput.onchange=()=>setAudioFiles(audioInput.files);
+    audioDrop.ondragover=e=>{e.preventDefault();audioDrop.classList.add('drag');};
+    audioDrop.ondragleave=()=>audioDrop.classList.remove('drag');
+    audioDrop.ondrop=e=>{e.preventDefault();audioDrop.classList.remove('drag');setAudioFiles(e.dataTransfer.files);};
+    audioImport.onclick=async()=>{
+      const status=document.getElementById('audio-import-status'), body=new FormData();
+      selectedAudio.forEach(file=>body.append('files',file));
+      body.append('process',document.getElementById('audio-process').checked?'true':'false');
+      audioImport.disabled=true;status.textContent='Importing…';
+      try { const response=await fetch('/api/files/import',{method:'POST',body}), data=await response.json();
+        if(!response.ok) throw new Error(data.error||'Import failed');
+        status.textContent=`Imported ${data.files.length} file(s). Opening library…`;
+        location.href='/file-list?categoryId=allFiles';
+      } catch(error){status.textContent=error.message;audioImport.disabled=false;}
+    };
     document.getElementById('sync-now').onclick = async e => {
       const btn=e.currentTarget, status=document.getElementById('sync-status');
       btn.disabled=true; status.textContent='Looking for new Plaud recordings…';
