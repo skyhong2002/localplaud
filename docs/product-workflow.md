@@ -280,7 +280,8 @@ can resume from existing artifacts. Ollama embeddings have model-aware health ch
 and modern batch API support. The recordings library now supports sortable
 name/duration/recorded columns, processing-state and capture-source filters, per-row
 processing state with error/partial attention indicators, and a read-only trash
-mirror view; folders/tags, uncategorized organization, and bulk operations remain.
+mirror view. Local folders/tags, uncategorized organization, counts/filters, and
+atomic bulk organization are implemented without modifying Plaud cloud state.
 MLX large-v3-turbo is smoke-tested on SkyLabMac, and
 the code targets pyannote Community-1. Optional VAD groundwork now exists behind a
 default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-timestamp

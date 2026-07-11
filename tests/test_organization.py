@@ -129,3 +129,32 @@ def test_counts_filters_uncategorized_and_delete_cleanup(monkeypatch, tmp_path):
     assert client.delete(f"/api/tags/{tag['id']}").status_code == 200
     row = next(row for row in client.get("/api/files").json()["files"] if row["id"] == "a")
     assert row["folder"] is None and row["tags"] == []
+
+
+def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_files()
+    folder = client.post("/api/folders", json={"name": "Research"}).json()
+    tag = client.post("/api/tags", json={"name": "Interview"}).json()
+    client.post(
+        "/api/files/organize",
+        json={"file_ids": ["a"], "folder_id": folder["id"], "add_tag_ids": [tag["id"]]},
+    )
+
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "Library organization" in page.text
+    assert "Research" in page.text
+    assert "Interview" in page.text
+    assert "Uncategorized" in page.text
+    assert 'id="bulkbar"' in page.text
+    assert 'value="a"' in page.text
+
+    detail = client.get("/file/a")
+    assert detail.status_code == 200
+    assert 'href="/?folder=' in detail.text and "Research" in detail.text
+    assert 'href="/?tag=' in detail.text and "Interview" in detail.text
+
+    trash = client.get("/?view=trash")
+    assert 'id="bulkbar"' not in trash.text
+    assert "read-only recovery view" in trash.text

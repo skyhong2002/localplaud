@@ -299,30 +299,39 @@ def _require_unique_name(session, model, name: str, *, exclude_id: int | None = 
         raise HTTPException(status_code=409, detail="name already exists")
 
 
+def _organization_summary(session) -> dict:
+    folders = list(session.scalars(select(Folder).order_by(func.lower(Folder.name), Folder.id)))
+    tags = list(session.scalars(select(Tag).order_by(func.lower(Tag.name), Tag.id)))
+    folder_counts = dict(
+        session.execute(
+            select(PlaudFile.folder_id, func.count(PlaudFile.id))
+            .where(PlaudFile.is_trash.is_(False), PlaudFile.folder_id.is_not(None))
+            .group_by(PlaudFile.folder_id)
+        ).all()
+    )
+    tag_counts = dict(
+        session.execute(
+            select(recording_tags.c.tag_id, func.count(recording_tags.c.file_id))
+            .join(PlaudFile, PlaudFile.id == recording_tags.c.file_id)
+            .where(PlaudFile.is_trash.is_(False))
+            .group_by(recording_tags.c.tag_id)
+        ).all()
+    )
+    return {
+        "folders": [
+            _organization_item(row) | {"count": folder_counts.get(row.id, 0)}
+            for row in folders
+        ],
+        "tags": [
+            _organization_item(row) | {"count": tag_counts.get(row.id, 0)} for row in tags
+        ],
+    }
+
+
 @app.get("/api/organization")
 def api_organization() -> dict:
     with session_scope() as session:
-        folders = list(session.scalars(select(Folder).order_by(func.lower(Folder.name), Folder.id)))
-        tags = list(session.scalars(select(Tag).order_by(func.lower(Tag.name), Tag.id)))
-        folder_counts = dict(
-            session.execute(
-                select(PlaudFile.folder_id, func.count(PlaudFile.id))
-                .where(PlaudFile.is_trash.is_(False), PlaudFile.folder_id.is_not(None))
-                .group_by(PlaudFile.folder_id)
-            ).all()
-        )
-        tag_counts = dict(
-            session.execute(
-                select(recording_tags.c.tag_id, func.count(recording_tags.c.file_id))
-                .join(PlaudFile, PlaudFile.id == recording_tags.c.file_id)
-                .where(PlaudFile.is_trash.is_(False))
-                .group_by(recording_tags.c.tag_id)
-            ).all()
-        )
-        return {
-            "folders": [_organization_item(row) | {"count": folder_counts.get(row.id, 0)} for row in folders],
-            "tags": [_organization_item(row) | {"count": tag_counts.get(row.id, 0)} for row in tags],
-        }
+        return _organization_summary(session)
 
 
 def _create_organization_item(model, body: OrganizationItemBody) -> dict:
@@ -462,12 +471,14 @@ def index(
         files = [_file_summary(r) for r in rows]
         stats = _stats(session)
         facets = _library_facets(session, params)
+        organization = _organization_summary(session)
     ctx = _base_ctx(request, "recordings") | {
         "files": files,
         "stats": stats,
         "q": params["q"],
         "lib": params,
         "facets": facets,
+        "organization": organization,
         "states": [s.value for s in FileStatus],
         "attention_states": _ATTENTION_STATES,
     }
@@ -631,6 +642,11 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
             "can_edit": transcript is not None and (corrected is None or show_corrected),
             "summaries": summaries,
             "error": r.error,
+            "folder": _organization_item(r.folder) if r.folder is not None else None,
+            "tags": [
+                _organization_item(tag)
+                for tag in sorted(r.tags, key=lambda tag: (tag.name.casefold(), tag.id))
+            ],
             "stages": [
                 {
                     "name": stage.stage.value,

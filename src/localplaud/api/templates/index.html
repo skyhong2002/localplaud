@@ -5,6 +5,8 @@
 {%- if q %}&amp;q={{ q | urlencode }}{% endif -%}
 {%- if state %}&amp;state={{ state | urlencode }}{% endif -%}
 {%- if scene is not none and scene != '' %}&amp;scene={{ scene }}{% endif -%}
+{%- if lib.folder is not none %}&amp;folder={{ lib.folder }}{% endif -%}
+{%- if lib.tag is not none %}&amp;tag={{ lib.tag }}{% endif -%}
 {%- endmacro -%}
 
 {%- macro sorth(col, label) -%}
@@ -45,6 +47,35 @@
   .rectable .num { text-align:right; font-variant-numeric:tabular-nums; }
   .attn-dot { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; margin-left:6px;
     border-radius:50%; background:var(--warn); color:#fff; font-size:10px; font-weight:800; vertical-align:middle; }
+  .select-cell { width:34px; text-align:center !important; }
+  .select-cell input { width:15px; height:15px; accent-color:var(--blue); cursor:pointer; }
+  .orgline { display:flex; gap:5px; flex-wrap:wrap; margin-top:5px; }
+  .orgpill { display:inline-flex; align-items:center; gap:4px; max-width:150px; padding:1px 6px; border-radius:999px;
+    border:1px solid var(--border2); color:var(--muted); font-size:10.5px; font-weight:600; }
+  .orgpill.folder::before { content:'▰'; color:var(--c,var(--blue)); }
+  .orgpill.tag::before { content:'•'; color:var(--c,var(--purple)); font-size:16px; line-height:8px; }
+  .orgbox { margin:14px 0 4px; padding:12px 13px; border:1px solid var(--border); border-radius:var(--radius); background:var(--panel2); }
+  .orgrow { display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  .orgrow:first-child { margin-top:0; }
+  .orgrow .lbl { width:52px; flex:none; }
+  .quickadd { margin-left:auto; position:relative; }
+  .quickadd summary { list-style:none; cursor:pointer; color:var(--blue); font-size:11.5px; font-weight:650; }
+  .quickadd summary::-webkit-details-marker { display:none; }
+  .quickadd form { position:absolute; right:0; top:24px; z-index:5; display:flex; gap:6px; width:260px; padding:9px;
+    border:1px solid var(--border2); border-radius:10px; background:var(--panel); box-shadow:var(--shadow); }
+  .quickadd input { min-width:0; flex:1; border:1px solid var(--border2); border-radius:7px; padding:7px 9px;
+    background:var(--panel); color:var(--fg); }
+  .quickadd button { padding:7px 10px; border:0; border-radius:7px; background:var(--blue); color:white; font-weight:650; cursor:pointer; }
+  .bulkbar { position:sticky; top:-1px; z-index:4; display:none; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0 8px;
+    padding:9px 11px; border:1px solid var(--blue-br); border-radius:10px; background:var(--blue-soft); box-shadow:var(--shadow); }
+  .bulkbar.on { display:flex; }
+  .bulkbar strong { color:var(--blue); margin-right:auto; }
+  .bulkbar select { max-width:180px; border:1px solid var(--border2); border-radius:7px; padding:7px 9px;
+    background:var(--panel); color:var(--fg); }
+  .bulkbar button { border:0; border-radius:7px; padding:7px 11px; background:var(--blue); color:#fff; font-weight:650; cursor:pointer; }
+  .bulkbar .clear { background:transparent; color:var(--muted); padding-inline:5px; }
+  .bulkmsg { width:100%; color:var(--muted); font-size:11.5px; display:none; }
+  .bulkmsg.on { display:block; }
 
   .banner { border:1px solid var(--border2); background:var(--panel2); border-radius:var(--radius);
     padding:11px 14px; margin:12px 0; font-size:13px; color:var(--muted); }
@@ -61,6 +92,9 @@
     .rectable .nm { max-width:none; text-align:right; }
     .rectable .num { text-align:right; }
     .rectable tbody tr.attn td:first-child { box-shadow:inset 3px 0 0 var(--warn); }
+    .rectable tbody td.select-cell { justify-content:flex-start; }
+    .rectable tbody td.select-cell::before { display:none; }
+    .quickadd { margin-left:0; }
   }
 </style>
 <div class="shell">
@@ -83,6 +117,33 @@
     </form>
     <div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">thinking…</div>
     <div id="answer"></div>
+
+    <div class="orgbox" aria-label="Library organization">
+      <div class="orgrow">
+        <span class="lbl">Folders</span>
+        <a class="fchip {% if lib.folder is none %}on{% endif %}" href="/?view=all">All</a>
+        {% for folder in organization.folders %}
+        <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="/?view=all&amp;folder={{ folder.id }}">
+          {{ folder.name }} <span class="n">{{ folder.count }}</span>
+        </a>
+        {% endfor %}
+        <details class="quickadd"><summary>+ Folder</summary>
+          <form data-create-kind="folders"><input name="name" maxlength="80" placeholder="Folder name" required><button>Add</button></form>
+        </details>
+      </div>
+      <div class="orgrow">
+        <span class="lbl">Tags</span>
+        <a class="fchip {% if lib.tag is none %}on{% endif %}" href="/?view=all">All</a>
+        {% for tag in organization.tags %}
+        <a class="fchip {% if lib.tag == tag.id %}on{% endif %}" href="/?view=all&amp;tag={{ tag.id }}">
+          {{ tag.name }} <span class="n">{{ tag.count }}</span>
+        </a>
+        {% endfor %}
+        <details class="quickadd"><summary>+ Tag</summary>
+          <form data-create-kind="tags"><input name="name" maxlength="80" placeholder="Tag name" required><button>Add</button></form>
+        </details>
+      </div>
+    </div>
 
     <div class="libbar">
       <div class="filtrow">
@@ -109,6 +170,8 @@
         <span class="lbl">View</span>
         <a class="fchip {% if lib.view == 'all' %}on{% endif %}"
            href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'all') }}">All files</a>
+        <a class="fchip {% if lib.view == 'uncategorized' %}on{% endif %}"
+           href="/?view=uncategorized">Uncategorized</a>
         <a class="fchip trash {% if lib.view == 'trash' %}on{% endif %}"
            href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'trash') }}">🗑 Trash <span class="n">{{ facets.trash_count }}</span></a>
       </div>
@@ -125,16 +188,31 @@
     <div class="empty"><div class="big">🎙️</div>
       {% if lib.view == 'trash' %}
         Nothing in trash.
-      {% elif lib.q or lib.state or lib.scene is not none %}
+      {% elif lib.q or lib.state or lib.scene is not none or lib.folder is not none or lib.tag is not none or lib.view == 'uncategorized' %}
         No recordings match these filters.
       {% else %}
         No recordings yet.<br>Run <code>localplaud auth import</code> then <code>localplaud poll --once</code> to sync.
       {% endif %}
     </div>
     {% else %}
+    {% if lib.view != 'trash' %}
+    <div class="bulkbar" id="bulkbar">
+      <strong><span id="selected-count">0</span> selected</strong>
+      <select id="bulk-action" aria-label="Organization action">
+        <option value="folder">Move to folder</option>
+        <option value="add-tag">Add tag</option>
+        <option value="remove-tag">Remove tag</option>
+      </select>
+      <select id="bulk-target" aria-label="Folder or tag"></select>
+      <button type="button" id="bulk-apply">Apply</button>
+      <button type="button" class="clear" id="bulk-clear">Clear</button>
+      <div class="bulkmsg" id="bulk-message" role="status"></div>
+    </div>
+    {% endif %}
     <table class="rectable">
       <thead>
         <tr>
+          {% if lib.view != 'trash' %}<th class="select-cell"><input id="select-all" type="checkbox" aria-label="Select all visible recordings"></th>{% endif %}
           <th>{{ sorth('name', 'Name') }}</th>
           <th>Source</th>
           <th>State</th>
@@ -145,8 +223,13 @@
       <tbody>
         {% for f in files %}
         <tr class="{% if f.needs_attention %}attn{% endif %}">
+          {% if lib.view != 'trash' %}<td class="select-cell"><input class="row-select" type="checkbox" value="{{ f.id }}" aria-label="Select {{ f.filename }}"></td>{% endif %}
           <td data-label="Name">
             <a class="nm" href="/file/{{ f.id }}">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="Needs attention — {{ f.status }}">!</span>{% endif %}</a>
+            {% if f.folder or f.tags %}<div class="orgline">
+              {% if f.folder %}<span class="orgpill folder" style="--c:{{ f.folder.color or 'var(--blue)' }}">{{ f.folder.name }}</span>{% endif %}
+              {% for tag in f.tags %}<span class="orgpill tag" style="--c:{{ tag.color or 'var(--purple)' }}">{{ tag.name }}</span>{% endfor %}
+            </div>{% endif %}
           </td>
           <td data-label="Source" class="src">{{ f.scene_label }}</td>
           <td data-label="State"><span class="st {{ f.status }}">{{ f.status }}</span></td>
@@ -159,4 +242,94 @@
     {% endif %}
   </div></section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const folders = {{ organization.folders | tojson }};
+  const tags = {{ organization.tags | tojson }};
+  const checks = [...document.querySelectorAll('.row-select')];
+  const all = document.getElementById('select-all');
+  const bar = document.getElementById('bulkbar');
+  const count = document.getElementById('selected-count');
+  const action = document.getElementById('bulk-action');
+  const target = document.getElementById('bulk-target');
+  const apply = document.getElementById('bulk-apply');
+  const clear = document.getElementById('bulk-clear');
+  const message = document.getElementById('bulk-message');
+
+  function selected() { return checks.filter(c => c.checked).map(c => c.value); }
+  function sync() {
+    const n = selected().length;
+    if (count) count.textContent = n;
+    if (bar) bar.classList.toggle('on', n > 0);
+    if (all) { all.checked = n > 0 && n === checks.length; all.indeterminate = n > 0 && n < checks.length; }
+  }
+  function targets() {
+    if (!target || !action) return;
+    const isFolder = action.value === 'folder';
+    const items = isFolder ? folders : tags;
+    target.innerHTML = '';
+    if (isFolder) target.add(new Option('No folder', ''));
+    for (const item of items) target.add(new Option(item.name, String(item.id)));
+    target.disabled = !isFolder && !items.length;
+    if (apply) apply.disabled = !isFolder && !items.length;
+  }
+  function show(text, error=false) {
+    if (!message) return;
+    message.textContent = text;
+    message.style.color = error ? 'var(--red)' : 'var(--muted)';
+    message.classList.add('on');
+  }
+  checks.forEach(c => c.addEventListener('change', sync));
+  all?.addEventListener('change', () => { checks.forEach(c => c.checked = all.checked); sync(); });
+  clear?.addEventListener('click', () => { checks.forEach(c => c.checked = false); sync(); });
+  action?.addEventListener('change', targets);
+  targets();
+
+  apply?.addEventListener('click', async () => {
+    const fileIds = selected();
+    if (!fileIds.length) return;
+    const body = {file_ids: fileIds};
+    if (action.value === 'folder') body.folder_id = target.value ? Number(target.value) : null;
+    if (action.value === 'add-tag') body.add_tag_ids = [Number(target.value)];
+    if (action.value === 'remove-tag') body.remove_tag_ids = [Number(target.value)];
+    apply.disabled = true;
+    show('Saving organization…');
+    try {
+      const response = await fetch('/api/files/organize', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Could not organize recordings');
+      show(`${data.updated} recording${data.updated === 1 ? '' : 's'} updated.`);
+      window.setTimeout(() => window.location.reload(), 350);
+    } catch (error) {
+      show(error.message, true);
+      apply.disabled = false;
+    }
+  });
+
+  document.querySelectorAll('[data-create-kind]').forEach(form => {
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = form.querySelector('button');
+      const name = new FormData(form).get('name');
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/${form.dataset.createKind}`, {
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail?.[0]?.msg || data.detail || 'Could not create item');
+        window.location.href = `/?view=all&${form.dataset.createKind === 'folders' ? 'folder' : 'tag'}=${data.id}`;
+      } catch (error) {
+        button.disabled = false;
+        window.alert(error.message);
+      }
+    });
+  });
+})();
+</script>
 {% endblock %}

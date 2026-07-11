@@ -14,6 +14,10 @@
           {% if f.transcript %} · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %} · {{ f.transcript.kind }}{% if f.transcript.revision %} rev {{ f.transcript.revision }}{% endif %}{% endif %}
           · <span class="st {{ f.status }}">{{ f.status }}</span>
         </div>
+        {% if f.folder or f.tags %}<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:7px">
+          {% if f.folder %}<a class="chip on" href="/?folder={{ f.folder.id }}">▰ {{ f.folder.name }}</a>{% endif %}
+          {% for tag in f.tags %}<a class="chip" href="/?tag={{ tag.id }}">● {{ tag.name }}</a>{% endfor %}
+        </div>{% endif %}
       </div>
       <div style="display:flex; gap:7px">
         {% if f.transcript or f.summaries %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:8px 12px; font-size:13px">Export</a>{% endif %}

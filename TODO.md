@@ -258,8 +258,11 @@ embedding raw provider credentials or model settings in each rule.
   indicators, processing-state and capture-source filters, an always-visible per-row
   processing state, error/partial attention indicators, and a read-only trash mirror
   view with count (localplaud never deletes cloud data). `/` and `/api/files` share
-  the sort/state/scene/view params and fall back safely on bad input. Bulk selection,
-  folders/tags, and uncategorized organization still remain.
+  the sort/state/scene/view params and fall back safely on bad input.
+- ✅ Added local folders and tags with additive legacy-DB migration, guarded CRUD,
+  counts and filters, a true uncategorized view, deterministic metadata in the JSON
+  API, folder/tag pills on library and detail views, and atomic multi-recording bulk
+  move/add/remove controls. Organization never mutates Plaud cloud or trash state.
 - ✅ (partial) Explicit raw-ASR versus corrected-canonical transcript switch with
   synchronized timestamps/speaker labels is live, and edits are preserved
   independently from the raw artifact. Remaining: transcript-local search and
