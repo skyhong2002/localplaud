@@ -45,12 +45,14 @@ def init_db() -> dict[str, int] | None:
         migrate_import_schema,
         migrate_note_template_schema,
         migrate_organization_schema,
+        migrate_pipeline_retry_schema,
         migrate_profile_snapshot_columns,
         migrate_vocabulary_schema,
     )
 
     migrate_profile_snapshot_columns(engine)
     migrate_organization_schema(engine)
+    migrate_pipeline_retry_schema(engine)
     migrate_note_template_schema(engine)
     migrate_artifact_lineage_columns(engine)
     migrate_import_schema(engine)

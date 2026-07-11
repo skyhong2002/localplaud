@@ -250,6 +250,11 @@ every optional integration. Stages retain independent status and may be retried 
 their last valid input. The UI should expose friendly aggregate states while keeping
 detailed diagnostics available.
 
+Failed and usable-partial processing cycles are retried with durable exponential
+backoff. Newly downloaded recordings remain ahead of retries in each bounded daemon
+batch; the recording UI shows the next retry or exhausted state, and an explicit
+Resume bypasses the delay and resets the consecutive-failure budget.
+
 Before work starts, localplaud resolves and persists the recording's execution
 profile. Each stage dispatches independently to its selected local runtime, cloud
 provider, or remote worker. Retries are idempotent and preserve the resolved profile

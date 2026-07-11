@@ -137,6 +137,8 @@ def test_index_failure_keeps_transcript_and_summary(monkeypatch, tmp_path):
         assert index_run.status == StageStatus.failed
         assert index_run.attempts == 1
         assert "embedding model unavailable" in index_run.error
+        assert f.pipeline_retry_count == 1
+        assert f.pipeline_next_retry_at is not None
 
 
 def test_asr_failure_marks_core_pipeline_error(monkeypatch, tmp_path):
@@ -165,6 +167,8 @@ def test_asr_failure_marks_core_pipeline_error(monkeypatch, tmp_path):
         transcribe_run = next(x for x in f.stage_runs if x.stage == StageName.transcribe)
         assert transcribe_run.status == StageStatus.failed
         assert transcribe_run.attempts == 1
+        assert f.pipeline_retry_count == 1
+        assert f.pipeline_next_retry_at is not None
 
 
 def test_pending_batch_prioritizes_newest_recordings(monkeypatch, tmp_path):

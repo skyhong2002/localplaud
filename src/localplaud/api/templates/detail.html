@@ -85,7 +85,7 @@
       <div class="sub" style="font-size:10.5px;margin-top:5px">Space play/pause · ←/→ 5 seconds · Shift+←/→ 30 seconds</div>
     </section>
     {% endif %}
-    {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}</div>{% endif %}
+    {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}<div style="font-size:11.5px;margin-top:5px">{% if f.retry.exhausted %}Automatic retries exhausted after {{ f.retry.count }} failed cycles. Resume retries immediately and resets the budget.{% elif f.retry.next_at %}Automatic retry {{ f.retry.count + 1 }} of {{ f.retry.maximum }} scheduled for {{ f.retry.next_at }}.{% else %}Resume retries immediately.{% endif %}</div></div>{% endif %}
     {% if f.stages %}
     <details class="panel" style="margin-top:12px">
       <summary style="cursor:pointer;font-weight:650">Processing details</summary>

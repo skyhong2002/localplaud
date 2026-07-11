@@ -59,6 +59,9 @@ mind_map = true                  # nested Markdown outline rendered as a tree in
 index = true                     # build embeddings for Q&A / search
 concurrency = 1                  # files processed in parallel by the worker
 files_per_cycle = 1              # daemon batch; newest first so fresh files stay responsive
+retry_max_attempts = 5           # consecutive failed cycles before manual Resume is required
+retry_base_seconds = 300         # exponential delay: 5m, 10m, 20m, …
+retry_max_seconds = 21600        # cap automatic retry delay at 6h
 summary_chunk_chars = 12000      # full transcript is hierarchically summarized above this size
 summary_template = "default"     # default | meeting | call | lecture | personal
 # "independent" (default) accepts only raw audio + metadata from Plaud and

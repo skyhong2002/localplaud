@@ -143,6 +143,33 @@ def migrate_import_schema(engine: Engine) -> list[str]:
     return ["plaud_files.origin"]
 
 
+def migrate_pipeline_retry_schema(engine: Engine) -> list[str]:
+    """Add durable pipeline retry scheduling to an existing SQLite library."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "plaud_files" not in inspector.get_table_names():
+        return []
+    columns = {item["name"] for item in inspector.get_columns("plaud_files")}
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for column, ddl in (
+            ("pipeline_retry_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("pipeline_next_retry_at", "DATETIME"),
+            ("pipeline_last_failure_at", "DATETIME"),
+        ):
+            if column not in columns:
+                connection.execute(text(f"ALTER TABLE plaud_files ADD COLUMN {column} {ddl}"))
+                migrated.append(f"plaud_files.{column}")
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_plaud_files_pipeline_next_retry_at "
+                "ON plaud_files (pipeline_next_retry_at)"
+            )
+        )
+    return migrated
+
+
 def migrate_vocabulary_schema(engine: Engine) -> list[str]:
     """Create the durable custom-vocabulary table for an existing library."""
     if engine.dialect.name != "sqlite":

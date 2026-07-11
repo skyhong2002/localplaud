@@ -356,7 +356,7 @@ def reprocess(
     """Re-run the local pipeline on one recording."""
     from .db.models import FileStatus, PlaudFile
     from .db.session import session_scope
-    from .worker.pipeline import process_file
+    from .worker.pipeline import process_file, reset_pipeline_retry
 
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
@@ -367,6 +367,7 @@ def reprocess(
             console.print(f"[red]✗[/] {file_id} has no downloaded audio")
             raise typer.Exit(1)
         r.status = FileStatus.downloaded
+        reset_pipeline_retry(r)
     process_file(file_id, force=force)
     console.print(f"[green]✓[/] reprocessed {file_id}")
 

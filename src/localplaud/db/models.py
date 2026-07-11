@@ -173,6 +173,13 @@ class PlaudFile(Base):
     wav_path: Mapped[str | None] = mapped_column(String(1024), default=None)  # converted
     downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    pipeline_retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    pipeline_next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, index=True
+    )
+    pipeline_last_failure_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
     origin: Mapped[str] = mapped_column(String(32), default="plaud", index=True)
     folder_id: Mapped[int | None] = mapped_column(
         ForeignKey("folders.id", ondelete="SET NULL"), default=None, index=True

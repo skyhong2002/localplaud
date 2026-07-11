@@ -128,6 +128,11 @@ class PipelineConfig(BaseModel):
     # The daemon yields after a small newest-first batch so fresh recordings
     # are discovered promptly instead of sitting behind a months-long backlog.
     files_per_cycle: int = 1
+    # Consecutive daemon retries for pipeline failures. A failed/partial recording
+    # becomes eligible after exponential backoff; manual Resume resets the budget.
+    retry_max_attempts: int = Field(default=5, ge=0, le=50)
+    retry_base_seconds: int = Field(default=300, ge=1, le=86_400)
+    retry_max_seconds: int = Field(default=21_600, ge=1, le=604_800)
     # Character budget per LLM call. Longer transcripts are covered through
     # hierarchical map/reduce notes instead of being truncated.
     summary_chunk_chars: int = 12_000

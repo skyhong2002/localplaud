@@ -16,10 +16,10 @@ import json
 import logging
 from contextvars import ContextVar
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import case, delete, or_, select, update
 
 from ..asr.base import Segment, Transcript, Word
 from ..config import Settings, get_settings
@@ -297,6 +297,29 @@ def _apply_speaker_display_names(
             if word.speaker:
                 word.speaker = names.get(word.speaker, word.speaker)
     return transcript
+
+
+def reset_pipeline_retry(row: PlaudFile) -> None:
+    """Reset consecutive retry state for a manual retry or a successful run."""
+    row.pipeline_retry_count = 0
+    row.pipeline_next_retry_at = None
+    row.pipeline_last_failure_at = None
+
+
+def _schedule_pipeline_retry(row: PlaudFile, settings: Settings) -> None:
+    """Persist the next exponential-backoff deadline after a failed cycle."""
+    now = datetime.now(UTC)
+    row.pipeline_retry_count = (row.pipeline_retry_count or 0) + 1
+    row.pipeline_last_failure_at = now
+    maximum = settings.pipeline.retry_max_attempts
+    if maximum <= 0 or row.pipeline_retry_count >= maximum:
+        row.pipeline_next_retry_at = None
+        return
+    delay = min(
+        settings.pipeline.retry_max_seconds,
+        settings.pipeline.retry_base_seconds * (2 ** (row.pipeline_retry_count - 1)),
+    )
+    row.pipeline_next_retry_at = now + timedelta(seconds=delay)
 
 
 def process_file(file_id: str, settings: Settings | None = None, force: bool = False) -> None:
@@ -660,8 +683,14 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
 
         with session_scope() as session:
             row = session.get(PlaudFile, file_id)
-            row.status = FileStatus.partial if partial_errors else FileStatus.done
-            row.error = "; ".join(partial_errors)[:2000] if partial_errors else None
+            if partial_errors:
+                row.status = FileStatus.partial
+                row.error = "; ".join(partial_errors)[:2000]
+                _schedule_pipeline_retry(row, settings)
+            else:
+                row.status = FileStatus.done
+                row.error = None
+                reset_pipeline_retry(row)
         log.info("Pipeline %s for %s", "partial" if partial_errors else "complete", file_id)
 
     except Exception as exc:  # noqa: BLE001
@@ -670,6 +699,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             r = session.get(PlaudFile, file_id)
             r.status = FileStatus.error
             r.error = str(exc)[:2000]
+            _schedule_pipeline_retry(r, settings)
         raise
     finally:
         _PROFILE_SNAPSHOT.reset(profile_token)
@@ -896,15 +926,32 @@ def _persist_remote_chunks(
 def process_pending(
     settings: Settings | None = None, limit: int | None = None, force: bool = False
 ) -> int:
-    """Process newest files in ``downloaded`` state, up to ``pipeline.concurrency``
-    at a time. ``limit`` bounds a daemon batch; ``None`` drains the backlog.
-    Returns the count that reached either complete or usable-partial state."""
+    """Process fresh downloads first, then due failed/partial retries.
+
+    Work runs up to ``pipeline.concurrency`` at a time. ``limit`` bounds a daemon
+    batch; ``None`` drains all currently eligible work. Returns the count that
+    reached either complete or usable-partial state.
+    """
     settings = settings or get_settings()
+    now = datetime.now(UTC)
     with session_scope() as session:
+        due_retry = (
+            PlaudFile.status.in_([FileStatus.error, FileStatus.partial])
+            & PlaudFile.audio_path.is_not(None)
+            & (PlaudFile.pipeline_retry_count < settings.pipeline.retry_max_attempts)
+            & or_(
+                PlaudFile.pipeline_next_retry_at.is_(None),
+                PlaudFile.pipeline_next_retry_at <= now,
+            )
+        )
         stmt = (
             select(PlaudFile.id)
-            .where(PlaudFile.status == FileStatus.downloaded)
-            .order_by(PlaudFile.start_time_ms.desc().nulls_last(), PlaudFile.created_at.desc())
+            .where(or_(PlaudFile.status == FileStatus.downloaded, due_retry))
+            .order_by(
+                case((PlaudFile.status == FileStatus.downloaded, 0), else_=1),
+                PlaudFile.start_time_ms.desc().nulls_last(),
+                PlaudFile.created_at.desc(),
+            )
         )
         if limit is not None:
             stmt = stmt.limit(limit)

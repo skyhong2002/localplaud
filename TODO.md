@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-11)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (268 tests passing locally).
+  Active development is merged directly to `main` (273 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -69,7 +69,9 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 - ✅ Queue is newest-first, and daemon work is bounded by configurable
   `pipeline.files_per_cycle` so fresh recordings can enter between backlog batches;
   `localplaud work --once` remains the explicit full-backlog path. Stage/status
-  counts provide progress; automatic retry backoff policy remains to be added.
+  counts provide progress. Failed and usable-partial cycles now retry automatically
+  with durable bounded exponential backoff; fresh downloads stay ahead of due
+  retries, exhaustion is visible, and manual Resume immediately resets the budget.
 
 ### P0 PRIMARY — Provider, model, and execution profiles
 

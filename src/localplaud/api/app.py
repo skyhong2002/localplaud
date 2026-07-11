@@ -126,7 +126,8 @@ templates.env.filters["mmss"] = _mmss
 
 
 def _file_summary(r: PlaudFile) -> dict:
-    independent = get_settings().pipeline.artifact_mode == "independent"
+    settings = get_settings()
+    independent = settings.pipeline.artifact_mode == "independent"
     transcript = r.local_transcript if independent else r.transcript
     return {
         "id": r.id,
@@ -140,6 +141,17 @@ def _file_summary(r: PlaudFile) -> dict:
         "scene_label": _scene_label(r.scene),
         "is_trash": r.is_trash,
         "needs_attention": r.status.value in _ATTENTION_STATES,
+        "retry": {
+            "count": r.pipeline_retry_count or 0,
+            "maximum": settings.pipeline.retry_max_attempts,
+            "next_at": (
+                r.pipeline_next_retry_at.isoformat() if r.pipeline_next_retry_at else None
+            ),
+            "exhausted": (
+                r.status.value in _ATTENTION_STATES
+                and (r.pipeline_retry_count or 0) >= settings.pipeline.retry_max_attempts
+            ),
+        },
         "has_transcript": transcript is not None,
         "has_imported_transcript": r.plaud_transcript is not None,
         "has_summary": any(s.source == "local" for s in r.summaries),
@@ -1051,6 +1063,19 @@ def file_detail(
             ),
             "summaries": summaries,
             "error": r.error,
+            "retry": {
+                "count": r.pipeline_retry_count or 0,
+                "maximum": settings.pipeline.retry_max_attempts,
+                "next_at": (
+                    r.pipeline_next_retry_at.strftime("%b %d, %Y · %H:%M:%S UTC")
+                    if r.pipeline_next_retry_at
+                    else None
+                ),
+                "exhausted": (
+                    r.status.value in _ATTENTION_STATES
+                    and (r.pipeline_retry_count or 0) >= settings.pipeline.retry_max_attempts
+                ),
+            },
             "folder": _organization_item(r.folder) if r.folder is not None else None,
             "tags": [
                 _organization_item(tag)
@@ -1197,6 +1222,10 @@ def status_page(request: Request):
         "diarize": settings.diarize.provider,
         "summary_template": settings.pipeline.summary_template,
         "files_per_cycle": settings.pipeline.files_per_cycle,
+        "retry_policy": (
+            f"{settings.pipeline.retry_max_attempts} cycles · "
+            f"{settings.pipeline.retry_base_seconds}s–{settings.pipeline.retry_max_seconds}s"
+        ),
         "poll_interval": settings.poller.interval_seconds,
     }
     ctx = _base_ctx(request, "status") | {
@@ -1486,7 +1515,7 @@ def reprocess(file_id: str, force: bool = False):
     import threading
 
     from ..db.models import FileStatus
-    from ..worker.pipeline import process_file
+    from ..worker.pipeline import process_file, reset_pipeline_retry
 
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
@@ -1495,6 +1524,7 @@ def reprocess(file_id: str, force: bool = False):
                 '<span style="color:var(--err)">no audio to reprocess</span>', status_code=400
             )
         r.status = FileStatus.downloaded
+        reset_pipeline_retry(r)
 
     threading.Thread(target=process_file, args=(file_id,), kwargs={"force": force}, daemon=True).start()
     return HTMLResponse('<span style="color:var(--warn)">re-running… refresh in a moment</span>')
