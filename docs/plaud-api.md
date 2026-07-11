@@ -30,7 +30,8 @@ All endpoints verified against a real account (2026-07-10).
     `refresh_token` in the response means "keep the old one".
   - Token cache: `~/.plaud/tokens.json` — `{access_token, refresh_token,
     token_type, expires_at}` (epoch **ms**; access token lives 24 h). Written
-    by the official CLI (`plaud login`), read + refreshed by localplaud.
+    atomically with mode `0600` by native `localplaud auth login`, compatible
+    with the official CLI, and refreshed by localplaud.
 - **Endpoints** (all GET):
   - `/open/third-party/users/current` — whoami (`id`, `email`, `nickname`).
   - `/open/third-party/files/?page=&page_size=` — listing, `{type, data:

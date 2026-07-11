@@ -35,8 +35,8 @@ Priority map:
   orchestrate proven capabilities instead of inventing a second provider system.
 
 ### ✅ DONE (2026-07-10) — Foundation: official Open API and raw audio
-`plaud.provider = "official"` (default): OAuth via the official Plaud CLI
-(`localplaud auth login` wraps it; tokens in `~/.plaud/tokens.json`,
+`plaud.provider = "official"` (default): native S256 PKCE OAuth through
+`localplaud auth login`; tokens remain official-CLI-compatible in `~/.plaud/tokens.json`,
 auto-refresh implemented in `plaud/oauth.py`, verified live — both tokens
 rotate, 24h expiry). `/open/third-party/files/{id}` supplies a signed raw-audio
 URL. The client can also import Plaud transcripts/summaries, but that capability is
@@ -379,7 +379,11 @@ embedding raw provider credentials or model settings in each rule.
   personalization, locale/preferences, vocabulary, private sync/backup, authorized
   apps/integrations, support, and version/about. Show integration scopes, health,
   last use, and revoke controls without mixing them with destructive account actions.
-- Native PKCE inside localplaud to remove the Node.js dependency from first login.
+- ✅ Added native loopback S256 PKCE inside localplaud. First login no longer needs
+  Node.js or the Plaud CLI; state, two-minute expiry, public-client exchange,
+  atomic `0600` token storage, auto-refresh, CLI-compatible schema, and actionable
+  port/denial/timeout errors are covered. Settings exposes non-secret auth status
+  and the correct local login command without offering a misleading remote callback.
 
 ### Housekeeping
 - Optional: root LaunchDaemon so production starts on boot without login (needs sudo).

@@ -76,6 +76,23 @@ def test_auth_check_without_oauth_session_fails_helpfully(monkeypatch, tmp_path)
     assert "auth login" in result.output
 
 
+def test_auth_login_uses_native_pkce_without_node(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    tokens_path = tmp_path / "tokens.json"
+    monkeypatch.setenv("LOCALPLAUD_PLAUD__OFFICIAL__TOKENS_PATH", str(tokens_path))
+    get_settings(reload=True)
+    monkeypatch.setattr(
+        "localplaud.plaud.oauth.native_login",
+        lambda config, **kwargs: config.tokens_path,
+    )
+    monkeypatch.setattr("localplaud.cli.auth_check", lambda: None)
+    result = runner.invoke(app, ["auth", "login"])
+    assert result.exit_code == 0, result.output
+    assert "Opening Plaud authorization" in result.output
+    assert "Signed in" in result.output
+    assert "Node" not in result.output and "npx" not in result.output
+
+
 def test_auth_check_apse1_without_credentials_fails_helpfully(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)  # no token/cookie anywhere
     monkeypatch.setenv("LOCALPLAUD_PLAUD__PROVIDER", "apse1")

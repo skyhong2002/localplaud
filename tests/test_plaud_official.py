@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
+import threading
 import time
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -11,7 +15,14 @@ import respx
 
 from localplaud.config import PlaudOfficialConfig
 from localplaud.plaud.client import PlaudAuthError
-from localplaud.plaud.oauth import OAuthError, OfficialTokenStore
+from localplaud.plaud.oauth import (
+    OAuthError,
+    OfficialTokenStore,
+    create_authorization_request,
+    exchange_authorization_code,
+    native_login,
+    run_loopback_callback,
+)
 from localplaud.plaud.official import PlaudOfficialClient, _parse_iso_ms, _to_dto
 
 API = "https://platform.plaud.ai/developer/api"
@@ -55,6 +66,184 @@ def test_valid_token_used_without_refresh(tmp_path):
     store = OfficialTokenStore(p, REFRESH_URL)
     assert store.get_access_token() == "tok-live"  # no HTTP mock -> would blow up
     assert store.status() == {"ok": True, "detail": "valid"}
+
+
+def test_native_pkce_request_uses_official_public_client():
+    request = create_authorization_request(
+        "https://web.plaud.ai/platform/oauth",
+        "client-public",
+        "http://localhost:8199/auth/callback",
+    )
+    params = parse_qs(urlparse(request.url).query)
+    assert params["client_id"] == ["client-public"]
+    assert params["redirect_uri"] == ["http://localhost:8199/auth/callback"]
+    assert params["response_type"] == ["code"]
+    assert params["code_challenge_method"] == ["S256"]
+    assert params["state"] == [request.state]
+    assert params["code_challenge"][0]
+    assert request.code_verifier not in request.url
+
+
+@respx.mock
+def test_native_code_exchange_persists_private_cli_compatible_tokens(tmp_path):
+    token_url = f"{API}/oauth/third-party/access-token"
+    route = respx.post(token_url).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "native-access",
+                "refresh_token": "native-refresh",
+                "token_type": "Bearer",
+                "expires_in": 86400,
+            },
+        )
+    )
+    path = tmp_path / "tokens.json"
+    store = OfficialTokenStore(path, REFRESH_URL)
+    tokens = exchange_authorization_code(
+        token_url=token_url,
+        client_id="client-public",
+        redirect_uri="http://localhost:8199/auth/callback",
+        code="auth-code",
+        code_verifier="verifier",
+        state="expected-state",
+        store=store,
+    )
+    assert tokens["access_token"] == "native-access"
+    request = route.calls[0].request
+    assert request.headers["authorization"].startswith("Basic ")
+    assert b"code_verifier=verifier" in request.content
+    assert b"state=expected-state" in request.content
+    assert json.loads(path.read_text())["refresh_token"] == "native-refresh"
+    assert os.stat(path).st_mode & 0o777 == 0o600
+
+
+@respx.mock
+def test_native_code_exchange_requires_refresh_token(tmp_path):
+    token_url = f"{API}/oauth/third-party/access-token"
+    respx.post(token_url).mock(
+        return_value=httpx.Response(200, json={"access_token": "short-lived"})
+    )
+    with pytest.raises(OAuthError, match="no refresh_token"):
+        exchange_authorization_code(
+            token_url=token_url,
+            client_id="client-public",
+            redirect_uri="http://localhost:8199/auth/callback",
+            code="auth-code",
+            code_verifier="verifier",
+            state="expected-state",
+            store=OfficialTokenStore(tmp_path / "tokens.json", REFRESH_URL),
+        )
+    assert not (tmp_path / "tokens.json").exists()
+
+
+def test_loopback_callback_ignores_wrong_state_then_exchanges():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    ready = threading.Event()
+    exchanged = []
+    errors = []
+
+    def run():
+        try:
+            run_loopback_callback(
+                expected_state="right",
+                exchange_code=exchanged.append,
+                port=port,
+                timeout=3,
+                on_listening=ready.set,
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    assert ready.wait(1)
+    wrong = httpx.get(
+        f"http://127.0.0.1:{port}/auth/callback?code=wrong&state=wrong"
+    )
+    assert wrong.status_code == 200
+    assert exchanged == []
+    success = httpx.get(
+        f"http://127.0.0.1:{port}/auth/callback?code=good&state=right"
+    )
+    thread.join(2)
+    assert success.status_code == 200
+    assert exchanged == ["good"]
+    assert errors == []
+    assert not thread.is_alive()
+
+
+def test_loopback_callback_surfaces_denial_timeout_and_busy_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        denied_port = probe.getsockname()[1]
+    ready = threading.Event()
+    errors = []
+
+    def denied_run():
+        try:
+            run_loopback_callback(
+                expected_state="right",
+                exchange_code=lambda code: None,
+                port=denied_port,
+                timeout=2,
+                on_listening=ready.set,
+            )
+        except Exception as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=denied_run)
+    thread.start()
+    assert ready.wait(1)
+    response = httpx.get(
+        f"http://127.0.0.1:{denied_port}/auth/callback"
+        "?error=access_denied&error_description=Nope&state=right"
+    )
+    thread.join(2)
+    assert response.status_code == 400
+    assert len(errors) == 1 and "denied" in str(errors[0])
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        timeout_port = probe.getsockname()[1]
+    with pytest.raises(OAuthError, match="timed out"):
+        run_loopback_callback(
+            expected_state="right",
+            exchange_code=lambda code: None,
+            port=timeout_port,
+            timeout=0.02,
+        )
+
+    with socket.socket() as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen()
+        with pytest.raises(OAuthError, match="cannot bind OAuth callback"):
+            run_loopback_callback(
+                expected_state="right",
+                exchange_code=lambda code: None,
+                port=occupied.getsockname()[1],
+                timeout=0.1,
+            )
+
+
+def test_native_login_shows_manual_url_when_browser_launch_raises(monkeypatch, tmp_path):
+    shown = []
+    monkeypatch.setattr(
+        "localplaud.plaud.oauth.run_loopback_callback",
+        lambda **kwargs: kwargs["on_listening"](),
+    )
+
+    def broken_browser(_url):
+        raise RuntimeError("no desktop")
+
+    path = native_login(
+        _cfg(tmp_path), open_browser=broken_browser, show_manual_url=shown.append
+    )
+    assert path == tmp_path / "tokens.json"
+    assert len(shown) == 1
+    assert shown[0].startswith("https://web.plaud.ai/platform/oauth?")
 
 
 @respx.mock

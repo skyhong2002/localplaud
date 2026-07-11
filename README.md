@@ -142,7 +142,7 @@ localplaud run
 
 localplaud never sees your Plaud password. The default provider is **Plaud's
 official Open API**: run `localplaud auth login` once — it opens your browser
-for OAuth (via the official Plaud CLI, Node.js ≥ 20) and caches an
+for native S256 PKCE OAuth (no Node.js required) and caches an
 auto-refreshing token set in `~/.plaud/tokens.json`. That's it; the session
 keeps itself alive.
 

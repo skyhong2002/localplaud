@@ -12,6 +12,9 @@ def _client(monkeypatch, tmp_path):
     from localplaud.config import get_settings
 
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'ui.db'}")
+    monkeypatch.setenv(
+        "LOCALPLAUD_PLAUD__OFFICIAL__TOKENS_PATH", str(tmp_path / "plaud-tokens.json")
+    )
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
     get_settings(reload=True)
@@ -166,6 +169,16 @@ def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_pat
     assert "New version" in r.text and "Edit" in r.text and "Delete" in r.text
     assert "Remote workers" in r.text and "Register worker" in r.text
     assert 'href="/templates"' in r.text
+    assert "Plaud account" in r.text
+    assert "Native S256 PKCE · no Node.js" in r.text
+    assert "localplaud auth login" in r.text
+    status = c.get("/api/plaud/auth/status").json()
+    assert status == {
+        "ok": False,
+        "detail": f"no session at {tmp_path / 'plaud-tokens.json'}",
+        "provider": "official",
+        "login_method": "native-pkce-loopback",
+    }
 
 
 def test_export_markdown_endpoint(monkeypatch, tmp_path):

@@ -1367,6 +1367,16 @@ def settings_page(request: Request):
     from ..providers.service import list_connections, list_models, list_profiles
     from ..remote.registry import list_workers
 
+    settings = get_settings()
+    from ..plaud.oauth import OfficialTokenStore
+
+    plaud_auth = OfficialTokenStore(
+        settings.plaud.official.tokens_path,
+        settings.plaud.official.refresh_url,
+        settings.plaud.official.request_timeout_seconds,
+    ).status()
+    plaud_auth["tokens_path"] = str(settings.plaud.official.tokens_path.expanduser())
+
     with session_scope() as session:
         ctx = _base_ctx(request, "settings") | {
             "connections": list_connections(session),
@@ -1405,8 +1415,26 @@ def settings_page(request: Request):
                 )
             ],
             "hardware_recommendations": hardware_recommendations(),
+            "plaud_auth": plaud_auth,
         }
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
+
+
+@app.get("/api/plaud/auth/status")
+def plaud_auth_status():
+    """Non-secret status for setup/health UI."""
+    from ..plaud.oauth import OfficialTokenStore
+
+    settings = get_settings()
+    status = OfficialTokenStore(
+        settings.plaud.official.tokens_path,
+        settings.plaud.official.refresh_url,
+        settings.plaud.official.request_timeout_seconds,
+    ).status()
+    return status | {
+        "provider": settings.plaud.provider,
+        "login_method": "native-pkce-loopback",
+    }
 
 
 @app.get("/notes", response_class=HTMLResponse)

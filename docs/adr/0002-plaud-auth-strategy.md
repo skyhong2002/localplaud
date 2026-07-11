@@ -1,6 +1,11 @@
 # ADR 0002: Plaud cloud authentication — replay a pasted browser session
 
-Status: Accepted
+Status: Superseded for primary auth; retained for optional legacy enrichment
+
+The default provider now uses Plaud's sanctioned read-only Open API and native
+loopback S256 PKCE (`localplaud auth login`). The pasted browser-session strategy
+below remains available only for optional api-apse1 enrichment fields that the Open
+API does not expose; it is not required for ordinary setup or raw-audio processing.
 
 ## Context
 

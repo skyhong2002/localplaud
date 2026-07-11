@@ -96,31 +96,23 @@ def auth_check():
 def auth_login():
     """Sign in to the official Plaud Open API (one-time browser OAuth).
 
-    Wraps the official Plaud CLI, which opens your browser and saves an
-    auto-refreshing token set to ~/.plaud/tokens.json. After this, no more
-    session pasting — localplaud keeps the session alive by itself.
+    Uses native S256 PKCE, opens your browser, and saves an auto-refreshing
+    token set compatible with the official Plaud CLI. No Node.js is required.
     """
-    import shutil
-    import subprocess
-
     settings = get_settings()
-    tokens_path = settings.plaud.official.tokens_path.expanduser()
-    if shutil.which("plaud"):
-        cmd = ["plaud", "login"]
-    elif shutil.which("npx"):
-        cmd = ["npx", "-y", "@plaud-ai/cli@latest", "login"]
-    else:
-        console.print(
-            "[red]✗[/] Needs the official Plaud CLI (Node.js ≥ 20): "
-            "run [bold]npm install -g @plaud-ai/cli && plaud login[/], "
-            f"then re-run this. Tokens land in [dim]{tokens_path}[/]."
+    from .plaud.oauth import OAuthError, native_login
+
+    console.print("Opening Plaud authorization in your browser…")
+    try:
+        tokens_path = native_login(
+            settings.plaud.official,
+            show_manual_url=lambda url: console.print(
+                f"Could not open a browser. Open this URL manually:\n[link={url}]{url}[/link]"
+            ),
         )
-        raise typer.Exit(1)
-    console.print(f"Launching [bold]{' '.join(cmd)}[/] — finish the sign-in in your browser…")
-    proc = subprocess.run(cmd)  # noqa: S603 — interactive, inherits stdio
-    if proc.returncode != 0 or not tokens_path.exists():
-        console.print("[red]✗[/] Login did not complete.")
-        raise typer.Exit(1)
+    except OAuthError as exc:
+        console.print(f"[red]✗ Login failed:[/] {exc}")
+        raise typer.Exit(1) from exc
     console.print(f"[green]✓[/] Signed in; tokens saved to [bold]{tokens_path}[/].")
     auth_check()
 

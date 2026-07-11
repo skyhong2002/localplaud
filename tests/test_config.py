@@ -49,6 +49,8 @@ def test_defaults_without_env(monkeypatch, tmp_path):
 
     assert s.asr.provider == "faster-whisper"
     assert s.plaud.auth_mode == "cookie"
+    assert s.plaud.official.client_id.startswith("client_")
+    assert s.plaud.official.redirect_uri == "http://localhost:8199/auth/callback"
     assert s.pipeline.transcribe is True
     assert s.pipeline.artifact_mode == "independent"
     assert s.pipeline.cloud_import_enabled is False

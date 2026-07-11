@@ -32,17 +32,23 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 class PlaudOfficialConfig(BaseModel):
     """The official Plaud Open API (platform.plaud.ai) with sanctioned OAuth.
 
-    The one-time browser sign-in happens through the official Plaud CLI
-    (``localplaud auth login`` wraps it); after that, localplaud reads and
-    auto-refreshes the token set in ``tokens_path``. No secrets needed for the
-    default public client.
+    The one-time browser sign-in uses localplaud's native loopback S256 PKCE;
+    after that, localplaud reads and auto-refreshes the token set in
+    ``tokens_path``. No Node.js or client secret is needed for the public client.
     """
 
     api_base: str = "https://platform.plaud.ai/developer/api"
+    authorization_url: str = "https://web.plaud.ai/platform/oauth"
+    token_url: str = (
+        "https://platform.plaud.ai/developer/api/oauth/third-party/access-token"
+    )
     refresh_url: str = (
         "https://platform.plaud.ai/developer/api/oauth/third-party/access-token/refresh"
     )
-    # Token cache written by the official CLI (`plaud login`).
+    client_id: str = "client_f9e0b214-c11f-434b-8b95-c4497d1feb81"
+    redirect_uri: str = "http://localhost:8199/auth/callback"
+    login_timeout_seconds: float = 120.0
+    # Compatible with the official CLI's token cache.
     tokens_path: Path = Path("~/.plaud/tokens.json")
     request_timeout_seconds: float = 30.0
 

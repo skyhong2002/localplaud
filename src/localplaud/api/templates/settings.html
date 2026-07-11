@@ -5,6 +5,19 @@
   <h1 class="page">Providers &amp; execution profiles</h1>
   <p class="sub">Choose exactly where each processing stage runs. Local-only profiles never send recording data outside this host.</p>
 
+  <div class="panel" style="margin-top:18px" id="plaud-account">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+      <div><strong>Plaud account</strong><div class="sub" style="font-size:12px;margin-top:3px">Read-only Open API connection used for metadata and raw audio.</div></div>
+      <span class="st {{ 'healthy' if plaud_auth.ok else 'failed' }}">{{ 'connected' if plaud_auth.ok else 'sign-in required' }}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;margin-top:12px">
+      <div class="tile"><div class="k">Session</div><div style="margin-top:4px">{{ plaud_auth.detail }}</div></div>
+      <div class="tile"><div class="k">Login method</div><div style="margin-top:4px">Native S256 PKCE · no Node.js</div></div>
+      <div class="tile"><div class="k">Token storage</div><div style="margin-top:4px;overflow-wrap:anywhere"><code>{{ plaud_auth.tokens_path }}</code></div></div>
+    </div>
+    {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">On the machine running localplaud, run <code>localplaud auth login</code>. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.</div>{% endif %}
+  </div>
+
   <div class="panel" style="margin-top:18px" id="hardware-profiles">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div><strong>Recommended for this host</strong><div class="sub" style="font-size:12px;margin-top:3px">Evidence-based local ASR profiles; no accelerator is claimed unless detected.</div></div>
