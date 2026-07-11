@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-11)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (230 tests passing locally).
+  Active development is merged directly to `main` (268 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -211,8 +211,11 @@ embedding raw provider credentials or model settings in each rule.
   notes/indexes, Ask, and Markdown export. A rename invalidates stale derived
   artifacts and re-indexes without ASR. Remaining: reconcile identities safely
   across diarization reruns because `SPEAKER_00` labels are run-local.
-- Add a custom vocabulary/correction layer for names, specialist terms, Taiwan
-  Mandarin, and Mandarin/English code-switching.
+- ✅ Added a durable custom vocabulary/correction layer for names, specialist terms,
+  Taiwan Mandarin, and Mandarin/English code-switching. Rules support language and
+  case scope, longest non-overlapping matching, Settings CRUD, and explicit library
+  application. New local ASR applies rules automatically as an immutable revision;
+  raw provider output stays untouched and dependent artifacts become visibly stale.
 - Establish a benchmark set from consented user-owned recordings: WER/CER, diarization
   error, timestamp quality, hallucination rate, runtime, and memory.
 
@@ -233,7 +236,7 @@ embedding raw provider credentials or model settings in each rule.
   a template independently, changes mark notes/maps stale for explicit Resume, remote
   workers receive the exact prompt snapshot, and generated notes/export retain the
   template version and full prompt provenance. Multiple template notes remain visible
-  as tabs. Remaining: optional automatic template selection rules.
+  as tabs; local deterministic automatic template selection is also implemented.
 - ✅ Single-file Ask: `/file/{id}/ask` answers grounded only in one recording, with
   citations rendered as playable timestamp buttons that seek the player; suggested
   grounded question chips; graceful degrade when unindexed or providers are down.
@@ -250,9 +253,9 @@ embedding raw provider credentials or model settings in each rule.
   and export, edits survive re-ASR, and each edit hides/invalidates stale notes and
   maps while rebuilding the embedding index in the background without rerunning ASR
   (notes/map regeneration stays explicit through Resume). Provenance prevents edits
-  of Plaud imports from satisfying independent mode. Remaining: transcript
-  find/replace, multi-segment/bulk edits, dependent-artifact revision links, and a
-  revision history browser.
+  of Plaud imports from satisfying independent mode. Find/replace, bulk revisions,
+  dependent-artifact lineage, revision history, and non-destructive restore are
+  implemented.
 
 ### P1 — Plaud-like Web App workflow
 

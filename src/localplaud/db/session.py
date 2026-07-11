@@ -46,6 +46,7 @@ def init_db() -> dict[str, int] | None:
         migrate_note_template_schema,
         migrate_organization_schema,
         migrate_profile_snapshot_columns,
+        migrate_vocabulary_schema,
     )
 
     migrate_profile_snapshot_columns(engine)
@@ -53,6 +54,7 @@ def init_db() -> dict[str, int] | None:
     migrate_note_template_schema(engine)
     migrate_artifact_lineage_columns(engine)
     migrate_import_schema(engine)
+    migrate_vocabulary_schema(engine)
     with Session(engine) as session:
         bootstrap_default_profile(session, get_settings())
         from ..worker.summary_templates import bootstrap_note_templates

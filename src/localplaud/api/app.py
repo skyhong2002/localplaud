@@ -34,6 +34,7 @@ from ..db.models import (
     Transcript,
     TranscriptRevision,
     UserNote,
+    VocabularyTerm,
     recording_tags,
 )
 from ..db.session import init_db, session_scope
@@ -46,6 +47,7 @@ from .note_templates import _item as note_template_item
 from .note_templates import router as note_templates_router
 from .notes import router as notes_router
 from .providers import router as providers_router
+from .vocabulary import router as vocabulary_router
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
@@ -65,6 +67,7 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
 app.include_router(providers_router)
+app.include_router(vocabulary_router)
 app.include_router(note_templates_router)
 app.include_router(notes_router)
 app.include_router(imports_router)
@@ -1244,6 +1247,21 @@ def settings_page(request: Request):
                     select(NoteTemplate)
                     .where(NoteTemplate.is_active.is_(True))
                     .order_by(NoteTemplate.name)
+                )
+            ],
+            "vocabulary_terms": [
+                {
+                    "id": item.id,
+                    "source_text": item.source_text,
+                    "replacement_text": item.replacement_text,
+                    "language": item.language,
+                    "case_sensitive": item.case_sensitive,
+                    "enabled": item.enabled,
+                }
+                for item in session.scalars(
+                    select(VocabularyTerm).order_by(
+                        VocabularyTerm.enabled.desc(), func.lower(VocabularyTerm.source_text)
+                    )
                 )
             ],
         }

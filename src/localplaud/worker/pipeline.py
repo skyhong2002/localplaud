@@ -467,6 +467,22 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                 _fail_stage(file_id, StageName.diarize, exc)
                 partial_errors.append(f"diarize: {exc}")
 
+        # Apply terminology only after ASR/diarization has produced its final raw
+        # row. This creates a revision and never mutates provider output.
+        from ..vocabulary import apply_vocabulary
+
+        vocabulary_result = apply_vocabulary(file_id, automatic=True, settings=settings)
+        if vocabulary_result.get("replacements"):
+            with session_scope() as session:
+                run = session.scalar(
+                    select(StageRun).where(
+                        StageRun.file_id == file_id,
+                        StageRun.stage == StageName.transcribe,
+                    )
+                )
+                if run is not None:
+                    run.detail = dict(run.detail or {}) | {"vocabulary": vocabulary_result}
+
         # A force rebuild may replace the raw row while preserving user edits.
         # Reload the configured canonical lane before all derived stages so notes,
         # mind maps and the search index never drift from corrected transcript UI.

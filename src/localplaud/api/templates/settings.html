@@ -28,6 +28,28 @@
     </div>
   </div>
 
+  <div class="panel" style="margin-top:16px" id="vocabulary">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <div><strong>Custom vocabulary</strong><div class="sub" style="font-size:12px">Correct names and specialist terms without changing raw ASR output.</div></div>
+      <button class="btn sec" id="apply-vocabulary" type="button" style="padding:7px 10px">Apply to library</button>
+    </div>
+    <div style="display:grid;gap:8px;margin-top:12px">
+      {% for term in vocabulary_terms %}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px;{% if not term.enabled %}opacity:.55{% endif %}">
+        <div><strong>{{ term.source_text }}</strong> → <strong>{{ term.replacement_text }}</strong><div class="sub" style="font-size:11px">{{ term.language or 'All languages' }} · {{ 'case-sensitive' if term.case_sensitive else 'ignore case' }}{% if not term.enabled %} · disabled{% endif %}</div></div>
+        <div><button class="btn sec" type="button" style="padding:6px 9px" onclick="editVocabulary({{ term.id }})">Edit</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteVocabulary({{ term.id }})">Delete</button></div>
+      </div>
+      {% else %}<div class="sub">No correction rules yet.</div>{% endfor %}
+    </div>
+    <form id="vocabulary-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
+      <input class="search-input" name="source_text" maxlength="300" placeholder="ASR writes…" required>
+      <input class="search-input" name="replacement_text" maxlength="300" placeholder="Correct to…" required>
+      <input class="search-input" name="language" maxlength="24" placeholder="Language (optional, e.g. zh)">
+      <div class="sub" style="display:flex;align-items:center;gap:14px"><label><input type="checkbox" name="case_sensitive"> Case-sensitive</label><label><input type="checkbox" name="enabled" checked> Enabled</label></div>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Add correction</button><button class="btn sec" id="cancel-vocabulary" type="button" hidden>Cancel edit</button><span id="vocabulary-result" class="sub"></span></div>
+    </form>
+  </div>
+
   <div class="panel" style="margin-top:16px">
     <strong>Model catalog</strong>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px">
@@ -153,7 +175,15 @@ const CONNECTIONS={{ connections|tojson }};
 const MODELS={{ models|tojson }};
 const PROFILES={{ profiles|tojson }};
 const NOTE_TEMPLATES={{ note_templates|tojson }};
+const VOCABULARY={{ vocabulary_terms|tojson }};
 let editingNoteTemplate=null;
+let editingVocabulary=null;
+function resetVocabulary(){editingVocabulary=null;const form=document.getElementById('vocabulary-form');form.reset();form.elements.enabled.checked=true;form.querySelector('[type=submit]').textContent='Add correction';document.getElementById('cancel-vocabulary').hidden=true;}
+function editVocabulary(id){const term=VOCABULARY.find(item=>item.id===id),form=document.getElementById('vocabulary-form');editingVocabulary=id;for(const key of ['source_text','replacement_text','language'])form.elements[key].value=term[key]||'';form.elements.case_sensitive.checked=term.case_sensitive;form.elements.enabled.checked=term.enabled;form.querySelector('[type=submit]').textContent='Save correction';document.getElementById('cancel-vocabulary').hidden=false;form.scrollIntoView({behavior:'smooth'});}
+async function deleteVocabulary(id){if(!confirm('Delete this correction rule? Existing transcript revisions remain unchanged.'))return;const response=await fetch(`/api/vocabulary/${id}`,{method:'DELETE'});if(response.ok)location.reload();else{const data=await response.json();alert(data.detail||'Delete failed');}}
+document.getElementById('cancel-vocabulary').addEventListener('click',resetVocabulary);
+document.getElementById('vocabulary-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.target,data=new FormData(form),body={source_text:data.get('source_text'),replacement_text:data.get('replacement_text'),language:data.get('language')||null,case_sensitive:data.get('case_sensitive')==='on',enabled:data.get('enabled')==='on'};const response=await fetch(editingVocabulary?`/api/vocabulary/${editingVocabulary}`:'/api/vocabulary',{method:editingVocabulary?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),result=await response.json(),out=document.getElementById('vocabulary-result');if(response.ok){out.textContent='Saved. Reloading…';location.reload();}else out.textContent=result.detail?.[0]?.msg||result.detail||'Could not save correction';});
+document.getElementById('apply-vocabulary').addEventListener('click',async event=>{if(!confirm('Apply enabled corrections to existing local transcripts? Changed summaries and indexes will be marked for regeneration.'))return;event.target.disabled=true;const out=document.getElementById('vocabulary-result');out.textContent='Applying corrections…';const response=await fetch('/api/vocabulary/apply-library',{method:'POST'}),result=await response.json();if(response.ok){out.textContent=`Updated ${result.changed} recordings · ${result.replacements} replacements`;setTimeout(()=>location.reload(),900);}else{event.target.disabled=false;out.textContent=result.detail||'Could not apply corrections';}});
 function editNoteTemplate(key){
   const t=NOTE_TEMPLATES.find(x=>x.key===key),form=document.getElementById('note-template-form');
   editingNoteTemplate=key;form.elements.name.value=t.name;form.elements.key.value=t.key;form.elements.key.disabled=true;

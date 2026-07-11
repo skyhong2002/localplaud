@@ -143,6 +143,33 @@ def migrate_import_schema(engine: Engine) -> list[str]:
     return ["plaud_files.origin"]
 
 
+def migrate_vocabulary_schema(engine: Engine) -> list[str]:
+    """Create the durable custom-vocabulary table for an existing library."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "vocabulary_terms" in inspector.get_table_names():
+        return []
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE vocabulary_terms (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                source_text VARCHAR(300) NOT NULL,
+                replacement_text VARCHAR(300) NOT NULL,
+                language VARCHAR(24),
+                case_sensitive BOOLEAN NOT NULL DEFAULT 0,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                CONSTRAINT uq_vocabulary_source_language UNIQUE (source_text, language)
+            )
+        """))
+        connection.execute(
+            text("CREATE INDEX ix_vocabulary_terms_enabled ON vocabulary_terms (enabled)")
+        )
+    return ["vocabulary_terms"]
+
+
 def migrate_profile_snapshot_columns(engine: Engine) -> list[str]:
     """Add immutable profile provenance to existing SQLite artifact tables."""
     if engine.dialect.name != "sqlite":

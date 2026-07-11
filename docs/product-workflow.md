@@ -269,6 +269,10 @@ diarization/alignment stages, not by Whisper itself.
 - Transcript edits invalidate only dependent summaries/maps/indexes, not the audio or
   ASR artifact.
 - Regeneration never silently destroys user edits.
+- Custom vocabulary rules are local, optionally language/case scoped, and apply as
+  immutable transcript revisions after ASR and diarization. They never rewrite raw
+  provider output; explicit library-wide application marks affected notes, maps, and
+  indexes stale before those artifacts can be reused.
 
 ## Export parity target
 

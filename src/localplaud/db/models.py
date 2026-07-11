@@ -90,6 +90,31 @@ class Tag(Base):
     )
 
 
+class VocabularyTerm(Base):
+    """A local, user-owned transcript correction rule.
+
+    Rules are applied as immutable transcript revisions; raw provider output is
+    never rewritten. ``language`` is optional and uses a BCP-47 prefix match.
+    """
+
+    __tablename__ = "vocabulary_terms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_text: Mapped[str] = mapped_column(String(300))
+    replacement_text: Mapped[str] = mapped_column(String(300))
+    language: Mapped[str | None] = mapped_column(String(24), default=None)
+    case_sensitive: Mapped[bool] = mapped_column(default=False)
+    enabled: Mapped[bool] = mapped_column(default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    __table_args__ = (
+        UniqueConstraint("source_text", "language", name="uq_vocabulary_source_language"),
+    )
+
+
 class StageName(enum.StrEnum):
     convert = "convert"
     transcribe = "transcribe"
