@@ -171,6 +171,10 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
     config.get_settings(reload=True)
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
+    monkeypatch.setattr(
+        "localplaud.providers.service._probe_connection",
+        lambda connection, model_key=None: (True, f"model {model_key or 'default'} ready"),
+    )
     with TestClient(app) as client:
         rejected = client.post(
             "/api/providers/connections",
@@ -210,6 +214,8 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
             },
         )
         assert model.status_code == 201
+        model_health = client.post(f"/api/providers/models/{model.json()['id']}/health")
+        assert model_health.json()["status"] == "healthy"
 
         profile = client.post(
             "/api/providers/profiles",
@@ -230,6 +236,8 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
         assert profile.status_code == 201
         profile_id = profile.json()["id"]
         assert client.delete(f"/api/providers/profiles/{profile_id}").status_code == 204
+        assert client.delete(f"/api/providers/models/{model.json()['id']}").status_code == 204
+        assert client.delete(f"/api/providers/connections/{connection_id}").status_code == 204
 
 
 def test_stage_run_snapshot_roundtrip(tmp_path):

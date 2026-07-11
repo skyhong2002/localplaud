@@ -100,9 +100,15 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
 - ✅ Added provider/model/profile CRUD APIs, connection configuration health, and a
   Settings surface for inspecting connections/profiles, testing health, and creating
   secret-reference-only connections. Raw credentials are rejected by the API.
-- Remaining: complete the visual model/profile editor and real provider model-health
-  probes, implement explicit retry/fallback/cost accounting, and build the remote GPU
-  worker protocol.
+- ✅ Connection and model health actions now execute the real provider/runtime health
+  implementation (including configured model checks) and persist checked status,
+  detail, and timestamp. Secret references resolve only from explicit `env:` names.
+- ✅ Settings can add model capabilities and construct an explicit per-stage profile;
+  the API now provides guarded create/update/delete operations for connections,
+  models, and immutable profile versions.
+- Remaining: add in-place Web editing/deletion for existing catalog entries,
+  implement explicit retry/fallback/cost accounting, and build the remote GPU worker
+  protocol.
 
 Implement this P0 in the following order:
 

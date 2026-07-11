@@ -95,6 +95,16 @@ def test_status_page_renders(monkeypatch, tmp_path):
     assert "Needs attention" in r.text and "embedding model unavailable" in r.text
 
 
+def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    r = c.get("/settings")
+    assert r.status_code == 200
+    assert "Model catalog" in r.text
+    assert "Add model" in r.text
+    assert "Create execution profile" in r.text
+    assert "Local only / no egress" in r.text
+
+
 def test_export_markdown_endpoint(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()

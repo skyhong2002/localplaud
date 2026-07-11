@@ -544,12 +544,15 @@ def status_page(request: Request):
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
-    from ..providers.service import list_connections, list_profiles
+    from ..providers.contracts import ProviderStage
+    from ..providers.service import list_connections, list_models, list_profiles
 
     with session_scope() as session:
         ctx = _base_ctx(request, "settings") | {
             "connections": list_connections(session),
+            "models": list_models(session),
             "profiles": list_profiles(session),
+            "provider_stages": [stage.value for stage in ProviderStage],
         }
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
 

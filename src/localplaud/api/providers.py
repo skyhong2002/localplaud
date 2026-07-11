@@ -6,7 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..db.session import session_scope
 from ..providers.service import (
     check_connection_health,
+    check_model_health,
     create_profile_version,
+    delete_connection,
+    delete_model,
     delete_profile,
     list_connections,
     list_models,
@@ -100,6 +103,17 @@ def connection_health(connection_id: int):
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.delete("/connections/{connection_id}", status_code=204)
+def remove_connection(connection_id: int):
+    with session_scope() as session:
+        try:
+            delete_connection(session, connection_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.get("/models")
 def models():
     with session_scope() as session:
@@ -122,6 +136,26 @@ def update_model(model_id: int, body: ModelRequest):
             return save_model(session, body.model_dump(exclude_none=True), model_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/models/{model_id}/health")
+def model_health(model_id: int):
+    with session_scope() as session:
+        try:
+            return check_model_health(session, model_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/models/{model_id}", status_code=204)
+def remove_model(model_id: int):
+    with session_scope() as session:
+        try:
+            delete_model(session, model_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/profiles")

@@ -27,6 +27,20 @@
   </div>
 
   <div class="panel" style="margin-top:16px">
+    <strong>Model catalog</strong>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px">
+      {% for m in models %}
+      <div class="tile">
+        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ m.display_name }}</strong><button class="btn sec" style="padding:5px 8px" onclick="testModel({{ m.id }})">Test</button></div>
+        <div class="sub" style="font-size:11px;margin-top:3px">{{ m.connection_key }} · <code>{{ m.model_key }}</code></div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">{% for capability in m.capabilities.stages or [] %}<span class="chip">{{ capability.stage }}</span>{% endfor %}</div>
+        <div id="model-health-{{ m.id }}" class="sub" style="font-size:11px;margin-top:7px">{{ (m.capabilities.health or {}).status or 'not tested' }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
     <strong>Execution profiles</strong>
     <div style="display:grid;gap:12px;margin-top:12px">
       {% for p in profiles %}
@@ -57,6 +71,35 @@
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Create connection</button><span id="connection-result" class="sub"></span></div>
     </form>
   </div>
+
+  <div class="panel" style="margin-top:16px">
+    <strong>Add model</strong>
+    <form id="model-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
+      <select class="search-input" name="connection_id" required>{% for c in connections %}<option value="{{ c.id }}" data-target="{{ c.execution_target }}" data-egress="{{ 'true' if c.data_egress else 'false' }}">{{ c.name }}</option>{% endfor %}</select>
+      <input class="search-input" name="model_key" placeholder="Model identifier" required>
+      <input class="search-input" name="display_name" placeholder="Display name" required>
+      <div class="sub" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">{% for stage in provider_stages %}<label><input type="checkbox" name="capability" value="{{ stage }}"> {{ stage }}</label>{% endfor %}</div>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Add model</button><span id="model-result" class="sub"></span></div>
+    </form>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <strong>Create execution profile</strong>
+    <p class="sub" style="margin:4px 0 12px">Each stage is explicit. Unsupported model/stage combinations are rejected before saving.</p>
+    <form id="profile-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <input class="search-input" name="name" placeholder="Profile name" required>
+      <input class="search-input" name="key" placeholder="Stable key, e.g. apple-local" required>
+      {% for stage in provider_stages %}
+      <label class="sub">{{ stage }}
+        <select class="search-input" name="stage-{{ stage }}" required style="margin-top:3px"><option value="">Choose model…</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
+      </label>
+      {% endfor %}
+      <label class="sub"><input type="checkbox" name="no_egress" checked> Local only / no egress</label>
+      <label class="sub"><input type="checkbox" name="is_system_default"> Make system default</label>
+      <label class="sub">Cost ceiling <input class="search-input" type="number" step="0.01" min="0" name="cost_ceiling" placeholder="Optional"></label>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Create profile</button><span id="profile-result" class="sub"></span></div>
+    </form>
+  </div>
 </div></div>
 {% endblock %}
 {% block scripts %}
@@ -66,12 +109,32 @@ async function testHealth(id){
   const r=await fetch(`/api/providers/connections/${id}/health`,{method:'POST'}); const data=await r.json();
   badge.textContent=data.status||'error'; badge.className=`st ${data.status||'error'}`;
 }
+async function testModel(id){
+  const out=document.getElementById(`model-health-${id}`);out.textContent='checking…';
+  const r=await fetch(`/api/providers/models/${id}/health`,{method:'POST'});const data=await r.json();
+  out.textContent=`${data.status||'error'} · ${data.detail||''}`;
+}
 document.getElementById('connection-form').addEventListener('submit',async e=>{
   e.preventDefault(); const f=new FormData(e.target);
   const body={name:f.get('name'),key:f.get('key'),provider_type:f.get('provider_type'),execution_target:f.get('execution_target'),data_egress:f.get('data_egress')==='on',secret_ref:f.get('secret_ref')||null,config:{}};
   const r=await fetch('/api/providers/connections',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const out=document.getElementById('connection-result');
   if(r.ok){out.textContent='Created. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not create connection';}
+});
+document.getElementById('model-form').addEventListener('submit',async e=>{
+  e.preventDefault();const f=new FormData(e.target);const select=e.target.elements.connection_id;const option=select.options[select.selectedIndex];
+  const stages=f.getAll('capability').map(stage=>({stage,languages:['*'],timestamps:stage==='transcribe'||stage==='align'?'word':'none',speaker_output:stage==='diarize',batch:true,streaming:false}));
+  const body={connection_id:Number(f.get('connection_id')),model_key:f.get('model_key'),display_name:f.get('display_name'),enabled:true,capabilities:{execution_target:option.dataset.target,data_egress:option.dataset.egress==='true',health:{status:'unknown'},stages}};
+  const r=await fetch('/api/providers/models',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const out=document.getElementById('model-result');
+  if(r.ok){out.textContent='Added. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not add model';}
+});
+document.getElementById('profile-form').addEventListener('submit',async e=>{
+  e.preventDefault();const f=new FormData(e.target),stages={};
+  {% for stage in provider_stages %}const v{{ loop.index }}=f.get('stage-{{ stage }}').split('|||');stages['{{ stage }}']={connection:v{{ loop.index }}[0],model:v{{ loop.index }}[1],options:{}};{% endfor %}
+  const noEgress=f.get('no_egress')==='on';const cost=f.get('cost_ceiling');
+  const body={name:f.get('name'),key:f.get('key'),is_system_default:f.get('is_system_default')==='on',privacy_policy:noEgress?'local-only':'allow-egress',no_egress:noEgress,cost_ceiling:cost?Number(cost):null,fallback_policy:{},stages};
+  const r=await fetch('/api/providers/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const out=document.getElementById('profile-result');
+  if(r.ok){out.textContent='Created. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not create profile';}
 });
 </script>
 {% endblock %}

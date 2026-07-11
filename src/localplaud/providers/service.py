@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from ..config import Settings
+from ..config import Settings, get_settings
 from ..db.models import (
     ExecutionProfile,
     ModelCatalogEntry,
@@ -115,7 +117,9 @@ def list_connections(session: Session) -> list[dict[str, Any]]:
 
 
 def list_models(session: Session) -> list[dict[str, Any]]:
-    return [{"id": r.id, "connection_id": r.connection_id, "model_key": r.model_key,
+    return [{"id": r.id, "connection_id": r.connection_id,
+             "connection_key": session.get(ProviderConnection, r.connection_id).key,
+             "model_key": r.model_key,
              "display_name": r.display_name, "capabilities": r.capabilities,
              "enabled": r.enabled} for r in session.scalars(
                  select(ModelCatalogEntry).order_by(ModelCatalogEntry.id))]
@@ -230,21 +234,130 @@ def save_connection(session: Session, data: dict, connection_id: int | None = No
     )
 
 
+def delete_connection(session: Session, connection_id: int) -> None:
+    row = session.get(ProviderConnection, connection_id)
+    if row is None:
+        raise LookupError("provider connection not found")
+    if session.scalar(
+        select(ModelCatalogEntry.id).where(ModelCatalogEntry.connection_id == connection_id)
+    ):
+        raise ValueError("connection still has models")
+    session.delete(row)
+
+
+def _secret_value(secret_ref: str | None) -> str | None:
+    if not secret_ref:
+        return None
+    if not secret_ref.startswith("env:"):
+        raise ValueError("unsupported secret reference; expected env:VARIABLE")
+    return os.environ.get(secret_ref.removeprefix("env:"))
+
+
+def _probe_connection(row: ProviderConnection, model_key: str | None = None) -> tuple[bool, str]:
+    """Run the selected provider's real model-aware health implementation."""
+    if row.execution_target == "remote_worker":
+        return False, "remote worker handshake not implemented"
+    family = row.key.split(":", 1)[0]
+    settings = get_settings().model_copy(deep=True)
+    secret = _secret_value(row.secret_ref)
+
+    if family == "asr":
+        from ..asr.registry import build_provider
+
+        settings.asr.provider = row.provider_type
+        cfg = getattr(settings.asr, row.provider_type.replace("-", "_"))
+        for key, value in (row.config or {}).items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+        if model_key and hasattr(cfg, "model"):
+            cfg.model = model_key
+        if secret and hasattr(cfg, "api_key"):
+            cfg.api_key = secret
+        provider = build_provider(row.provider_type, settings.asr)
+    elif family == "llm":
+        from ..llm.base import build_llm
+
+        settings.llm.provider = row.provider_type
+        cfg = getattr(settings.llm, row.provider_type.replace("-", "_"))
+        for key, value in (row.config or {}).items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+        if model_key and hasattr(cfg, "model"):
+            cfg.model = model_key
+        if secret and hasattr(cfg, "api_key"):
+            cfg.api_key = secret
+        provider = build_llm(settings.llm)
+    elif family == "embeddings":
+        from ..embeddings.base import build_embedder
+
+        settings.embeddings.provider = row.provider_type
+        cfg = getattr(settings.embeddings, row.provider_type.replace("-", "_"))
+        for key, value in (row.config or {}).items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+        if model_key and hasattr(cfg, "model"):
+            cfg.model = model_key
+        if secret and hasattr(cfg, "api_key"):
+            cfg.api_key = secret
+        provider = build_embedder(settings.embeddings)
+    elif family == "diarize":
+        from ..worker.diarize import health
+
+        settings.diarize.provider = row.provider_type
+        if model_key:
+            settings.diarize.model = model_key
+        if secret:
+            settings.diarize.hf_token = secret
+        return health(settings.diarize)
+    else:
+        return False, f"unsupported provider family: {family}"
+
+    health = getattr(provider, "health", None)
+    if callable(health):
+        result = health()
+        return result if isinstance(result, tuple) else (bool(result), "health check completed")
+    return bool(provider.available()), "provider availability check"
+
+
 def check_connection_health(session: Session, connection_id: int) -> dict:
     row = session.get(ProviderConnection, connection_id)
     if row is None:
         raise LookupError("provider connection not found")
-    if row.execution_target == "local":
-        status, detail = "healthy", "local runtime configured"
-    elif row.execution_target == "cloud" and not row.secret_ref:
-        status, detail = "degraded", "cloud connection has no secret reference"
-    elif row.execution_target == "remote_worker":
-        status, detail = "unknown", "remote worker handshake not implemented"
-    else:
-        status, detail = "healthy", "connection configuration is complete"
-    row.health = {"status": status, "detail": detail}
+    try:
+        ok, detail = _probe_connection(row)
+        status = "healthy" if ok else "degraded"
+    except Exception as exc:  # noqa: BLE001 - health must return structured degradation
+        status, detail = "unavailable", str(exc)
+    row.health = {
+        "status": status,
+        "detail": detail,
+        "checked_at": datetime.now(UTC).isoformat(),
+    }
     session.flush()
     return row.health
+
+
+def check_model_health(session: Session, model_id: int) -> dict:
+    model = session.get(ModelCatalogEntry, model_id)
+    if model is None:
+        raise LookupError("model not found")
+    connection = session.get(ProviderConnection, model.connection_id)
+    if connection is None:
+        raise LookupError("provider connection not found")
+    try:
+        ok, detail = _probe_connection(connection, model.model_key)
+        status = "healthy" if ok else "degraded"
+    except Exception as exc:  # noqa: BLE001
+        status, detail = "unavailable", str(exc)
+    capability = dict(model.capabilities or {})
+    capability["health"] = {
+        "status": status,
+        "detail": detail,
+        "checked_at": datetime.now(UTC).isoformat(),
+    }
+    model.capabilities = capability
+    session.flush()
+    return capability["health"]
 
 
 def save_model(session: Session, data: dict, model_id: int | None = None) -> dict:
@@ -265,6 +378,17 @@ def save_model(session: Session, data: dict, model_id: int | None = None) -> dic
             setattr(row, field, data[field])
     session.flush()
     return next(item for item in list_models(session) if item["id"] == row.id)
+
+
+def delete_model(session: Session, model_id: int) -> None:
+    row = session.get(ModelCatalogEntry, model_id)
+    if row is None:
+        raise LookupError("model not found")
+    if session.scalar(
+        select(ProfileStageSelection.id).where(ProfileStageSelection.model_id == model_id)
+    ):
+        raise ValueError("model is used by an execution profile")
+    session.delete(row)
 
 
 def create_profile_version(session: Session, data: dict) -> dict:
@@ -326,4 +450,4 @@ def delete_profile(session: Session, profile_id: int) -> None:
         select(RecordingProfileOverride.file_id).where(RecordingProfileOverride.profile_id == profile_id)
     ):
         raise ValueError("profile is selected by a recording")
-    session.execute(delete(ExecutionProfile).where(ExecutionProfile.id == profile_id))
+    session.delete(row)
