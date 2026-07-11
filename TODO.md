@@ -277,9 +277,10 @@ embedding raw provider credentials or model settings in each rule.
   exposes a per-recording Import audio action for metadata-only rows. Scheduled
   polling now follows the same metadata-first default.
 - ✅ (partial) Explicit raw-ASR versus corrected-canonical transcript switch with
-  synchronized timestamps/speaker labels is live, and edits are preserved
-  independently from the raw artifact. Remaining: transcript-local search and
-  find/replace.
+  synchronized timestamps/speaker labels is live. Transcript-local search provides
+  next/previous navigation, and case-aware replace-all creates one immutable bulk
+  revision while preserving raw ASR and invalidating only dependent artifacts.
+  Remaining: a revision history browser and dependent-artifact revision links.
 - Add file Ask suggested questions and reusable local skills (action items, task
   table, insights), plus grounded follow-ups and save-to-note.
 - Build template My Space and Explore surfaces with search, categories/scenarios,

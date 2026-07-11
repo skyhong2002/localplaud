@@ -99,6 +99,23 @@
         {% endif %}
       </div>
       {% endif %}
+      <div class="panel" style="padding:9px 10px;margin:5px 0 12px">
+        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+          <input id="transcript-find" class="search-input" type="search" placeholder="Find in transcript" style="flex:1;min-width:180px;padding:7px 9px">
+          <button class="btn sec" id="find-previous" type="button" style="padding:7px 10px">↑</button>
+          <button class="btn sec" id="find-next" type="button" style="padding:7px 10px">↓</button>
+          <span id="find-count" class="sub" style="font-size:12px;min-width:48px">0 results</span>
+        </div>
+        {% if f.can_edit %}
+        <div id="replace-row" style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:8px" hidden>
+          <input id="transcript-replace" class="search-input" type="text" placeholder="Replace with" style="flex:1;min-width:180px;padding:7px 9px">
+          <label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> Match case</label>
+          <button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">Replace all</button>
+          <span id="replace-result" class="sub" style="font-size:12px"></span>
+        </div>
+        <button type="button" id="toggle-replace" style="border:0;background:none;color:var(--blue);padding:6px 0 0;cursor:pointer;font-size:12px">Replace</button>
+        {% endif %}
+      </div>
       {% if f.speakers %}
       <div class="legend" id="legend">
         {% for sp in f.speakers %}
@@ -254,6 +271,16 @@
 
 {% block scripts %}
 <script>
+  const findInput=document.getElementById('transcript-find');
+  if(findInput){
+    const segments=[...document.querySelectorAll('#transcript .seg')],count=document.getElementById('find-count');let matches=[],position=-1;
+    const focusMatch=next=>{if(!matches.length)return;position=(position+next+matches.length)%matches.length;matches.forEach((segment,index)=>segment.style.outline=index===position?'2px solid var(--blue)':'');matches[position].scrollIntoView({behavior:'smooth',block:'center'});count.textContent=`${position+1} / ${matches.length}`;};
+    const search=()=>{segments.forEach(segment=>segment.style.outline='');const query=findInput.value.trim().toLocaleLowerCase();matches=query?segments.filter(segment=>segment.querySelector('.txt')?.textContent.toLocaleLowerCase().includes(query)):[];position=-1;count.textContent=`${matches.length} result${matches.length===1?'':'s'}`;if(matches.length)focusMatch(1);};
+    findInput.addEventListener('input',search);document.getElementById('find-next').onclick=()=>focusMatch(1);document.getElementById('find-previous').onclick=()=>focusMatch(-1);
+    findInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();focusMatch(event.shiftKey?-1:1);}});
+    document.getElementById('toggle-replace')?.addEventListener('click',()=>{const row=document.getElementById('replace-row');row.hidden=!row.hidden;if(!row.hidden)document.getElementById('transcript-replace').focus();});
+    document.getElementById('replace-all')?.addEventListener('click',async()=>{const output=document.getElementById('replace-result'),button=document.getElementById('replace-all');if(!findInput.value.trim()){output.textContent='Enter text to find';return;}button.disabled=true;output.textContent='Replacing…';const body=new FormData();body.set('find',findInput.value);body.set('replace',document.getElementById('transcript-replace').value);body.set('base_revision','{{ f.transcript.revision if f.transcript else 0 }}');body.set('case_sensitive',document.getElementById('replace-case').checked?'true':'false');const response=await fetch('/file/{{ f.id }}/transcript/replace',{method:'POST',body}),data=await response.json();if(response.ok&&data.replacements){output.textContent=`Replaced ${data.replacements}. Reloading…`;location.href='/file/{{ f.id }}?view=corrected';return;}output.textContent=response.ok?'No matches':(data.error||'Replace failed');button.disabled=false;});
+  }
   const exportBackdrop=document.getElementById('export-backdrop');
   document.getElementById('open-export')?.addEventListener('click',()=>{exportBackdrop.hidden=false;});
   document.getElementById('export-close')?.addEventListener('click',()=>{exportBackdrop.hidden=true;});

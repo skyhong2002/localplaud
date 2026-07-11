@@ -73,6 +73,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "embedding model unavailable" in r.text
     assert "Resume" in r.text and "Rebuild all" in r.text
     assert "Execution profile" in r.text and "Current Settings" in r.text
+    assert "Find in transcript" in r.text and "Replace all" in r.text
 
 
 def test_metadata_only_plaud_recording_offers_audio_import(monkeypatch, tmp_path):

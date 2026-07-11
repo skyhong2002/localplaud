@@ -128,6 +128,55 @@ def test_segment_edit_creates_revision_and_invalidates_index(monkeypatch, tmp_pa
         assert revs[1].segments[1]["text"] == "let us start"
 
 
+def test_find_replace_creates_one_bulk_revision(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed(with_index=True)
+    calls = _mute_reindex(monkeypatch)
+    from localplaud.db.models import Chunk, Transcript, TranscriptRevision
+    from localplaud.db.session import session_scope
+
+    response = c.post(
+        "/file/r1/transcript/replace",
+        data={
+            "find": "TEAM",
+            "replace": "everyone",
+            "base_revision": 0,
+            "case_sensitive": "false",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {"replacements": 1, "revision": 1}
+    with session_scope() as session:
+        revision = session.scalar(select(TranscriptRevision))
+        raw = session.scalar(select(Transcript).where(Transcript.file_id == "r1"))
+        assert revision.text == "hello everyone\nlet's start"
+        assert revision.note == 'replaced "TEAM" (1 occurrence(s))'
+        assert raw.text == "hello team\nlet's start"
+        assert session.query(Chunk).filter_by(file_id="r1").count() == 0
+    assert calls == ["r1"]
+
+
+def test_find_replace_no_match_and_stale_revision_are_safe(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _mute_reindex(monkeypatch)
+    no_match = c.post(
+        "/file/r1/transcript/replace",
+        data={"find": "missing", "replace": "x", "base_revision": 0},
+    )
+    assert no_match.json() == {"replacements": 0, "revision": 0}
+    c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "first edit", "base_revision": 0},
+        follow_redirects=False,
+    )
+    stale = c.post(
+        "/file/r1/transcript/replace",
+        data={"find": "start", "replace": "finish", "base_revision": 0},
+    )
+    assert stale.status_code == 409
+
+
 def test_segment_edit_validation(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()

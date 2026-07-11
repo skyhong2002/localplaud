@@ -1269,3 +1269,88 @@ def edit_transcript_segment(
         daemon=True,
     ).start()
     return RedirectResponse(url=f"/file/{file_id}", status_code=303)
+
+
+@app.post("/file/{file_id}/transcript/replace")
+def replace_transcript_text(
+    file_id: str,
+    find: str = Form(...),
+    replace: str = Form(""),
+    base_revision: int = Form(...),
+    case_sensitive: bool = Form(False),
+):
+    """Replace text across canonical segments in one immutable revision."""
+    import copy
+    import re
+    import threading
+
+    needle = find.strip()
+    if not needle:
+        return JSONResponse({"error": "find text is required"}, status_code=400)
+    if len(needle) > 500 or len(replace) > 5000:
+        return JSONResponse({"error": "find or replacement text is too long"}, status_code=400)
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        raw = _canonical_raw_row(row, get_settings())
+        corrected = _canonical_revision(row, raw)
+        if corrected is not None:
+            base_segments = corrected.segments
+            has_speakers = corrected.has_speakers
+            base_transcript_id = corrected.base_transcript_id
+            source = corrected.source
+        elif raw is not None:
+            base_segments = raw.segments
+            has_speakers = raw.has_speakers
+            base_transcript_id = raw.id
+            source = raw.source
+        else:
+            return JSONResponse({"error": "no transcript to edit"}, status_code=400)
+        current_revision = corrected.revision if corrected else 0
+        if base_revision != current_revision:
+            return JSONResponse(
+                {"error": "transcript changed; reload before replacing"}, status_code=409
+            )
+        pattern = re.compile(re.escape(needle), 0 if case_sensitive else re.IGNORECASE)
+        segments = copy.deepcopy(base_segments)
+        replacements = 0
+        for index, segment in enumerate(segments):
+            updated, count = pattern.subn(lambda _match: replace, segment.get("text") or "")
+            if count:
+                segments[index] = dict(segment) | {"text": updated, "words": []}
+                replacements += count
+        if not replacements:
+            return {"replacements": 0, "revision": current_revision}
+        next_revision = max((rev.revision for rev in row.transcript_revisions), default=0) + 1
+        joined = "\n".join(
+            (segment.get("text") or "").strip()
+            for segment in segments
+            if (segment.get("text") or "").strip()
+        )
+        session.add(
+            TranscriptRevision(
+                file_id=file_id,
+                base_transcript_id=base_transcript_id,
+                revision=next_revision,
+                source=source,
+                segments=segments,
+                text=joined,
+                has_speakers=has_speakers,
+                note=f'replaced "{needle}" ({replacements} occurrence(s))',
+            )
+        )
+        session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+        _mark_derived_stale(
+            session, file_id, (StageName.summarize, StageName.mind_map, StageName.index)
+        )
+        expected_names = display_names(session, file_id)
+    from ..worker.reindex import reindex_file
+
+    threading.Thread(
+        target=reindex_file,
+        args=(file_id,),
+        kwargs={"expected_revision": next_revision, "expected_speaker_names": expected_names},
+        daemon=True,
+    ).start()
+    return {"replacements": replacements, "revision": next_revision}
