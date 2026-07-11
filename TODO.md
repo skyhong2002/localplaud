@@ -282,7 +282,8 @@ embedding raw provider credentials or model settings in each rule.
   revision while preserving raw ASR and invalidating only dependent artifacts.
   Revision history exposes change reason/time, historical preview, current-state
   marking, and non-destructive restore-as-new-revision with stale-write protection.
-  Remaining: dependent-artifact revision links.
+  Summaries, mind maps, embedding chunks, and stage provenance now store and expose
+  the exact raw transcript id/source plus revision they consumed.
 - Add file Ask suggested questions and reusable local skills (action items, task
   table, insights), plus grounded follow-ups and save-to-note.
 - Build template My Space and Explore surfaces with search, categories/scenarios,

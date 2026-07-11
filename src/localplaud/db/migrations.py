@@ -84,6 +84,31 @@ def migrate_note_template_schema(engine: Engine) -> list[str]:
     return migrated
 
 
+def migrate_artifact_lineage_columns(engine: Engine) -> list[str]:
+    """Add canonical transcript lineage to derived artifacts."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for table in ("summaries", "chunks"):
+            if table not in tables:
+                continue
+            columns = {item["name"] for item in inspector.get_columns(table)}
+            for column, ddl in (
+                ("input_transcript_id", "INTEGER"),
+                ("input_transcript_revision", "INTEGER"),
+                ("input_transcript_source", "VARCHAR(16)"),
+            ):
+                if column not in columns:
+                    connection.execute(
+                        text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                    )
+                    migrated.append(f"{table}.{column}")
+    return migrated
+
+
 def migrate_import_schema(engine: Engine) -> list[str]:
     """Add recording origin to existing SQLite libraries."""
     if engine.dialect.name != "sqlite":

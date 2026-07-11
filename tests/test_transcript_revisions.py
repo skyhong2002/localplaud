@@ -237,6 +237,59 @@ def test_revision_restore_rejects_stale_or_unknown_revision(monkeypatch, tmp_pat
     ).status_code == 409
 
 
+def test_derived_artifacts_record_exact_transcript_revision(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _mute_reindex(monkeypatch)
+    c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "canonical revision", "base_revision": 0},
+        follow_redirects=False,
+    )
+    import localplaud.worker.index as index_mod
+    from localplaud.config import get_settings
+    from localplaud.db.models import Chunk, Summary
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import (
+        _finish_stage,
+        _load_transcript,
+        _persist_chunks,
+        _persist_summary,
+        _transcript_lineage,
+    )
+
+    monkeypatch.setattr(
+        index_mod,
+        "embed_chunks",
+        lambda chunks, settings: ([b"\x00\x00\x80?" for _ in chunks], "fake", 1),
+    )
+    settings = get_settings()
+    lineage = _transcript_lineage("r1", settings)
+    transcript, _source = _load_transcript("r1", settings)
+    _persist_summary(
+        "r1",
+        {"template": "lineage", "content_md": "# From corrected transcript"},
+        lineage,
+    )
+    from localplaud.db.models import StageName
+
+    _finish_stage("r1", StageName.summarize, artifact_source="local", detail={})
+    _persist_chunks("r1", transcript, settings, lineage)
+    with session_scope() as session:
+        summary = session.query(Summary).filter_by(file_id="r1", template="lineage").one()
+        chunk = session.query(Chunk).filter_by(file_id="r1").first()
+        assert lineage == {
+            "input_transcript_id": summary.input_transcript_id,
+            "input_transcript_revision": 1,
+            "input_transcript_source": "local",
+        }
+        assert chunk.input_transcript_id == summary.input_transcript_id
+        assert chunk.input_transcript_revision == 1
+        assert chunk.input_transcript_source == "local"
+    page = c.get("/file/r1?view=corrected")
+    assert "Generated from transcript rev 1 · local" in page.text
+
+
 def test_segment_edit_validation(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()

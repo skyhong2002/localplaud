@@ -470,6 +470,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         # Reload the configured canonical lane before all derived stages so notes,
         # mind maps and the search index never drift from corrected transcript UI.
         canonical = _load_transcript(file_id, settings)
+        transcript_lineage = _transcript_lineage(file_id, settings)
         if canonical is not None:
             transcript, transcript_source = canonical
 
@@ -494,7 +495,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         result.setdefault("model", snapshot["stages"]["summarize"].get("model"))
                     else:
                         result = summarize.summarize(transcript, summarize_settings)
-                    _persist_summary(file_id, result)
+                    _persist_summary(file_id, result, transcript_lineage)
                     _finish_stage(
                         file_id,
                         StageName.summarize,
@@ -504,6 +505,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         detail={
                             "template": result.get("template", "default"),
                             "coverage": result.get("coverage", {}),
+                            "transcript": transcript_lineage,
                         },
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript remains usable
@@ -544,14 +546,14 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         result = mindmap.generate_mind_map(
                             transcript, mind_map_settings, summary_md
                         )
-                    _persist_summary(file_id, result)
+                    _persist_summary(file_id, result, transcript_lineage)
                     _finish_stage(
                         file_id,
                         StageName.mind_map,
                         provider=result.get("provider"),
                         model=result.get("model"),
                         artifact_source="local",
-                        detail=result.get("detail", {}),
+                        detail=result.get("detail", {}) | {"transcript": transcript_lineage},
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript/notes stay usable
                     log.exception("Mind map generation failed for %s", file_id)
@@ -583,9 +585,11 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                             "embed",
                             [_remote_json_input("transcript", _transcript_payload(transcript))],
                         )
-                        model_name = _persist_remote_chunks(file_id, payload)
+                        model_name = _persist_remote_chunks(file_id, payload, transcript_lineage)
                     else:
-                        model_name = _persist_chunks(file_id, transcript, embed_settings)
+                        model_name = _persist_chunks(
+                            file_id, transcript, embed_settings, transcript_lineage
+                        )
                     _finish_stage(
                         file_id,
                         StageName.index,
@@ -596,7 +600,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         ),
                         model=model_name,
                         artifact_source="local",
-                        detail={},
+                        detail={"transcript": transcript_lineage},
                     )
                 except Exception as exc:  # noqa: BLE001 - notes remain usable
                     log.exception("Indexing failed for %s", file_id)
@@ -665,6 +669,23 @@ def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str]
             if speaker.display_name
         }
         return (_apply_speaker_display_names(transcript, names), selected.source)
+
+
+def _transcript_lineage(file_id: str, settings: Settings) -> dict | None:
+    """Identify the exact canonical transcript input used by derived stages."""
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            return None
+        raw = _select_raw_transcript(row, settings)
+        if raw is None:
+            return None
+        revision = row.corrected_transcript_for_source(raw.source)
+        return {
+            "input_transcript_id": raw.id,
+            "input_transcript_revision": revision.revision if revision else 0,
+            "input_transcript_source": raw.source,
+        }
 
 
 def _has_summary(file_id: str, template: str) -> bool:
@@ -746,7 +767,7 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> None:
         sync_speakers(session, file_id, speaker_keys_from_segments(segments))
 
 
-def _persist_summary(file_id: str, result: dict) -> None:
+def _persist_summary(file_id: str, result: dict, lineage: dict | None = None) -> None:
     template = result.get("template", "default")
     with session_scope() as session:
         session.execute(
@@ -767,12 +788,18 @@ def _persist_summary(file_id: str, result: dict) -> None:
                 llm_provider=result.get("provider"),
                 model=result.get("model"),
                 source="local",
+                **(lineage or {}),
                 resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
             )
         )
 
 
-def _persist_chunks(file_id: str, transcript: Transcript, settings: Settings) -> str | None:
+def _persist_chunks(
+    file_id: str,
+    transcript: Transcript,
+    settings: Settings,
+    lineage: dict | None = None,
+) -> str | None:
     chunks = index.build_chunks(transcript)
     if not chunks:
         return None
@@ -791,13 +818,16 @@ def _persist_chunks(file_id: str, transcript: Transcript, settings: Settings) ->
                     embedding_model=model_name,
                     dim=dim,
                     embedding=blob,
+                    **(lineage or {}),
                     resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
                 )
             )
     return model_name
 
 
-def _persist_remote_chunks(file_id: str, payload: dict) -> str | None:
+def _persist_remote_chunks(
+    file_id: str, payload: dict, lineage: dict | None = None
+) -> str | None:
     chunks = payload.get("chunks", [])
     vectors = payload.get("vectors_base64", [])
     if len(chunks) != len(vectors):
@@ -818,6 +848,7 @@ def _persist_remote_chunks(file_id: str, payload: dict) -> str | None:
                     embedding_model=model_name,
                     dim=dim,
                     embedding=base64.b64decode(encoded),
+                    **(lineage or {}),
                     resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
                 )
             )

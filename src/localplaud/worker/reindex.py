@@ -22,6 +22,7 @@ from .pipeline import (
     _load_transcript,
     _persist_chunks,
     _select_raw_transcript,
+    _transcript_lineage,
 )
 
 log = logging.getLogger(__name__)
@@ -68,14 +69,15 @@ def reindex_file(
             if loaded is None:
                 raise ValueError(f"no canonical transcript to index for {file_id}")
             transcript, _source = loaded
-            model_name = _persist_chunks(file_id, transcript, settings)
+            lineage = _transcript_lineage(file_id, settings)
+            model_name = _persist_chunks(file_id, transcript, settings, lineage)
             _finish_stage(
                 file_id,
                 StageName.index,
                 provider=settings.embeddings.provider,
                 model=model_name,
                 artifact_source="local",
-                detail={},
+                detail={"transcript": lineage},
             )
             return True
         except Exception as exc:  # noqa: BLE001 - transcript/notes remain usable

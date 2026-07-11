@@ -10,6 +10,7 @@ import localplaud.db.session as db_session
 from localplaud.api.app import app
 from localplaud.config import Settings
 from localplaud.db.migrations import (
+    migrate_artifact_lineage_columns,
     migrate_profile_snapshot_columns,
     migrate_stage_run_snapshot_column,
 )
@@ -145,6 +146,23 @@ def test_legacy_artifact_snapshot_migration(tmp_path):
             connection.execute(text(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY)"))
     assert migrate_profile_snapshot_columns(engine) == ["transcripts", "summaries", "chunks"]
     assert migrate_profile_snapshot_columns(engine) == []
+
+
+def test_legacy_artifact_lineage_migration(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-lineage.db'}")
+    with engine.begin() as connection:
+        for table in ("summaries", "chunks"):
+            connection.execute(text(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY)"))
+    migrated = migrate_artifact_lineage_columns(engine)
+    assert len(migrated) == 6
+    assert migrate_artifact_lineage_columns(engine) == []
+    for table in ("summaries", "chunks"):
+        columns = {column["name"] for column in inspect(engine).get_columns(table)}
+        assert {
+            "input_transcript_id",
+            "input_transcript_revision",
+            "input_transcript_source",
+        } <= columns
 
 
 def test_provider_read_api(monkeypatch, tmp_path):

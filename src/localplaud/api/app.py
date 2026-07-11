@@ -633,6 +633,17 @@ def file_detail(
                     or s.template.replace("-", " ").title(),
                     "template_version": s.template_version,
                     "source": s.source,
+                    "input_transcript_revision": s.input_transcript_revision,
+                    "input_transcript_source": s.input_transcript_source,
+                    "lineage_label": (
+                        "raw ASR"
+                        if s.input_transcript_revision == 0
+                        else (
+                            f"transcript rev {s.input_transcript_revision}"
+                            if s.input_transcript_revision is not None
+                            else "legacy / unknown transcript"
+                        )
+                    ),
                 }
                 for s in r.summaries
                 if not (

@@ -329,6 +329,9 @@ class Summary(Base):
     llm_provider: Mapped[str | None] = mapped_column(String(64), default=None)
     model: Mapped[str | None] = mapped_column(String(128), default=None)
     source: Mapped[str] = mapped_column(String(16), default="local")  # local | cloud
+    input_transcript_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    input_transcript_revision: Mapped[int | None] = mapped_column(Integer, default=None)
+    input_transcript_source: Mapped[str | None] = mapped_column(String(16), default=None)
     resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -454,6 +457,9 @@ class Chunk(Base):
     dim: Mapped[int | None] = mapped_column(Integer, default=None)
     # float32 vector packed as bytes; decode with numpy.frombuffer.
     embedding: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    input_transcript_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    input_transcript_revision: Mapped[int | None] = mapped_column(Integer, default=None)
+    input_transcript_source: Mapped[str | None] = mapped_column(String(16), default=None)
     resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

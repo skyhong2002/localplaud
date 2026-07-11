@@ -65,6 +65,7 @@
           <div>
             <strong>{{ stage.name }}</strong>
             {% if stage.provider %}<span class="sub"> · {{ stage.provider }}{% if stage.model %}:{{ stage.model }}{% endif %}</span>{% endif %}
+            {% if stage.detail.transcript %}<div class="sub" style="font-size:11.5px;margin-top:2px">Input: {% if stage.detail.transcript.input_transcript_revision %}transcript rev {{ stage.detail.transcript.input_transcript_revision }}{% else %}raw ASR{% endif %} · {{ stage.detail.transcript.input_transcript_source }}</div>{% endif %}
             {% if stage.error %}<div style="color:var(--red);font-size:12px;margin-top:2px">{{ stage.error }}</div>{% endif %}
           </div>
           <span class="st {{ stage.status }}">{{ stage.status }}</span>
@@ -190,7 +191,10 @@
     {% endif %}
 
     {% for s in notes %}
-    <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %} data-md>{{ s.content_md }}</div>
+    <div class="tabpanel" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %}>
+      <div class="sub" style="font-size:11.5px;margin:8px 0">Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}</div>
+      <div class="md" data-md>{{ s.content_md }}</div>
+    </div>
     {% endfor %}
 
     {% for note in f.user_notes %}
@@ -216,6 +220,7 @@
         <button type="button" class="btn sec" id="mm-collapse" style="padding:6px 10px; font-size:12px">Collapse all</button>
       </div>
       <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
+      <div class="sub" style="font-size:11.5px;margin-top:8px">Generated from {{ mindmaps[-1].lineage_label }}{% if mindmaps[-1].input_transcript_source %} · {{ mindmaps[-1].input_transcript_source }}{% endif %}</div>
       <div id="mindmap-tree" class="mindmap"></div>
     </div>
     {% endif %}
