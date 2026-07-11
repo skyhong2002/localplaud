@@ -555,6 +555,35 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class AutomationExport(Base):
+    """One durable transcript export delivery for an AutoFlow run."""
+
+    __tablename__ = "automation_exports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    automation_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_runs.id", ondelete="SET NULL"), index=True
+    )
+    file_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    format: Mapped[str] = mapped_column(String(8))
+    status: Mapped[str] = mapped_column(String(20), index=True, default="pending")
+    path: Mapped[str | None] = mapped_column(Text, default=None)
+    sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "automation_run_id", "format", name="uq_automation_export_run_format"
+        ),
+    )
+
+
 class Chunk(Base):
     """A retrievable text chunk with its embedding, for Q&A / semantic search."""
 

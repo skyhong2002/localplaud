@@ -10,6 +10,7 @@ def _client(monkeypatch, tmp_path):
     from localplaud.config import get_settings
 
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'auto.db'}")
+    monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "audio"))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
@@ -145,6 +146,14 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
         "/api/automations/rules",
         json={"name": "No action", "trigger": {}, "actions": {}},
     ).status_code == 422
+    assert client.post(
+        "/api/automations/rules",
+        json={
+            "name": "Duplicate export",
+            "trigger": {},
+            "actions": {"export_formats": ["txt", "txt"]},
+        },
+    ).status_code == 422
     page = client.get("/discover")
     assert page.status_code == 200
     assert "AutoFlow" in page.text and "Run history" in page.text
@@ -231,3 +240,110 @@ def test_notification_failure_does_not_rollback_actions_and_can_retry(
     assert retried.status_code == 200
     assert retried.json()["status"] == "delivered"
     assert client.post(f"/api/automations/runs/{run_id}/retry-notification").json() == retried.json()
+
+
+def test_autoflow_transcript_exports_are_durable_downloadable_and_idempotent(
+    monkeypatch, tmp_path
+):
+    client, _folder_id, _tag_id = _seed(monkeypatch, tmp_path)
+    from localplaud.db.models import AutomationExport, PlaudFile, Transcript
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        file = session.get(PlaudFile, "match")
+        file.transcript = Transcript(
+            provider="test-asr",
+            source="local",
+            text="hello world",
+            segments=[
+                {
+                    "text": "hello world",
+                    "start": 1.25,
+                    "end": 2.5,
+                    "speaker": "SPEAKER_00",
+                }
+            ],
+        )
+
+    rule = client.post(
+        "/api/automations/rules",
+        json={
+            "name": "Export transcript",
+            "trigger": {"origin": "plaud"},
+            "actions": {"export_formats": ["txt", "srt", "vtt"]},
+        },
+    )
+    assert rule.status_code == 201
+    rule_id = rule.json()["id"]
+    assert "export TXT/SRT/VTT" in rule.json()["sentence"]
+    assert client.post("/api/automations/run").json()["recordings_changed"] == 1
+
+    runs = client.get("/api/automations/runs").json()["runs"]
+    assert [item["format"] for item in runs[0]["exports"]] == ["srt", "txt", "vtt"]
+    assert {item["status"] for item in runs[0]["exports"]} == {"completed"}
+    txt = next(item for item in runs[0]["exports"] if item["format"] == "txt")
+    assert txt["provenance"]["transcript_source"] == "local"
+    response = client.get(f"/api/automations/exports/{txt['id']}/download")
+    assert response.status_code == 200
+    assert b"hello world" in response.content
+    assert 'filename="transcript.txt"' in response.headers["content-disposition"]
+
+    with session_scope() as session:
+        rows = session.query(AutomationExport).all()
+        assert len(rows) == 3
+        txt_path = next(row.path for row in rows if row.format == "txt")
+    assert client.post("/api/automations/run").json()["recordings_changed"] == 0
+    with session_scope() as session:
+        assert session.query(AutomationExport).count() == 3
+
+    from pathlib import Path
+
+    Path(txt_path).write_text("corrupt", encoding="utf-8")
+    assert client.get(f"/api/automations/exports/{txt['id']}/download").status_code == 409
+    retried = client.post(f"/api/automations/exports/{txt['id']}/retry").json()
+    assert retried["status"] == "completed"
+    assert b"hello world" in client.get(
+        f"/api/automations/exports/{txt['id']}/download"
+    ).content
+    assert client.delete(f"/api/automations/rules/{rule_id}").status_code == 200
+    preserved = client.get(f"/api/automations/exports/{txt['id']}/download")
+    assert preserved.status_code == 200
+    with session_scope() as session:
+        assert session.get(AutomationExport, txt["id"]).automation_run_id is None
+
+
+def test_export_failure_isolated_then_retries_after_transcript_exists(
+    monkeypatch, tmp_path
+):
+    client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
+    client.post(
+        "/api/automations/rules",
+        json={
+            "name": "Export when ready",
+            "trigger": {"origin": "plaud"},
+            "actions": {"folder_id": folder_id, "export_formats": ["srt"]},
+        },
+    )
+    assert client.post("/api/automations/run").json()["recordings_changed"] == 1
+
+    from localplaud.db.models import AutomationExport, AutomationRun, PlaudFile, Transcript
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        run = session.query(AutomationRun).one()
+        delivery = session.query(AutomationExport).one()
+        assert run.status == "completed"
+        assert delivery.status == "failed"
+        assert "no exportable transcript" in delivery.error
+        assert session.get(PlaudFile, "match").folder_id == folder_id
+        export_id = delivery.id
+        session.get(PlaudFile, "match").transcript = Transcript(
+            provider="test-asr",
+            source="local",
+            text="now ready",
+            segments=[{"text": "now ready", "start": 0, "end": 1}],
+        )
+
+    retried = client.post(f"/api/automations/exports/{export_id}/retry")
+    assert retried.status_code == 200
+    assert retried.json()["status"] == "completed"

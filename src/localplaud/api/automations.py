@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import delete, select, update
 
 from ..automations import (
+    deliver_automation_export,
     deliver_local_notification,
     evaluate_library,
     evaluate_recording,
@@ -16,7 +20,14 @@ from ..automations import (
     rule_sentence,
     validate_rule_references,
 )
-from ..db.models import AutomationRule, AutomationRun, Notification, PlaudFile
+from ..config import get_settings
+from ..db.models import (
+    AutomationExport,
+    AutomationRule,
+    AutomationRun,
+    Notification,
+    PlaudFile,
+)
 from ..db.session import session_scope
 
 router = APIRouter(prefix="/api/automations", tags=["automations"])
@@ -46,11 +57,22 @@ class ActionsBody(BaseModel):
     profile_id: int | None = Field(default=None, gt=0)
     folder_id: int | None = Field(default=None, gt=0)
     add_tag_ids: list[int] = Field(default_factory=list, max_length=20)
+    export_formats: list[Literal["txt", "srt", "vtt"]] = Field(
+        default_factory=list, max_length=3
+    )
 
     @model_validator(mode="after")
     def has_action(self):
+        if len(set(self.export_formats)) != len(self.export_formats):
+            raise ValueError("export formats must be unique")
         if not any(
-            [self.note_template_key, self.profile_id, self.folder_id, self.add_tag_ids]
+            [
+                self.note_template_key,
+                self.profile_id,
+                self.folder_id,
+                self.add_tag_ids,
+                self.export_formats,
+            ]
         ):
             raise ValueError("at least one action is required")
         return self
@@ -168,6 +190,11 @@ def delete_rule(rule_id: int) -> dict:
             raise HTTPException(status_code=404, detail="rule not found")
         run_ids = select(AutomationRun.id).where(AutomationRun.rule_id == rule_id)
         session.execute(
+            update(AutomationExport)
+            .where(AutomationExport.automation_run_id.in_(run_ids))
+            .values(automation_run_id=None)
+        )
+        session.execute(
             update(Notification)
             .where(Notification.automation_run_id.in_(run_ids))
             .values(automation_run_id=None)
@@ -206,7 +233,30 @@ def list_runs(rule_id: int | None = None, limit: int = 100) -> dict:
         if rule_id is not None:
             stmt = stmt.where(AutomationRun.rule_id == rule_id)
         rows = list(session.scalars(stmt))
-        return {"runs": [{"id": row.id, "rule_id": row.rule_id, "rule_version": row.rule_version, "file_id": row.file_id, "status": row.status, "matched": row.matched, "detail": row.detail or {}, "error": row.error, "created_at": row.created_at.isoformat()} for row in rows]}
+        output = []
+        for row in rows:
+            exports = list(
+                session.scalars(
+                    select(AutomationExport)
+                    .where(AutomationExport.automation_run_id == row.id)
+                    .order_by(AutomationExport.format)
+                )
+            )
+            output.append(
+                {
+                    "id": row.id,
+                    "rule_id": row.rule_id,
+                    "rule_version": row.rule_version,
+                    "file_id": row.file_id,
+                    "status": row.status,
+                    "matched": row.matched,
+                    "detail": row.detail or {},
+                    "error": row.error,
+                    "created_at": row.created_at.isoformat(),
+                    "exports": [_serialize_export(item) for item in exports],
+                }
+            )
+        return {"runs": output}
 
 
 @router.post("/runs/{run_id}/retry")
@@ -294,3 +344,52 @@ def retry_notification(run_id: int) -> dict:
         return deliver_local_notification(run_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _serialize_export(row: AutomationExport) -> dict:
+    return {
+        "id": row.id,
+        "automation_run_id": row.automation_run_id,
+        "file_id": row.file_id,
+        "format": row.format,
+        "status": row.status,
+        "sha256": row.sha256,
+        "size_bytes": row.size_bytes,
+        "provenance": row.provenance or {},
+        "error": row.error,
+        "created_at": row.created_at.isoformat(),
+        "updated_at": row.updated_at.isoformat(),
+    }
+
+
+@router.post("/exports/{export_id}/retry")
+def retry_export(export_id: int) -> dict:
+    with session_scope() as session:
+        row = session.get(AutomationExport, export_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="automation export not found")
+        if row.automation_run_id is None:
+            raise HTTPException(status_code=409, detail="source automation run was deleted")
+        run_id, fmt = row.automation_run_id, row.format
+    return deliver_automation_export(run_id, fmt)
+
+
+@router.get("/exports/{export_id}/download")
+def download_export(export_id: int):
+    with session_scope() as session:
+        row = session.get(AutomationExport, export_id)
+        if row is None or row.status != "completed" or not row.path:
+            raise HTTPException(status_code=404, detail="completed automation export not found")
+        path = Path(row.path).resolve()
+        expected_sha256 = row.sha256
+        fmt = row.format
+    root = get_settings().poller.download_dir.resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(status_code=404, detail="automation export file not found")
+    if not expected_sha256 or hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
+        raise HTTPException(status_code=409, detail="automation export checksum mismatch; retry it")
+    return FileResponse(
+        path,
+        media_type="text/plain" if fmt == "txt" else f"text/{fmt}",
+        filename=f"transcript.{fmt}",
+    )

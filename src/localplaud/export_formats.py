@@ -65,7 +65,22 @@ def _recording_data(file_id: str) -> dict:
             "speaker_names": names,
             "notes": notes,
             "audio_path": file.audio_path,
+            "transcript_provenance": (
+                {
+                    "transcript_id": raw.id,
+                    "transcript_source": raw.source,
+                    "transcript_revision_id": corrected.id if corrected else None,
+                    "transcript_revision": corrected.revision if corrected else None,
+                }
+                if raw
+                else {}
+            ),
         }
+
+
+def transcript_provenance(file_id: str) -> dict:
+    """Return the canonical transcript lineage used by transcript exports."""
+    return _recording_data(file_id)["transcript_provenance"]
 
 
 def render_transcript(

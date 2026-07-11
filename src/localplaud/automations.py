@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+import tempfile
+from pathlib import Path
+
 from sqlalchemy import select
 
 from .db.models import (
+    AutomationExport,
     AutomationRule,
     AutomationRun,
     ExecutionProfile,
@@ -46,6 +52,8 @@ def rule_sentence(rule: AutomationRule | dict) -> str:
         effects.append(f"move to folder #{actions['folder_id']}")
     if actions.get("add_tag_ids"):
         effects.append("add tags " + ", ".join(f"#{value}" for value in actions["add_tag_ids"]))
+    if actions.get("export_formats"):
+        effects.append("export " + "/".join(value.upper() for value in actions["export_formats"]))
     notify = rule.notify if isinstance(rule, AutomationRule) else bool(rule.get("notify"))
     if notify:
         effects.append("notify you")
@@ -141,7 +149,8 @@ def evaluate_recording(file_id: str) -> list[dict]:
             )
         )
     for rule_id in rule_ids:
-        notification_run_id: int | None = None
+        downstream_run_id: int | None = None
+        notification_requested = False
         with session_scope() as session:
             rule = session.get(AutomationRule, rule_id)
             recording = session.get(PlaudFile, file_id)
@@ -173,11 +182,13 @@ def evaluate_recording(file_id: str) -> list[dict]:
                         "reasons": reasons,
                         "applied": applied,
                         "notification_requested": rule.notify,
+                        "export_requested": list((rule.actions or {}).get("export_formats", [])),
                     },
                 )
                 session.add(run)
                 session.flush()
-                notification_run_id = run.id if rule.notify else None
+                downstream_run_id = run.id
+                notification_requested = rule.notify
                 results.append({"rule_id": rule.id, "status": "completed", "applied": applied})
             except Exception as exc:  # noqa: BLE001
                 session.add(
@@ -192,14 +203,118 @@ def evaluate_recording(file_id: str) -> list[dict]:
                     )
                 )
                 results.append({"rule_id": rule.id, "status": "failed", "error": str(exc)})
-        if notification_run_id is not None:
+        if downstream_run_id is not None and notification_requested:
             try:
-                notification = deliver_local_notification(notification_run_id)
+                notification = deliver_local_notification(downstream_run_id)
                 results[-1]["notification"] = notification
             except Exception as exc:  # noqa: BLE001 - actions remain committed
-                _record_notification_failure(notification_run_id, exc)
+                _record_notification_failure(downstream_run_id, exc)
                 results[-1]["notification"] = {"status": "failed", "error": str(exc)}
+        if downstream_run_id is not None:
+            exports = []
+            for fmt in _requested_export_formats(downstream_run_id):
+                try:
+                    exports.append(deliver_automation_export(downstream_run_id, fmt))
+                except Exception as exc:  # noqa: BLE001 - actions remain committed
+                    exports.append({"format": fmt, "status": "failed", "error": str(exc)})
+            if exports:
+                results[-1]["exports"] = exports
     return results
+
+
+def _requested_export_formats(run_id: int) -> list[str]:
+    with session_scope() as session:
+        run = session.get(AutomationRun, run_id)
+        if run is None:
+            return []
+        return [
+            value
+            for value in (run.detail or {}).get("export_requested", [])
+            if value in {"txt", "srt", "vtt"}
+        ]
+
+
+def _export_path(run: AutomationRun, fmt: str) -> Path:
+    from .config import get_settings
+
+    return (
+        get_settings().poller.download_dir
+        / run.file_id
+        / "autoflow"
+        / f"run-{run.id}"
+        / f"transcript.{fmt}"
+    )
+
+
+def deliver_automation_export(run_id: int, fmt: str) -> dict:
+    """Create or retry one canonical transcript export without affecting rule actions."""
+    if fmt not in {"txt", "srt", "vtt"}:
+        raise ValueError("unsupported automation export format")
+    with session_scope() as session:
+        run = session.get(AutomationRun, run_id)
+        if run is None or run.status != "completed":
+            raise ValueError("completed automation run not found")
+        if fmt not in (run.detail or {}).get("export_requested", []):
+            raise ValueError("export format was not requested by this run")
+        row = session.scalar(
+            select(AutomationExport).where(
+                AutomationExport.automation_run_id == run_id,
+                AutomationExport.format == fmt,
+            )
+        )
+        if row is None:
+            row = AutomationExport(
+                automation_run_id=run_id,
+                file_id=run.file_id,
+                format=fmt,
+            )
+            session.add(row)
+            session.flush()
+        path = _export_path(run, fmt)
+        if row.status == "completed" and path.is_file():
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest == row.sha256:
+                return {"id": row.id, "format": fmt, "status": "completed"}
+        row.status = "running"
+        row.error = None
+        export_id = row.id
+        file_id = run.file_id
+
+    try:
+        from .export_formats import render_transcript, transcript_provenance
+
+        content, _media_type = render_transcript(file_id, fmt)
+        provenance = transcript_provenance(file_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix=".transcript-", dir=path.parent)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        digest = hashlib.sha256(content).hexdigest()
+        with session_scope() as session:
+            row = session.get(AutomationExport, export_id)
+            if row is None:
+                raise ValueError("automation export was deleted during delivery")
+            row.status = "completed"
+            row.path = str(path)
+            row.sha256 = digest
+            row.size_bytes = len(content)
+            row.provenance = provenance
+            row.error = None
+        return {"id": export_id, "format": fmt, "status": "completed"}
+    except Exception as exc:  # noqa: BLE001 - durable failure is independently retryable
+        with session_scope() as session:
+            row = session.get(AutomationExport, export_id)
+            if row is not None:
+                row.status = "failed"
+                row.error = str(exc)[:2000]
+        return {"id": export_id, "format": fmt, "status": "failed", "error": str(exc)}
 
 
 def deliver_local_notification(run_id: int) -> dict:
