@@ -190,6 +190,7 @@ class Transcript(Base):
     # Full segment list (with words/speakers/timestamps) as JSON — see
     # asr.base.Segment for the shape.
     segments: Mapped[list] = mapped_column(JSON, default=list)
+    resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -271,6 +272,7 @@ class Summary(Base):
     llm_provider: Mapped[str | None] = mapped_column(String(64), default=None)
     model: Mapped[str | None] = mapped_column(String(128), default=None)
     source: Mapped[str] = mapped_column(String(16), default="local")  # local | cloud
+    resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -297,6 +299,7 @@ class Chunk(Base):
     dim: Mapped[int | None] = mapped_column(Integer, default=None)
     # float32 vector packed as bytes; decode with numpy.frombuffer.
     embedding: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -321,6 +324,7 @@ class StageRun(Base):
     model: Mapped[str | None] = mapped_column(String(128), default=None)
     artifact_source: Mapped[str | None] = mapped_column(String(32), default=None)
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
@@ -331,6 +335,86 @@ class StageRun(Base):
     file: Mapped[PlaudFile] = relationship(back_populates="stage_runs")
 
     __table_args__ = (UniqueConstraint("file_id", "stage", name="uq_stage_run_file_stage"),)
+
+
+class ProviderConnection(Base):
+    """Configured provider endpoint. Credentials live behind ``secret_ref`` only."""
+
+    __tablename__ = "provider_connections"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(128))
+    provider_type: Mapped[str] = mapped_column(String(64))
+    execution_target: Mapped[str] = mapped_column(String(32), default="local")
+    data_egress: Mapped[bool] = mapped_column(default=False)
+    secret_ref: Mapped[str | None] = mapped_column(String(256), default=None)
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    health: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ModelCatalogEntry(Base):
+    __tablename__ = "model_catalog_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connection_id: Mapped[int] = mapped_column(
+        ForeignKey("provider_connections.id", ondelete="CASCADE")
+    )
+    model_key: Mapped[str] = mapped_column(String(256))
+    display_name: Mapped[str] = mapped_column(String(256))
+    capabilities: Mapped[dict] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    __table_args__ = (
+        UniqueConstraint("connection_id", "model_key", name="uq_model_connection_key"),
+    )
+
+
+class ExecutionProfile(Base):
+    __tablename__ = "execution_profiles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(128))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    is_system_default: Mapped[bool] = mapped_column(default=False)
+    privacy_policy: Mapped[str] = mapped_column(String(32), default="allow-egress")
+    no_egress: Mapped[bool] = mapped_column(default=False)
+    cost_ceiling: Mapped[float | None] = mapped_column(Float, default=None)
+    fallback_policy: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    stage_selections: Mapped[list[ProfileStageSelection]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan", order_by="ProfileStageSelection.id"
+    )
+    __table_args__ = (UniqueConstraint("key", "version", name="uq_profile_key_version"),)
+
+
+class ProfileStageSelection(Base):
+    __tablename__ = "profile_stage_selections"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile_id: Mapped[int] = mapped_column(
+        ForeignKey("execution_profiles.id", ondelete="CASCADE")
+    )
+    stage: Mapped[str] = mapped_column(String(32))
+    connection_id: Mapped[int] = mapped_column(
+        ForeignKey("provider_connections.id", ondelete="RESTRICT")
+    )
+    model_id: Mapped[int] = mapped_column(ForeignKey("model_catalog_entries.id", ondelete="RESTRICT"))
+    options: Mapped[dict] = mapped_column(JSON, default=dict)
+    profile: Mapped[ExecutionProfile] = relationship(back_populates="stage_selections")
+    connection: Mapped[ProviderConnection] = relationship()
+    model_entry: Mapped[ModelCatalogEntry] = relationship()
+    __table_args__ = (UniqueConstraint("profile_id", "stage", name="uq_profile_stage"),)
+
+
+class RecordingProfileOverride(Base):
+    __tablename__ = "recording_profile_overrides"
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), primary_key=True
+    )
+    profile_id: Mapped[int] = mapped_column(ForeignKey("execution_profiles.id"))
+    stage_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
+    policy_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
 
 
 class KeyValue(Base):

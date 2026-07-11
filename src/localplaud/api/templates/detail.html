@@ -27,6 +27,17 @@
     </div>
     <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px"></div>
 
+    {% if f.profiles %}
+    <form method="post" action="/file/{{ f.id }}/profile" class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
+      <label for="profile-select" style="font-weight:650">Execution profile</label>
+      <select id="profile-select" name="profile_id" class="search-input" style="flex:1;min-width:220px;padding:7px 10px">
+        {% for profile in f.profiles %}<option value="{{ profile.id }}" {% if profile.id == f.profile_id %}selected{% endif %}>{{ profile.label }}{% if profile.default %} · system default{% endif %}</option>{% endfor %}
+      </select>
+      <button class="btn sec" type="submit" style="padding:8px 12px">Use profile</button>
+      <span class="sub" style="font-size:12px">Applied on the next Resume or Rebuild.</span>
+    </form>
+    {% endif %}
+
     {% if f.has_audio %}<audio id="player" controls preload="none" src="/audio/{{ f.id }}"></audio>{% endif %}
     {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}</div>{% endif %}
     {% if f.stages %}

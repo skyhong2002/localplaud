@@ -69,6 +69,21 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "Processing details" in r.text
     assert "embedding model unavailable" in r.text
     assert "Resume" in r.text and "Rebuild all" in r.text
+    assert "Execution profile" in r.text and "Current Settings" in r.text
+
+
+def test_recording_profile_picker_persists_override(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import ExecutionProfile, RecordingProfileOverride
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        profile_id = session.query(ExecutionProfile.id).filter_by(is_system_default=True).scalar()
+    response = c.post("/file/r1/profile", data={"profile_id": profile_id}, follow_redirects=False)
+    assert response.status_code == 303
+    with session_scope() as session:
+        assert session.get(RecordingProfileOverride, "r1").profile_id == profile_id
 
 
 def test_status_page_renders(monkeypatch, tmp_path):

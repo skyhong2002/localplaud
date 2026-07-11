@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,32 @@ from .models import Chunk, FileStatus, KeyValue, PlaudFile, Transcript
 
 INDEPENDENT_MIGRATION_KEY = "migration.independent-artifacts.v1"
 _PLAUD_SOURCES = {"cloud", "plaud"}
+
+
+def migrate_profile_snapshot_columns(engine: Engine) -> list[str]:
+    """Add immutable profile provenance to existing SQLite artifact tables."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    existing = set(inspector.get_table_names())
+    migrated: list[str] = []
+    for table in ("stage_runs", "transcripts", "summaries", "chunks"):
+        if table not in existing:
+            continue
+        columns = {column["name"] for column in inspector.get_columns(table)}
+        if "resolved_profile_snapshot" in columns:
+            continue
+        with engine.begin() as connection:
+            connection.execute(
+                text(f"ALTER TABLE {table} ADD COLUMN resolved_profile_snapshot JSON")
+            )
+        migrated.append(table)
+    return migrated
+
+
+def migrate_stage_run_snapshot_column(engine: Engine) -> bool:
+    """Backward-compatible wrapper for the original single-column migration."""
+    return "stage_runs" in migrate_profile_snapshot_columns(engine)
 
 
 def _legacy_template(template: str, used: set[str], row_id: int) -> str:

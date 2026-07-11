@@ -11,6 +11,7 @@ State lives on the ``PlaudFile`` row; derived artifacts become ``Transcript``,
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,12 +32,56 @@ from ..db.models import (
 from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
+from ..providers.service import resolve_recording_profile
 from ..store.files import wav_path
 from ..store.speakers import speaker_keys_from_segments, sync_speakers
 from . import convert, index, mindmap, summarize, transcribe
 from .diarize import DiarizationUnavailable, diarize
 
 log = logging.getLogger(__name__)
+_PROFILE_SNAPSHOT: ContextVar[dict | None] = ContextVar("resolved_profile_snapshot", default=None)
+
+
+def _settings_for_stage(
+    settings: Settings, snapshot: dict, stage: str
+) -> Settings:
+    """Project one resolved stage selection onto an isolated Settings copy."""
+    selected = snapshot.get("stages", {}).get(stage)
+    if not selected:
+        return settings.model_copy(deep=True)
+
+    resolved = settings.model_copy(deep=True)
+    family = {
+        "transcribe": "asr",
+        "diarize": "diarize",
+        "summarize": "llm",
+        "mind_map": "llm",
+        "embed": "embeddings",
+        "ask": "llm",
+        "correct": "llm",
+    }.get(stage)
+    if family is None:
+        return resolved
+
+    family_config = getattr(resolved, family)
+    provider = str(selected["connection"]).split(":", 1)[-1]
+    family_config.provider = provider
+    provider_config = getattr(family_config, provider.replace("-", "_"), None)
+    if provider_config is not None and hasattr(provider_config, "model"):
+        provider_config.model = selected.get("model")
+    elif hasattr(family_config, "model"):
+        family_config.model = selected.get("model")
+
+    for key, value in selected.get("options", {}).items():
+        target = provider_config if provider_config is not None and hasattr(provider_config, key) else family_config
+        if hasattr(target, key):
+            setattr(target, key, value)
+
+    if stage == "transcribe":
+        policy = snapshot.get("policy", {})
+        fallback = policy.get("fallback_policy", {}).get("asr", [])
+        family_config.fallback = [] if policy.get("no_egress") else list(fallback)
+    return resolved
 
 
 def _set_stage(
@@ -59,6 +104,9 @@ def _set_stage(
         if run is None:
             run = StageRun(file_id=file_id, stage=stage, attempts=0, detail={})
             session.add(run)
+        snapshot = _PROFILE_SNAPSHOT.get()
+        if snapshot is not None:
+            run.resolved_profile_snapshot = snapshot
         if begin_attempt:
             run.attempts = (run.attempts or 0) + 1
             run.started_at = now
@@ -179,6 +227,14 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         row.error = None
         audio = Path(row.audio_path)
         existing_wav = row.wav_path
+        snapshot = resolve_recording_profile(session, file_id).to_dict()
+
+    profile_token = _PROFILE_SNAPSHOT.set(snapshot)
+    transcribe_settings = _settings_for_stage(settings, snapshot, "transcribe")
+    diarize_settings = _settings_for_stage(settings, snapshot, "diarize")
+    summarize_settings = _settings_for_stage(settings, snapshot, "summarize")
+    mind_map_settings = _settings_for_stage(settings, snapshot, "mind_map")
+    embed_settings = _settings_for_stage(settings, snapshot, "embed")
 
     partial_errors: list[str] = []
     try:
@@ -231,7 +287,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             else:
                 _begin_stage(file_id, StageName.transcribe)
                 try:
-                    transcript = transcribe.run_asr(wav, settings)
+                    transcript = transcribe.run_asr(wav, transcribe_settings)
                     _persist_transcript(file_id, transcript)
                     _finish_stage(
                         file_id,
@@ -262,18 +318,18 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                 artifact_source=transcript_source,
                 detail={"reused": True, "provided_by_asr": True},
             )
-        elif settings.diarize.provider == "none":
+        elif diarize_settings.diarize.provider == "none":
             _skip_stage(file_id, StageName.diarize, "provider disabled")
         else:
             _begin_stage(file_id, StageName.diarize)
             try:
-                transcript = diarize(wav, transcript, settings.diarize)
+                transcript = diarize(wav, transcript, diarize_settings.diarize)
                 _persist_transcript(file_id, transcript)
                 _finish_stage(
                     file_id,
                     StageName.diarize,
-                    provider=settings.diarize.provider,
-                    model=settings.diarize.model,
+                    provider=diarize_settings.diarize.provider,
+                    model=diarize_settings.diarize.model,
                     artifact_source="local",
                 )
             except DiarizationUnavailable as exc:
@@ -297,7 +353,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             if force or not _has_summary(file_id, pcfg.summary_template):
                 _begin_stage(file_id, StageName.summarize)
                 try:
-                    result = summarize.summarize(transcript, settings)
+                    result = summarize.summarize(transcript, summarize_settings)
                     _persist_summary(file_id, result)
                     _finish_stage(
                         file_id,
@@ -334,7 +390,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                 _begin_stage(file_id, StageName.mind_map)
                 try:
                     summary_md = _load_summary_md(file_id, pcfg.summary_template)
-                    result = mindmap.generate_mind_map(transcript, settings, summary_md)
+                    result = mindmap.generate_mind_map(transcript, mind_map_settings, summary_md)
                     _persist_summary(file_id, result)
                     _finish_stage(
                         file_id,
@@ -367,11 +423,11 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             if force or not _has_chunks(file_id):
                 _begin_stage(file_id, StageName.index)
                 try:
-                    model_name = _persist_chunks(file_id, transcript, settings)
+                    model_name = _persist_chunks(file_id, transcript, embed_settings)
                     _finish_stage(
                         file_id,
                         StageName.index,
-                        provider=settings.embeddings.provider,
+                        provider=embed_settings.embeddings.provider,
                         model=model_name,
                         artifact_source="local",
                         detail={},
@@ -407,6 +463,8 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             r.status = FileStatus.error
             r.error = str(exc)[:2000]
         raise
+    finally:
+        _PROFILE_SNAPSHOT.reset(profile_token)
 
 
 def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str] | None:
@@ -505,6 +563,7 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> None:
                 source="local",
                 text=transcript.text,
                 segments=segments,
+                resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
             )
         )
         # Register stable speaker identities; existing display names are kept.
@@ -530,6 +589,7 @@ def _persist_summary(file_id: str, result: dict) -> None:
                 llm_provider=result.get("provider"),
                 model=result.get("model"),
                 source="local",
+                resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
             )
         )
 
@@ -553,6 +613,7 @@ def _persist_chunks(file_id: str, transcript: Transcript, settings: Settings) ->
                     embedding_model=model_name,
                     dim=dim,
                     embedding=blob,
+                    resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
                 )
             )
     return model_name

@@ -76,6 +76,15 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
         assert stages[StageName.diarize].detail["provided_by_asr"] is True
         assert stages[StageName.summarize].attempts == 1
         assert stages[StageName.index].attempts == 1
+        assert all(run.resolved_profile_snapshot for run in stages.values())
+        assert (
+            stages[StageName.transcribe].resolved_profile_snapshot["stages"]
+            ["transcribe"]["connection"]
+            == "asr:faster-whisper"
+        )
+        assert f.local_transcript.resolved_profile_snapshot
+        assert all(summary.resolved_profile_snapshot for summary in f.summaries)
+        assert all(chunk.resolved_profile_snapshot for chunk in f.chunks)
 
     # Second run without force: all stages skipped (artifacts reused).
     process_file("f1")

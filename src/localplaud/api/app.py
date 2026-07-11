@@ -15,8 +15,10 @@ from sqlalchemy import delete, func, select
 from ..config import get_settings
 from ..db.models import (
     Chunk,
+    ExecutionProfile,
     FileStatus,
     PlaudFile,
+    RecordingProfileOverride,
     Speaker,
     StageName,
     StageRun,
@@ -26,6 +28,7 @@ from ..db.models import (
 )
 from ..db.session import init_db, session_scope
 from ..store.speakers import display_names, speaker_keys_from_segments
+from .providers import router as providers_router
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
@@ -38,6 +41,7 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
+app.include_router(providers_router)
 
 _static = _HERE / "static"
 if _static.exists():
@@ -448,6 +452,27 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
                 for stage in r.stage_runs
             ],
         }
+        profile_rows = list(
+            session.scalars(
+                select(ExecutionProfile).order_by(
+                    ExecutionProfile.is_system_default.desc(),
+                    ExecutionProfile.name,
+                    ExecutionProfile.version.desc(),
+                )
+            )
+        )
+        override = session.get(RecordingProfileOverride, file_id)
+        f["profiles"] = [
+            {
+                "id": profile.id,
+                "label": f"{profile.name} · v{profile.version}",
+                "default": profile.is_system_default,
+            }
+            for profile in profile_rows
+        ]
+        f["profile_id"] = override.profile_id if override is not None else next(
+            (profile.id for profile in profile_rows if profile.is_system_default), None
+        )
         files = [
             _file_summary(x)
             for x in session.scalars(
@@ -515,6 +540,18 @@ def status_page(request: Request):
         ],
     }
     return templates.TemplateResponse(request=request, name="status.html", context=ctx)
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request):
+    from ..providers.service import list_connections, list_profiles
+
+    with session_scope() as session:
+        ctx = _base_ctx(request, "settings") | {
+            "connections": list_connections(session),
+            "profiles": list_profiles(session),
+        }
+    return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
 
 
 def _health_checks(settings) -> list[dict]:
@@ -619,6 +656,18 @@ def reprocess(file_id: str, force: bool = False):
 
     threading.Thread(target=process_file, args=(file_id,), kwargs={"force": force}, daemon=True).start()
     return HTMLResponse('<span style="color:var(--warn)">re-running… refresh in a moment</span>')
+
+
+@app.post("/file/{file_id}/profile")
+def choose_recording_profile(file_id: str, profile_id: int = Form(...)):
+    from ..providers.service import select_recording_override
+
+    with session_scope() as session:
+        try:
+            select_recording_override(session, file_id, profile_id)
+        except LookupError:
+            return JSONResponse({"error": "recording or profile not found"}, status_code=404)
+    return RedirectResponse(f"/file/{file_id}", status_code=303)
 
 
 @app.post("/file/{file_id}/speakers")

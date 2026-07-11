@@ -78,15 +78,31 @@ or a remote worker. localplaud resolves those choices into a reusable execution
 profile, records the resolved snapshot on each run, and never crosses a privacy or
 cost boundary through an implicit fallback.
 
-Existing groundwork, not the finished feature:
+Backend foundation landed on 2026-07-11, but this is not yet the finished feature:
 
 - ✅ Provider registries/config already exist for ASR, LLMs, and embeddings;
   OpenAI-compatible `base_url` configuration exists for relevant API paths.
 - ✅ Stage runs and artifacts already retain provider/model provenance, and health
   checks can distinguish some daemon-level and model-level failures.
-- Missing: a shared capability contract, durable provider/model/profile records,
-  profile resolution, Web management, explicit fallback policy, cost/privacy
-  controls, and a remote GPU worker protocol.
+- ✅ Added provider-neutral capability contracts for transcription, alignment,
+  diarization, correction, notes, mind maps, embeddings, and Ask. Durable database
+  records now cover provider connections, model catalog entries, versioned execution
+  profiles, per-stage selections, and per-recording overrides; ordinary rows retain
+  only opaque secret references.
+- ✅ Added deterministic layered resolution (system → folder/rule → template →
+  recording), immutable JSON snapshots, capability validation, no-egress enforcement,
+  an idempotent Settings-equivalent bootstrap, legacy SQLite migration, and headless
+  list/preview/override APIs.
+- ✅ Pipeline stages now dispatch through the resolved recording profile without
+  mutating process-wide Settings. The immutable snapshot is persisted on stage runs,
+  transcripts, notes, and embedding chunks; local-only profiles disable legacy cloud
+  fallback. Recordings expose a profile picker for the next Resume/Rebuild.
+- ✅ Added provider/model/profile CRUD APIs, connection configuration health, and a
+  Settings surface for inspecting connections/profiles, testing health, and creating
+  secret-reference-only connections. Raw credentials are rejected by the API.
+- Remaining: complete the visual model/profile editor and real provider model-health
+  probes, implement explicit retry/fallback/cost accounting, and build the remote GPU
+  worker protocol.
 
 Implement this P0 in the following order:
 

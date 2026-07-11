@@ -1,0 +1,329 @@
+"""Headless CRUD/read surface and legacy Settings bootstrap."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session, selectinload
+
+from ..config import Settings
+from ..db.models import (
+    ExecutionProfile,
+    ModelCatalogEntry,
+    PlaudFile,
+    ProfileStageSelection,
+    ProviderConnection,
+    RecordingProfileOverride,
+)
+from .contracts import Capability, Health, ProviderStage, StageCapabilities
+from .resolver import ResolvedProfile, resolve_profile
+
+DEFAULT_PROFILE_KEY = "legacy-settings-default"
+
+
+def _is_cloud(name: str) -> bool:
+    return name in {"openai", "deepgram", "assemblyai", "anthropic"}
+
+
+def _model_for(settings: Settings, family: str, provider: str) -> str:
+    config = getattr(getattr(settings, family), provider.replace("-", "_"))
+    return str(getattr(config, "model", provider))
+
+
+def _capability(stages: list[ProviderStage], *, cloud: bool) -> dict:
+    return Capability(
+        execution_target="cloud" if cloud else "local",
+        data_egress=cloud,
+        health=Health(),
+        stages=tuple(
+            StageCapabilities(
+                stage=stage,
+                timestamps="word" if stage in {ProviderStage.transcribe, ProviderStage.align} else "none",
+                speaker_output=stage == ProviderStage.diarize,
+                hardware_requirement=None if cloud else "configured local runtime",
+            )
+            for stage in stages
+        ),
+    ).model_dump(mode="json")
+
+
+def bootstrap_default_profile(session: Session, settings: Settings) -> ExecutionProfile:
+    """Create a Settings-equivalent profile once, without changing runtime dispatch."""
+    existing = session.scalar(
+        select(ExecutionProfile)
+        .where(ExecutionProfile.key == DEFAULT_PROFILE_KEY, ExecutionProfile.version == 1)
+        .options(selectinload(ExecutionProfile.stage_selections))
+    )
+    if existing is not None:
+        return existing
+
+    specs = [
+        ("asr", settings.asr.provider, _model_for(settings, "asr", settings.asr.provider),
+         [ProviderStage.transcribe, ProviderStage.align]),
+        ("diarize", settings.diarize.provider, settings.diarize.model,
+         [ProviderStage.diarize]),
+        ("llm", settings.llm.provider, _model_for(settings, "llm", settings.llm.provider),
+         [ProviderStage.correct, ProviderStage.summarize, ProviderStage.mind_map, ProviderStage.ask]),
+        ("embeddings", settings.embeddings.provider,
+         _model_for(settings, "embeddings", settings.embeddings.provider), [ProviderStage.embed]),
+    ]
+    entries: dict[str, tuple[ProviderConnection, ModelCatalogEntry]] = {}
+    for family, provider, model, stages in specs:
+        connection = ProviderConnection(
+            key=f"{family}:{provider}", name=f"{provider} ({family})", provider_type=provider,
+            execution_target="cloud" if _is_cloud(provider) else "local",
+            data_egress=_is_cloud(provider), secret_ref=None,
+        )
+        entry = ModelCatalogEntry(
+            model_key=model, display_name=model,
+            capabilities=_capability(stages, cloud=_is_cloud(provider)),
+        )
+        session.add(connection)
+        session.flush()
+        entry.connection_id = connection.id
+        session.add(entry)
+        session.flush()
+        entries[family] = (connection, entry)
+
+    cloud = any(connection.data_egress for connection, _ in entries.values())
+    profile = ExecutionProfile(
+        key=DEFAULT_PROFILE_KEY, name="Current Settings", version=1, is_system_default=True,
+        privacy_policy="allow-egress" if cloud else "local-only", no_egress=not cloud,
+        fallback_policy={"asr": list(settings.asr.fallback)},
+    )
+    session.add(profile)
+    session.flush()
+    stage_family = {
+        "transcribe": "asr", "align": "asr", "diarize": "diarize", "correct": "llm",
+        "summarize": "llm", "mind_map": "llm", "embed": "embeddings", "ask": "llm",
+    }
+    for stage, family in stage_family.items():
+        connection, entry = entries[family]
+        profile.stage_selections.append(ProfileStageSelection(
+            stage=stage, connection_id=connection.id, model_id=entry.id, options={},
+        ))
+    session.flush()
+    return profile
+
+
+def list_connections(session: Session) -> list[dict[str, Any]]:
+    return [{"id": r.id, "key": r.key, "name": r.name, "provider_type": r.provider_type,
+             "execution_target": r.execution_target, "data_egress": r.data_egress,
+             "secret_ref": r.secret_ref, "health": r.health} for r in session.scalars(
+                 select(ProviderConnection).order_by(ProviderConnection.id))]
+
+
+def list_models(session: Session) -> list[dict[str, Any]]:
+    return [{"id": r.id, "connection_id": r.connection_id, "model_key": r.model_key,
+             "display_name": r.display_name, "capabilities": r.capabilities,
+             "enabled": r.enabled} for r in session.scalars(
+                 select(ModelCatalogEntry).order_by(ModelCatalogEntry.id))]
+
+
+def _profile_layer(profile: ExecutionProfile) -> dict[str, Any]:
+    return {"key": profile.key, "policy": {"privacy_policy": profile.privacy_policy,
+            "no_egress": profile.no_egress, "cost_ceiling": profile.cost_ceiling,
+            "fallback_policy": profile.fallback_policy}, "stages": {
+                row.stage: {"connection": row.connection.key, "model": row.model_entry.model_key,
+                            "options": row.options} for row in profile.stage_selections}}
+
+
+def _profile_query():
+    return select(ExecutionProfile).options(
+        selectinload(ExecutionProfile.stage_selections).selectinload(
+            ProfileStageSelection.connection
+        ),
+        selectinload(ExecutionProfile.stage_selections).selectinload(
+            ProfileStageSelection.model_entry
+        ),
+    )
+
+
+def _capability_catalog(session: Session) -> dict[tuple[str, str], dict]:
+    catalog: dict[tuple[str, str], dict] = {}
+    for model in session.scalars(select(ModelCatalogEntry)):
+        connection = session.get(ProviderConnection, model.connection_id)
+        if connection is not None and model.enabled:
+            catalog[(connection.key, model.model_key)] = model.capabilities
+    return catalog
+
+
+def list_profiles(session: Session) -> list[dict[str, Any]]:
+    rows = session.scalars(_profile_query().order_by(ExecutionProfile.id))
+    return [{"id": row.id, "name": row.name, "version": row.version,
+             "is_system_default": row.is_system_default, **_profile_layer(row)} for row in rows]
+
+
+def preview_resolution(session: Session, *partial_layers: dict | None) -> ResolvedProfile:
+    profile = session.scalar(
+        _profile_query()
+        .where(ExecutionProfile.is_system_default)
+        .order_by(ExecutionProfile.version.desc(), ExecutionProfile.id.desc())
+    )
+    if profile is None:
+        raise ValueError("no system default execution profile")
+    return resolve_profile([_profile_layer(profile), *partial_layers], _capability_catalog(session))
+
+
+def resolve_recording_profile(session: Session, file_id: str) -> ResolvedProfile:
+    """Resolve the durable execution profile selected for one recording."""
+    system = session.scalar(
+        _profile_query()
+        .where(ExecutionProfile.is_system_default)
+        .order_by(ExecutionProfile.version.desc(), ExecutionProfile.id.desc())
+    )
+    if system is None:
+        raise ValueError("no system default execution profile")
+
+    layers: list[dict | None] = [_profile_layer(system)]
+    override = session.get(RecordingProfileOverride, file_id)
+    if override is not None:
+        selected = session.scalar(
+            _profile_query().where(ExecutionProfile.id == override.profile_id)
+        )
+        if selected is None:
+            raise ValueError(f"recording profile {override.profile_id} no longer exists")
+        layers.append(_profile_layer(selected))
+        layers.append(
+            {
+                "key": f"recording:{file_id}",
+                "stages": override.stage_overrides,
+                "policy": override.policy_overrides,
+            }
+        )
+    return resolve_profile(layers, _capability_catalog(session))
+
+
+def select_recording_override(session: Session, file_id: str, profile_id: int,
+                              *, stages: dict | None = None, policy: dict | None = None) -> dict:
+    if session.get(PlaudFile, file_id) is None or session.get(ExecutionProfile, profile_id) is None:
+        raise LookupError("recording or profile not found")
+    row = session.get(RecordingProfileOverride, file_id)
+    if row is None:
+        row = RecordingProfileOverride(file_id=file_id, profile_id=profile_id)
+        session.add(row)
+    row.profile_id = profile_id
+    row.stage_overrides = stages or {}
+    row.policy_overrides = policy or {}
+    session.flush()
+    return {"file_id": file_id, "profile_id": profile_id,
+            "stages": row.stage_overrides, "policy": row.policy_overrides}
+
+
+def save_connection(session: Session, data: dict, connection_id: int | None = None) -> dict:
+    """Create or update a provider connection without accepting raw credentials."""
+    if any(key in data for key in ("api_key", "token", "password", "secret")):
+        raise ValueError("raw credentials are not accepted; use secret_ref")
+    row = session.get(ProviderConnection, connection_id) if connection_id else None
+    if connection_id and row is None:
+        raise LookupError("provider connection not found")
+    if row is None:
+        row = ProviderConnection(key=data["key"], name=data["name"], provider_type=data["provider_type"])
+        session.add(row)
+    for field in ("key", "name", "provider_type", "execution_target", "data_egress", "secret_ref", "config"):
+        if field in data:
+            setattr(row, field, data[field])
+    session.flush()
+    return list_connections(session)[-1] if connection_id is None else next(
+        item for item in list_connections(session) if item["id"] == row.id
+    )
+
+
+def check_connection_health(session: Session, connection_id: int) -> dict:
+    row = session.get(ProviderConnection, connection_id)
+    if row is None:
+        raise LookupError("provider connection not found")
+    if row.execution_target == "local":
+        status, detail = "healthy", "local runtime configured"
+    elif row.execution_target == "cloud" and not row.secret_ref:
+        status, detail = "degraded", "cloud connection has no secret reference"
+    elif row.execution_target == "remote_worker":
+        status, detail = "unknown", "remote worker handshake not implemented"
+    else:
+        status, detail = "healthy", "connection configuration is complete"
+    row.health = {"status": status, "detail": detail}
+    session.flush()
+    return row.health
+
+
+def save_model(session: Session, data: dict, model_id: int | None = None) -> dict:
+    row = session.get(ModelCatalogEntry, model_id) if model_id else None
+    if model_id and row is None:
+        raise LookupError("model not found")
+    if session.get(ProviderConnection, data.get("connection_id", getattr(row, "connection_id", None))) is None:
+        raise LookupError("provider connection not found")
+    if row is None:
+        row = ModelCatalogEntry(
+            connection_id=data["connection_id"],
+            model_key=data["model_key"],
+            display_name=data.get("display_name", data["model_key"]),
+        )
+        session.add(row)
+    for field in ("connection_id", "model_key", "display_name", "capabilities", "enabled"):
+        if field in data:
+            setattr(row, field, data[field])
+    session.flush()
+    return next(item for item in list_models(session) if item["id"] == row.id)
+
+
+def create_profile_version(session: Session, data: dict) -> dict:
+    """Create an immutable profile version and its validated stage selections."""
+    key = data["key"]
+    version = data.get("version") or (
+        session.scalar(select(func.max(ExecutionProfile.version)).where(ExecutionProfile.key == key)) or 0
+    ) + 1
+    if data.get("is_system_default"):
+        for current in session.scalars(select(ExecutionProfile).where(ExecutionProfile.is_system_default)):
+            current.is_system_default = False
+    row = ExecutionProfile(
+        key=key,
+        name=data["name"],
+        version=version,
+        is_system_default=bool(data.get("is_system_default")),
+        privacy_policy=data.get("privacy_policy", "allow-egress"),
+        no_egress=bool(data.get("no_egress")),
+        cost_ceiling=data.get("cost_ceiling"),
+        fallback_policy=data.get("fallback_policy", {}),
+    )
+    session.add(row)
+    session.flush()
+    for stage, selection in data.get("stages", {}).items():
+        connection = session.scalar(
+            select(ProviderConnection).where(ProviderConnection.key == selection["connection"])
+        )
+        if connection is None:
+            raise LookupError(f"provider connection not found: {selection['connection']}")
+        model = session.scalar(
+            select(ModelCatalogEntry).where(
+                ModelCatalogEntry.connection_id == connection.id,
+                ModelCatalogEntry.model_key == selection["model"],
+            )
+        )
+        if model is None:
+            raise LookupError(f"model not found: {selection['model']}")
+        row.stage_selections.append(
+            ProfileStageSelection(
+                stage=stage,
+                connection_id=connection.id,
+                model_id=model.id,
+                options=selection.get("options", {}),
+            )
+        )
+    session.flush()
+    # Reuse the resolver as the write-time policy/capability gate.
+    resolve_profile([_profile_layer(row)], _capability_catalog(session))
+    return next(item for item in list_profiles(session) if item["id"] == row.id)
+
+
+def delete_profile(session: Session, profile_id: int) -> None:
+    row = session.get(ExecutionProfile, profile_id)
+    if row is None:
+        raise LookupError("profile not found")
+    if row.is_system_default:
+        raise ValueError("cannot delete the system default profile")
+    if session.scalar(
+        select(RecordingProfileOverride.file_id).where(RecordingProfileOverride.profile_id == profile_id)
+    ):
+        raise ValueError("profile is selected by a recording")
+    session.execute(delete(ExecutionProfile).where(ExecutionProfile.id == profile_id))

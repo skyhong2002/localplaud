@@ -39,6 +39,13 @@ def init_db() -> dict[str, int] | None:
     """Create tables and prepare legacy cloud-derived rows when required."""
     engine = get_engine()
     Base.metadata.create_all(engine)
+    from ..providers.service import bootstrap_default_profile
+    from .migrations import migrate_profile_snapshot_columns
+
+    migrate_profile_snapshot_columns(engine)
+    with Session(engine) as session:
+        bootstrap_default_profile(session, get_settings())
+        session.commit()
     if get_settings().pipeline.artifact_mode == "independent":
         from .migrations import prepare_independent_mode
 

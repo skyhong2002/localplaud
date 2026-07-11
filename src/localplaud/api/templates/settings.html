@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Settings — localplaud{% endblock %}
+{% block body %}
+<div class="content"><div class="pane-inner">
+  <h1 class="page">Providers &amp; execution profiles</h1>
+  <p class="sub">Choose exactly where each processing stage runs. Local-only profiles never send recording data outside this host.</p>
+
+  <div class="panel" style="margin-top:18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <strong>Connections</strong>
+      <span class="sub">Secrets are stored as references, never copied into profiles.</span>
+    </div>
+    <div style="display:grid;gap:10px;margin-top:12px">
+      {% for c in connections %}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 0;border-top:1px solid var(--border)">
+        <div>
+          <div style="font-weight:650">{{ c.name }} <code>{{ c.key }}</code></div>
+          <div class="sub" style="font-size:12px">{{ c.execution_target }} · {% if c.data_egress %}data egress allowed{% else %}no data egress{% endif %}{% if c.secret_ref %} · secret configured{% endif %}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}">{{ c.health.status or 'unknown' }}</span>
+          <button class="btn sec" style="padding:7px 10px" onclick="testHealth({{ c.id }})">Test</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <strong>Execution profiles</strong>
+    <div style="display:grid;gap:12px;margin-top:12px">
+      {% for p in profiles %}
+      <details {% if p.is_system_default %}open{% endif %} style="border-top:1px solid var(--border);padding-top:11px">
+        <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:12px;list-style:none">
+          <span><strong>{{ p.name }}</strong> <code>{{ p.key }}@{{ p.version }}</code></span>
+          <span>{% if p.is_system_default %}<span class="chip on">Default</span>{% endif %} <span class="chip">{% if p.policy.no_egress %}Local only{% else %}Egress allowed{% endif %}</span></span>
+        </summary>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px">
+          {% for stage, selection in p.stages.items() %}
+          <div class="tile"><div class="k">{{ stage }}</div><div style="font-weight:600;margin-top:3px">{{ selection.model }}</div><div class="sub" style="font-size:11px">{{ selection.connection }} · {{ selection.execution_target }}</div></div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <strong>Create provider connection</strong>
+    <form id="connection-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
+      <input class="search-input" name="name" placeholder="Display name" required>
+      <input class="search-input" name="key" placeholder="Unique key, e.g. llm:studio" required>
+      <input class="search-input" name="provider_type" placeholder="Provider type" required>
+      <select class="search-input" name="execution_target"><option value="local">Local</option><option value="cloud">Cloud</option><option value="remote_worker">Remote worker</option></select>
+      <input class="search-input" name="secret_ref" placeholder="Secret ref (optional)">
+      <label class="sub" style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="data_egress"> Data may leave this host</label>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Create connection</button><span id="connection-result" class="sub"></span></div>
+    </form>
+  </div>
+</div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function testHealth(id){
+  const badge=document.getElementById(`health-${id}`); badge.textContent='checking';
+  const r=await fetch(`/api/providers/connections/${id}/health`,{method:'POST'}); const data=await r.json();
+  badge.textContent=data.status||'error'; badge.className=`st ${data.status||'error'}`;
+}
+document.getElementById('connection-form').addEventListener('submit',async e=>{
+  e.preventDefault(); const f=new FormData(e.target);
+  const body={name:f.get('name'),key:f.get('key'),provider_type:f.get('provider_type'),execution_target:f.get('execution_target'),data_egress:f.get('data_egress')==='on',secret_ref:f.get('secret_ref')||null,config:{}};
+  const r=await fetch('/api/providers/connections',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  const out=document.getElementById('connection-result');
+  if(r.ok){out.textContent='Created. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not create connection';}
+});
+</script>
+{% endblock %}
