@@ -1,0 +1,48 @@
+<div class="ask-thread" data-thread-id="{{ thread.thread_id or '' }}" style="display:flex;flex-direction:column;gap:10px;margin:8px 0 14px">
+  {% for message in thread.messages %}
+    {% if message.role == 'user' %}
+    <div style="align-self:flex-end;max-width:85%;background:var(--blue);color:white;border-radius:14px 14px 4px 14px;padding:8px 12px">{{ message.content }}</div>
+    {% else %}
+    <div class="panel" style="border-color:var(--border2);padding:13px 14px">
+      <div class="md" style="white-space:pre-wrap">{{ message.content }}</div>
+      {% if message.sources %}
+      <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:9px">
+        <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:5px">GROUNDED SOURCES</div>
+        {% for source in message.sources[:6] %}
+          {% if file_id %}
+          <button type="button" class="seg" data-seek="{{ source.start or 0 }}" style="width:100%;text-align:left;background:none;border:0;padding:5px 8px">
+            <div class="ts">{{ source.start | mmss }}</div><div class="txt">{% if source.speaker %}<strong>{{ source.speaker }}</strong> {% endif %}{{ source.text | truncate(140) }}</div>
+          </button>
+          {% else %}
+          <a class="seg" href="/file/{{ source.file_id }}{% if source.start is not none %}?t={{ source.start }}{% endif %}" style="padding:5px 8px">
+            <div class="ts">{{ source.start | mmss }}</div><div class="txt"><strong>{{ source.filename }}</strong> <span class="sub">· {{ source.text | truncate(110) }}</span></div>
+          </a>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if message.id %}<div style="display:flex;align-items:center;gap:8px;margin-top:9px">
+        <button class="btn sec" type="button" style="padding:6px 9px;font-size:12px" onclick="saveAskNote({{ message.id }},this)">Save as note</button>
+        <span class="sub" data-save-status style="font-size:11px"></span>
+      </div>{% endif %}
+    </div>
+    {% endif %}
+  {% endfor %}
+
+  {% if thread.thread_id %}
+  <form class="ask" hx-post="{% if file_id %}/file/{{ file_id }}/ask{% else %}/ask{% endif %}" hx-target="#{{ target }}" hx-swap="innerHTML" style="margin:2px 0 0">
+    <input type="hidden" name="thread_id" value="{{ thread.thread_id }}">
+    <input name="q" placeholder="Ask a follow-up…" autocomplete="off" required>
+    <button class="btn" type="submit">Follow up</button>
+  </form>
+  {% endif %}
+</div>
+<script>
+window.saveAskNote=async function(messageId,button){
+  const status=button.parentElement.querySelector('[data-save-status]');button.disabled=true;status.textContent='Saving…';
+  const response=await fetch(`/api/ask/messages/${messageId}/save-note`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+  const data=await response.json();
+  if(response.ok){status.textContent=`Saved to Notes · ${data.title}`;button.textContent='Saved';}
+  else{status.textContent=data.detail||'Could not save';button.disabled=false;}
+};
+</script>

@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-11)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (227 tests passing locally).
+  Active development is merged directly to `main` (230 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -239,7 +239,11 @@ embedding raw provider credentials or model settings in each rule.
   grounded question chips; graceful degrade when unindexed or providers are down.
 - ✅ Whole-library Ask citations now deep-link to `/file/{id}?t={start}` and seek the
   player on load, so a cited answer opens the recording at the cited moment.
-- Remaining: save-to-note from an Ask answer and grounded follow-up threads.
+- ✅ Ask conversations are durable grounded threads for both one recording and the
+  whole library. Follow-ups retain bounded conversation context while retrieval and
+  citations remain grounded in the current query. Any assistant answer can be saved
+  idempotently as an editable note with source moments; Saved notes has its own page,
+  recording tabs, edit/delete controls, deep links, and Markdown export coverage.
 - ✅ Transcript corrections as revisions: inline per-segment editing on the Web
   detail page creates immutable `transcript_revisions` on top of the untouched raw
   ASR row; the latest revision is the canonical transcript for summaries, indexing,

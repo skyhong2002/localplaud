@@ -109,7 +109,10 @@ accessibility require a different design.
 - Answers must be grounded, name their recordings, and link to playable timestamps.
 - Filters may scope by date, folder/tag, speaker, or selected recordings.
 - A citation opens the recording at the cited moment.
-- Users can continue a thread, edit a result, copy/export it, or save it as a note.
+- Users can continue a durable grounded thread and save any answer as an editable
+  note. Saved notes retain source moments, link back to recordings, appear in the
+  recording workspace, and can be copied or exported as Markdown, edited, or deleted
+  independently without altering the original Ask thread.
 
 ### 4. Templates and generation
 
@@ -311,8 +314,8 @@ ASR row, survive re-ASR, re-index in the background without rerunning ASR, and h
 stale notes/maps until explicit regeneration, with a labelled raw-versus-corrected
 view switch. Plaud-derived edits remain excluded from independent mode. Transcript
 find/replace, dependent-artifact revision links, and a revision history browser
-remain. Other major gaps include editable note bodies, Ask save-to-note and
-follow-up threads, automatic template selection, richer export, automation, and UI
-polish. Provider/model/profile management and the versioned remote-worker protocol
+remain. Saved Ask answers are editable note bodies with durable follow-up threads.
+Other major gaps include automatic template selection, richer export, automation,
+and UI polish. Provider/model/profile management and the versioned remote-worker protocol
 are implemented; cross-provider fallback/cost accounting and the remaining hardware
 acceptance matrix are still open.

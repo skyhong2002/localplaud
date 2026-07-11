@@ -182,6 +182,9 @@ class PlaudFile(Base):
         cascade="all, delete-orphan",
         order_by="TranscriptRevision.revision",
     )
+    user_notes: Mapped[list[UserNote]] = relationship(
+        back_populates="file", cascade="all, delete-orphan", order_by="UserNote.id"
+    )
     folder: Mapped[Folder | None] = relationship(back_populates="recordings")
     tags: Mapped[list[Tag]] = relationship(
         secondary=recording_tags, back_populates="recordings", order_by="Tag.id"
@@ -351,6 +354,60 @@ class NoteTemplate(Base):
     __table_args__ = (
         UniqueConstraint("key", "version", name="uq_note_template_key_version"),
     )
+
+
+class AskThread(Base):
+    __tablename__ = "ask_threads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    file_id: Mapped[str | None] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), default=None, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    messages: Mapped[list[AskMessage]] = relationship(
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="AskMessage.id",
+    )
+
+
+class AskMessage(Base):
+    __tablename__ = "ask_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("ask_threads.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    thread: Mapped[AskThread] = relationship(back_populates="messages")
+
+
+class UserNote(Base):
+    __tablename__ = "user_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str | None] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), default=None, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    content_md: Mapped[str] = mapped_column(Text)
+    source_type: Mapped[str] = mapped_column(String(32), default="manual")
+    ask_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ask_messages.id", ondelete="SET NULL"), unique=True, default=None
+    )
+    citations: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    file: Mapped[PlaudFile | None] = relationship(back_populates="user_notes")
 
 
 class Chunk(Base):

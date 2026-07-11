@@ -116,7 +116,8 @@
       <button class="btn" type="submit">Ask</button>
     </form>
     <div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">thinking…</div>
-    <div id="answer"></div>
+    {% if ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-5px 0 10px"><span class="sub" style="font-size:11px">Recent Ask</span>{% for thread in ask_threads %}<a class="chip {% if selected_ask_thread and selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/?ask_thread={{ thread.id }}">{{ thread.title | truncate(38) }}</a>{% endfor %}</div>{% endif %}
+    <div id="answer">{% if selected_ask_thread %}{% set thread=selected_ask_thread %}{% set file_id=None %}{% set target='answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
 
     <div class="orgbox" aria-label="Library organization">
       <div class="orgrow">

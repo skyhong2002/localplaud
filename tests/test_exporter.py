@@ -4,7 +4,7 @@ import pytest
 
 import localplaud.config as config
 import localplaud.db.session as db_session
-from localplaud.db.models import PlaudFile, Summary, Transcript
+from localplaud.db.models import PlaudFile, Summary, Transcript, UserNote
 from localplaud.db.session import init_db, session_scope
 from localplaud.exporter import export_to_file, render_markdown
 
@@ -45,6 +45,14 @@ def seeded_db(monkeypatch, tmp_path):
             Summary(template="default", title="A Chat", content_md="# A Chat\n\nShort chat."),
             Summary(template="meeting", title="Standup", content_md="# Standup\n\nDecisions."),
         ]
+        f.user_notes = [
+            UserNote(
+                title="Launch answer",
+                content_md="The team decided to ship.",
+                source_type="ask",
+                citations=[{"file_id": FILE_ID, "filename": "A Chat", "start": 65.2}],
+            )
+        ]
         session.add(f)
     return tmp_path
 
@@ -54,6 +62,9 @@ def test_render_markdown_contains_everything(seeded_db):
     assert "# 2026-07-09 15:38:57" in md
     assert "## Default: A Chat" in md
     assert "## Meeting: Standup" in md
+    assert "## Launch answer" in md
+    assert "The team decided to ship." in md
+    assert "- A Chat @ 01:05" in md
     assert "## Transcript" in md
     assert "**[00:00] SPEAKER_00:** hello there" in md
     assert "**[01:05] SPEAKER_01:** general kenobi" in md

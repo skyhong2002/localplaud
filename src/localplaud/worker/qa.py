@@ -105,6 +105,7 @@ def answer(
     top_k: int = 6,
     settings: Settings | None = None,
     file_id: str | None = None,
+    history: list[dict] | None = None,
 ) -> dict:
     """Retrieve + answer. Returns {answer, sources}.
 
@@ -123,8 +124,16 @@ def answer(
         return {"answer": "No indexed recordings yet — run the pipeline first.", "sources": []}
     llm = build_llm(settings.llm)
     system = _QA_SYSTEM_SINGLE if file_id is not None else _QA_SYSTEM
+    prior = ""
+    if history:
+        bounded = history[-8:]
+        turns = "\n".join(
+            f"{item.get('role', 'user').title()}: {str(item.get('content', ''))[:2000]}"
+            for item in bounded
+        )
+        prior = f"Conversation so far:\n---\n{turns}\n---\n\n"
     prompt = (
-        f"Question: {query}\n\nExcerpts:\n---\n{_format_context(hits)}\n---\n\n"
+        f"{prior}Current question: {query}\n\nExcerpts:\n---\n{_format_context(hits)}\n---\n\n"
         "Answer the question grounded in the excerpts above."
     )
     text = llm.complete(prompt, system=system, temperature=0.2, max_tokens=800)

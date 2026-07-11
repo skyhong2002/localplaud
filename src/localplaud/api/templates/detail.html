@@ -77,8 +77,9 @@
       {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}
       {% if f.imported_transcript %}<button data-panel="imported" class="{% if not f.transcript and not f.summaries %}on{% endif %}">Plaud import ☁</button>{% endif %}
       {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
+      {% for note in f.user_notes %}<button data-panel="saved-{{ note.id }}">{{ note.title }}</button>{% endfor %}
       {% if mindmaps %}<button data-panel="mindmap" class="{% if not f.transcript and not notes %}on{% endif %}">Mind map</button>{% endif %}
-      <button data-panel="ask" class="{% if not f.transcript and not f.imported_transcript and not f.summaries %}on{% endif %}">Ask</button>
+      <button data-panel="ask" class="{% if not f.transcript and not f.imported_transcript and not f.summaries and not f.user_notes %}on{% endif %}">Ask</button>
     </div>
 
     {% if f.transcript %}
@@ -155,6 +156,14 @@
     <div class="tabpanel md" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %} data-md>{{ s.content_md }}</div>
     {% endfor %}
 
+    {% for note in f.user_notes %}
+    <div class="tabpanel" data-panel="saved-{{ note.id }}" hidden>
+      <div class="sub" style="font-size:12px;margin-bottom:8px">Saved from {{ note.source_type }} · <a href="/notes#note-{{ note.id }}">Edit in Saved notes</a></div>
+      <div class="md" data-md>{{ note.content_md }}</div>
+      {% if note.citations %}<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px">{% for citation in note.citations %}<a class="chip" href="/file/{{ citation.file_id }}{% if citation.start is not none %}?t={{ citation.start }}{% endif %}">{{ citation.start | mmss }}</a>{% endfor %}</div>{% endif %}
+    </div>
+    {% endfor %}
+
     {% if mindmaps %}
     <div class="tabpanel" data-panel="mindmap" {% if f.transcript or notes %}hidden{% endif %}>
       <style>
@@ -191,7 +200,8 @@
         <button class="btn" type="submit">Ask</button>
       </form>
       <div id="file-ask-spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">thinking…</div>
-      <div id="file-answer"></div>
+      {% if f.ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 10px"><span class="sub" style="font-size:11px">Recent threads</span>{% for thread in f.ask_threads %}<a class="chip {% if f.selected_ask_thread and f.selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/file/{{ f.id }}?ask_thread={{ thread.id }}">{{ thread.title | truncate(34) }}</a>{% endfor %}</div>{% endif %}
+      <div id="file-answer">{% if f.selected_ask_thread %}{% set thread=f.selected_ask_thread %}{% set file_id=f.id %}{% set target='file-answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
     </div>
 
     {% if not f.transcript and not f.imported_transcript and not f.summaries %}

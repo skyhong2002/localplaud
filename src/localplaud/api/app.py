@@ -13,8 +13,10 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, select, update
 
+from ..ask_threads import thread_to_dict
 from ..config import get_settings
 from ..db.models import (
+    AskThread,
     Chunk,
     ExecutionProfile,
     FileStatus,
@@ -29,6 +31,7 @@ from ..db.models import (
     Tag,
     Transcript,
     TranscriptRevision,
+    UserNote,
     recording_tags,
 )
 from ..db.session import init_db, session_scope
@@ -36,6 +39,7 @@ from ..remote.server import resume_pending_jobs
 from ..remote.server import router as worker_router
 from ..store.speakers import display_names, speaker_keys_from_segments
 from .note_templates import router as note_templates_router
+from .notes import router as notes_router
 from .providers import router as providers_router
 
 _HERE = Path(__file__).parent
@@ -54,6 +58,7 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
 app.include_router(providers_router)
 app.include_router(note_templates_router)
+app.include_router(notes_router)
 app.include_router(worker_router)
 
 _static = _HERE / "static"
@@ -467,6 +472,7 @@ def index(
     view: str | None = None,
     folder: str | None = None,
     tag: str | None = None,
+    ask_thread: str | None = None,
 ):
     params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag)
     with session_scope() as session:
@@ -475,6 +481,20 @@ def index(
         stats = _stats(session)
         facets = _library_facets(session, params)
         organization = _organization_summary(session)
+        recent_ask_threads = list(
+            session.scalars(
+                select(AskThread)
+                .where(AskThread.file_id.is_(None))
+                .order_by(AskThread.updated_at.desc())
+                .limit(5)
+            )
+        )
+        selected_ask_thread = session.get(AskThread, ask_thread) if ask_thread else None
+        if selected_ask_thread is not None and selected_ask_thread.file_id is not None:
+            selected_ask_thread = None
+        selected_ask_thread_data = (
+            thread_to_dict(selected_ask_thread) if selected_ask_thread is not None else None
+        )
     ctx = _base_ctx(request, "recordings") | {
         "files": files,
         "stats": stats,
@@ -484,6 +504,10 @@ def index(
         "organization": organization,
         "states": [s.value for s in FileStatus],
         "attention_states": _ATTENTION_STATES,
+        "ask_threads": [
+            {"id": row.id, "title": row.title} for row in recent_ask_threads
+        ],
+        "selected_ask_thread": selected_ask_thread_data,
     }
     return templates.TemplateResponse(request=request, name="index.html", context=ctx)
 
@@ -554,7 +578,12 @@ def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) ->
 
 
 @app.get("/file/{file_id}", response_class=HTMLResponse)
-def file_detail(request: Request, file_id: str, view: str | None = None):
+def file_detail(
+    request: Request,
+    file_id: str,
+    view: str | None = None,
+    ask_thread: str | None = None,
+):
     settings = get_settings()
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
@@ -658,6 +687,16 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
                 _organization_item(tag)
                 for tag in sorted(r.tags, key=lambda tag: (tag.name.casefold(), tag.id))
             ],
+            "user_notes": [
+                {
+                    "id": note.id,
+                    "title": note.title,
+                    "content_md": note.content_md,
+                    "source_type": note.source_type,
+                    "citations": note.citations or [],
+                }
+                for note in r.user_notes
+            ],
             "note_template_key": r.note_template_key or settings.pipeline.summary_template,
             "stages": [
                 {
@@ -706,6 +745,21 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
                 .order_by(NoteTemplate.name)
             )
         ]
+        recent_ask_threads = list(
+            session.scalars(
+                select(AskThread)
+                .where(AskThread.file_id == file_id)
+                .order_by(AskThread.updated_at.desc())
+                .limit(5)
+            )
+        )
+        selected_ask_thread = session.get(AskThread, ask_thread) if ask_thread else None
+        if selected_ask_thread is not None and selected_ask_thread.file_id != file_id:
+            selected_ask_thread = None
+        f["ask_threads"] = [{"id": row.id, "title": row.title} for row in recent_ask_threads]
+        f["selected_ask_thread"] = (
+            thread_to_dict(selected_ask_thread) if selected_ask_thread is not None else None
+        )
         files = [
             _file_summary(x)
             for x in session.scalars(
@@ -807,6 +861,37 @@ def settings_page(request: Request):
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
 
 
+@app.get("/notes", response_class=HTMLResponse)
+def notes_page(request: Request):
+    with session_scope() as session:
+        rows = list(
+            session.scalars(select(UserNote).order_by(UserNote.updated_at.desc(), UserNote.id.desc()))
+        )
+        file_names = {}
+        for row in rows:
+            if row.file_id and row.file_id not in file_names:
+                recording = session.get(PlaudFile, row.file_id)
+                if recording is not None:
+                    file_names[row.file_id] = recording.filename
+        notes = [
+            {
+                "id": row.id,
+                "file_id": row.file_id,
+                "filename": file_names.get(row.file_id),
+                "title": row.title,
+                "content_md": row.content_md,
+                "source_type": row.source_type,
+                "citations": row.citations or [],
+            }
+            for row in rows
+        ]
+    return templates.TemplateResponse(
+        request=request,
+        name="notes.html",
+        context=_base_ctx(request, "notes") | {"notes": notes},
+    )
+
+
 def _health_checks(settings) -> list[dict]:
     checks: list[dict] = []
 
@@ -840,17 +925,31 @@ def _health_checks(settings) -> list[dict]:
 
 
 @app.post("/ask", response_class=HTMLResponse)
-def ask(request: Request, q: str = Form(...)):
-    from ..worker.qa import answer
+def ask(request: Request, q: str = Form(...), thread_id: str | None = Form(None)):
+    from ..ask_threads import ask_in_thread
 
-    res = answer(q)
+    try:
+        thread = ask_in_thread(q, thread_id=thread_id)
+    except LookupError as exc:
+        return HTMLResponse(str(exc), status_code=404)
+    except ValueError as exc:
+        return HTMLResponse(str(exc), status_code=409)
+    except Exception:  # noqa: BLE001 - provider may be unavailable
+        thread = _unavailable_ask_thread(q, thread_id)
     return templates.TemplateResponse(
-        request=request, name="_answer.html", context={"q": q, "res": res}
+        request=request,
+        name="_ask_thread.html",
+        context={"thread": thread, "file_id": None, "target": "answer"},
     )
 
 
 @app.post("/file/{file_id}/ask", response_class=HTMLResponse)
-def file_ask(request: Request, file_id: str, q: str = Form(...)):
+def file_ask(
+    request: Request,
+    file_id: str,
+    q: str = Form(...),
+    thread_id: str | None = Form(None),
+):
     """Single-recording Ask: answer grounded only in this recording, with each
     citation rendered as a playable timestamp (handled by [data-seek] JS)."""
     with session_scope() as session:
@@ -858,19 +957,41 @@ def file_ask(request: Request, file_id: str, q: str = Form(...)):
         if r is None:
             return HTMLResponse("Not found", status_code=404)
 
-    from ..worker.qa import answer
+    from ..ask_threads import ask_in_thread
 
     try:
-        res = answer(q, file_id=file_id)
+        thread = ask_in_thread(q, file_id=file_id, thread_id=thread_id)
+    except LookupError as exc:
+        return HTMLResponse(str(exc), status_code=404)
+    except ValueError as exc:
+        return HTMLResponse(str(exc), status_code=409)
     except Exception:  # noqa: BLE001 - embeddings/LLM provider may be unavailable
-        res = {
-            "answer": "Ask is unavailable right now — the embeddings or language "
-            "model provider could not be reached. Check Settings and try again.",
-            "sources": [],
-        }
+        thread = _unavailable_ask_thread(q, thread_id, file_id=file_id)
     return templates.TemplateResponse(
-        request=request, name="_file_answer.html", context={"q": q, "res": res}
+        request=request,
+        name="_ask_thread.html",
+        context={"thread": thread, "file_id": file_id, "target": "file-answer"},
     )
+
+
+def _unavailable_ask_thread(
+    query: str, thread_id: str | None, *, file_id: str | None = None
+) -> dict:
+    return {
+        "thread_id": thread_id,
+        "file_id": file_id,
+        "title": query,
+        "messages": [
+            {"id": None, "role": "user", "content": query, "sources": []},
+            {
+                "id": None,
+                "role": "assistant",
+                "content": "Ask is unavailable right now — the embeddings or language "
+                "model provider could not be reached. Check Settings and try again.",
+                "sources": [],
+            },
+        ],
+    }
 
 
 @app.get("/file/{file_id}/export.md")

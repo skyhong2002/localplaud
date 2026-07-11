@@ -90,6 +90,18 @@ def render_markdown(file_id: str) -> str:
                 heading += f": {summary.title}"
             parts += [heading, "", summary.content_md.strip(), ""]
 
+        for note in file.user_notes:
+            parts += [f"## {note.title}", "", note.content_md.strip(), ""]
+            if note.citations:
+                parts += ["Sources:", ""]
+                for citation in note.citations:
+                    label = citation.get("filename") or citation.get("file_id") or "Recording"
+                    stamp = citation.get("start")
+                    if stamp is not None:
+                        label += f" @ {_format_timestamp(stamp)}"
+                    parts.append(f"- {label}")
+                parts.append("")
+
         if mind_maps:
             outline = mind_maps[-1].content_md.strip()
             if outline.startswith("# "):
