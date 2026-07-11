@@ -68,15 +68,12 @@ def resolve_profile(
             applied.append(str(layer["key"]))
 
     no_egress = bool(merged["policy"].get("no_egress"))
-    for stage_name, selection in merged["stages"].items():
-        try:
-            stage = ProviderStage(stage_name)
-        except ValueError as exc:
-            raise ResolutionError(f"unknown stage: {stage_name}") from exc
+
+    def validate_selection(stage: ProviderStage, selection: dict, label: str) -> None:
         key = (str(selection.get("connection")), str(selection.get("model")))
         raw = capabilities.get(key)
         if raw is None:
-            raise ResolutionError(f"unknown provider/model for {stage.value}: {key[0]}/{key[1]}")
+            raise ResolutionError(f"unknown provider/model for {label}: {key[0]}/{key[1]}")
         capability = raw if isinstance(raw, Capability) else Capability.model_validate(raw)
         if capability.for_stage(stage) is None:
             raise ResolutionError(f"model {key[1]} does not support stage {stage.value}")
@@ -84,6 +81,41 @@ def resolve_profile(
             raise ResolutionError(f"no-egress profile cannot use {key[0]}/{key[1]}")
         selection["execution_target"] = capability.execution_target
         selection["data_egress"] = capability.data_egress
+
+    for stage_name, selection in merged["stages"].items():
+        try:
+            stage = ProviderStage(stage_name)
+        except ValueError as exc:
+            raise ResolutionError(f"unknown stage: {stage_name}") from exc
+        validate_selection(stage, selection, stage.value)
+
+    fallback = merged["policy"].get("fallback_policy") or {}
+    fallback_stages = fallback.get("stages") or {}
+    if not isinstance(fallback_stages, Mapping):
+        raise ResolutionError("fallback_policy.stages must be an object")
+    for stage_name, candidates in fallback_stages.items():
+        try:
+            stage = ProviderStage(stage_name)
+        except ValueError as exc:
+            raise ResolutionError(f"unknown fallback stage: {stage_name}") from exc
+        if stage_name not in merged["stages"]:
+            raise ResolutionError(f"fallback stage has no primary selection: {stage_name}")
+        if not isinstance(candidates, list | tuple) or len(candidates) > 5:
+            raise ResolutionError(f"fallbacks for {stage_name} must be a list of at most 5")
+        seen = {
+            (
+                merged["stages"][stage_name].get("connection"),
+                merged["stages"][stage_name].get("model"),
+            )
+        }
+        for index, candidate in enumerate(candidates):
+            if not isinstance(candidate, dict):
+                raise ResolutionError(f"fallback {stage_name}[{index}] must be an object")
+            key = (candidate.get("connection"), candidate.get("model"))
+            if key in seen:
+                raise ResolutionError(f"duplicate fallback for {stage_name}: {key[0]}/{key[1]}")
+            seen.add(key)
+            validate_selection(stage, candidate, f"{stage_name} fallback {index + 1}")
 
     merged["layers"] = applied
     return ResolvedProfile(_freeze(merged))

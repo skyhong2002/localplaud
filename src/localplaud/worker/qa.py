@@ -7,6 +7,7 @@ the source recordings.
 
 from __future__ import annotations
 
+import copy
 import logging
 
 import numpy as np
@@ -17,6 +18,10 @@ from ..db.models import Chunk, PlaudFile
 from ..db.session import session_scope
 from ..embeddings.base import build_embedder
 from ..llm.base import build_llm
+from ..providers.fallback import candidate_snapshots, is_retryable_fallback_error
+from ..providers.service import preview_resolution, resolve_recording_profile
+from ..providers.usage import CostPolicyError, estimate_cost, normalize_usage, pricing_for_stage
+from .pipeline import _settings_for_stage
 
 log = logging.getLogger(__name__)
 
@@ -100,12 +105,85 @@ def _format_context(hits: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
+def _resolved_snapshot(file_id: str | None) -> dict:
+    with session_scope() as session:
+        if file_id is not None:
+            return resolve_recording_profile(session, file_id).to_dict()
+        return preview_resolution(session).to_dict()
+
+
+def _candidate_cost(
+    snapshot: dict,
+    stage: str,
+    usage: dict,
+    spent_cost_usd: float,
+) -> tuple[float, dict]:
+    selection = snapshot["stages"][stage]
+    with session_scope() as session:
+        pricing = pricing_for_stage(session, snapshot, stage)
+    ceiling = (snapshot.get("policy") or {}).get("cost_ceiling")
+    external = selection.get("execution_target") in {"cloud", "remote_worker"}
+    if ceiling is not None and external and not pricing:
+        raise CostPolicyError(
+            f"{stage} cost is unknown for {selection.get('connection')}:{selection.get('model')}"
+        )
+    projected = estimate_cost(usage, pricing)
+    if ceiling is not None and spent_cost_usd + projected > float(ceiling) + 1e-12:
+        raise CostPolicyError(
+            f"{stage} would exceed the ${float(ceiling):.6g} Ask ceiling "
+            f"(${spent_cost_usd:.6g} spent + ${projected:.6g} projected)"
+        )
+    return projected, pricing
+
+
+def _retrieve_with_profile(
+    query: str,
+    top_k: int,
+    settings: Settings,
+    file_id: str | None,
+    snapshot: dict,
+    spent_cost_usd: float,
+) -> tuple[list[dict], dict, dict, float]:
+    failures: list[dict] = []
+    for index, candidate in enumerate(candidate_snapshots(snapshot, "embed")):
+        candidate_settings = _settings_for_stage(settings, candidate, "embed")
+        usage = normalize_usage({"input_chars": len(query), "requests": 1})
+        try:
+            _projected, pricing = _candidate_cost(
+                candidate, "embed", usage, spent_cost_usd
+            )
+            hits = retrieve(
+                query,
+                top_k=top_k,
+                settings=candidate_settings,
+                file_id=file_id,
+            )
+            actual_cost = estimate_cost(usage, pricing)
+            return hits, candidate, usage, actual_cost
+        except Exception as exc:  # noqa: BLE001 - explicit retry classification
+            retryable = is_retryable_fallback_error(exc)
+            selection = candidate["stages"]["embed"]
+            failures.append(
+                {
+                    "index": index,
+                    "connection": selection["connection"],
+                    "model": selection["model"],
+                    "error": str(exc)[:500],
+                    "retryable": retryable,
+                }
+            )
+            if not retryable or index + 1 >= len(candidate_snapshots(snapshot, "embed")):
+                raise
+    raise RuntimeError("no embedding candidate executed")
+
+
 def answer(
     query: str,
     top_k: int = 6,
     settings: Settings | None = None,
     file_id: str | None = None,
     history: list[dict] | None = None,
+    spent_cost_usd: float = 0.0,
 ) -> dict:
     """Retrieve + answer. Returns {answer, sources}.
 
@@ -113,16 +191,27 @@ def answer(
     single recording, and the model is asked to reference moments by timestamp.
     """
     settings = settings or get_settings()
-    hits = retrieve(query, top_k=top_k, settings=settings, file_id=file_id)
+    snapshot = _resolved_snapshot(file_id)
+    hits, embed_snapshot, embed_usage, embed_cost = _retrieve_with_profile(
+        query, top_k, settings, file_id, snapshot, spent_cost_usd
+    )
     if not hits:
         if file_id is not None:
             return {
                 "answer": "This recording isn't indexed yet — process it first, "
                 "then ask again.",
                 "sources": [],
+                "usage": {"embed": embed_usage},
+                "estimated_cost_usd": embed_cost,
+                "provenance": {"profile": embed_snapshot},
             }
-        return {"answer": "No indexed recordings yet — run the pipeline first.", "sources": []}
-    llm = build_llm(settings.llm)
+        return {
+            "answer": "No indexed recordings yet — run the pipeline first.",
+            "sources": [],
+            "usage": {"embed": embed_usage},
+            "estimated_cost_usd": embed_cost,
+            "provenance": {"profile": embed_snapshot},
+        }
     system = _QA_SYSTEM_SINGLE if file_id is not None else _QA_SYSTEM
     prior = ""
     if history:
@@ -136,5 +225,55 @@ def answer(
         f"{prior}Current question: {query}\n\nExcerpts:\n---\n{_format_context(hits)}\n---\n\n"
         "Answer the question grounded in the excerpts above."
     )
-    text = llm.complete(prompt, system=system, temperature=0.2, max_tokens=800)
-    return {"answer": text, "sources": hits}
+    failures: list[dict] = []
+    for index, candidate in enumerate(candidate_snapshots(snapshot, "ask")):
+        candidate_settings = _settings_for_stage(settings, candidate, "ask")
+        projected_usage = normalize_usage(
+            {"input_chars": len(prompt) + len(system), "output_tokens": 800, "requests": 1}
+        )
+        try:
+            _projected, pricing = _candidate_cost(
+                candidate,
+                "ask",
+                projected_usage,
+                spent_cost_usd + embed_cost,
+            )
+            llm = build_llm(candidate_settings.llm)
+            text = llm.complete(prompt, system=system, temperature=0.2, max_tokens=800)
+            actual_usage = normalize_usage(
+                {
+                    "input_chars": len(prompt) + len(system),
+                    "output_chars": len(text),
+                    "requests": 1,
+                }
+            )
+            llm_cost = estimate_cost(actual_usage, pricing)
+            provenance = copy.deepcopy(candidate)
+            provenance["fallback_failures"] = failures
+            selection = candidate["stages"]["ask"]
+            return {
+                "answer": text,
+                "sources": hits,
+                "usage": {"embed": embed_usage, "ask": actual_usage},
+                "estimated_cost_usd": round(embed_cost + llm_cost, 8),
+                "provenance": {
+                    "provider": selection["connection"].split(":", 1)[-1],
+                    "model": selection["model"],
+                    "profile": provenance,
+                },
+            }
+        except Exception as exc:  # noqa: BLE001 - explicit retry classification
+            retryable = is_retryable_fallback_error(exc)
+            selection = candidate["stages"]["ask"]
+            failures.append(
+                {
+                    "index": index,
+                    "connection": selection["connection"],
+                    "model": selection["model"],
+                    "error": str(exc)[:500],
+                    "retryable": retryable,
+                }
+            )
+            if not retryable or index + 1 >= len(candidate_snapshots(snapshot, "ask")):
+                raise
+    raise RuntimeError("no Ask candidate executed")

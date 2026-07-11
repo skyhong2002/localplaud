@@ -99,6 +99,7 @@
           <div class="tile"><div class="k">{{ stage }}</div><div style="font-weight:600;margin-top:3px">{{ selection.model }}</div><div class="sub" style="font-size:11px">{{ selection.connection }} · {{ selection.execution_target }}</div></div>
           {% endfor %}
         </div>
+        {% set fallbacks=(p.policy.fallback_policy or {}).stages or {} %}{% if fallbacks %}<div class="sub" style="font-size:11.5px;margin-top:10px"><strong>Fallback order</strong>{% for stage, candidates in fallbacks.items() %}{% if candidates %}<div style="margin-top:3px">{{ stage }} · {% for candidate in candidates %}{{ loop.index }}. {{ candidate.connection }}:{{ candidate.model }}{% if not loop.last %} → {% endif %}{% endfor %}</div>{% endif %}{% endfor %}</div>{% endif %}
       </details>
       {% endfor %}
     </div>
@@ -162,8 +163,11 @@
       <input class="search-input" name="name" placeholder="Profile name" required>
       <input class="search-input" name="key" placeholder="Stable key, e.g. apple-local" required>
       {% for stage in provider_stages %}
-      <label class="sub">{{ stage }}
+      <label class="sub">{{ stage }} · primary
         <select class="search-input" name="stage-{{ stage }}" required style="margin-top:3px"><option value="">Choose model…</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
+      </label>
+      <label class="sub">{{ stage }} · first fallback
+        <select class="search-input" name="fallback-{{ stage }}" style="margin-top:3px"><option value="">No fallback</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
       </label>
       {% endfor %}
       <label class="sub"><input type="checkbox" name="no_egress" checked> Local only / no egress</label>
@@ -254,7 +258,7 @@ async function editModel(id){
 }
 function newProfileVersion(id){
   const p=PROFILES.find(x=>x.id===id),form=document.getElementById('profile-form');form.elements.name.value=p.name;form.elements.key.value=p.key;form.elements.no_egress.checked=p.policy.no_egress;
-  for(const [stage,s] of Object.entries(p.stages)){const el=form.elements[`stage-${stage}`];if(el)el.value=`${s.connection}|||${s.model}`;}
+  for(const [stage,s] of Object.entries(p.stages)){const el=form.elements[`stage-${stage}`];if(el)el.value=`${s.connection}|||${s.model}`;}for(const [stage,candidates] of Object.entries(p.policy.fallback_policy?.stages||{})){const el=form.elements[`fallback-${stage}`],candidate=candidates[0];if(el&&candidate)el.value=`${candidate.connection}|||${candidate.model}`;}
   form.scrollIntoView({behavior:'smooth'});document.getElementById('profile-result').textContent=`Creating the next version of ${p.key}`;
 }
 async function testHealth(id){
@@ -287,10 +291,10 @@ document.getElementById('model-form').addEventListener('submit',async e=>{
   if(r.ok){out.textContent='Added. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not add model';}
 });
 document.getElementById('profile-form').addEventListener('submit',async e=>{
-  e.preventDefault();const f=new FormData(e.target),stages={};
-  {% for stage in provider_stages %}const v{{ loop.index }}=f.get('stage-{{ stage }}').split('|||');stages['{{ stage }}']={connection:v{{ loop.index }}[0],model:v{{ loop.index }}[1],options:{}};{% endfor %}
+  e.preventDefault();const f=new FormData(e.target),stages={},fallbackStages={};
+  {% for stage in provider_stages %}const v{{ loop.index }}=f.get('stage-{{ stage }}').split('|||');stages['{{ stage }}']={connection:v{{ loop.index }}[0],model:v{{ loop.index }}[1],options:{}};const fb{{ loop.index }}=f.get('fallback-{{ stage }}');if(fb{{ loop.index }}){const parts=fb{{ loop.index }}.split('|||');fallbackStages['{{ stage }}']=[{connection:parts[0],model:parts[1],options:{}}];}{% endfor %}
   const noEgress=f.get('no_egress')==='on';const cost=f.get('cost_ceiling');
-  const body={name:f.get('name'),key:f.get('key'),is_system_default:f.get('is_system_default')==='on',privacy_policy:noEgress?'local-only':'allow-egress',no_egress:noEgress,cost_ceiling:cost?Number(cost):null,fallback_policy:{},stages};
+  const body={name:f.get('name'),key:f.get('key'),is_system_default:f.get('is_system_default')==='on',privacy_policy:noEgress?'local-only':'allow-egress',no_egress:noEgress,cost_ceiling:cost?Number(cost):null,fallback_policy:{stages:fallbackStages},stages};
   const r=await fetch('/api/providers/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const out=document.getElementById('profile-result');
   if(r.ok){out.textContent='Created. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not create profile';}
 });

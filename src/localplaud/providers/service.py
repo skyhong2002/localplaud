@@ -92,7 +92,7 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
     profile = ExecutionProfile(
         key=DEFAULT_PROFILE_KEY, name="Current Settings", version=1, is_system_default=True,
         privacy_policy="allow-egress" if cloud else "local-only", no_egress=not cloud,
-        fallback_policy={"asr": list(settings.asr.fallback)},
+        fallback_policy={"stages": {}},
     )
     session.add(profile)
     session.flush()

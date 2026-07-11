@@ -5,6 +5,13 @@
     {% else %}
     <div class="panel" style="border-color:var(--border2);padding:13px 14px">
       <div class="md" style="white-space:pre-wrap">{{ message.content }}</div>
+      {% if message.provider or message.model or message.estimated_cost_usd %}
+      <div class="sub" style="font-size:11px;margin-top:8px">
+        {{ message.provider or 'unknown provider' }}{% if message.model %} · {{ message.model }}{% endif %}
+        {% if message.fallback %} · fallback {{ message.fallback.index }}{% endif %}
+        {% if message.estimated_cost_usd %} · estimated ${{ '%.4f' | format(message.estimated_cost_usd) }}{% endif %}
+      </div>
+      {% endif %}
       {% if message.sources %}
       <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:9px">
         <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:5px">GROUNDED SOURCES</div>

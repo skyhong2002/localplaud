@@ -279,20 +279,15 @@ diarization/alignment stages, not by Whisper itself.
   provider output; explicit library-wide application marks affected notes, maps, and
   indexes stale before those artifacts can be reused.
 
-## Export parity target
+## Required export scope
 
 | Content | Formats |
 | --- | --- |
-| Audio | original, MP3, WAV |
 | Transcript | TXT, SRT, VTT |
-| Notes | Markdown, TXT |
-| Mind map | Markdown outline, PNG |
 
 The recording workspace now provides transcript TXT/SRT/VTT exports with timestamp
-and speaker-label controls, notes Markdown/TXT, original audio,
-and a combined Markdown archive. Converted MP3/WAV audio and PNG mind-map rendering
-remain to complete this matrix.
-| Ask result | Markdown, clipboard, saved local note |
+and speaker-label controls. Existing notes, audio, archive, and mind-map exports are
+conveniences rather than release requirements.
 
 Transcript export must allow timestamps and speaker names to be toggled.
 

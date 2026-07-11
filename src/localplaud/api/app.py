@@ -359,6 +359,7 @@ def file_usage(file_id: str) -> dict:
             "model": row.model,
             "latency_ms": row.latency_ms,
             "usage": row.usage or {},
+            "fallback": (row.resolved_profile_snapshot or {}).get("fallback"),
             "estimated_cost_usd": row.estimated_cost_usd or 0,
             "started_at": row.started_at.isoformat(),
             "completed_at": row.completed_at.isoformat() if row.completed_at else None,
@@ -1192,6 +1193,7 @@ def file_detail(
                         "model": item.model,
                         "latency_ms": item.latency_ms,
                         "usage": item.usage or {},
+                        "fallback": (item.resolved_profile_snapshot or {}).get("fallback"),
                         "estimated_cost_usd": item.estimated_cost_usd or 0,
                     }
                     for item in attempt_rows

@@ -433,6 +433,11 @@ class AskMessage(Base):
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
     sources: Mapped[list] = mapped_column(JSON, default=list)
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     thread: Mapped[AskThread] = relationship(back_populates="messages")
 

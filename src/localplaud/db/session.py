@@ -42,6 +42,7 @@ def init_db() -> dict[str, int] | None:
     from ..providers.service import bootstrap_default_profile
     from .migrations import (
         migrate_artifact_lineage_columns,
+        migrate_ask_provenance_schema,
         migrate_import_schema,
         migrate_note_template_schema,
         migrate_organization_schema,
@@ -57,6 +58,7 @@ def init_db() -> dict[str, int] | None:
     migrate_pipeline_retry_schema(engine)
     migrate_note_template_schema(engine)
     migrate_artifact_lineage_columns(engine)
+    migrate_ask_provenance_schema(engine)
     migrate_import_schema(engine)
     migrate_vocabulary_schema(engine)
     with Session(engine) as session:

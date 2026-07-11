@@ -5,20 +5,26 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .config import Settings, get_settings
-from .db.models import AskMessage, AskThread, PlaudFile, UserNote
+from .db.models import AskMessage, AskThread, PlaudFile, StageAttempt, UserNote
 from .db.session import session_scope
 from .worker import qa
 
 
 def _message(row: AskMessage) -> dict:
+    profile = row.resolved_profile_snapshot or {}
     return {
         "id": row.id,
         "role": row.role,
         "content": row.content,
         "sources": row.sources or [],
+        "provider": row.provider,
+        "model": row.model,
+        "usage": row.usage or {},
+        "estimated_cost_usd": row.estimated_cost_usd or 0,
+        "fallback": profile.get("fallback"),
     }
 
 
@@ -51,8 +57,27 @@ def ask_in_thread(
         if thread is not None and thread.file_id != file_id:
             raise ValueError("thread scope does not match this Ask surface")
         history = [_message(row) for row in thread.messages] if thread is not None else []
+        ask_spent = sum(item.get("estimated_cost_usd", 0) for item in history)
+        pipeline_spent = (
+            float(
+                session.scalar(
+                    select(func.coalesce(func.sum(StageAttempt.estimated_cost_usd), 0)).where(
+                        StageAttempt.file_id == file_id
+                    )
+                )
+                or 0
+            )
+            if file_id is not None
+            else 0.0
+        )
 
-    result = qa.answer(query, settings=settings, file_id=file_id, history=history)
+    result = qa.answer(
+        query,
+        settings=settings,
+        file_id=file_id,
+        history=history,
+        spent_cost_usd=ask_spent + pipeline_spent,
+    )
     with session_scope() as session:
         thread = session.get(AskThread, thread_id) if thread_id else None
         if thread_id and thread is None:
@@ -72,6 +97,13 @@ def ask_in_thread(
                     role="assistant",
                     content=result["answer"],
                     sources=result.get("sources", []),
+                    provider=(result.get("provenance") or {}).get("provider"),
+                    model=(result.get("provenance") or {}).get("model"),
+                    resolved_profile_snapshot=(result.get("provenance") or {}).get(
+                        "profile"
+                    ),
+                    usage=result.get("usage", {}),
+                    estimated_cost_usd=result.get("estimated_cost_usd", 0),
                 ),
             ]
         )

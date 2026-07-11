@@ -11,6 +11,7 @@ State lives on the ``PlaudFile`` row; derived artifacts become ``Transcript``,
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import logging
@@ -38,6 +39,7 @@ from ..db.models import (
 from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
+from ..providers.fallback import candidate_snapshots, is_retryable_fallback_error
 from ..providers.service import resolve_recording_profile
 from ..providers.usage import (
     enforce_cost_ceiling,
@@ -94,9 +96,9 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
             setattr(target, key, value)
 
     if stage == "transcribe":
-        policy = snapshot.get("policy", {})
-        fallback = policy.get("fallback_policy", {}).get("asr", [])
-        family_config.fallback = [] if policy.get("no_egress") else list(fallback)
+        # Provider-name fallback is intentionally disabled. Only the validated,
+        # ordered stage selections in Profile fallback_policy may change provider.
+        family_config.fallback = []
     return resolved
 
 
@@ -368,6 +370,55 @@ def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
         return enforce_cost_ceiling(session, file_id, stage, snapshot, usage)
 
 
+def _run_fallback_stage(
+    file_id: str,
+    profile_stage: str,
+    durable_stage: StageName,
+    snapshot: dict,
+    operation,
+):
+    """Run primary then explicit retryable fallbacks as separate attempts."""
+    candidates = candidate_snapshots(snapshot, profile_stage)
+    failures: list[dict] = []
+    for position, candidate in enumerate(candidates):
+        token = _PROFILE_SNAPSHOT.set(candidate)
+        _begin_stage(file_id, durable_stage)
+        try:
+            outcome = operation(candidate)
+            detail = dict(outcome.get("detail") or {}) | {
+                "fallback": candidate["fallback"],
+                "fallback_failures": failures,
+            }
+            _finish_stage(
+                file_id,
+                durable_stage,
+                provider=outcome.get("provider"),
+                model=outcome.get("model"),
+                artifact_source=outcome.get("artifact_source", "local"),
+                detail=detail,
+                usage=outcome.get("usage"),
+            )
+            return outcome.get("value"), candidate
+        except Exception as exc:  # noqa: BLE001 - classified by provider contract
+            retryable = is_retryable_fallback_error(exc)
+            _fail_stage(file_id, durable_stage, exc)
+            selection = candidate["stages"].get(profile_stage) or {}
+            failures.append(
+                {
+                    "index": position,
+                    "connection": selection.get("connection"),
+                    "model": selection.get("model"),
+                    "error": str(exc)[:500],
+                    "retryable": retryable,
+                }
+            )
+            if not retryable or position + 1 >= len(candidates):
+                raise
+        finally:
+            _PROFILE_SNAPSHOT.reset(token)
+    raise RuntimeError(f"no candidate executed for {profile_stage}")
+
+
 def _llm_projected_usage(transcript: Transcript, settings: Settings) -> dict:
     chars = len(transcript.text)
     chunks = max(1, math.ceil(chars / settings.pipeline.summary_chunk_chars))
@@ -424,13 +475,11 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         snapshot = resolve_recording_profile(session, file_id).to_dict()
 
     profile_token = _PROFILE_SNAPSHOT.set(snapshot)
-    transcribe_settings = _settings_for_stage(settings, snapshot, "transcribe")
     diarize_settings = _settings_for_stage(settings, snapshot, "diarize")
     summarize_settings = _settings_for_stage(settings, snapshot, "summarize")
     mind_map_settings = _settings_for_stage(settings, snapshot, "mind_map")
     summarize_settings.pipeline.summary_template = template_key
     mind_map_settings.pipeline.summary_template = template_key
-    embed_settings = _settings_for_stage(settings, snapshot, "embed")
 
     partial_errors: list[str] = []
     try:
@@ -482,15 +531,16 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                     detail={"reused": True},
                 )
             else:
-                _begin_stage(file_id, StageName.transcribe)
-                try:
+
+                def run_transcribe(candidate):
+                    candidate_settings = _settings_for_stage(settings, candidate, "transcribe")
                     projected_usage = {"audio_seconds": _audio_seconds(row)}
-                    cost_budget = _cost_guard(file_id, "transcribe", snapshot, projected_usage)
-                    if _remote_selection(snapshot, "transcribe"):
+                    cost_budget = _cost_guard(file_id, "transcribe", candidate, projected_usage)
+                    if _remote_selection(candidate, "transcribe"):
                         payload = _run_remote_stage(
-                            file_id, snapshot, "transcribe", [_remote_audio_input(wav)]
+                            file_id, candidate, "transcribe", [_remote_audio_input(wav)]
                         )
-                        transcript = Transcript(
+                        result = Transcript(
                             segments=_rehydrate_segments(payload.get("segments")),
                             language=payload.get("language"),
                             duration=payload.get("duration"),
@@ -499,23 +549,26 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                             has_speakers=payload.get("has_speakers", False),
                         )
                     else:
-                        transcript = transcribe.run_asr(wav, transcribe_settings)
-                    _persist_transcript(file_id, transcript)
-                    _finish_stage(
-                        file_id,
-                        StageName.transcribe,
-                        provider=transcript.provider,
-                        model=transcript.model,
-                        artifact_source="local",
-                        detail={"cost_budget": cost_budget},
-                        usage={
-                            "audio_seconds": _audio_seconds(row, transcript),
-                            "output_chars": len(transcript.text),
+                        result = transcribe.run_asr(wav, candidate_settings)
+                    _persist_transcript(file_id, result)
+                    return {
+                        "value": result,
+                        "provider": result.provider,
+                        "model": result.model,
+                        "detail": {"cost_budget": cost_budget},
+                        "usage": {
+                            "audio_seconds": _audio_seconds(row, result),
+                            "output_chars": len(result.text),
                         },
-                    )
-                except Exception as exc:
-                    _fail_stage(file_id, StageName.transcribe, exc)
-                    raise
+                    }
+
+                transcript, _selected_snapshot = _run_fallback_stage(
+                    file_id,
+                    "transcribe",
+                    StageName.transcribe,
+                    snapshot,
+                    run_transcribe,
+                )
         else:
             _skip_stage(file_id, StageName.transcribe, "disabled")
 
@@ -535,53 +588,56 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                 artifact_source=transcript_source,
                 detail={"reused": True, "provided_by_asr": True},
             )
-        elif diarize_settings.diarize.provider == "none":
+        elif (
+            diarize_settings.diarize.provider == "none"
+            and len(candidate_snapshots(snapshot, "diarize")) == 1
+        ):
             _skip_stage(file_id, StageName.diarize, "provider disabled")
         else:
-            _begin_stage(file_id, StageName.diarize)
             try:
-                projected_usage = {
-                    "audio_seconds": _audio_seconds(row, transcript),
-                    "input_chars": len(transcript.text),
-                }
-                cost_budget = _cost_guard(file_id, "diarize", snapshot, projected_usage)
-                if _remote_selection(snapshot, "diarize"):
-                    payload = _run_remote_stage(
-                        file_id,
-                        snapshot,
-                        "diarize",
-                        [
-                            _remote_audio_input(wav),
-                            _remote_json_input("transcript", _transcript_payload(transcript)),
-                        ],
-                    )
-                    transcript.segments = _rehydrate_segments(payload.get("segments"))
-                    transcript.has_speakers = payload.get("has_speakers", True)
-                    transcript.provider = "remote-worker"
-                    transcript.model = snapshot["stages"]["diarize"].get("model")
-                else:
-                    transcript = diarize(wav, transcript, diarize_settings.diarize)
-                _persist_transcript(file_id, transcript)
-                _finish_stage(
-                    file_id,
-                    StageName.diarize,
-                    provider=(
-                        "remote-worker"
-                        if _remote_selection(snapshot, "diarize")
-                        else diarize_settings.diarize.provider
-                    ),
-                    model=(
-                        snapshot["stages"]["diarize"].get("model")
-                        if _remote_selection(snapshot, "diarize")
-                        else diarize_settings.diarize.model
-                    ),
-                    artifact_source="local",
-                    detail={"cost_budget": cost_budget},
-                    usage={
-                        "audio_seconds": _audio_seconds(row, transcript),
-                        "input_chars": len(transcript.text),
-                        "output_chars": len(transcript.text),
-                    },
+
+                def run_diarize(candidate):
+                    candidate_settings = _settings_for_stage(settings, candidate, "diarize")
+                    source = copy.deepcopy(transcript)
+                    if candidate_settings.diarize.provider == "none":
+                        raise DiarizationUnavailable("diarization provider disabled")
+                    projected_usage = {
+                        "audio_seconds": _audio_seconds(row, source),
+                        "input_chars": len(source.text),
+                    }
+                    cost_budget = _cost_guard(file_id, "diarize", candidate, projected_usage)
+                    if _remote_selection(candidate, "diarize"):
+                        payload = _run_remote_stage(
+                            file_id,
+                            candidate,
+                            "diarize",
+                            [
+                                _remote_audio_input(wav),
+                                _remote_json_input("transcript", _transcript_payload(source)),
+                            ],
+                        )
+                        source.segments = _rehydrate_segments(payload.get("segments"))
+                        source.has_speakers = payload.get("has_speakers", True)
+                        provider = "remote-worker"
+                    else:
+                        source = diarize(wav, source, candidate_settings.diarize)
+                        provider = candidate_settings.diarize.provider
+                    model = candidate["stages"]["diarize"].get("model")
+                    _persist_transcript(file_id, source)
+                    return {
+                        "value": source,
+                        "provider": provider,
+                        "model": model,
+                        "detail": {"cost_budget": cost_budget},
+                        "usage": {
+                            "audio_seconds": _audio_seconds(row, source),
+                            "input_chars": len(source.text),
+                            "output_chars": len(source.text),
+                        },
+                    }
+
+                transcript, _selected_snapshot = _run_fallback_stage(
+                    file_id, "diarize", StageName.diarize, snapshot, run_diarize
                 )
             except DiarizationUnavailable as exc:
                 log.warning("Diarization degraded for %s: %s", file_id, exc)
@@ -589,7 +645,6 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                 partial_errors.append(f"diarize: {exc}")
             except Exception as exc:  # noqa: BLE001 - preserve usable transcript
                 log.exception("Diarization failed for %s", file_id)
-                _fail_stage(file_id, StageName.diarize, exc)
                 partial_errors.append(f"diarize: {exc}")
 
         # Apply terminology only after ASR/diarization has produced its final raw
@@ -631,53 +686,63 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         # --- summarize (skip if this template's summary already exists) #
         if pcfg.summarize and transcript is not None:
             if force or not _has_summary(file_id, template_key):
-                _begin_stage(file_id, StageName.summarize)
                 try:
-                    projected_usage = _llm_projected_usage(transcript, summarize_settings)
-                    cost_budget = _cost_guard(file_id, "summarize", snapshot, projected_usage)
-                    if _remote_selection(snapshot, "summarize"):
-                        result = _run_remote_stage(
-                            file_id,
-                            snapshot,
-                            "summarize",
-                            [_remote_json_input("transcript", _transcript_payload(transcript))],
-                            options={
-                                "template": summary_templates.template_snapshot(
-                                    summary_templates.get_effective_template(template_key)
-                                )
+
+                    def run_summary(candidate):
+                        candidate_settings = _settings_for_stage(settings, candidate, "summarize")
+                        candidate_settings.pipeline.summary_template = template_key
+                        projected_usage = _llm_projected_usage(transcript, candidate_settings)
+                        cost_budget = _cost_guard(file_id, "summarize", candidate, projected_usage)
+                        if _remote_selection(candidate, "summarize"):
+                            result = _run_remote_stage(
+                                file_id,
+                                candidate,
+                                "summarize",
+                                [_remote_json_input("transcript", _transcript_payload(transcript))],
+                                options={
+                                    "template": summary_templates.template_snapshot(
+                                        summary_templates.get_effective_template(template_key)
+                                    )
+                                },
+                            )
+                            result.setdefault("provider", "remote-worker")
+                            result.setdefault(
+                                "model", candidate["stages"]["summarize"].get("model")
+                            )
+                        else:
+                            result = summarize.summarize(transcript, candidate_settings)
+                        _persist_summary(file_id, result, transcript_lineage)
+                        return {
+                            "value": result,
+                            "provider": result.get("provider"),
+                            "model": result.get("model"),
+                            "detail": {
+                                "template": result.get("template", "default"),
+                                "coverage": result.get("coverage", {}),
+                                "transcript": transcript_lineage,
+                                "auto_template": auto_recommendation,
+                                "cost_budget": cost_budget,
                             },
-                        )
-                        result.setdefault("provider", "remote-worker")
-                        result.setdefault("model", snapshot["stages"]["summarize"].get("model"))
-                    else:
-                        result = summarize.summarize(transcript, summarize_settings)
-                    _persist_summary(file_id, result, transcript_lineage)
-                    _finish_stage(
+                            "usage": {
+                                "input_chars": len(transcript.text),
+                                "output_chars": len(result.get("content_md") or ""),
+                                "requests": (
+                                    (result.get("coverage") or {}).get("map_calls", 0)
+                                    + (result.get("coverage") or {}).get("reduce_calls", 0)
+                                    + 1
+                                ),
+                            },
+                        }
+
+                    _result, _selected_snapshot = _run_fallback_stage(
                         file_id,
+                        "summarize",
                         StageName.summarize,
-                        provider=result.get("provider"),
-                        model=result.get("model"),
-                        artifact_source="local",
-                        detail={
-                            "template": result.get("template", "default"),
-                            "coverage": result.get("coverage", {}),
-                            "transcript": transcript_lineage,
-                            "auto_template": auto_recommendation,
-                            "cost_budget": cost_budget,
-                        },
-                        usage={
-                            "input_chars": len(transcript.text),
-                            "output_chars": len(result.get("content_md") or ""),
-                            "requests": (
-                                (result.get("coverage") or {}).get("map_calls", 0)
-                                + (result.get("coverage") or {}).get("reduce_calls", 0)
-                                + 1
-                            ),
-                        },
+                        snapshot,
+                        run_summary,
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript remains usable
                     log.exception("Summarization failed for %s", file_id)
-                    _fail_stage(file_id, StageName.summarize, exc)
                     partial_errors.append(f"summarize: {exc}")
             else:
                 _finish_stage(
@@ -700,51 +765,59 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         # --- mind map (skip if a local mind map already exists) ------- #
         if pcfg.mind_map and transcript is not None:
             if force or not _has_summary(file_id, "mind_map"):
-                _begin_stage(file_id, StageName.mind_map)
                 try:
-                    projected_usage = _llm_projected_usage(transcript, mind_map_settings)
-                    cost_budget = _cost_guard(file_id, "mind_map", snapshot, projected_usage)
-                    summary_md = _load_summary_md(file_id, template_key)
-                    if _remote_selection(snapshot, "mind_map"):
-                        result = _run_remote_stage(
-                            file_id,
-                            snapshot,
-                            "mind_map",
-                            [_remote_json_input("transcript", _transcript_payload(transcript))],
-                            options={"summary_md": summary_md},
-                        )
-                        result.setdefault("provider", "remote-worker")
-                        result.setdefault("model", snapshot["stages"]["mind_map"].get("model"))
-                    else:
-                        result = mindmap.generate_mind_map(
-                            transcript, mind_map_settings, summary_md
-                        )
-                    _persist_summary(file_id, result, transcript_lineage)
-                    _finish_stage(
+
+                    def run_mind_map(candidate):
+                        candidate_settings = _settings_for_stage(settings, candidate, "mind_map")
+                        candidate_settings.pipeline.summary_template = template_key
+                        projected_usage = _llm_projected_usage(transcript, candidate_settings)
+                        cost_budget = _cost_guard(file_id, "mind_map", candidate, projected_usage)
+                        summary_md = _load_summary_md(file_id, template_key)
+                        if _remote_selection(candidate, "mind_map"):
+                            result = _run_remote_stage(
+                                file_id,
+                                candidate,
+                                "mind_map",
+                                [_remote_json_input("transcript", _transcript_payload(transcript))],
+                                options={"summary_md": summary_md},
+                            )
+                            result.setdefault("provider", "remote-worker")
+                            result.setdefault("model", candidate["stages"]["mind_map"].get("model"))
+                        else:
+                            result = mindmap.generate_mind_map(
+                                transcript, candidate_settings, summary_md
+                            )
+                        _persist_summary(file_id, result, transcript_lineage)
+                        return {
+                            "value": result,
+                            "provider": result.get("provider"),
+                            "model": result.get("model"),
+                            "detail": (result.get("detail", {}))
+                            | {
+                                "transcript": transcript_lineage,
+                                "auto_template": auto_recommendation,
+                                "cost_budget": cost_budget,
+                            },
+                            "usage": {
+                                "input_chars": len(transcript.text),
+                                "output_chars": len(result.get("content_md") or ""),
+                                "requests": (
+                                    (result.get("detail") or {}).get("map_calls", 0)
+                                    + (result.get("detail") or {}).get("reduce_calls", 0)
+                                    + 1
+                                ),
+                            },
+                        }
+
+                    _result, _selected_snapshot = _run_fallback_stage(
                         file_id,
+                        "mind_map",
                         StageName.mind_map,
-                        provider=result.get("provider"),
-                        model=result.get("model"),
-                        artifact_source="local",
-                        detail=result.get("detail", {})
-                        | {
-                            "transcript": transcript_lineage,
-                            "auto_template": auto_recommendation,
-                            "cost_budget": cost_budget,
-                        },
-                        usage={
-                            "input_chars": len(transcript.text),
-                            "output_chars": len(result.get("content_md") or ""),
-                            "requests": (
-                                (result.get("detail") or {}).get("map_calls", 0)
-                                + (result.get("detail") or {}).get("reduce_calls", 0)
-                                + 1
-                            ),
-                        },
+                        snapshot,
+                        run_mind_map,
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript/notes stay usable
                     log.exception("Mind map generation failed for %s", file_id)
-                    _fail_stage(file_id, StageName.mind_map, exc)
                     partial_errors.append(f"mind_map: {exc}")
             else:
                 _finish_stage(
@@ -763,48 +836,51 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         # --- index (skip if chunks already exist) --------------------- #
         if pcfg.index and transcript is not None:
             if force or not _has_chunks(file_id):
-                _begin_stage(file_id, StageName.index)
                 try:
-                    projected_usage = {
-                        "input_chars": len(transcript.text),
-                        "input_items": len(transcript.segments),
-                        "projection": True,
-                    }
-                    cost_budget = _cost_guard(file_id, "embed", snapshot, projected_usage)
-                    if _remote_selection(snapshot, "embed"):
-                        payload = _run_remote_stage(
-                            file_id,
-                            snapshot,
-                            "embed",
-                            [_remote_json_input("transcript", _transcript_payload(transcript))],
-                        )
-                        model_name = _persist_remote_chunks(file_id, payload, transcript_lineage)
-                    else:
-                        model_name = _persist_chunks(
-                            file_id, transcript, embed_settings, transcript_lineage
-                        )
-                    _finish_stage(
-                        file_id,
-                        StageName.index,
-                        provider=(
-                            "remote-worker"
-                            if _remote_selection(snapshot, "embed")
-                            else embed_settings.embeddings.provider
-                        ),
-                        model=model_name,
-                        artifact_source="local",
-                        detail={
-                            "transcript": transcript_lineage,
-                            "cost_budget": cost_budget,
-                        },
-                        usage={
+
+                    def run_index(candidate):
+                        candidate_settings = _settings_for_stage(settings, candidate, "embed")
+                        projected_usage = {
                             "input_chars": len(transcript.text),
                             "input_items": len(transcript.segments),
-                        },
+                            "projection": True,
+                        }
+                        cost_budget = _cost_guard(file_id, "embed", candidate, projected_usage)
+                        if _remote_selection(candidate, "embed"):
+                            payload = _run_remote_stage(
+                                file_id,
+                                candidate,
+                                "embed",
+                                [_remote_json_input("transcript", _transcript_payload(transcript))],
+                            )
+                            model_name = _persist_remote_chunks(
+                                file_id, payload, transcript_lineage
+                            )
+                            provider = "remote-worker"
+                        else:
+                            model_name = _persist_chunks(
+                                file_id, transcript, candidate_settings, transcript_lineage
+                            )
+                            provider = candidate_settings.embeddings.provider
+                        return {
+                            "value": model_name,
+                            "provider": provider,
+                            "model": model_name,
+                            "detail": {
+                                "transcript": transcript_lineage,
+                                "cost_budget": cost_budget,
+                            },
+                            "usage": {
+                                "input_chars": len(transcript.text),
+                                "input_items": len(transcript.segments),
+                            },
+                        }
+
+                    _model, _selected_snapshot = _run_fallback_stage(
+                        file_id, "embed", StageName.index, snapshot, run_index
                     )
                 except Exception as exc:  # noqa: BLE001 - notes remain usable
                     log.exception("Indexing failed for %s", file_id)
-                    _fail_stage(file_id, StageName.index, exc)
                     partial_errors.append(f"index: {exc}")
             else:
                 _finish_stage(

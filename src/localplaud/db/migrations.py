@@ -202,6 +202,29 @@ def migrate_stage_attempt_schema(engine: Engine) -> list[str]:
     return ["stage_attempts"]
 
 
+def migrate_ask_provenance_schema(engine: Engine) -> list[str]:
+    """Add provider/profile/usage provenance to durable Ask answers."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "ask_messages" not in inspector.get_table_names():
+        return []
+    columns = {item["name"] for item in inspector.get_columns("ask_messages")}
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for column, ddl in (
+            ("provider", "VARCHAR(64)"),
+            ("model", "VARCHAR(128)"),
+            ("resolved_profile_snapshot", "JSON"),
+            ("usage", "JSON NOT NULL DEFAULT '{}'"),
+            ("estimated_cost_usd", "FLOAT NOT NULL DEFAULT 0"),
+        ):
+            if column not in columns:
+                connection.execute(text(f"ALTER TABLE ask_messages ADD COLUMN {column} {ddl}"))
+                migrated.append(f"ask_messages.{column}")
+    return migrated
+
+
 def migrate_vocabulary_schema(engine: Engine) -> list[str]:
     """Create the durable custom-vocabulary table for an existing library."""
     if engine.dialect.name != "sqlite":

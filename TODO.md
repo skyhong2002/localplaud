@@ -332,9 +332,8 @@ embedding raw provider credentials or model settings in each rule.
   signals in English and Chinese, an explainable preview, confidence/reasons, and
   durable stage provenance for the actual selected template and engine version.
 - ✅ Consolidated recording exports in one modal: canonical transcript TXT/SRT/VTT
-  with timestamp and speaker-label toggles, notes Markdown/TXT,
-  combined Markdown archive, and original audio. Remaining broader targets: MP3/WAV
-  conversion and PNG mind maps.
+  with timestamp and speaker-label toggles. Existing notes, archive, and original
+  audio exports remain conveniences; no additional formats are required.
 - Treat the Web App as the product, not a status viewer. CLI remains setup/ops tooling.
 - Add provider/model/profile management to Settings: connection setup, capability
   and model health, recommended local profiles, cost/privacy policy, remote workers,
@@ -342,9 +341,8 @@ embedding raw provider credentials or model settings in each rule.
   secrets masked and make the actual selected provider visible during processing.
 - Add original localplaud visual design with Plaud-like interaction density and
   information architecture; do not copy Plaud assets.
-- Export converted MP3/WAV audio and PNG mind maps. Transcript TXT/SRT/VTT,
-  notes Markdown/TXT, original audio, and the combined Markdown archive now
-  ship with speaker/timestamp options where applicable.
+- Transcript TXT/SRT/VTT is the completed required export scope. Existing notes,
+  original-audio, archive, and mind-map exports may remain as conveniences.
 
 ### P1 — Multi-host deployment
 
