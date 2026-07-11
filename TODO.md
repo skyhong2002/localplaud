@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-11)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (284 tests passing locally).
+  Active development is merged directly to `main` (305 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -137,8 +137,13 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
   CUDA 12.8 / TorchCodec 0.7 / pyannote 4 stack. The image imports cleanly, sees the
   RTX 5060 through NVIDIA Container Toolkit, and completed an authenticated v1
   capability handshake without interrupting the existing processing container.
-- Remaining: validate one rentable GPU host, then add explicit cross-provider
-  fallback and benchmark acceptance.
+- ✅ Explicit cross-provider fallback is stage-scoped, ordered, capability- and
+  no-egress-validated, restricted to retryable failures, recorded as independent
+  attempts, and visible in recording/usage diagnostics. Remote-worker connections
+  and catalog models now run a real authenticated protocol-v1 handshake for health
+  checks and reject models the worker does not advertise.
+- Remaining: validate one rentable GPU host and complete the benchmark acceptance
+  matrix.
 
 Implement this P0 in the following order:
 

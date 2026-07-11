@@ -256,7 +256,34 @@ def _secret_value(secret_ref: str | None) -> str | None:
 def _probe_connection(row: ProviderConnection, model_key: str | None = None) -> tuple[bool, str]:
     """Run the selected provider's real model-aware health implementation."""
     if row.execution_target == "remote_worker":
-        return False, "remote worker handshake not implemented"
+        from ..remote.client import RemoteWorkerClient
+
+        config = dict(row.config or {})
+        if "token_env" not in config and (row.secret_ref or "").startswith("env:"):
+            config["token_env"] = row.secret_ref.removeprefix("env:")
+        if not config.get("base_url"):
+            raise ValueError("remote worker base_url is not configured")
+        client = RemoteWorkerClient.from_config(config)
+        try:
+            handshake = client.handshake()
+        finally:
+            client.close()
+        advertised: dict[str, set[str]] = {}
+        for capability in handshake.capabilities:
+            for advertised_model in capability.models:
+                advertised.setdefault(advertised_model, set()).add(capability.stage.value)
+        if model_key is not None and model_key not in advertised:
+            return False, f"model {model_key} is not advertised by worker {handshake.worker_id}"
+        stages = (
+            sorted(advertised[model_key])
+            if model_key is not None
+            else sorted({item.stage.value for item in handshake.capabilities})
+        )
+        detail = (
+            f"worker {handshake.worker_id} · protocol {handshake.version} · "
+            f"{len(advertised)} model(s) · stages {', '.join(stages) or 'none'}"
+        )
+        return True, detail
     family = row.key.split(":", 1)[0]
     settings = get_settings().model_copy(deep=True)
     secret = _secret_value(row.secret_ref)

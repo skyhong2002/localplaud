@@ -51,7 +51,7 @@
           <div class="sub" style="font-size:12px">{{ c.execution_target }} · {% if c.data_egress %}data egress allowed{% else %}no data egress{% endif %}{% if c.secret_ref %} · secret configured{% endif %}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}">{{ c.health.status or 'unknown' }}</span>
+          <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}" title="{{ c.health.detail or '' }}">{{ c.health.status or 'unknown' }}</span>
           <button class="btn sec" style="padding:7px 10px" onclick="testHealth({{ c.id }})">Test</button>
           <button class="btn sec" style="padding:7px 10px" onclick="editConnection({{ c.id }})">Edit</button>
           <button class="btn sec" style="padding:7px 10px;color:var(--red)" onclick="removeItem('connections',{{ c.id }})">Delete</button>
@@ -278,6 +278,7 @@ async function testHealth(id){
   const badge=document.getElementById(`health-${id}`); badge.textContent='checking';
   const r=await fetch(`/api/providers/connections/${id}/health`,{method:'POST'}); const data=await r.json();
   badge.textContent=data.status||'error'; badge.className=`st ${data.status||'error'}`;
+  badge.title=data.detail||'';
 }
 async function testModel(id){
   const out=document.getElementById(`model-health-${id}`);out.textContent='checking…';

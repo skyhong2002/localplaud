@@ -380,8 +380,12 @@ persists the actual selected template plus recommendation engine provenance.
 Provider/model/profile management and the versioned remote-worker protocol
 are implemented. Local hardware/runtime detection now provides evidence-backed,
 ranked Apple MLX, NVIDIA CUDA, and CPU ASR recommendations with guarded one-click
-profile creation that preserves the current non-ASR stages and policy. Cross-provider
-fallback and the remaining real-hardware acceptance matrix are open.
+profile creation that preserves the current non-ASR stages and policy. Explicit
+cross-provider fallback is stage-scoped, capability/policy validated, limited to
+retryable failures, and recorded as separate attempts. Provider connection and model
+health checks for remote workers use the authenticated protocol-v1 capability
+handshake; a healthy worker does not imply that an unadvertised model is available.
+The remaining real-hardware acceptance matrix is open.
 Each concrete pipeline attempt is now retained in an append-only usage ledger with
 profile snapshot, provider/model, outcome, latency, normalized audio/text/token usage,
 and catalog-driven estimated cost. Recording and Status surfaces expose both attempts

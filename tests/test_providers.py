@@ -283,6 +283,93 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
         assert client.delete(f"/api/providers/connections/{connection_id}").status_code == 204
 
 
+def test_remote_worker_connection_health_uses_handshake_and_checks_model(
+    monkeypatch, tmp_path
+):
+    from localplaud.remote.protocol import HandshakeResponse, StageCapability
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'remote-health.db'}")
+    monkeypatch.setenv("TEST_WORKER_TOKEN", "test-secret")
+    config.get_settings(reload=True)
+    monkeypatch.setattr(db_session, "_engine", None)
+    monkeypatch.setattr(db_session, "_Session", None)
+    seen = []
+    worker_configs = []
+
+    class FakeClient:
+        def handshake(self):
+            seen.append("handshake")
+            return HandshakeResponse(
+                worker_id="gpu-health",
+                capabilities=[
+                    StageCapability(stage="transcribe", models=["turbo"]),
+                    StageCapability(stage="diarize", models=["community-1"]),
+                ],
+            )
+
+        def close(self):
+            seen.append("closed")
+
+    monkeypatch.setattr(
+        "localplaud.remote.client.RemoteWorkerClient.from_config",
+        lambda worker_config: worker_configs.append(worker_config) or FakeClient(),
+    )
+    with TestClient(app) as client:
+        connection = client.post(
+            "/api/providers/connections",
+            json={
+                "key": "worker:health",
+                "name": "Health worker",
+                "provider_type": "localplaud-worker",
+                "execution_target": "remote_worker",
+                "data_egress": True,
+                "secret_ref": "env:TEST_WORKER_TOKEN",
+                "config": {"base_url": "https://worker.example/"},
+            },
+        ).json()
+        health = client.post(
+            f"/api/providers/connections/{connection['id']}/health"
+        ).json()
+        assert health["status"] == "healthy"
+        assert "gpu-health" in health["detail"]
+        assert "transcribe" in health["detail"]
+
+        available = client.post(
+            "/api/providers/models",
+            json={
+                "connection_id": connection["id"],
+                "model_key": "turbo",
+                "display_name": "Turbo",
+                "capabilities": _cap(ProviderStage.transcribe, egress=True).model_dump(mode="json"),
+            },
+        ).json()
+        available_health = client.post(
+            f"/api/providers/models/{available['id']}/health"
+        ).json()
+        assert available_health["status"] == "healthy"
+        assert available_health["detail"].endswith("stages transcribe")
+
+        missing = client.post(
+            "/api/providers/models",
+            json={
+                "connection_id": connection["id"],
+                "model_key": "missing",
+                "display_name": "Missing",
+                "capabilities": _cap(ProviderStage.transcribe, egress=True).model_dump(mode="json"),
+            },
+        ).json()
+        missing_health = client.post(
+            f"/api/providers/models/{missing['id']}/health"
+        ).json()
+        assert missing_health["status"] == "degraded"
+        assert "not advertised" in missing_health["detail"]
+    assert seen == ["handshake", "closed"] * 3
+    assert all(item["base_url"] == "https://worker.example/" for item in worker_configs)
+    assert all(item["token_env"] == "TEST_WORKER_TOKEN" for item in worker_configs)
+    assert "test-secret" not in str(worker_configs)
+
+
 def test_stage_run_snapshot_roundtrip(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'snapshot.db'}")
     Base.metadata.create_all(engine)
