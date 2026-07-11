@@ -262,6 +262,9 @@ embedding raw provider credentials or model settings in each rule.
 - Match the audited daily navigation model: Home/recent files, Search, all files,
   uncategorized, trash/recovery, folders, capture-source facets, library Ask,
   Templates, Discover/Automation, and Settings with responsive persistence.
+- ✅ Added a dedicated Home dashboard separate from All files: recent recordings,
+  operational library/audio/processing counts, metadata-only visibility, Plaud mirror
+  progress, AutoFlow activity, attention queue, and direct Add/Import actions.
 - ✅ Added sortable library columns (name, duration, recorded date) with direction
   indicators, processing-state and capture-source filters, an always-visible per-row
   processing state, error/partial attention indicators, and a read-only trash mirror

@@ -59,6 +59,34 @@ def test_dashboard_renders(monkeypatch, tmp_path):
     assert "Total audio" in r.text  # stat tiles present
 
 
+def test_home_renders_recent_recordings_and_operational_cards(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import ImportRun
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(
+            ImportRun(
+                id="home-import",
+                source="plaud",
+                status="completed",
+                total=754,
+                processed=754,
+                transcript_count=280,
+                summary_count=281,
+            )
+        )
+    response = c.get("/home")
+    assert response.status_code == 200
+    assert "Welcome back" in response.text
+    assert "Recent recordings" in response.text and "Weekly Sync" in response.text
+    assert "Plaud mirror" in response.text and "754 / 754" in response.text
+    assert "AutoFlow activity" in response.text
+    assert 'id="home-import-plaud"' in response.text
+    assert 'href="/home"' in response.text and 'href="/"' in response.text
+
+
 def test_detail_page_renders(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     audio = tmp_path / "audio.mp3"

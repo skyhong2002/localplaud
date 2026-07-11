@@ -17,10 +17,12 @@ from ..ask_threads import thread_to_dict
 from ..config import get_settings
 from ..db.models import (
     AskThread,
+    AutomationRun,
     Chunk,
     ExecutionProfile,
     FileStatus,
     Folder,
+    ImportRun,
     NoteTemplate,
     PlaudFile,
     RecordingProfileOverride,
@@ -520,6 +522,82 @@ def _stats(session) -> dict:
         "processing": processing,
         "hours": round(total_ms / 3_600_000, 1),
     }
+
+
+@app.get("/home", response_class=HTMLResponse)
+def home(request: Request):
+    with session_scope() as session:
+        recent_rows = list(
+            session.scalars(
+                select(PlaudFile)
+                .where(PlaudFile.is_trash.is_(False))
+                .order_by(PlaudFile.start_time_ms.desc().nullslast(), PlaudFile.id)
+                .limit(12)
+            )
+        )
+        attention_rows = list(
+            session.scalars(
+                select(PlaudFile)
+                .where(
+                    PlaudFile.is_trash.is_(False),
+                    PlaudFile.status.in_([FileStatus.error, FileStatus.partial]),
+                )
+                .order_by(PlaudFile.updated_at.desc())
+                .limit(6)
+            )
+        )
+        metadata_only = session.scalar(
+            select(func.count())
+            .select_from(PlaudFile)
+            .where(PlaudFile.status == FileStatus.metadata_only)
+        ) or 0
+        audio_local = session.scalar(
+            select(func.count())
+            .select_from(PlaudFile)
+            .where(PlaudFile.audio_path.is_not(None))
+        ) or 0
+        import_run = session.scalar(
+            select(ImportRun).order_by(ImportRun.created_at.desc()).limit(1)
+        )
+        automation_run = session.scalar(
+            select(AutomationRun).order_by(AutomationRun.created_at.desc()).limit(1)
+        )
+        automation_count = session.scalar(
+            select(func.count()).select_from(AutomationRun)
+        ) or 0
+        stats = _stats(session)
+        recent_files = [_file_summary(row) for row in recent_rows]
+        attention_files = [_file_summary(row) for row in attention_rows]
+    ctx = _base_ctx(request, "home") | {
+        "recent_files": recent_files,
+        "attention_files": attention_files,
+        "stats": stats,
+        "metadata_only": metadata_only,
+        "audio_local": audio_local,
+        "import_run": (
+            {
+                "status": import_run.status,
+                "processed": import_run.processed,
+                "total": import_run.total,
+                "transcripts": import_run.transcript_count,
+                "summaries": import_run.summary_count,
+                "failed": import_run.failed_count,
+            }
+            if import_run
+            else None
+        ),
+        "automation_count": automation_count,
+        "automation_run": (
+            {
+                "status": automation_run.status,
+                "file_id": automation_run.file_id,
+                "created_at": automation_run.created_at.strftime("%b %d · %H:%M"),
+            }
+            if automation_run
+            else None
+        ),
+    }
+    return templates.TemplateResponse(request=request, name="home.html", context=ctx)
 
 
 @app.get("/", response_class=HTMLResponse)

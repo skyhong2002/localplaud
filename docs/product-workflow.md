@@ -207,6 +207,11 @@ Folder and tag metadata is editable directly from the recording header through t
 same atomic organization contract used by Library bulk actions. Counts and filters
 update immediately, and clearing organization remains entirely local.
 
+Home is now a distinct operational landing page rather than an alias for All files.
+It presents recent recordings, mirror/import progress, metadata-only versus local
+audio counts, current processing, AutoFlow activity, attention items, and direct
+import actions; the Library remains the dense filtering and bulk-management surface.
+
 ### 7. Settings and system health
 
 - Plaud OAuth and last successful sync.
