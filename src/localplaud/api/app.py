@@ -649,6 +649,24 @@ def audio(file_id: str):
     return FileResponse(path, media_type=_AUDIO_MIME.get(ext, "application/octet-stream"))
 
 
+@app.get("/audio/{file_id}/waveform")
+def audio_waveform(file_id: str, buckets: int = 180):
+    import subprocess
+
+    from ..waveform import waveform_peaks
+
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        path = row.audio_path if row else None
+    if not path or not Path(path).exists():
+        raise HTTPException(status_code=409, detail="recording audio has not been imported")
+    try:
+        peaks = waveform_peaks(path, buckets=buckets)
+    except (subprocess.SubprocessError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"could not build waveform: {exc}") from exc
+    return {"file_id": file_id, "buckets": len(peaks), "peaks": peaks}
+
+
 def _canonical_raw_row(r: PlaudFile, settings) -> Transcript | None:
     """The raw transcript selected by configured provenance rules."""
     if settings.pipeline.artifact_mode == "independent":

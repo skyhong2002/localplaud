@@ -284,6 +284,9 @@ embedding raw provider credentials or model settings in each rule.
   marking, and non-destructive restore-as-new-revision with stale-write protection.
   Summaries, mind maps, embedding chunks, and stage provenance now store and expose
   the exact raw transcript id/source plus revision they consumed.
+- ✅ Replaced the native audio control with a responsive persistent player: locally
+  generated/cached waveform, click/range seek, play/pause, −10/+30 seconds, playback
+  speed, keyboard controls, deep-link seeking, and active transcript synchronization.
 - Add file Ask suggested questions and reusable local skills (action items, task
   table, insights), plus grounded follow-ups and save-to-note.
 - ✅ Built dedicated Templates My Space and Explore surfaces with search,

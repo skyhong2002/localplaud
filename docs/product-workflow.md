@@ -193,6 +193,11 @@ move/tag recordings. Rules are ordered, versioned, idempotent, dry-runnable, loc
 editable, and retain per-recording history; notification delivery and external
 integration actions remain future work.
 
+The recording workspace now has a sticky custom player backed by locally generated
+and cached ffmpeg waveform envelopes. Playback state survives tab switches and stays
+synchronized with transcript segments; seek, speed, skip, deep links, and keyboard
+controls share one audio element.
+
 ### 7. Settings and system health
 
 - Plaud OAuth and last successful sync.

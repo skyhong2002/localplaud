@@ -55,7 +55,19 @@
       <span id="note-template-result" class="sub" style="font-size:12px">Applied on the next Resume or Rebuild.</span>
     </div>
 
-    {% if f.has_audio %}<audio id="player" controls preload="none" src="/audio/{{ f.id }}"></audio>{% endif %}
+    {% if f.has_audio %}
+    <section id="persistent-player" class="panel" style="position:sticky;top:8px;z-index:12;margin:12px 0;padding:10px 12px;box-shadow:0 8px 24px rgba(15,23,42,.09)">
+      <audio id="player" preload="metadata" src="/audio/{{ f.id }}"></audio>
+      <div style="display:grid;grid-template-columns:auto auto minmax(180px,1fr) auto auto;gap:9px;align-items:center">
+        <button class="btn" id="player-toggle" type="button" aria-label="Play" style="width:38px;height:34px;padding:0">▶</button>
+        <div style="display:flex;gap:3px"><button class="btn sec" id="player-back" type="button" title="Back 10 seconds" style="padding:6px 8px">−10</button><button class="btn sec" id="player-forward" type="button" title="Forward 30 seconds" style="padding:6px 8px">+30</button></div>
+        <div style="min-width:0"><canvas id="waveform" height="42" style="display:block;width:100%;height:42px;cursor:pointer" aria-label="Audio waveform"></canvas><input id="player-progress" type="range" min="0" max="1000" value="0" aria-label="Playback position" style="width:100%;height:4px;margin:0;display:block"></div>
+        <span id="player-clock" class="sub" style="font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap">0:00 / 0:00</span>
+        <select id="player-speed" class="search-input" aria-label="Playback speed" style="padding:6px 7px;width:72px"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+      </div>
+      <div class="sub" style="font-size:10.5px;margin-top:5px">Space play/pause · ←/→ 5 seconds · Shift+←/→ 30 seconds</div>
+    </section>
+    {% endif %}
     {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}</div>{% endif %}
     {% if f.stages %}
     <details class="panel" style="margin-top:12px">
@@ -395,8 +407,14 @@
   // click-to-seek + red active segment synced to audio (Plaud-style)
   const player=document.getElementById('player'), segs=[...document.querySelectorAll('.seg[data-start]')];
   segs.forEach(seg=>seg.onclick=()=>{ if(player){ player.currentTime=parseFloat(seg.dataset.start)||0; player.play(); }});
-  if(player) player.ontimeupdate=()=>{ const t=player.currentTime;
-    segs.forEach(s=>s.classList.toggle('active', t>=parseFloat(s.dataset.start) && t<parseFloat(s.dataset.end||1e9))); };
+  if(player){
+    const toggle=document.getElementById('player-toggle'),progress=document.getElementById('player-progress'),clock=document.getElementById('player-clock'),speed=document.getElementById('player-speed'),canvas=document.getElementById('waveform'),ctx=canvas.getContext('2d');let peaks=[];
+    const stamp=seconds=>{seconds=Math.max(0,Math.floor(seconds||0));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;};
+    const draw=()=>{const ratio=devicePixelRatio||1,width=Math.max(1,canvas.clientWidth),height=canvas.clientHeight;canvas.width=width*ratio;canvas.height=height*ratio;ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,width,height);const played=player.duration?player.currentTime/player.duration:0,bar=Math.max(1,width/(peaks.length||1)*.62);(peaks.length?peaks:Array(90).fill(.18)).forEach((peak,index)=>{const x=index*width/(peaks.length||90),h=Math.max(3,peak*(height-4));ctx.fillStyle=x/width<=played?'#2563eb':'#cbd5e1';ctx.fillRect(x,(height-h)/2,bar,h);});};
+    const sync=()=>{const t=player.currentTime,d=player.duration||0;progress.value=d?Math.round(t/d*1000):0;clock.textContent=`${stamp(t)} / ${stamp(d)}`;toggle.textContent=player.paused?'▶':'❚❚';toggle.setAttribute('aria-label',player.paused?'Play':'Pause');segs.forEach(s=>s.classList.toggle('active',t>=parseFloat(s.dataset.start)&&t<parseFloat(s.dataset.end||1e9)));draw();};
+    toggle.onclick=()=>player.paused?player.play():player.pause();document.getElementById('player-back').onclick=()=>player.currentTime=Math.max(0,player.currentTime-10);document.getElementById('player-forward').onclick=()=>player.currentTime=Math.min(player.duration||Infinity,player.currentTime+30);speed.onchange=()=>player.playbackRate=+speed.value;progress.oninput=()=>{if(player.duration)player.currentTime=+progress.value/1000*player.duration;};canvas.onclick=event=>{if(player.duration)player.currentTime=event.offsetX/canvas.clientWidth*player.duration;};['loadedmetadata','timeupdate','play','pause','ratechange','ended'].forEach(name=>player.addEventListener(name,sync));new ResizeObserver(draw).observe(canvas);fetch('/audio/{{ f.id }}/waveform').then(response=>response.ok?response.json():null).then(data=>{if(data){peaks=data.peaks;draw();}}).catch(()=>{});
+    document.addEventListener('keydown',event=>{const target=event.target;if(target.matches('input,textarea,select,button')||target.isContentEditable)return;if(event.code==='Space'){event.preventDefault();player.paused?player.play():player.pause();}else if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const direction=event.key==='ArrowRight'?1:-1,amount=event.shiftKey?30:5;player.currentTime=Math.max(0,Math.min(player.duration||Infinity,player.currentTime+direction*amount));}});
+  }
   // single-file Ask: suggested-question chips fill the input (grounded, non-mutating)
   document.querySelectorAll('.ask-chip').forEach(chip=>chip.onclick=()=>{
     const q=document.getElementById('ask-q'); if(q){ q.value=chip.dataset.q; q.focus(); }});
