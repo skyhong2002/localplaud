@@ -417,6 +417,50 @@ class RecordingProfileOverride(Base):
     )
 
 
+class RemoteWorker(Base):
+    """Controller-side registration; authentication remains an env reference."""
+
+    __tablename__ = "remote_workers"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(128))
+    base_url: Mapped[str] = mapped_column(String(1024))
+    token_env: Mapped[str] = mapped_column(String(128), default="LOCALPLAUD_WORKER_TOKEN")
+    protocol_version: Mapped[str | None] = mapped_column(String(16), default=None)
+    capabilities: Mapped[dict] = mapped_column(JSON, default=dict)
+    health: Mapped[dict] = mapped_column(JSON, default=dict)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class RemoteJob(Base):
+    """Durable worker job ledger, including checksummed inline artifacts."""
+
+    __tablename__ = "remote_jobs"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(256), unique=True)
+    protocol_version: Mapped[str] = mapped_column(String(16), default="1")
+    stage: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str | None] = mapped_column(String(256), default=None)
+    status: Mapped[str] = mapped_column(String(24), default="queued")
+    progress: Mapped[float] = mapped_column(Float, default=0.0)
+    input_manifest: Mapped[dict] = mapped_column(JSON, default=dict)
+    options: Mapped[dict] = mapped_column(JSON, default=dict)
+    artifacts: Mapped[list] = mapped_column(JSON, default=list)
+    error: Mapped[dict | None] = mapped_column(JSON, default=None)
+    cancel_requested: Mapped[bool] = mapped_column(default=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
 class KeyValue(Base):
     """Small persistent store for sync bookkeeping (cursors, last poll, etc.)."""
 

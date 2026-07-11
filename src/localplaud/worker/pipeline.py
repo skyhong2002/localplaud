@@ -10,6 +10,9 @@ State lives on the ``PlaudFile`` row; derived artifacts become ``Transcript``,
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import logging
 from contextvars import ContextVar
 from dataclasses import asdict
@@ -24,6 +27,7 @@ from ..db.models import (
     Chunk,
     FileStatus,
     PlaudFile,
+    ProviderConnection,
     StageName,
     StageRun,
     StageStatus,
@@ -33,6 +37,8 @@ from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
 from ..providers.service import resolve_recording_profile
+from ..remote.client import RemoteWorkerClient
+from ..remote.protocol import InputReference, JobStage, JobSubmitRequest
 from ..store.files import wav_path
 from ..store.speakers import speaker_keys_from_segments, sync_speakers
 from . import convert, index, mindmap, summarize, transcribe
@@ -82,6 +88,86 @@ def _settings_for_stage(
         fallback = policy.get("fallback_policy", {}).get("asr", [])
         family_config.fallback = [] if policy.get("no_egress") else list(fallback)
     return resolved
+
+
+def _remote_selection(snapshot: dict, stage: str) -> dict | None:
+    selection = snapshot.get("stages", {}).get(stage)
+    return selection if selection and selection.get("execution_target") == "remote_worker" else None
+
+
+def _remote_json_input(name: str, payload: dict) -> InputReference:
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    return InputReference(
+        name=name,
+        media_type="application/json",
+        kind="inline_json",
+        value=payload,
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def _remote_audio_input(path: Path) -> InputReference:
+    data = path.read_bytes()
+    return InputReference(
+        name="audio",
+        media_type="audio/wav",
+        kind="inline_base64",
+        value=base64.b64encode(data).decode(),
+        sha256=hashlib.sha256(data).hexdigest(),
+    )
+
+
+def _transcript_payload(transcript: Transcript) -> dict:
+    return {
+        "segments": [asdict(segment) for segment in transcript.segments],
+        "language": transcript.language,
+        "duration": transcript.duration,
+        "provider": transcript.provider,
+        "model": transcript.model,
+        "has_speakers": transcript.has_speakers,
+    }
+
+
+def _run_remote_stage(
+    file_id: str,
+    snapshot: dict,
+    stage: str,
+    inputs: list[InputReference],
+    *,
+    options: dict | None = None,
+) -> dict:
+    selection = _remote_selection(snapshot, stage)
+    if selection is None:
+        raise ValueError(f"stage is not remote: {stage}")
+    with session_scope() as session:
+        connection = session.scalar(
+            select(ProviderConnection).where(ProviderConnection.key == selection["connection"])
+        )
+        if connection is None:
+            raise ValueError(f"remote connection not found: {selection['connection']}")
+        config = dict(connection.config or {})
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {"file": file_id, "stage": stage, "selection": selection, "inputs": [i.sha256 for i in inputs]},
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    request = JobSubmitRequest(
+        idempotency_key=fingerprint,
+        stage=JobStage(stage),
+        model=selection.get("model"),
+        inputs=inputs,
+        options=(selection.get("options") or {}) | (options or {}),
+    )
+    client = RemoteWorkerClient.from_config(config)
+    try:
+        result = client.submit_and_wait(request, timeout=float(config.get("job_timeout", 3600)))
+    finally:
+        client.close()
+    artifact = result.artifacts.get("transcript.json") or result.artifacts.get("result.json")
+    if artifact is None:
+        raise ValueError(f"remote {stage} returned no JSON artifact")
+    return json.loads(artifact)
 
 
 def _set_stage(
@@ -287,7 +373,20 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             else:
                 _begin_stage(file_id, StageName.transcribe)
                 try:
-                    transcript = transcribe.run_asr(wav, transcribe_settings)
+                    if _remote_selection(snapshot, "transcribe"):
+                        payload = _run_remote_stage(
+                            file_id, snapshot, "transcribe", [_remote_audio_input(wav)]
+                        )
+                        transcript = Transcript(
+                            segments=_rehydrate_segments(payload.get("segments")),
+                            language=payload.get("language"),
+                            duration=payload.get("duration"),
+                            provider="remote-worker",
+                            model=payload.get("model"),
+                            has_speakers=payload.get("has_speakers", False),
+                        )
+                    else:
+                        transcript = transcribe.run_asr(wav, transcribe_settings)
                     _persist_transcript(file_id, transcript)
                     _finish_stage(
                         file_id,
@@ -323,13 +422,36 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         else:
             _begin_stage(file_id, StageName.diarize)
             try:
-                transcript = diarize(wav, transcript, diarize_settings.diarize)
+                if _remote_selection(snapshot, "diarize"):
+                    payload = _run_remote_stage(
+                        file_id,
+                        snapshot,
+                        "diarize",
+                        [
+                            _remote_audio_input(wav),
+                            _remote_json_input("transcript", _transcript_payload(transcript)),
+                        ],
+                    )
+                    transcript.segments = _rehydrate_segments(payload.get("segments"))
+                    transcript.has_speakers = payload.get("has_speakers", True)
+                    transcript.provider = "remote-worker"
+                    transcript.model = snapshot["stages"]["diarize"].get("model")
+                else:
+                    transcript = diarize(wav, transcript, diarize_settings.diarize)
                 _persist_transcript(file_id, transcript)
                 _finish_stage(
                     file_id,
                     StageName.diarize,
-                    provider=diarize_settings.diarize.provider,
-                    model=diarize_settings.diarize.model,
+                    provider=(
+                        "remote-worker"
+                        if _remote_selection(snapshot, "diarize")
+                        else diarize_settings.diarize.provider
+                    ),
+                    model=(
+                        snapshot["stages"]["diarize"].get("model")
+                        if _remote_selection(snapshot, "diarize")
+                        else diarize_settings.diarize.model
+                    ),
                     artifact_source="local",
                 )
             except DiarizationUnavailable as exc:
@@ -353,7 +475,17 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             if force or not _has_summary(file_id, pcfg.summary_template):
                 _begin_stage(file_id, StageName.summarize)
                 try:
-                    result = summarize.summarize(transcript, summarize_settings)
+                    if _remote_selection(snapshot, "summarize"):
+                        result = _run_remote_stage(
+                            file_id,
+                            snapshot,
+                            "summarize",
+                            [_remote_json_input("transcript", _transcript_payload(transcript))],
+                        )
+                        result.setdefault("provider", "remote-worker")
+                        result.setdefault("model", snapshot["stages"]["summarize"].get("model"))
+                    else:
+                        result = summarize.summarize(transcript, summarize_settings)
                     _persist_summary(file_id, result)
                     _finish_stage(
                         file_id,
@@ -390,7 +522,20 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                 _begin_stage(file_id, StageName.mind_map)
                 try:
                     summary_md = _load_summary_md(file_id, pcfg.summary_template)
-                    result = mindmap.generate_mind_map(transcript, mind_map_settings, summary_md)
+                    if _remote_selection(snapshot, "mind_map"):
+                        result = _run_remote_stage(
+                            file_id,
+                            snapshot,
+                            "mind_map",
+                            [_remote_json_input("transcript", _transcript_payload(transcript))],
+                            options={"summary_md": summary_md},
+                        )
+                        result.setdefault("provider", "remote-worker")
+                        result.setdefault("model", snapshot["stages"]["mind_map"].get("model"))
+                    else:
+                        result = mindmap.generate_mind_map(
+                            transcript, mind_map_settings, summary_md
+                        )
                     _persist_summary(file_id, result)
                     _finish_stage(
                         file_id,
@@ -423,11 +568,24 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             if force or not _has_chunks(file_id):
                 _begin_stage(file_id, StageName.index)
                 try:
-                    model_name = _persist_chunks(file_id, transcript, embed_settings)
+                    if _remote_selection(snapshot, "embed"):
+                        payload = _run_remote_stage(
+                            file_id,
+                            snapshot,
+                            "embed",
+                            [_remote_json_input("transcript", _transcript_payload(transcript))],
+                        )
+                        model_name = _persist_remote_chunks(file_id, payload)
+                    else:
+                        model_name = _persist_chunks(file_id, transcript, embed_settings)
                     _finish_stage(
                         file_id,
                         StageName.index,
-                        provider=embed_settings.embeddings.provider,
+                        provider=(
+                            "remote-worker"
+                            if _remote_selection(snapshot, "embed")
+                            else embed_settings.embeddings.provider
+                        ),
                         model=model_name,
                         artifact_source="local",
                         detail={},
@@ -613,6 +771,33 @@ def _persist_chunks(file_id: str, transcript: Transcript, settings: Settings) ->
                     embedding_model=model_name,
                     dim=dim,
                     embedding=blob,
+                    resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
+                )
+            )
+    return model_name
+
+
+def _persist_remote_chunks(file_id: str, payload: dict) -> str | None:
+    chunks = payload.get("chunks", [])
+    vectors = payload.get("vectors_base64", [])
+    if len(chunks) != len(vectors):
+        raise ValueError("remote embedding artifact has mismatched chunks and vectors")
+    model_name = payload.get("model")
+    dim = payload.get("dim")
+    with session_scope() as session:
+        session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+        for idx, (chunk, encoded) in enumerate(zip(chunks, vectors, strict=True)):
+            session.add(
+                Chunk(
+                    file_id=file_id,
+                    idx=idx,
+                    text=chunk["text"],
+                    start=chunk.get("start"),
+                    end=chunk.get("end"),
+                    speaker=chunk.get("speaker"),
+                    embedding_model=model_name,
+                    dim=dim,
+                    embedding=base64.b64decode(encoded),
                     resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
                 )
             )

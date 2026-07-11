@@ -102,6 +102,26 @@
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Create profile</button><span id="profile-result" class="sub"></span></div>
     </form>
   </div>
+
+  <div class="panel" style="margin-top:16px">
+    <strong>Remote workers</strong>
+    <p class="sub" style="margin:4px 0 12px">Authenticated localplaud-worker v1 hosts. Tokens remain in environment variables.</p>
+    <div style="display:grid;gap:9px">
+      {% for worker in workers %}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:9px">
+        <div><strong>{{ worker.name }}</strong> <code>{{ worker.key }}</code><div class="sub" style="font-size:11px">{{ worker.base_url }} · protocol {{ worker.protocol_version or 'not checked' }} · {{ worker.token_env }}</div></div>
+        <div><span id="worker-health-{{ worker.id }}" class="st {{ worker.health.status or 'unknown' }}">{{ worker.health.status or 'unknown' }}</span> <button class="btn sec" style="padding:6px 9px" onclick="testWorker({{ worker.id }})">Test</button> <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="removeItem('workers',{{ worker.id }})">Delete</button></div>
+      </div>
+      {% endfor %}
+    </div>
+    <form id="worker-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
+      <input class="search-input" name="name" placeholder="Worker name" required>
+      <input class="search-input" name="key" placeholder="Stable key, e.g. cclab-gpu" required>
+      <input class="search-input" name="base_url" type="url" placeholder="https://worker.example/" required>
+      <input class="search-input" name="token_env" value="LOCALPLAUD_WORKER_TOKEN" placeholder="Token environment variable" required>
+      <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center"><button class="btn" type="submit">Register worker</button><span id="worker-result" class="sub"></span></div>
+    </form>
+  </div>
 </div></div>
 {% endblock %}
 {% block scripts %}
@@ -140,6 +160,10 @@ async function testModel(id){
   const r=await fetch(`/api/providers/models/${id}/health`,{method:'POST'});const data=await r.json();
   out.textContent=`${data.status||'error'} · ${data.detail||''}`;
 }
+async function testWorker(id){
+  const out=document.getElementById(`worker-health-${id}`);out.textContent='checking…';
+  const r=await fetch(`/api/providers/workers/${id}/health`,{method:'POST'});const data=await r.json();out.textContent=data.status||'error';out.title=data.detail||'';
+}
 document.getElementById('connection-form').addEventListener('submit',async e=>{
   e.preventDefault(); const f=new FormData(e.target);
   const body={name:f.get('name'),key:f.get('key'),provider_type:f.get('provider_type'),execution_target:f.get('execution_target'),data_egress:f.get('data_egress')==='on',secret_ref:f.get('secret_ref')||null,config:{}};
@@ -161,6 +185,11 @@ document.getElementById('profile-form').addEventListener('submit',async e=>{
   const body={name:f.get('name'),key:f.get('key'),is_system_default:f.get('is_system_default')==='on',privacy_policy:noEgress?'local-only':'allow-egress',no_egress:noEgress,cost_ceiling:cost?Number(cost):null,fallback_policy:{},stages};
   const r=await fetch('/api/providers/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const out=document.getElementById('profile-result');
   if(r.ok){out.textContent='Created. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not create profile';}
+});
+document.getElementById('worker-form').addEventListener('submit',async e=>{
+  e.preventDefault();const f=new FormData(e.target);const body={name:f.get('name'),key:f.get('key'),base_url:f.get('base_url'),token_env:f.get('token_env'),timeout:120,job_timeout:3600,enabled:true};
+  const r=await fetch('/api/providers/workers',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const out=document.getElementById('worker-result');
+  if(r.ok){out.textContent='Registered. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not register worker';}
 });
 </script>
 {% endblock %}

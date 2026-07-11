@@ -109,8 +109,14 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
 - ✅ Existing connections and models can be edited or safely deleted from Settings;
   immutable profiles expose a guided “New version” flow and guarded deletion for
   non-default, unused versions.
-- Remaining: implement explicit retry/fallback/cost accounting and build the remote
-  GPU worker protocol.
+- ✅ Added authenticated `localplaud-worker` protocol v1: versioned capability
+  handshake, durable/idempotent jobs, progress, cancellation, structured retryable
+  errors, minimum typed inputs, restart recovery, and SHA-256 artifact verification.
+  Credential-shaped Plaud/provider fields are rejected recursively and bearer tokens
+  remain environment-only. Pipeline dispatch covers transcribe, diarize, notes, mind
+  maps, and embeddings.
+- Remaining: validate the worker on CCLabPC NVIDIA/CUDA and one rentable GPU host,
+  then add explicit cross-provider fallback/cost accounting and benchmark acceptance.
 
 Implement this P0 in the following order:
 

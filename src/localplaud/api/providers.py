@@ -19,6 +19,7 @@ from ..providers.service import (
     save_model,
     select_recording_override,
 )
+from ..remote.registry import check_worker, delete_worker, list_workers, save_worker
 
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
@@ -66,6 +67,17 @@ class ProfileRequest(BaseModel):
     cost_ceiling: float | None = None
     fallback_policy: dict = Field(default_factory=dict)
     stages: dict = Field(default_factory=dict)
+
+
+class WorkerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str
+    name: str
+    base_url: str
+    token_env: str = "LOCALPLAUD_WORKER_TOKEN"
+    timeout: float = 120
+    job_timeout: float = 3600
+    enabled: bool = True
 
 
 @router.get("/connections")
@@ -207,3 +219,44 @@ def recording_override(file_id: str, body: OverrideRequest):
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/workers")
+def workers():
+    with session_scope() as session:
+        return {"workers": list_workers(session)}
+
+
+@router.post("/workers", status_code=201)
+def create_worker(body: WorkerRequest):
+    with session_scope() as session:
+        return save_worker(session, body.model_dump())
+
+
+@router.put("/workers/{worker_id}")
+def update_worker(worker_id: int, body: WorkerRequest):
+    with session_scope() as session:
+        try:
+            return save_worker(session, body.model_dump(), worker_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/workers/{worker_id}/health")
+def worker_health(worker_id: int):
+    with session_scope() as session:
+        try:
+            return check_worker(session, worker_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/workers/{worker_id}", status_code=204)
+def remove_worker(worker_id: int):
+    with session_scope() as session:
+        try:
+            delete_worker(session, worker_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc

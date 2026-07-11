@@ -27,6 +27,8 @@ from ..db.models import (
     TranscriptRevision,
 )
 from ..db.session import init_db, session_scope
+from ..remote.server import resume_pending_jobs
+from ..remote.server import router as worker_router
 from ..store.speakers import display_names, speaker_keys_from_segments
 from .providers import router as providers_router
 
@@ -37,11 +39,15 @@ templates = Jinja2Templates(directory=str(_HERE / "templates"))
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     init_db()
+    import threading
+
+    threading.Thread(target=resume_pending_jobs, daemon=True).start()
     yield
 
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
 app.include_router(providers_router)
+app.include_router(worker_router)
 
 _static = _HERE / "static"
 if _static.exists():
@@ -53,7 +59,7 @@ async def _auth_gate(request: Request, call_next):
     """If api.auth_token is configured, require it on every request (except the
     health check) via an X-Auth-Token header or ?token= query param."""
     token = get_settings().api.auth_token
-    if token and request.url.path != "/healthz":
+    if token and request.url.path != "/healthz" and not request.url.path.startswith("/api/worker/v1"):
         supplied = request.headers.get("x-auth-token") or request.query_params.get("token")
         if supplied != token:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -546,12 +552,14 @@ def status_page(request: Request):
 def settings_page(request: Request):
     from ..providers.contracts import ProviderStage
     from ..providers.service import list_connections, list_models, list_profiles
+    from ..remote.registry import list_workers
 
     with session_scope() as session:
         ctx = _base_ctx(request, "settings") | {
             "connections": list_connections(session),
             "models": list_models(session),
             "profiles": list_profiles(session),
+            "workers": list_workers(session),
             "provider_stages": [stage.value for stage in ProviderStage],
         }
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)

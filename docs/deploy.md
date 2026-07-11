@@ -116,6 +116,9 @@ See [ADR 0006](adr/0006-security-posture.md).
 - One-off sync: `docker compose exec <service> localplaud poll --once`
 - The `run` command already polls on a schedule, processes the backlog, and
   serves the UI; nothing else to cron.
+- To attach a separate GPU worker, configure its dedicated
+  `LOCALPLAUD_WORKER_TOKEN`, expose the authenticated worker API through HTTPS,
+  then register it in Settings. See [remote-worker.md](remote-worker.md).
 
 ## Updating
 
