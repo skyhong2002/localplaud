@@ -48,6 +48,7 @@
     <div class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
       <label for="note-template-select" style="font-weight:650">Note template</label>
       <select id="note-template-select" class="search-input" style="flex:1;min-width:220px;padding:7px 10px">
+        <option value="auto" {% if f.note_template_key == 'auto' %}selected{% endif %}>Auto · choose from recording</option>
         {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
       </select>
       <button class="btn sec" type="button" id="save-note-template" style="padding:8px 12px">Use template</button>
@@ -66,6 +67,7 @@
             <strong>{{ stage.name }}</strong>
             {% if stage.provider %}<span class="sub"> · {{ stage.provider }}{% if stage.model %}:{{ stage.model }}{% endif %}</span>{% endif %}
             {% if stage.detail.transcript %}<div class="sub" style="font-size:11.5px;margin-top:2px">Input: {% if stage.detail.transcript.input_transcript_revision %}transcript rev {{ stage.detail.transcript.input_transcript_revision }}{% else %}raw ASR{% endif %} · {{ stage.detail.transcript.input_transcript_source }}</div>{% endif %}
+            {% if stage.detail.auto_template %}<div class="sub" style="font-size:11.5px;margin-top:2px">Auto selected {{ stage.detail.auto_template.key }} · {{ stage.detail.auto_template.confidence }} confidence</div>{% endif %}
             {% if stage.error %}<div style="color:var(--red);font-size:12px;margin-top:2px">{{ stage.error }}</div>{% endif %}
           </div>
           <span class="st {{ stage.status }}">{{ stage.status }}</span>
@@ -333,6 +335,10 @@
     if(response.ok)out.textContent='Saved. Resume to regenerate notes with this template.';
     else{out.textContent=data.detail||'Could not save template';button.disabled=false;}
   });
+  const noteTemplateSelect=document.getElementById('note-template-select');
+  async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent='Checking recording signals…';const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`Auto suggests ${data.template?.name||data.key} · ${data.confidence} confidence · ${reason}`;}else out.textContent=data.detail||'Could not preview Auto selection';}
+  noteTemplateSelect?.addEventListener('change',()=>{if(noteTemplateSelect.value==='auto')previewAutoTemplate();else document.getElementById('note-template-result').textContent='Applied on the next Resume or Rebuild.';});
+  if(noteTemplateSelect?.value==='auto')previewAutoTemplate();
   const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   document.querySelectorAll('[data-md]').forEach(el => {
     el.innerHTML = esc(el.textContent.trim())

@@ -215,7 +215,7 @@ def select_recording_note_template(file_id: str, body: RecordingTemplateBody) ->
         recording = session.get(PlaudFile, file_id)
         if recording is None:
             raise HTTPException(status_code=404, detail="recording not found")
-        if body.key is not None:
+        if body.key is not None and body.key != "auto":
             exists = session.scalar(
                 select(NoteTemplate.id).where(
                     NoteTemplate.key == body.key, NoteTemplate.is_active.is_(True)
@@ -233,3 +233,30 @@ def select_recording_note_template(file_id: str, body: RecordingTemplateBody) ->
                 run.detail = (run.detail or {}) | {"stale": True, "reason": "note template changed"}
                 run.error = None
     return {"file_id": file_id, "key": body.key}
+
+
+@router.get("/files/{file_id}/note-template/recommendation")
+def recording_note_template_recommendation(file_id: str) -> dict:
+    from ..config import get_settings
+    from ..template_auto import recommend_template
+    from ..worker.pipeline import _load_transcript
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, file_id)
+        if recording is None:
+            raise HTTPException(status_code=404, detail="recording not found")
+        title, duration_ms = recording.filename or "", recording.duration_ms
+    loaded = _load_transcript(file_id, get_settings())
+    transcript_text = loaded[0].text if loaded is not None else ""
+    recommendation = recommend_template(
+        title=title, transcript=transcript_text, duration_ms=duration_ms
+    )
+    with session_scope() as session:
+        template = session.scalar(
+            select(NoteTemplate).where(
+                NoteTemplate.key == recommendation["key"],
+                NoteTemplate.is_active.is_(True),
+            )
+        )
+        recommendation["template"] = _item(template) if template is not None else None
+    return recommendation

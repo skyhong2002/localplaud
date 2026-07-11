@@ -313,7 +313,8 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         row.error = None
         audio = Path(row.audio_path)
         existing_wav = row.wav_path
-        template_key = row.note_template_key or pcfg.summary_template
+        requested_template_key = row.note_template_key or pcfg.summary_template
+        template_key = "default" if requested_template_key == "auto" else requested_template_key
         snapshot = resolve_recording_profile(session, file_id).to_dict()
 
     profile_token = _PROFILE_SNAPSHOT.set(snapshot)
@@ -473,6 +474,18 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         transcript_lineage = _transcript_lineage(file_id, settings)
         if canonical is not None:
             transcript, transcript_source = canonical
+        auto_recommendation = None
+        if requested_template_key == "auto":
+            from ..template_auto import recommend_template
+
+            auto_recommendation = recommend_template(
+                title=row.filename or "",
+                transcript=transcript.text if transcript is not None else "",
+                duration_ms=row.duration_ms,
+            )
+            template_key = auto_recommendation["key"]
+            summarize_settings.pipeline.summary_template = template_key
+            mind_map_settings.pipeline.summary_template = template_key
 
         # --- summarize (skip if this template's summary already exists) #
         if pcfg.summarize and transcript is not None:
@@ -506,6 +519,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                             "template": result.get("template", "default"),
                             "coverage": result.get("coverage", {}),
                             "transcript": transcript_lineage,
+                            "auto_template": auto_recommendation,
                         },
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript remains usable
@@ -517,7 +531,11 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                     file_id,
                     StageName.summarize,
                     artifact_source="local",
-                    detail={"reused": True, "template": template_key},
+                    detail={
+                        "reused": True,
+                        "template": template_key,
+                        "auto_template": auto_recommendation,
+                    },
                 )
         else:
             _skip_stage(
@@ -553,7 +571,11 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         provider=result.get("provider"),
                         model=result.get("model"),
                         artifact_source="local",
-                        detail=result.get("detail", {}) | {"transcript": transcript_lineage},
+                        detail=result.get("detail", {})
+                        | {
+                            "transcript": transcript_lineage,
+                            "auto_template": auto_recommendation,
+                        },
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript/notes stay usable
                     log.exception("Mind map generation failed for %s", file_id)

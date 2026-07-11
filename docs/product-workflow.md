@@ -329,7 +329,9 @@ Saved Ask answers are editable note bodies with durable follow-up threads.
 The Templates workspace now separates My Space and Explore, with server-side search,
 scenario/category browsing, provenance, descriptions, authorship/popularity signals,
 prompt preview, immutable version editing, and copy-to-workspace. Other major gaps
-include automatic template selection, automation, and UI polish.
+include automation and UI polish. Auto template selection is local and deterministic,
+uses title/transcript/duration signals, previews its reasoning before processing, and
+persists the actual selected template plus recommendation engine provenance.
 Provider/model/profile management and the versioned remote-worker protocol
 are implemented; cross-provider fallback/cost accounting and the remaining hardware
 acceptance matrix are still open.

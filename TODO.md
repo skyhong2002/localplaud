@@ -290,6 +290,9 @@ embedding raw provider credentials or model settings in each rule.
   categories/scenarios, first-party/personal provenance, authorship, descriptions,
   popularity signals, prompt preview, immutable new-version editing, and
   copy-to-workspace behavior. Community/remote catalog ingestion remains optional.
+- ✅ Added local deterministic Auto template selection with title/transcript/duration
+  signals in English and Chinese, an explainable preview, confidence/reasons, and
+  durable stage provenance for the actual selected template and engine version.
 - ✅ Consolidated recording exports in one modal: canonical transcript TXT/SRT/VTT
   with timestamp and speaker-label toggles, notes Markdown/TXT,
   combined Markdown archive, and original audio. Remaining broader targets: MP3/WAV
