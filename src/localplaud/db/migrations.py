@@ -74,6 +74,12 @@ def migrate_note_template_schema(engine: Engine) -> list[str]:
             ("plaud_files", "note_template_key", "VARCHAR(64)"),
             ("summaries", "template_version", "INTEGER"),
             ("summaries", "template_snapshot", "JSON"),
+            ("note_templates", "category", "VARCHAR(80)"),
+            ("note_templates", "scenario", "VARCHAR(80)"),
+            ("note_templates", "description", "VARCHAR(512)"),
+            ("note_templates", "author", "VARCHAR(120)"),
+            ("note_templates", "provenance", "VARCHAR(32)"),
+            ("note_templates", "popularity", "INTEGER"),
         ):
             if table not in tables:
                 continue

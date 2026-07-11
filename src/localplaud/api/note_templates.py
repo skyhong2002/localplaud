@@ -75,14 +75,14 @@ def _item(row: NoteTemplate) -> dict:
         "instructions": row.instructions,
         "is_builtin": row.is_builtin,
         "is_active": row.is_active,
-        "category": catalog.get("category", "Custom"),
-        "scenario": catalog.get("scenario", "Workspace"),
-        "description": catalog.get(
+        "category": row.category or catalog.get("category", "Custom"),
+        "scenario": row.scenario or catalog.get("scenario", "Workspace"),
+        "description": row.description or catalog.get(
             "description", next((line.strip("# ") for line in row.instructions.splitlines() if line.strip()), "Custom structured notes")
         ),
-        "author": catalog.get("author", "Local workspace"),
-        "popularity": catalog.get("popularity"),
-        "provenance": "first-party" if row.is_builtin else "personal",
+        "author": row.author or catalog.get("author", "Local workspace"),
+        "popularity": row.popularity if row.popularity is not None else catalog.get("popularity"),
+        "provenance": row.provenance or ("first-party" if row.is_builtin else "personal"),
     }
 
 
@@ -114,6 +114,12 @@ def copy_note_template(key: str, body: CopyTemplateBody) -> dict:
             name=body.name or f"{source.name} copy",
             system_prompt=source.system_prompt,
             instructions=source.instructions,
+            category=_item(source)["category"],
+            scenario=_item(source)["scenario"],
+            description=_item(source)["description"],
+            author="Local workspace",
+            provenance="personal-copy",
+            popularity=None,
             is_builtin=False,
             is_active=True,
         )
@@ -136,6 +142,10 @@ def create_note_template(body: TemplateBody) -> dict:
             name=body.name,
             system_prompt=body.system_prompt,
             instructions=body.instructions,
+            category="Custom",
+            scenario="Workspace",
+            author="Local workspace",
+            provenance="personal",
             is_builtin=False,
             is_active=True,
         )
@@ -164,6 +174,12 @@ def create_note_template_version(key: str, body: TemplateBody) -> dict:
             name=body.name,
             system_prompt=body.system_prompt,
             instructions=body.instructions,
+            category=current.category,
+            scenario=current.scenario,
+            description=current.description,
+            author=current.author,
+            provenance=current.provenance,
+            popularity=current.popularity,
             is_builtin=current.is_builtin,
             is_active=True,
         )

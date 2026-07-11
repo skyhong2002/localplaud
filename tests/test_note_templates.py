@@ -97,7 +97,10 @@ def test_catalog_metadata_and_copy_to_my_space(monkeypatch, tmp_path):
         json={"key": "my-meeting", "name": "My meeting"},
     )
     assert copied.status_code == 201
-    assert copied.json()["provenance"] == "personal"
+    assert copied.json()["provenance"] == "personal-copy"
+    assert copied.json()["category"] == "Work"
+    assert copied.json()["scenario"] == "Meetings"
+    assert copied.json()["description"] == meeting["description"]
     assert copied.json()["system_prompt"] == meeting["system_prompt"]
     assert client.post(
         "/api/note-templates/meeting/copy",
@@ -117,6 +120,24 @@ def test_templates_workspace_search_and_tabs(monkeypatch, tmp_path):
     assert "Lecture" in education.text and "Meeting" not in education.text
     searched = client.get("/templates?tab=explore&q=voice+memos")
     assert "Personal" in searched.text and "Lecture" not in searched.text
+
+
+def test_template_discovery_metadata_migration(monkeypatch, tmp_path):
+    from localplaud.db.migrations import migrate_note_template_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path/'legacy-template-catalog.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE note_templates (id INTEGER PRIMARY KEY)"))
+    migrated = migrate_note_template_schema(engine)
+    assert set(migrated) == {
+        "note_templates.category",
+        "note_templates.scenario",
+        "note_templates.description",
+        "note_templates.author",
+        "note_templates.provenance",
+        "note_templates.popularity",
+    }
+    assert migrate_note_template_schema(engine) == []
 
 
 def test_recording_selection_marks_notes_stale_and_archive_resets(monkeypatch, tmp_path):
