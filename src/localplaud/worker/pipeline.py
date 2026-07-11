@@ -50,7 +50,12 @@ from ..providers.usage import (
 from ..remote.client import RemoteWorkerClient
 from ..remote.protocol import InputReference, JobStage, JobSubmitRequest
 from ..store.files import wav_path
-from ..store.speakers import speaker_keys_from_segments, sync_speakers
+from ..store.speakers import (
+    capture_speaker_evidence,
+    reconcile_speaker_labels,
+    speaker_keys_from_segments,
+    sync_speakers,
+)
 from . import convert, index, mindmap, summarize, summary_templates, transcribe
 from .diarize import DiarizationUnavailable, diarize
 
@@ -623,12 +628,15 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         source = diarize(wav, source, candidate_settings.diarize)
                         provider = candidate_settings.diarize.provider
                     model = candidate["stages"]["diarize"].get("model")
-                    _persist_transcript(file_id, source)
+                    speaker_mapping = _persist_transcript(file_id, source)
                     return {
                         "value": source,
                         "provider": provider,
                         "model": model,
-                        "detail": {"cost_budget": cost_budget},
+                        "detail": {
+                            "cost_budget": cost_budget,
+                            "speaker_reconciliation": speaker_mapping,
+                        },
                         "usage": {
                             "audio_seconds": _audio_seconds(row, source),
                             "input_chars": len(source.text),
@@ -1006,7 +1014,8 @@ def _has_chunks(file_id: str) -> bool:
         return session.query(Chunk.id).filter(Chunk.file_id == file_id).first() is not None
 
 
-def _persist_transcript(file_id: str, transcript: Transcript) -> None:
+def _persist_transcript(file_id: str, transcript: Transcript) -> dict[str, str]:
+    speaker_mapping: dict[str, str] = {}
     with session_scope() as session:
         # Preserve imported Plaud transcripts for comparison/migration. Only the
         # canonical local ASR result is replaced. User corrections
@@ -1020,6 +1029,16 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> None:
                 )
             )
         )
+        previous_rows = list(
+            session.scalars(
+                select(TranscriptRow).where(
+                    TranscriptRow.file_id == file_id, TranscriptRow.source == "local"
+                )
+            )
+        )
+        for previous in previous_rows:
+            if previous.has_speakers:
+                capture_speaker_evidence(session, file_id, previous.segments or [])
         if replaced_ids:
             session.execute(
                 update(TranscriptRevision)
@@ -1028,6 +1047,8 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> None:
             )
             session.execute(delete(TranscriptRow).where(TranscriptRow.id.in_(replaced_ids)))
         segments = [asdict(s) for s in transcript.segments]
+        if transcript.has_speakers:
+            speaker_mapping = reconcile_speaker_labels(session, file_id, segments)
         session.add(
             TranscriptRow(
                 file_id=file_id,
@@ -1043,6 +1064,7 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> None:
         )
         # Register stable speaker identities; existing display names are kept.
         sync_speakers(session, file_id, speaker_keys_from_segments(segments))
+    return speaker_mapping
 
 
 def _persist_summary(file_id: str, result: dict, lineage: dict | None = None) -> None:

@@ -227,8 +227,10 @@ embedding raw provider credentials or model settings in each rule.
   rows mirror the diarization keys per recording, renames are upserted from the
   Web detail page (legend inline forms), and flow into transcript view, regenerated
   notes/indexes, Ask, and Markdown export. A rename invalidates stale derived
-  artifacts and re-indexes without ASR. Remaining: reconcile identities safely
-  across diarization reruns because `SPEAKER_00` labels are run-local.
+  artifacts and re-indexes without ASR. Diarization reruns now reconcile run-local
+  labels against the previous speech timeline with one-to-one overlap matching;
+  ambiguous/new voices receive a fresh unnamed identity rather than inheriting a
+  user's display name. The mapping is retained in stage-attempt provenance.
 - ✅ Added a durable custom vocabulary/correction layer for names, specialist terms,
   Taiwan Mandarin, and Mandarin/English code-switching. Rules support language and
   case scope, longest non-overlapping matching, Settings CRUD, and explicit library

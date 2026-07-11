@@ -304,6 +304,9 @@ class Speaker(Base):
 
     key: Mapped[str] = mapped_column(String(64))
     display_name: Mapped[str | None] = mapped_column(String(128), default=None)
+    # Last trusted diarization timeline used to reconcile run-local labels after
+    # a rebuild. The key remains stable even when pyannote renumbers speakers.
+    timeline: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(

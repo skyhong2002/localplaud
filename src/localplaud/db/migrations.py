@@ -225,6 +225,21 @@ def migrate_ask_provenance_schema(engine: Engine) -> list[str]:
     return migrated
 
 
+def migrate_speaker_timeline_schema(engine: Engine) -> list[str]:
+    """Add durable diarization evidence for stable speaker reconciliation."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "speakers" not in set(inspector.get_table_names()):
+        return []
+    columns = {item["name"] for item in inspector.get_columns("speakers")}
+    if "timeline" in columns:
+        return []
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE speakers ADD COLUMN timeline JSON"))
+    return ["speakers.timeline"]
+
+
 def migrate_vocabulary_schema(engine: Engine) -> list[str]:
     """Create the durable custom-vocabulary table for an existing library."""
     if engine.dialect.name != "sqlite":

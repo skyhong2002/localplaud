@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from sqlalchemy import select
+from sqlalchemy import create_engine, inspect, select, text
 
 
 def _client(monkeypatch, tmp_path):
@@ -29,6 +29,24 @@ SEGMENTS = [
     {"text": "hi there", "start": 2.0, "end": 3.0, "speaker": "SPEAKER_01", "words": []},
     {"text": "sounds good", "start": 3.0, "end": 4.0, "speaker": "SPEAKER_00", "words": []},
 ]
+
+
+def test_speaker_timeline_migration_is_idempotent(tmp_path):
+    from localplaud.db.migrations import migrate_speaker_timeline_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE speakers (id INTEGER PRIMARY KEY, file_id VARCHAR(64), "
+                "key VARCHAR(64), display_name VARCHAR(128))"
+            )
+        )
+    assert migrate_speaker_timeline_schema(engine) == ["speakers.timeline"]
+    assert migrate_speaker_timeline_schema(engine) == []
+    assert "timeline" in {
+        column["name"] for column in inspect(engine).get_columns("speakers")
+    }
 
 
 def _mute_reindex(monkeypatch):
@@ -101,6 +119,104 @@ def test_sync_preserves_display_names_across_repersist(monkeypatch, tmp_path):
             select(Speaker).where(Speaker.file_id == "r1").order_by(Speaker.id))}
     # rename preserved, old keys never deleted, new key inserted without a name
     assert rows == {"SPEAKER_00": "Alice", "SPEAKER_01": None, "SPEAKER_02": None}
+
+
+def test_diarization_rerun_reconciles_swapped_labels_by_timeline(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    Speaker = _seed()
+    from localplaud.asr.base import Segment, Transcript
+    from localplaud.db.models import Transcript as TranscriptRow
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import _persist_transcript
+
+    with session_scope() as s:
+        alice = s.scalar(
+            select(Speaker).where(
+                Speaker.file_id == "r1", Speaker.key == "SPEAKER_00"
+            )
+        )
+        alice.display_name = "Alice"
+
+    # Rebuild first stores a fresh ASR transcript without speakers. Persisting it
+    # captures the previous diarization evidence before replacing the old row.
+    _persist_transcript(
+        "r1",
+        Transcript(
+            segments=[Segment(text="all speech", start=1.0, end=4.0)],
+            provider="faster-whisper",
+        ),
+    )
+    # The new diarizer numbers both voices in the opposite order.
+    _persist_transcript(
+        "r1",
+        Transcript(
+            segments=[
+                Segment(text="hello team", start=1.0, end=2.0, speaker="SPEAKER_01"),
+                Segment(text="hi there", start=2.0, end=3.0, speaker="SPEAKER_00"),
+                Segment(text="sounds good", start=3.0, end=4.0, speaker="SPEAKER_01"),
+            ],
+            provider="faster-whisper",
+            has_speakers=True,
+        ),
+    )
+    with session_scope() as s:
+        transcript = s.scalar(
+            select(TranscriptRow).where(
+                TranscriptRow.file_id == "r1", TranscriptRow.source == "local"
+            )
+        )
+        names = {
+            row.key: row.display_name
+            for row in s.scalars(select(Speaker).where(Speaker.file_id == "r1"))
+        }
+    assert [segment["speaker"] for segment in transcript.segments] == [
+        "SPEAKER_00",
+        "SPEAKER_01",
+        "SPEAKER_00",
+    ]
+    assert names["SPEAKER_00"] == "Alice"
+
+
+def test_ambiguous_rerun_voice_gets_new_identity_instead_of_name(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    Speaker = _seed()
+    from localplaud.db.session import session_scope
+    from localplaud.store.speakers import capture_speaker_evidence, reconcile_speaker_labels
+
+    with session_scope() as s:
+        alice = s.scalar(
+            select(Speaker).where(
+                Speaker.file_id == "r1", Speaker.key == "SPEAKER_00"
+            )
+        )
+        alice.display_name = "Alice"
+        capture_speaker_evidence(s, "r1", SEGMENTS)
+        bob = s.scalar(
+            select(Speaker).where(
+                Speaker.file_id == "r1", Speaker.key == "SPEAKER_01"
+            )
+        )
+        alice.timeline = {"intervals": [[1.0, 2.0]]}
+        bob.timeline = {"intervals": [[2.0, 3.0]]}
+        # One new label covers equal portions of two old voices; assigning either
+        # name would be unsafe, so it must become a fresh stable identity.
+        ambiguous = [
+            {
+                "text": "mixed",
+                "start": 1.0,
+                "end": 3.0,
+                "speaker": "SPEAKER_00",
+                "words": [],
+            }
+        ]
+        mapping = reconcile_speaker_labels(s, "r1", ambiguous)
+        new_key = mapping["SPEAKER_00"]
+        assert new_key not in {"SPEAKER_00", "SPEAKER_01"}
+        assert ambiguous[0]["speaker"] == new_key
+        new_row = s.scalar(
+            select(Speaker).where(Speaker.file_id == "r1", Speaker.key == new_key)
+        )
+        assert new_row.display_name is None
 
 
 def test_rename_endpoint_upsert_clear_and_validation(monkeypatch, tmp_path):

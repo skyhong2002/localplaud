@@ -48,6 +48,7 @@ def init_db() -> dict[str, int] | None:
         migrate_organization_schema,
         migrate_pipeline_retry_schema,
         migrate_profile_snapshot_columns,
+        migrate_speaker_timeline_schema,
         migrate_stage_attempt_schema,
         migrate_vocabulary_schema,
     )
@@ -59,6 +60,7 @@ def init_db() -> dict[str, int] | None:
     migrate_note_template_schema(engine)
     migrate_artifact_lineage_columns(engine)
     migrate_ask_provenance_schema(engine)
+    migrate_speaker_timeline_schema(engine)
     migrate_import_schema(engine)
     migrate_vocabulary_schema(engine)
     with Session(engine) as session:

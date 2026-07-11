@@ -352,10 +352,11 @@ coverage through bounded hierarchical map/reduce. Mind maps are generated from t
 canonical transcript as full-coverage Markdown outlines, rendered as a collapsible
 tree in the recording workspace, and included in Markdown export; PNG mind-map
 export remains. Speaker identities are now persisted
-per recording with stable diarization keys and user-editable display names
+per recording with stable local keys and user-editable display names
 (renamed from the Web detail page and applied in transcript view, regenerated
-artifacts, Ask, and export); safe identity reconciliation across diarization reruns
-remains because provider speaker labels are run-local. Transcript corrections are
+artifacts, Ask, and export). Run-local provider labels are reconciled using clear,
+one-to-one timestamp overlap; ambiguous or new voices get fresh unnamed identities
+so a saved name is never silently moved to uncertain speech. Transcript corrections are
 stored as provenance-preserving revisions: per-segment
 inline edits create a corrected canonical transcript on top of the immutable raw
 ASR row, survive re-ASR, re-index in the background without rerunning ASR, and hide
