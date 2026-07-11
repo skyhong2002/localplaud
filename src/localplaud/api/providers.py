@@ -11,6 +11,7 @@ from ..providers.service import (
     delete_connection,
     delete_model,
     delete_profile,
+    install_hardware_recommendation,
     list_connections,
     list_models,
     list_profiles,
@@ -78,6 +79,32 @@ class WorkerRequest(BaseModel):
     timeout: float = 120
     job_timeout: float = 3600
     enabled: bool = True
+
+
+class RecommendationInstallRequest(BaseModel):
+    make_default: bool = False
+
+
+@router.get("/hardware-recommendations")
+def hardware_profile_recommendations():
+    from ..providers.hardware import hardware_recommendations
+
+    return hardware_recommendations()
+
+
+@router.post("/hardware-recommendations/{recommendation_key}/install", status_code=201)
+def install_recommendation(
+    recommendation_key: str, body: RecommendationInstallRequest
+):
+    with session_scope() as session:
+        try:
+            return install_hardware_recommendation(
+                session, recommendation_key, make_default=body.make_default
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/connections")

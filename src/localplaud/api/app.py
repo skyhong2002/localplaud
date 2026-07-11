@@ -1253,6 +1253,7 @@ def status_page(request: Request):
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
     from ..providers.contracts import ProviderStage
+    from ..providers.hardware import hardware_recommendations
     from ..providers.service import list_connections, list_models, list_profiles
     from ..remote.registry import list_workers
 
@@ -1293,6 +1294,7 @@ def settings_page(request: Request):
                     )
                 )
             ],
+            "hardware_recommendations": hardware_recommendations(),
         }
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
 

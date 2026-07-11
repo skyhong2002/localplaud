@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-11)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (273 tests passing locally).
+  Active development is merged directly to `main` (278 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -111,6 +111,11 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
 - ✅ Existing connections and models can be edited or safely deleted from Settings;
   immutable profiles expose a guided “New version” flow and guarded deletion for
   non-default, unused versions.
+- ✅ Added truthful local hardware/runtime detection and ranked Apple Silicon MLX,
+  NVIDIA CUDA faster-whisper, and CPU fallback recommendations. Settings reports
+  architecture, memory, GPU/runtime evidence and missing requirements; only verified
+  ready recommendations can create an idempotent profile. Installation replaces only
+  ASR/alignment while preserving every other stage and privacy/cost/fallback policy.
 - ✅ Added authenticated `localplaud-worker` protocol v1: versioned capability
   handshake, durable/idempotent jobs, progress, cancellation, structured retryable
   errors, minimum typed inputs, restart recovery, and SHA-256 artifact verification.

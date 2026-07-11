@@ -377,5 +377,7 @@ include automation and UI polish. Auto template selection is local and determini
 uses title/transcript/duration signals, previews its reasoning before processing, and
 persists the actual selected template plus recommendation engine provenance.
 Provider/model/profile management and the versioned remote-worker protocol
-are implemented; cross-provider fallback/cost accounting and the remaining hardware
-acceptance matrix are still open.
+are implemented. Local hardware/runtime detection now provides evidence-backed,
+ranked Apple MLX, NVIDIA CUDA, and CPU ASR recommendations with guarded one-click
+profile creation that preserves the current non-ASR stages and policy. Cross-provider
+fallback/cost accounting and the remaining real-hardware acceptance matrix are open.

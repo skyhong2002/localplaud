@@ -5,7 +5,27 @@
   <h1 class="page">Providers &amp; execution profiles</h1>
   <p class="sub">Choose exactly where each processing stage runs. Local-only profiles never send recording data outside this host.</p>
 
-  <div class="panel" style="margin-top:18px">
+  <div class="panel" style="margin-top:18px" id="hardware-profiles">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div><strong>Recommended for this host</strong><div class="sub" style="font-size:12px;margin-top:3px">Evidence-based local ASR profiles; no accelerator is claimed unless detected.</div></div>
+      <span class="chip">{{ hardware_recommendations.host.system }} · {{ hardware_recommendations.host.machine }}{% if hardware_recommendations.host.memory_gb %} · {{ hardware_recommendations.host.memory_gb }} GB{% endif %}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:12px">
+      {% set profile_keys = profiles|map(attribute='key')|list %}
+      {% for recommendation in hardware_recommendations.recommendations %}
+      <div class="tile" style="display:flex;flex-direction:column;gap:7px">
+        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ recommendation.name }}</strong><span class="st {{ 'healthy' if recommendation.ready else 'degraded' }}">{{ 'ready' if recommendation.ready else 'setup needed' }}</span></div>
+        <div class="sub" style="font-size:11px">{{ recommendation.hardware }}</div>
+        <div><code>{{ recommendation.model }}</code></div>
+        <div class="sub" style="font-size:11.5px;flex:1">{{ recommendation.reason }}</div>
+        {% if ('recommended-' ~ recommendation.key) in profile_keys %}<span class="chip on">Profile created</span>{% elif recommendation.ready %}<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="false" style="padding:6px 9px">Create profile</button><button class="btn hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="true" style="padding:6px 9px">Create &amp; use</button></div>{% else %}<button class="btn sec" type="button" disabled style="padding:6px 9px">Install requirements first</button>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div id="hardware-result" class="sub" style="font-size:12px;margin-top:10px"></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
       <strong>Connections</strong>
       <span class="sub">Secrets are stored as references, never copied into profiles.</span>
@@ -178,6 +198,7 @@ const NOTE_TEMPLATES={{ note_templates|tojson }};
 const VOCABULARY={{ vocabulary_terms|tojson }};
 let editingNoteTemplate=null;
 let editingVocabulary=null;
+document.querySelectorAll('.hardware-install').forEach(button=>button.addEventListener('click',async()=>{const out=document.getElementById('hardware-result');button.disabled=true;out.textContent='Creating a verified profile…';const response=await fetch(`/api/providers/hardware-recommendations/${button.dataset.key}/install`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({make_default:button.dataset.default==='true'})}),result=await response.json();if(response.ok){out.textContent=`Created ${result.name}. Reloading…`;location.reload();}else{button.disabled=false;out.textContent=result.detail||'Could not create profile';}}));
 function resetVocabulary(){editingVocabulary=null;const form=document.getElementById('vocabulary-form');form.reset();form.elements.enabled.checked=true;form.querySelector('[type=submit]').textContent='Add correction';document.getElementById('cancel-vocabulary').hidden=true;}
 function editVocabulary(id){const term=VOCABULARY.find(item=>item.id===id),form=document.getElementById('vocabulary-form');editingVocabulary=id;for(const key of ['source_text','replacement_text','language'])form.elements[key].value=term[key]||'';form.elements.case_sensitive.checked=term.case_sensitive;form.elements.enabled.checked=term.enabled;form.querySelector('[type=submit]').textContent='Save correction';document.getElementById('cancel-vocabulary').hidden=false;form.scrollIntoView({behavior:'smooth'});}
 async function deleteVocabulary(id){if(!confirm('Delete this correction rule? Existing transcript revisions remain unchanged.'))return;const response=await fetch(`/api/vocabulary/${id}`,{method:'DELETE'});if(response.ok)location.reload();else{const data=await response.json();alert(data.detail||'Delete failed');}}

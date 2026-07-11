@@ -451,3 +451,124 @@ def delete_profile(session: Session, profile_id: int) -> None:
     ):
         raise ValueError("profile is selected by a recording")
     session.delete(row)
+
+
+def install_hardware_recommendation(
+    session: Session, recommendation_key: str, *, make_default: bool = False
+) -> dict:
+    """Create an idempotent profile that changes only local ASR/alignment.
+
+    All other stages and the current privacy/cost/fallback policy are cloned from
+    the system default. A recommendation cannot be installed until runtime probes
+    prove it ready on this host.
+    """
+    from .hardware import hardware_recommendations
+
+    recommendation = next(
+        (
+            item
+            for item in hardware_recommendations()["recommendations"]
+            if item["key"] == recommendation_key
+        ),
+        None,
+    )
+    if recommendation is None:
+        raise LookupError("hardware recommendation not found")
+    if not recommendation["ready"]:
+        raise ValueError(recommendation["reason"])
+
+    profile_key = f"recommended-{recommendation_key}"
+    existing = session.scalar(
+        _profile_query()
+        .where(ExecutionProfile.key == profile_key)
+        .order_by(ExecutionProfile.version.desc())
+    )
+    if existing is not None:
+        if make_default and not existing.is_system_default:
+            for current in session.scalars(
+                select(ExecutionProfile).where(ExecutionProfile.is_system_default)
+            ):
+                current.is_system_default = False
+            existing.is_system_default = True
+            session.flush()
+        return next(item for item in list_profiles(session) if item["id"] == existing.id)
+
+    connection_key = f"asr:{recommendation['provider']}"
+    connection = session.scalar(
+        select(ProviderConnection).where(ProviderConnection.key == connection_key)
+    )
+    if connection is None:
+        connection = ProviderConnection(
+            key=connection_key,
+            name=f"{recommendation['provider']} (local ASR)",
+            provider_type=recommendation["provider"],
+            execution_target="local",
+            data_egress=False,
+            config={},
+            health={"status": "healthy", "detail": recommendation["reason"]},
+        )
+        session.add(connection)
+        session.flush()
+    model = session.scalar(
+        select(ModelCatalogEntry).where(
+            ModelCatalogEntry.connection_id == connection.id,
+            ModelCatalogEntry.model_key == recommendation["model"],
+        )
+    )
+    if model is None:
+        model = ModelCatalogEntry(
+            connection_id=connection.id,
+            model_key=recommendation["model"],
+            display_name=recommendation["model"],
+            capabilities=Capability(
+                execution_target="local",
+                data_egress=False,
+                health=Health(status="healthy", detail=recommendation["reason"]),
+                stages=(
+                    StageCapabilities(
+                        stage=ProviderStage.transcribe,
+                        timestamps="word",
+                        hardware_requirement=recommendation["hardware"],
+                    ),
+                    StageCapabilities(
+                        stage=ProviderStage.align,
+                        timestamps="word",
+                        hardware_requirement=recommendation["hardware"],
+                    ),
+                ),
+                metadata={"recommended_by": "local-hardware-v1"},
+            ).model_dump(mode="json"),
+        )
+        session.add(model)
+        session.flush()
+
+    current = session.scalar(
+        _profile_query()
+        .where(ExecutionProfile.is_system_default)
+        .order_by(ExecutionProfile.version.desc(), ExecutionProfile.id.desc())
+    )
+    if current is None:
+        raise ValueError("no system default execution profile")
+    base = _profile_layer(current)
+    stages = dict(base["stages"])
+    asr_selection = {
+        "connection": connection.key,
+        "model": model.model_key,
+        "options": recommendation["options"],
+    }
+    stages[ProviderStage.transcribe.value] = asr_selection
+    stages[ProviderStage.align.value] = asr_selection
+    policy = base["policy"]
+    return create_profile_version(
+        session,
+        {
+            "key": profile_key,
+            "name": f"{recommendation['name']} + current stages",
+            "is_system_default": make_default,
+            "privacy_policy": policy["privacy_policy"],
+            "no_egress": policy["no_egress"],
+            "cost_ceiling": policy["cost_ceiling"],
+            "fallback_policy": policy["fallback_policy"],
+            "stages": stages,
+        },
+    )
