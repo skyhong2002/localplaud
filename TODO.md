@@ -297,6 +297,10 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Added durable local recording-title overrides with inline edit/revert. Plaud
   keeps its latest cloud title separately; local names survive sync and consistently
   drive library sort/search, detail, Ask/search citations, automation, CLI, and export.
+- ✅ Search no longer depends on embeddings: local lexical results cover title,
+  provenance-correct canonical transcript, generated notes, and Saved notes, with
+  folder/tag/source/date filters and playable timestamp links. Available semantic
+  hits are merged and deduplicated without weakening those filters.
 - Add file Ask suggested questions and reusable local skills (action items, task
   table, insights), plus grounded follow-ups and save-to-note.
 - ✅ Built dedicated Templates My Space and Explore surfaces with search,

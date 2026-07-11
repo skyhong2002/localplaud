@@ -2,34 +2,59 @@
 {% block title %}Search — localplaud{% endblock %}
 {% block body %}
 <div class="content"><div class="pane-inner">
-<h1 class="page">Ask &amp; Search</h1>
-<form method="get" action="/search" class="ask">
-  <input class="search-input" name="q" value="{{ q }}" autofocus
-         placeholder="Search across every transcript by meaning…">
-  <button class="btn" type="submit">Search</button>
+<h1 class="page">Search</h1>
+<form method="get" action="/search" class="panel" style="padding:14px;margin-bottom:14px">
+  <div class="ask" style="margin-bottom:10px">
+    <input class="search-input" name="q" value="{{ q }}" autofocus
+           placeholder="Search titles, transcripts, and notes…">
+    <button class="btn" type="submit">Search</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px">
+    <label class="sub">Folder
+      <select class="search-input" name="folder" style="width:100%;margin-top:4px">
+        <option value="">Any folder</option>
+        {% for folder in organization.folders %}<option value="{{ folder.id }}" {% if search_filters.folder == folder.id %}selected{% endif %}>{{ folder.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="sub">Tag
+      <select class="search-input" name="tag" style="width:100%;margin-top:4px">
+        <option value="">Any tag</option>
+        {% for tag in organization.tags %}<option value="{{ tag.id }}" {% if search_filters.tag == tag.id %}selected{% endif %}>{{ tag.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="sub">Source
+      <select class="search-input" name="origin" style="width:100%;margin-top:4px">
+        <option value="">Any source</option>
+        <option value="plaud" {% if search_filters.origin == 'plaud' %}selected{% endif %}>Plaud</option>
+        <option value="local" {% if search_filters.origin == 'local' %}selected{% endif %}>Local</option>
+      </select>
+    </label>
+    <label class="sub">From<input class="search-input" type="date" name="date_from" value="{{ search_filters.date_from }}" style="width:100%;margin-top:4px"></label>
+    <label class="sub">To<input class="search-input" type="date" name="date_to" value="{{ search_filters.date_to }}" style="width:100%;margin-top:4px"></label>
+  </div>
 </form>
 
 {% if q and not groups %}
 <div class="empty"><div class="big">🔍</div>No matches for “{{ q }}”.<br>
-  <span class="sub">Recordings need to be indexed first (embeddings), or the embedding provider isn't available.</span>
+  <span class="sub">No title, transcript, or note matches within these filters.</span>
 </div>
 {% elif groups %}
-<div class="sub" style="margin:6px 2px 14px">{{ groups|length }} recording(s) matched.</div>
+<div class="sub" style="margin:6px 2px 14px">{{ groups|length }} recording(s) matched · local keyword results plus semantic matches when available.</div>
 <div class="list">
   {% for g in groups %}
   <div class="panel" style="padding:14px 16px">
     <a class="name" style="font-weight:650" href="/file/{{ g.file_id }}">{{ g.filename }}</a>
-    {% for h in g.hits[:3] %}
-    <a class="seg" href="/file/{{ g.file_id }}" style="text-decoration:none">
-      <div class="ts">{{ h.start | mmss }}</div>
-      <div class="txt sub">{% if h.speaker %}<span style="color:var(--accent);font-weight:600">{{ h.speaker }}</span> {% endif %}{{ h.text[:220] }}{% if h.text|length > 220 %}…{% endif %}</div>
+    {% for h in g.hits[:5] %}
+    <a class="seg" href="/file/{{ g.file_id }}{% if h.start is not none %}?t={{ h.start }}{% endif %}" style="text-decoration:none">
+      <div class="ts">{% if h.start is not none %}{{ h.start | mmss }}{% else %}<span class="chip">{{ {'title':'Title','note':'Note','semantic':'Semantic'}.get(h.kind, 'Text') }}</span>{% endif %}</div>
+      <div class="txt sub">{% if h.start is not none %}<span class="chip">{{ 'Semantic' if h.kind == 'semantic' else 'Transcript' }}</span> {% endif %}{% if h.speaker %}<span style="color:var(--accent);font-weight:600">{{ h.speaker }}</span> {% endif %}{{ h.text[:220] }}{% if h.text|length > 220 %}…{% endif %}</div>
     </a>
     {% endfor %}
   </div>
   {% endfor %}
 </div>
 {% else %}
-<div class="empty"><div class="big">🔎</div>Search your recordings by meaning, not just keywords.</div>
+<div class="empty"><div class="big">🔎</div>Search works locally without an AI provider.<br><span class="sub">Find words in titles, transcripts, and notes; semantic results are blended in when configured.</span></div>
 {% endif %}
 </div></div>
 {% endblock %}

@@ -173,6 +173,9 @@ def test_export_menu_and_format_endpoints(monkeypatch, tmp_path):
     assert txt.status_code == 200 and "hello team" in txt.text
     assert "SPEAKER_00" not in txt.text and "[00:01]" not in txt.text
     assert c.get("/file/r1/export/transcript.srt").status_code == 200
+    vtt = c.get("/file/r1/export/transcript.vtt")
+    assert vtt.status_code == 200 and vtt.text.startswith("WEBVTT")
+    assert c.get("/file/r1/export/transcript.json").status_code == 404
     assert c.get("/file/r1/export/notes.txt").status_code == 200
     assert c.get("/file/r1/export/audio").content == b"audio"
 

@@ -675,23 +675,99 @@ def index(
 
 
 @app.get("/search", response_class=HTMLResponse)
-def search(request: Request, q: str | None = None):
+def search(
+    request: Request,
+    q: str | None = None,
+    folder: str | None = None,
+    tag: str | None = None,
+    origin: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+):
+    from datetime import datetime, timedelta
+
+    def optional_int(value: str | None) -> int | None:
+        try:
+            return int(value) if value else None
+        except ValueError:
+            return None
+
+    def date_ms(value: str | None, *, exclusive_end: bool = False) -> int | None:
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=UTC)
+            if exclusive_end:
+                parsed += timedelta(days=1)
+            return int(parsed.timestamp() * 1000)
+        except (TypeError, ValueError):
+            return None
+
+    filters = {
+        "folder_id": optional_int(folder),
+        "tag_id": optional_int(tag),
+        "origin": origin if origin in {"plaud", "local"} else None,
+        "date_from_ms": date_ms(date_from),
+        "date_to_ms": date_ms(date_to, exclusive_end=True),
+    }
     groups: list[dict] = []
     if q:
+        from ..library_search import lexical_search
         from ..worker.qa import retrieve
 
+        hits = lexical_search(q, **filters, limit=100)
         try:
-            hits = retrieve(q, top_k=20)
+            semantic_hits = retrieve(q, top_k=30)
         except Exception:  # noqa: BLE001 - embeddings/provider may be unavailable
-            hits = []
+            semantic_hits = []
+        with session_scope() as session:
+            stmt = select(PlaudFile.id).where(PlaudFile.is_trash.is_(False))
+            if filters["folder_id"] is not None:
+                stmt = stmt.where(PlaudFile.folder_id == filters["folder_id"])
+            if filters["tag_id"] is not None:
+                stmt = stmt.where(PlaudFile.tags.any(Tag.id == filters["tag_id"]))
+            if filters["origin"] is not None:
+                stmt = stmt.where(PlaudFile.origin == filters["origin"])
+            if filters["date_from_ms"] is not None:
+                stmt = stmt.where(PlaudFile.start_time_ms >= filters["date_from_ms"])
+            if filters["date_to_ms"] is not None:
+                stmt = stmt.where(PlaudFile.start_time_ms < filters["date_to_ms"])
+            allowed_ids = set(session.scalars(stmt))
+        seen = {
+            (hit["file_id"], round(hit.get("start") or -1, 1), hit["text"][:80].casefold())
+            for hit in hits
+        }
+        for hit in semantic_hits:
+            if hit["file_id"] not in allowed_ids:
+                continue
+            hit = hit | {"kind": "semantic"}
+            key = (
+                hit["file_id"],
+                round(hit.get("start") or -1, 1),
+                hit["text"][:80].casefold(),
+            )
+            if key not in seen:
+                hits.append(hit)
+                seen.add(key)
         by_file: dict[str, dict] = {}
-        for h in hits:
+        for h in sorted(hits, key=lambda item: -item["score"]):
             g = by_file.setdefault(
                 h["file_id"], {"file_id": h["file_id"], "filename": h["filename"], "hits": []}
             )
             g["hits"].append(h)
         groups = sorted(by_file.values(), key=lambda g: -max(x["score"] for x in g["hits"]))
-    ctx = _base_ctx(request, "search") | {"q": q or "", "groups": groups}
+    with session_scope() as session:
+        organization = _organization_summary(session)
+    ctx = _base_ctx(request, "search") | {
+        "q": q or "",
+        "groups": groups,
+        "organization": organization,
+        "search_filters": {
+            "folder": filters["folder_id"],
+            "tag": filters["tag_id"],
+            "origin": filters["origin"],
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+        },
+    }
     return templates.TemplateResponse(request=request, name="search.html", context=ctx)
 
 
