@@ -75,6 +75,10 @@
     .pane { flex:1; min-width:0; background:var(--panel); overflow-y:auto; }
     .pane-inner { max-width:760px; margin:0 auto; padding:26px 30px 80px; }
 
+    /* centered full-width product pages */
+    .main { flex:1; min-width:0; overflow-y:auto; }
+    .main > .content { width:100%; margin:0 auto; padding:26px 30px 80px; overflow:visible; }
+
     /* single-column pages (search/status) */
     .content { flex:1; overflow-y:auto; }
     .content .pane-inner { max-width:820px; }
@@ -178,6 +182,7 @@
       .shell { flex-direction:column; } .filelist{ width:auto; border-right:0; }
       .filelist.has-active { display:none; } .backlink{ display:inline-flex; }
       .stats{ grid-template-columns:repeat(2,1fr); } .pane-inner{ padding:20px 16px 60px; }
+      .main > .content{ padding:20px 16px 60px; }
     }
   </style>
 </head>

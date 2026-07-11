@@ -73,6 +73,17 @@ def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
     assert "document.getElementById('import-close').addEventListener('click'" in response.text
 
 
+def test_product_pages_use_centered_responsive_layout(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    for path in ("/home", "/templates", "/discover", "/notifications"):
+        response = c.get(path)
+        assert response.status_code == 200
+        assert '<main class="main"><div class="content"' in response.text
+        assert ".main { flex:1; min-width:0; overflow-y:auto; }" in response.text
+        assert "width:100%; margin:0 auto; padding:26px 30px 80px" in response.text
+        assert ".main > .content{ padding:20px 16px 60px; }" in response.text
+
+
 def test_browser_runtime_is_vendored_and_checksum_pinned(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     page = c.get("/")
