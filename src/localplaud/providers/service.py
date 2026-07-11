@@ -112,7 +112,7 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
 def list_connections(session: Session) -> list[dict[str, Any]]:
     return [{"id": r.id, "key": r.key, "name": r.name, "provider_type": r.provider_type,
              "execution_target": r.execution_target, "data_egress": r.data_egress,
-             "secret_ref": r.secret_ref, "health": r.health} for r in session.scalars(
+             "secret_ref": r.secret_ref, "config": r.config, "health": r.health} for r in session.scalars(
                  select(ProviderConnection).order_by(ProviderConnection.id))]
 
 

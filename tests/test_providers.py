@@ -200,6 +200,19 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
         )
         assert connection.status_code == 201
         connection_id = connection.json()["id"]
+        edited_connection = client.put(
+            f"/api/providers/connections/{connection_id}",
+            json={
+                "key": "llm:test-local",
+                "name": "Renamed Local",
+                "provider_type": "ollama",
+                "execution_target": "local",
+                "data_egress": False,
+                "config": {},
+            },
+        )
+        assert edited_connection.status_code == 200
+        assert edited_connection.json()["name"] == "Renamed Local"
         health = client.post(f"/api/providers/connections/{connection_id}/health")
         assert health.json()["status"] == "healthy"
 
@@ -214,6 +227,18 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
             },
         )
         assert model.status_code == 201
+        edited_model = client.put(
+            f"/api/providers/models/{model.json()['id']}",
+            json={
+                "connection_id": connection_id,
+                "model_key": "test-model",
+                "display_name": "Renamed Model",
+                "capabilities": capability,
+                "enabled": True,
+            },
+        )
+        assert edited_model.status_code == 200
+        assert edited_model.json()["display_name"] == "Renamed Model"
         model_health = client.post(f"/api/providers/models/{model.json()['id']}/health")
         assert model_health.json()["status"] == "healthy"
 

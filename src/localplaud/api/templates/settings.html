@@ -20,6 +20,8 @@
         <div style="display:flex;align-items:center;gap:8px">
           <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}">{{ c.health.status or 'unknown' }}</span>
           <button class="btn sec" style="padding:7px 10px" onclick="testHealth({{ c.id }})">Test</button>
+          <button class="btn sec" style="padding:7px 10px" onclick="editConnection({{ c.id }})">Edit</button>
+          <button class="btn sec" style="padding:7px 10px;color:var(--red)" onclick="removeItem('connections',{{ c.id }})">Delete</button>
         </div>
       </div>
       {% endfor %}
@@ -31,7 +33,7 @@
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px">
       {% for m in models %}
       <div class="tile">
-        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ m.display_name }}</strong><button class="btn sec" style="padding:5px 8px" onclick="testModel({{ m.id }})">Test</button></div>
+        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ m.display_name }}</strong><span><button class="btn sec" style="padding:5px 8px" onclick="testModel({{ m.id }})">Test</button> <button class="btn sec" style="padding:5px 8px" onclick="editModel({{ m.id }})">Edit</button> <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="removeItem('models',{{ m.id }})">Delete</button></span></div>
         <div class="sub" style="font-size:11px;margin-top:3px">{{ m.connection_key }} · <code>{{ m.model_key }}</code></div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">{% for capability in m.capabilities.stages or [] %}<span class="chip">{{ capability.stage }}</span>{% endfor %}</div>
         <div id="model-health-{{ m.id }}" class="sub" style="font-size:11px;margin-top:7px">{{ (m.capabilities.health or {}).status or 'not tested' }}</div>
@@ -47,7 +49,7 @@
       <details {% if p.is_system_default %}open{% endif %} style="border-top:1px solid var(--border);padding-top:11px">
         <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:12px;list-style:none">
           <span><strong>{{ p.name }}</strong> <code>{{ p.key }}@{{ p.version }}</code></span>
-          <span>{% if p.is_system_default %}<span class="chip on">Default</span>{% endif %} <span class="chip">{% if p.policy.no_egress %}Local only{% else %}Egress allowed{% endif %}</span></span>
+          <span>{% if p.is_system_default %}<span class="chip on">Default</span>{% endif %} <span class="chip">{% if p.policy.no_egress %}Local only{% else %}Egress allowed{% endif %}</span> <button class="btn sec" style="padding:5px 8px" onclick="event.preventDefault();newProfileVersion({{ p.id }})">New version</button>{% if not p.is_system_default %} <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="event.preventDefault();removeItem('profiles',{{ p.id }})">Delete</button>{% endif %}</span>
         </summary>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px">
           {% for stage, selection in p.stages.items() %}
@@ -104,6 +106,30 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const CONNECTIONS={{ connections|tojson }};
+const MODELS={{ models|tojson }};
+const PROFILES={{ profiles|tojson }};
+async function removeItem(kind,id){
+  if(!confirm(`Delete this ${kind.slice(0,-1)}?`))return;
+  const r=await fetch(`/api/providers/${kind}/${id}`,{method:'DELETE'});
+  if(r.ok)location.reload();else{const data=await r.json();alert(data.detail||'Delete failed');}
+}
+async function editConnection(id){
+  const c=CONNECTIONS.find(x=>x.id===id);const name=prompt('Display name',c.name);if(name===null)return;
+  const secret=prompt('Secret reference (env:VARIABLE or blank)',c.secret_ref||'');if(secret===null)return;
+  const body={key:c.key,name,provider_type:c.provider_type,execution_target:c.execution_target,data_egress:c.data_egress,secret_ref:secret||null,config:c.config||{}};
+  const r=await fetch(`/api/providers/connections/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.ok)location.reload();else{const d=await r.json();alert(d.detail||'Update failed');}
+}
+async function editModel(id){
+  const m=MODELS.find(x=>x.id===id);const name=prompt('Display name',m.display_name);if(name===null)return;const key=prompt('Model identifier',m.model_key);if(key===null)return;
+  const body={connection_id:m.connection_id,model_key:key,display_name:name,capabilities:m.capabilities,enabled:m.enabled};
+  const r=await fetch(`/api/providers/models/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.ok)location.reload();else{const d=await r.json();alert(d.detail||'Update failed');}
+}
+function newProfileVersion(id){
+  const p=PROFILES.find(x=>x.id===id),form=document.getElementById('profile-form');form.elements.name.value=p.name;form.elements.key.value=p.key;form.elements.no_egress.checked=p.policy.no_egress;
+  for(const [stage,s] of Object.entries(p.stages)){const el=form.elements[`stage-${stage}`];if(el)el.value=`${s.connection}|||${s.model}`;}
+  form.scrollIntoView({behavior:'smooth'});document.getElementById('profile-result').textContent=`Creating the next version of ${p.key}`;
+}
 async function testHealth(id){
   const badge=document.getElementById(`health-${id}`); badge.textContent='checking';
   const r=await fetch(`/api/providers/connections/${id}/health`,{method:'POST'}); const data=await r.json();

@@ -106,9 +106,11 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
 - ✅ Settings can add model capabilities and construct an explicit per-stage profile;
   the API now provides guarded create/update/delete operations for connections,
   models, and immutable profile versions.
-- Remaining: add in-place Web editing/deletion for existing catalog entries,
-  implement explicit retry/fallback/cost accounting, and build the remote GPU worker
-  protocol.
+- ✅ Existing connections and models can be edited or safely deleted from Settings;
+  immutable profiles expose a guided “New version” flow and guarded deletion for
+  non-default, unused versions.
+- Remaining: implement explicit retry/fallback/cost accounting and build the remote
+  GPU worker protocol.
 
 Implement this P0 in the following order:
 

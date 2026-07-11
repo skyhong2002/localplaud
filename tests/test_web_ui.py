@@ -103,6 +103,7 @@ def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_pat
     assert "Add model" in r.text
     assert "Create execution profile" in r.text
     assert "Local only / no egress" in r.text
+    assert "New version" in r.text and "Edit" in r.text and "Delete" in r.text
 
 
 def test_export_markdown_endpoint(monkeypatch, tmp_path):
