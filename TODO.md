@@ -279,6 +279,9 @@ embedding raw provider credentials or model settings in each rule.
 
 ### P1 — Plaud-like Web App workflow
 
+- ✅ Vendored the pinned HTMX 1.9.12 runtime, upstream Zero-Clause BSD license,
+  and SHA-256 manifest. The packaged Web App has no CDN dependency for daily
+  interaction and remains functional on offline/private deployments.
 - Implement `docs/product-workflow.md`: library filters/folders/tags, responsive
   split panes, persistent player, waveform/progress, transcript editing, speaker
   naming, notes, mind map, Ask, processing UI, and actionable recovery.

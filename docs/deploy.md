@@ -46,6 +46,10 @@ docker compose --profile <cpu|gpu|mac> up -d --build
 
 Then browse to `https://$DOMAIN`.
 
+The Web App ships its browser runtime inside the Python package. Normal operation
+does not require access to a JavaScript CDN, which is suitable for private or
+offline deployments.
+
 ---
 
 ## The reference three-machine setup

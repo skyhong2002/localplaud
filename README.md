@@ -29,6 +29,9 @@ download, transcode, transcribe, align, diarize, correct, summarize, map, search
 Ask, and export — on hardware you control. It replaces the subscription processing
 experience, not the recorder or the App's device-upload role.
 
+The browser runtime is self-contained: HTMX is vendored with its upstream license
+and pinned checksum, so normal Web App interaction does not depend on a CDN.
+
 > Record and upload as usual, but do not need to press Plaud's Generate button.
 > localplaud polls the read-only Open API, downloads the audio, and owns every
 > derived artifact. See the [target product workflow](docs/product-workflow.md).

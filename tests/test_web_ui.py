@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -57,6 +59,21 @@ def test_dashboard_renders(monkeypatch, tmp_path):
     assert r.status_code == 200
     assert "Weekly Sync" in r.text
     assert "Total audio" in r.text  # stat tiles present
+
+
+def test_browser_runtime_is_vendored_and_checksum_pinned(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    page = c.get("/")
+    assert '<script src="/static/htmx-1.9.12.min.js"></script>' in page.text
+    assert "unpkg.com" not in page.text
+    runtime = c.get("/static/htmx-1.9.12.min.js")
+    assert runtime.status_code == 200
+    assert hashlib.sha256(runtime.content).hexdigest() == (
+        "449317ade7881e949510db614991e195c3a099c4c791c24dacec55f9f4a2a452"
+    )
+    license_response = c.get("/static/HTMX-LICENSE.txt")
+    assert license_response.status_code == 200
+    assert b"Zero-Clause BSD" in license_response.content
 
 
 def test_home_renders_recent_recordings_and_operational_cards(monkeypatch, tmp_path):
