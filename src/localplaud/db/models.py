@@ -537,6 +537,24 @@ class AutomationRun(Base):
     )
 
 
+class Notification(Base):
+    """Durable local inbox item produced by an AutoFlow run."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    automation_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_runs.id", ondelete="SET NULL"), unique=True, index=True
+    )
+    file_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text, default="")
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class Chunk(Base):
     """A retrievable text chunk with its embedding, for Q&A / semantic search."""
 

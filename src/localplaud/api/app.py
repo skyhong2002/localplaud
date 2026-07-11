@@ -25,6 +25,7 @@ from ..db.models import (
     Folder,
     ImportRun,
     NoteTemplate,
+    Notification,
     PlaudFile,
     RecordingProfileOverride,
     Speaker,
@@ -176,7 +177,18 @@ def _file_summary(r: PlaudFile) -> dict:
 
 
 def _base_ctx(request: Request, active: str) -> dict:
-    return {"request": request, "active": active, "public_url": get_settings().api.public_url}
+    with session_scope() as session:
+        unread_notifications = session.scalar(
+            select(func.count()).select_from(Notification).where(
+                Notification.read_at.is_(None), Notification.dismissed_at.is_(None)
+            )
+        ) or 0
+    return {
+        "request": request,
+        "active": active,
+        "public_url": get_settings().api.public_url,
+        "unread_notifications": unread_notifications,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -922,6 +934,18 @@ def discover_automations(request: Request):
         "note_templates": note_templates,
     }
     return templates.TemplateResponse(request=request, name="discover.html", context=ctx)
+
+
+@app.get("/notifications", response_class=HTMLResponse)
+def notifications_page(request: Request):
+    from .automations import list_notifications
+
+    rows = list_notifications(limit=200)["notifications"]
+    return templates.TemplateResponse(
+        request=request,
+        name="notifications.html",
+        context=_base_ctx(request, "notifications") | {"notifications": rows},
+    )
 
 
 _AUDIO_MIME = {"mp3": "audio/mpeg", "opus": "audio/ogg", "wav": "audio/wav", "m4a": "audio/mp4"}

@@ -369,12 +369,16 @@ embedding raw provider credentials or model settings in each rule.
   sentences, mutation-free dry-run, versioned idempotency, metadata-sync hooks, and
   per-recording success/failure history with retry semantics.
 - ✅ Rule actions can select a named execution profile and note template or move/add
-  organization metadata; validation prevents dangling references. Remaining actions:
-  notification delivery, email, webhook, and export with independent downstream retry.
+  organization metadata; validation prevents dangling references.
+- ✅ Notification-enabled rules now create a durable, deduplicated local inbox item
+  after rule actions commit. Notifications support unread state, mark-all-read,
+  dismissal, preserved rule/recording snapshots, and independent delivery retry;
+  delivery failure never rolls back completed organization or processing actions.
+  Remaining downstream actions: email, webhook, and export.
 - ✅ Added a Discover hub for locally owned/editable AutoFlow rules, create/edit/
-  delete controls, Run now, history, and notification intent. Remaining: local
-  applications/integration catalog, externally owned read-only rules, and actual
-  notification delivery.
+  delete controls, Run now, history, and notification policy, plus a responsive
+  notification inbox with an unread badge. Remaining: local applications/integration
+  catalog and externally owned read-only rules.
 - Add settings sections for account/security and active sessions, workspace
   personalization, locale/preferences, vocabulary, private sync/backup, authorized
   apps/integrations, support, and version/about. Show integration scopes, health,

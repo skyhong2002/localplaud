@@ -50,6 +50,7 @@
       background:linear-gradient(120deg,var(--blue),var(--purple)); -webkit-background-clip:text; background-clip:text; color:transparent; }
     .navi { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:var(--radius); color:var(--fg); font-weight:500; }
     .navi .ic { width:18px; text-align:center; font-size:14px; }
+    .nav-badge { margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--red);color:#fff;font-size:10px;line-height:18px;text-align:center; }
     .navi:hover { background:var(--panel); }
     .navi.on { background:var(--panel); color:var(--blue); font-weight:600; box-shadow:var(--shadow); }
     .navi.red { color:var(--red); }
@@ -206,6 +207,7 @@
     <a class="navi {% if active=='notes' %}on{% endif %}" href="/notes"><span class="ic">📝</span><span class="lbl">Saved notes</span></a>
     <a class="navi {% if active=='templates' %}on{% endif %}" href="/templates"><span class="ic">▦</span><span class="lbl">Templates</span></a>
     <a class="navi {% if active=='discover' %}on{% endif %}" href="/discover"><span class="ic">⚡</span><span class="lbl">Discover</span></a>
+    <a class="navi {% if active=='notifications' %}on{% endif %}" href="/notifications"><span class="ic">🔔</span><span class="lbl">Notifications</span>{% if unread_notifications %}<span class="nav-badge">{{ unread_notifications if unread_notifications < 100 else '99+' }}</span>{% endif %}</a>
     <div class="grow"></div>
     <a class="navi {% if active=='settings' %}on{% endif %}" href="/settings"><span class="ic">⚙️</span><span class="lbl">Settings</span></a>
     <a class="navi {% if active=='status' %}on{% endif %}" href="/status"><span class="ic">🩺</span><span class="lbl">Status</span></a>

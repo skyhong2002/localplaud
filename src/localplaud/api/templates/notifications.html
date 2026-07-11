@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Notifications — localplaud{% endblock %}
+{% block body %}
+<main class="main"><div class="content" style="max-width:880px">
+  <div style="display:flex;justify-content:space-between;gap:16px;align-items:center">
+    <div><h1 class="page">Notifications</h1><p class="sub" style="margin:5px 0 0">Durable local updates from your AutoFlows.</p></div>
+    {% if unread_notifications %}<button class="btn sec" id="read-all" type="button">Mark all read</button>{% endif %}
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px;margin-top:22px" id="notification-list">
+    {% for item in notifications %}
+    <article class="panel notification" data-id="{{ item.id }}" style="padding:14px 16px;display:flex;gap:13px;align-items:flex-start;{% if not item.read_at %}border-left:3px solid var(--blue){% endif %}">
+      <button class="read-toggle" type="button" aria-label="{{ 'Mark unread' if item.read_at else 'Mark read' }}" title="{{ 'Mark unread' if item.read_at else 'Mark read' }}" style="border:0;background:none;color:var(--blue);padding:1px;cursor:pointer;font-size:17px">{{ '○' if item.read_at else '●' }}</button>
+      <div style="min-width:0;flex:1"><strong>{{ item.title }}</strong><div style="margin-top:3px">{% if item.file_id %}<a href="/file/{{ item.file_id }}">{{ item.detail.recording_title or item.body }}</a>{% else %}{{ item.detail.recording_title or item.body }}{% endif %}</div><div class="sub" style="font-size:11.5px;margin-top:5px">Rule v{{ item.detail.rule_version }} · {{ item.created_at[:16]|replace('T', ' · ') }}</div></div>
+      <button class="dismiss" type="button" aria-label="Dismiss" title="Dismiss" style="border:0;background:none;color:var(--muted);cursor:pointer;font-size:18px">×</button>
+    </article>
+    {% else %}<div class="empty"><div class="big">🔔</div>No notifications yet. AutoFlows with notifications enabled will appear here.</div>{% endfor %}
+  </div>
+</div></main>
+{% endblock %}
+{% block scripts %}<script>
+document.querySelectorAll('.read-toggle').forEach(button=>button.onclick=async()=>{const item=button.closest('.notification'),read=button.textContent.trim()==='●';await fetch(`/api/automations/notifications/${item.dataset.id}/read?read=${read}`,{method:'POST'});location.reload();});
+document.querySelectorAll('.dismiss').forEach(button=>button.onclick=async()=>{const item=button.closest('.notification');await fetch(`/api/automations/notifications/${item.dataset.id}`,{method:'DELETE'});item.remove();});
+document.getElementById('read-all')?.addEventListener('click',async()=>{await fetch('/api/automations/notifications/read-all',{method:'POST'});location.reload();});
+</script>{% endblock %}

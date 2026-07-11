@@ -192,8 +192,11 @@ setting.
 The local AutoFlow foundation now executes source/title/duration/folder/tag rules
 after metadata sync. Actions can select a note template or execution profile and
 move/tag recordings. Rules are ordered, versioned, idempotent, dry-runnable, locally
-editable, and retain per-recording history; notification delivery and external
-integration actions remain future work.
+editable, and retain per-recording history. Notification-enabled runs create durable,
+deduplicated local inbox items only after core actions commit; unread state, dismissal,
+preserved provenance, and delivery-only retry are available without rerunning ASR or
+rolling back successful actions. Email, webhook, export, and external integration
+actions remain future work.
 
 The recording workspace now has a sticky custom player backed by locally generated
 and cached ffmpeg waveform envelopes. Playback state survives tab switches and stays

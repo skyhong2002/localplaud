@@ -6,16 +6,17 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from ..automations import (
+    deliver_local_notification,
     evaluate_library,
     evaluate_recording,
     match_rule,
     rule_sentence,
     validate_rule_references,
 )
-from ..db.models import AutomationRule, AutomationRun, PlaudFile
+from ..db.models import AutomationRule, AutomationRun, Notification, PlaudFile
 from ..db.session import session_scope
 
 router = APIRouter(prefix="/api/automations", tags=["automations"])
@@ -165,6 +166,12 @@ def delete_rule(rule_id: int) -> dict:
         row = session.get(AutomationRule, rule_id)
         if row is None:
             raise HTTPException(status_code=404, detail="rule not found")
+        run_ids = select(AutomationRun.id).where(AutomationRun.rule_id == rule_id)
+        session.execute(
+            update(Notification)
+            .where(Notification.automation_run_id.in_(run_ids))
+            .values(automation_run_id=None)
+        )
         session.execute(delete(AutomationRun).where(AutomationRun.rule_id == rule_id))
         session.delete(row)
     return {"deleted": True}
@@ -213,3 +220,77 @@ def retry_run(run_id: int) -> dict:
         file_id = run.file_id
         session.delete(run)
     return {"results": evaluate_recording(file_id)}
+
+
+def _serialize_notification(row: Notification) -> dict:
+    return {
+        "id": row.id,
+        "automation_run_id": row.automation_run_id,
+        "file_id": row.file_id,
+        "title": row.title,
+        "body": row.body,
+        "detail": row.detail or {},
+        "read_at": row.read_at.isoformat() if row.read_at else None,
+        "dismissed_at": row.dismissed_at.isoformat() if row.dismissed_at else None,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+@router.get("/notifications")
+def list_notifications(unread_only: bool = False, limit: int = 100) -> dict:
+    with session_scope() as session:
+        stmt = (
+            select(Notification)
+            .where(Notification.dismissed_at.is_(None))
+            .order_by(Notification.created_at.desc(), Notification.id.desc())
+            .limit(min(max(limit, 1), 500))
+        )
+        if unread_only:
+            stmt = stmt.where(Notification.read_at.is_(None))
+        rows = list(session.scalars(stmt))
+        return {"notifications": [_serialize_notification(row) for row in rows]}
+
+
+@router.post("/notifications/{notification_id}/read")
+def mark_notification_read(notification_id: int, read: bool = True) -> dict:
+    from datetime import UTC, datetime
+
+    with session_scope() as session:
+        row = session.get(Notification, notification_id)
+        if row is None or row.dismissed_at is not None:
+            raise HTTPException(status_code=404, detail="notification not found")
+        row.read_at = datetime.now(UTC) if read else None
+        return _serialize_notification(row)
+
+
+@router.post("/notifications/read-all")
+def mark_all_notifications_read() -> dict:
+    from datetime import UTC, datetime
+
+    with session_scope() as session:
+        result = session.execute(
+            update(Notification)
+            .where(Notification.read_at.is_(None), Notification.dismissed_at.is_(None))
+            .values(read_at=datetime.now(UTC))
+        )
+        return {"updated": result.rowcount}
+
+
+@router.delete("/notifications/{notification_id}")
+def dismiss_notification(notification_id: int) -> dict:
+    from datetime import UTC, datetime
+
+    with session_scope() as session:
+        row = session.get(Notification, notification_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="notification not found")
+        row.dismissed_at = datetime.now(UTC)
+    return {"dismissed": True}
+
+
+@router.post("/runs/{run_id}/retry-notification")
+def retry_notification(run_id: int) -> dict:
+    try:
+        return deliver_local_notification(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

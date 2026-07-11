@@ -10,6 +10,7 @@ from .db.models import (
     ExecutionProfile,
     Folder,
     NoteTemplate,
+    Notification,
     PlaudFile,
     RecordingProfileOverride,
     StageName,
@@ -45,6 +46,9 @@ def rule_sentence(rule: AutomationRule | dict) -> str:
         effects.append(f"move to folder #{actions['folder_id']}")
     if actions.get("add_tag_ids"):
         effects.append("add tags " + ", ".join(f"#{value}" for value in actions["add_tag_ids"]))
+    notify = rule.notify if isinstance(rule, AutomationRule) else bool(rule.get("notify"))
+    if notify:
+        effects.append("notify you")
     return f"When {' and '.join(conditions) or 'a recording arrives'}, then {', '.join(effects) or 'record the match'}."
 
 
@@ -137,6 +141,7 @@ def evaluate_recording(file_id: str) -> list[dict]:
             )
         )
     for rule_id in rule_ids:
+        notification_run_id: int | None = None
         with session_scope() as session:
             rule = session.get(AutomationRule, rule_id)
             recording = session.get(PlaudFile, file_id)
@@ -164,12 +169,15 @@ def evaluate_recording(file_id: str) -> list[dict]:
                     status="completed",
                     matched=True,
                     detail={
+                        "rule_name": rule.name,
                         "reasons": reasons,
                         "applied": applied,
                         "notification_requested": rule.notify,
                     },
                 )
                 session.add(run)
+                session.flush()
+                notification_run_id = run.id if rule.notify else None
                 results.append({"rule_id": rule.id, "status": "completed", "applied": applied})
             except Exception as exc:  # noqa: BLE001
                 session.add(
@@ -184,7 +192,66 @@ def evaluate_recording(file_id: str) -> list[dict]:
                     )
                 )
                 results.append({"rule_id": rule.id, "status": "failed", "error": str(exc)})
+        if notification_run_id is not None:
+            try:
+                notification = deliver_local_notification(notification_run_id)
+                results[-1]["notification"] = notification
+            except Exception as exc:  # noqa: BLE001 - actions remain committed
+                _record_notification_failure(notification_run_id, exc)
+                results[-1]["notification"] = {"status": "failed", "error": str(exc)}
     return results
+
+
+def deliver_local_notification(run_id: int) -> dict:
+    """Create exactly one inbox item for a completed run."""
+    with session_scope() as session:
+        existing = session.scalar(
+            select(Notification).where(Notification.automation_run_id == run_id)
+        )
+        if existing is not None:
+            return {"status": "delivered", "notification_id": existing.id}
+        run = session.get(AutomationRun, run_id)
+        if run is None or run.status != "completed":
+            raise ValueError("completed automation run not found")
+        rule = session.get(AutomationRule, run.rule_id)
+        recording = session.get(PlaudFile, run.file_id)
+        requested = bool((run.detail or {}).get("notification_requested"))
+        if rule is None or not requested:
+            raise ValueError("notification is not enabled for this run")
+        rule_name = str((run.detail or {}).get("rule_name") or rule.name)
+        reasons = list((run.detail or {}).get("reasons", []))
+        row = Notification(
+            automation_run_id=run.id,
+            file_id=run.file_id,
+            title=f"AutoFlow completed: {rule_name}",
+            body=(recording.display_title if recording else run.file_id),
+            detail={
+                "rule_id": rule.id,
+                "rule_name": rule_name,
+                "rule_version": run.rule_version,
+                "recording_title": recording.display_title if recording else run.file_id,
+                "reasons": reasons,
+                "applied": (run.detail or {}).get("applied", {}),
+            },
+        )
+        session.add(row)
+        session.flush()
+        run.detail = (run.detail or {}) | {
+            "notification": {"status": "delivered", "notification_id": row.id}
+        }
+        return {"status": "delivered", "notification_id": row.id}
+
+
+def _record_notification_failure(run_id: int, exc: Exception) -> None:
+    try:
+        with session_scope() as session:
+            run = session.get(AutomationRun, run_id)
+            if run is not None:
+                run.detail = (run.detail or {}) | {
+                    "notification": {"status": "failed", "error": str(exc)[:1000]}
+                }
+    except Exception:  # noqa: BLE001 - notification metadata must never affect actions
+        pass
 
 
 def evaluate_library(limit: int | None = None) -> int:
