@@ -177,6 +177,66 @@ def test_find_replace_no_match_and_stale_revision_are_safe(monkeypatch, tmp_path
     assert stale.status_code == 409
 
 
+def test_revision_history_preview_and_non_destructive_restore(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    calls = _mute_reindex(monkeypatch)
+    from localplaud.db.models import TranscriptRevision
+    from localplaud.db.session import session_scope
+
+    c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "first version", "base_revision": 0},
+        follow_redirects=False,
+    )
+    c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "second version", "base_revision": 1},
+        follow_redirects=False,
+    )
+    preview = c.get("/file/r1?view=corrected&revision=1")
+    assert preview.status_code == 200
+    assert "Revision 1 preview" in preview.text and "first version" in preview.text
+    assert "second version" not in preview.text
+    assert "Revision history · 2" in preview.text
+
+    restored = c.post(
+        "/file/r1/transcript/revisions/1/restore",
+        data={"base_revision": 2},
+        follow_redirects=False,
+    )
+    assert restored.status_code == 303
+    with session_scope() as session:
+        revisions = list(
+            session.scalars(
+                select(TranscriptRevision).order_by(TranscriptRevision.revision)
+            )
+        )
+        assert [row.revision for row in revisions] == [1, 2, 3]
+        assert revisions[-1].text == "first version\nlet's start"
+        assert revisions[-1].note == "restored revision 1"
+    assert calls.count("r1") == 3
+
+
+def test_revision_restore_rejects_stale_or_unknown_revision(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _mute_reindex(monkeypatch)
+    c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "revision one", "base_revision": 0},
+        follow_redirects=False,
+    )
+    assert c.post(
+        "/file/r1/transcript/revisions/99/restore",
+        data={"base_revision": 1},
+    ).status_code == 404
+    assert c.post(
+        "/file/r1/transcript/revisions/1/restore",
+        data={"base_revision": 0},
+    ).status_code == 409
+
+
 def test_segment_edit_validation(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()

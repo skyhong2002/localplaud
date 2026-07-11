@@ -90,7 +90,11 @@
       {% if f.has_corrected %}
       <div class="viewswitch sub" style="margin:2px 0 10px; font-size:12.5px">
         View:
-        {% if f.transcript.kind == 'corrected' %}
+        {% if f.transcript.kind == 'history' %}
+        <strong>Revision {{ f.transcript.revision }} preview</strong>
+        · <a href="/file/{{ f.id }}?view=corrected">Current revision {{ f.corrected_revision }}</a>
+        · <a href="/file/{{ f.id }}?view=raw">Raw ASR</a>
+        {% elif f.transcript.kind == 'corrected' %}
         <strong>Corrected (rev {{ f.transcript.revision }})</strong>
         · <a href="/file/{{ f.id }}?view=raw">Raw ASR</a>
         {% else %}
@@ -98,6 +102,19 @@
         · <strong>Raw ASR</strong> — read-only; edits apply to the corrected transcript
         {% endif %}
       </div>
+      {% endif %}
+      {% if f.revisions %}
+      <details class="panel" style="padding:9px 11px;margin:4px 0 12px" {% if f.preview_revision %}open{% endif %}>
+        <summary style="cursor:pointer;font-weight:650">Revision history · {{ f.revisions | length }}</summary>
+        <div style="display:flex;flex-direction:column;gap:7px;margin-top:9px">
+          {% for revision in f.revisions %}
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px solid var(--border)">
+            <div><a href="/file/{{ f.id }}?view=corrected&revision={{ revision.revision }}"><strong>Revision {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">Current</span>{% endif %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ revision.note }} · {{ revision.created_at }}</div></div>
+            {% if not revision.current %}<form method="post" action="/file/{{ f.id }}/transcript/revisions/{{ revision.revision }}/restore" onsubmit="return confirm('Restore revision {{ revision.revision }} as a new revision? Current history will be preserved.')"><input type="hidden" name="base_revision" value="{{ f.corrected_revision }}"><button class="btn sec" type="submit" style="padding:6px 9px">Restore</button></form>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </details>
       {% endif %}
       <div class="panel" style="padding:9px 10px;margin:5px 0 12px">
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">

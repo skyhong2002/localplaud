@@ -610,6 +610,7 @@ def file_detail(
     file_id: str,
     view: str | None = None,
     ask_thread: str | None = None,
+    revision: int | None = None,
 ):
     settings = get_settings()
     with session_scope() as session:
@@ -648,6 +649,14 @@ def file_detail(
         imported_transcript = None
         raw_row = _canonical_raw_row(r, settings)
         corrected = _canonical_revision(r, raw_row)
+        revision_rows = [
+            row
+            for row in r.transcript_revisions
+            if raw_row is not None and row.source == raw_row.source
+        ]
+        preview_revision = next(
+            (row for row in revision_rows if row.revision == revision), None
+        )
         # Canonical segments (latest correction wins) drive the speaker legend.
         canonical_segments = (
             corrected.segments if corrected is not None
@@ -659,19 +668,20 @@ def file_detail(
             for key in speaker_keys_from_segments(canonical_segments)
         ]
         show_corrected = corrected is not None and view != "raw"
-        if show_corrected:
+        shown_revision = preview_revision if preview_revision is not None else corrected
+        if show_corrected and shown_revision is not None:
             base = (
-                session.get(Transcript, corrected.base_transcript_id)
-                if corrected.base_transcript_id is not None
+                session.get(Transcript, shown_revision.base_transcript_id)
+                if shown_revision.base_transcript_id is not None
                 else raw_row
             )
             transcript = {
                 "provider": base.provider if base is not None else "local-edit",
                 "language": base.language if base is not None else None,
                 "source": "local",
-                "segments": corrected.segments,
-                "kind": "corrected",
-                "revision": corrected.revision,
+                "segments": shown_revision.segments,
+                "kind": "history" if preview_revision is not None else "corrected",
+                "revision": shown_revision.revision,
             }
         elif raw_row is not None:
             transcript = {
@@ -705,9 +715,23 @@ def file_detail(
             # Whether both raw and corrected views exist (drives the toggle).
             "has_corrected": corrected is not None,
             "corrected_revision": corrected.revision if corrected is not None else None,
+            "preview_revision": preview_revision.revision if preview_revision else None,
+            "revisions": [
+                {
+                    "revision": row.revision,
+                    "note": row.note or "Transcript correction",
+                    "created_at": row.created_at.strftime("%b %d, %Y · %H:%M"),
+                    "current": corrected is not None and row.id == corrected.id,
+                }
+                for row in reversed(revision_rows)
+            ],
             # Edits always build on the latest canonical; hide the edit UI when
             # viewing the raw artifact behind an existing correction chain.
-            "can_edit": transcript is not None and (corrected is None or show_corrected),
+            "can_edit": (
+                transcript is not None
+                and preview_revision is None
+                and (corrected is None or show_corrected)
+            ),
             "summaries": summaries,
             "error": r.error,
             "folder": _organization_item(r.folder) if r.folder is not None else None,
@@ -1354,3 +1378,64 @@ def replace_transcript_text(
         daemon=True,
     ).start()
     return {"replacements": replacements, "revision": next_revision}
+
+
+@app.post("/file/{file_id}/transcript/revisions/{revision}/restore")
+def restore_transcript_revision(
+    file_id: str,
+    revision: int,
+    base_revision: int = Form(...),
+):
+    """Restore history by cloning it into a new revision; never rewrite history."""
+    import copy
+    import threading
+
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        raw = _canonical_raw_row(row, get_settings())
+        corrected = _canonical_revision(row, raw)
+        if raw is None or corrected is None:
+            return JSONResponse({"error": "no revision history to restore"}, status_code=400)
+        if base_revision != corrected.revision:
+            return JSONResponse(
+                {"error": "transcript changed; reload before restoring"}, status_code=409
+            )
+        target = next(
+            (
+                item
+                for item in row.transcript_revisions
+                if item.revision == revision and item.source == raw.source
+            ),
+            None,
+        )
+        if target is None:
+            return JSONResponse({"error": "revision not found"}, status_code=404)
+        next_revision = max(item.revision for item in row.transcript_revisions) + 1
+        session.add(
+            TranscriptRevision(
+                file_id=file_id,
+                base_transcript_id=target.base_transcript_id or raw.id,
+                revision=next_revision,
+                source=target.source,
+                segments=copy.deepcopy(target.segments),
+                text=target.text,
+                has_speakers=target.has_speakers,
+                note=f"restored revision {revision}",
+            )
+        )
+        session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+        _mark_derived_stale(
+            session, file_id, (StageName.summarize, StageName.mind_map, StageName.index)
+        )
+        expected_names = display_names(session, file_id)
+    from ..worker.reindex import reindex_file
+
+    threading.Thread(
+        target=reindex_file,
+        args=(file_id,),
+        kwargs={"expected_revision": next_revision, "expected_speaker_names": expected_names},
+        daemon=True,
+    ).start()
+    return RedirectResponse(f"/file/{file_id}?view=corrected", status_code=303)

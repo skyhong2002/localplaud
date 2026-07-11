@@ -322,8 +322,9 @@ inline edits create a corrected canonical transcript on top of the immutable raw
 ASR row, survive re-ASR, re-index in the background without rerunning ASR, and hide
 stale notes/maps until explicit regeneration, with a labelled raw-versus-corrected
 view switch. Plaud-derived edits remain excluded from independent mode. Transcript
-find/replace, dependent-artifact revision links, and a revision history browser
-remain. Saved Ask answers are editable note bodies with durable follow-up threads.
+find/replace, historical previews, and non-destructive restore-as-new-revision are
+implemented; dependent-artifact revision links remain. Saved Ask answers are editable
+note bodies with durable follow-up threads.
 Other major gaps include automatic template selection, richer export, automation,
 and UI polish. Provider/model/profile management and the versioned remote-worker protocol
 are implemented; cross-provider fallback/cost accounting and the remaining hardware
