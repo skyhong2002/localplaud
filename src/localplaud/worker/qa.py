@@ -184,6 +184,7 @@ def answer(
     file_id: str | None = None,
     history: list[dict] | None = None,
     spent_cost_usd: float = 0.0,
+    instruction: str | None = None,
 ) -> dict:
     """Retrieve + answer. Returns {answer, sources}.
 
@@ -222,7 +223,9 @@ def answer(
         )
         prior = f"Conversation so far:\n---\n{turns}\n---\n\n"
     prompt = (
-        f"{prior}Current question: {query}\n\nExcerpts:\n---\n{_format_context(hits)}\n---\n\n"
+        f"{prior}Current question: {query}\n"
+        f"{f'Output instruction: {instruction}' if instruction else ''}\n\n"
+        f"Excerpts:\n---\n{_format_context(hits)}\n---\n\n"
         "Answer the question grounded in the excerpts above."
     )
     failures: list[dict] = []

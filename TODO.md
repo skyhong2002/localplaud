@@ -324,8 +324,10 @@ embedding raw provider credentials or model settings in each rule.
   provenance-correct canonical transcript, generated notes, and Saved notes, with
   folder/tag/source/date filters and playable timestamp links. Available semantic
   hits are merged and deduplicated without weakening those filters.
-- Add file Ask suggested questions and reusable local skills (action items, task
-  table, insights), plus grounded follow-ups and save-to-note.
+- ✅ Added file Ask suggested questions and versioned, inspectable local quick actions
+  for action items, task tables, and insights. They use the same recording-scoped
+  retrieval, provider profile, citations, durable follow-ups, and save-to-note path;
+  running one is read-only and never silently creates notes, tasks, or external work.
 - ✅ Built dedicated Templates My Space and Explore surfaces with search,
   categories/scenarios, first-party/personal provenance, authorship, descriptions,
   popularity signals, prompt preview, immutable new-version editing, and

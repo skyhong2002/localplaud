@@ -269,6 +269,15 @@
           style="padding:5px 11px; font-size:12px">{{ chip }}</button>
         {% endfor %}
       </div>
+      <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:6px">QUICK ACTIONS · GROUNDED · READ ONLY</div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">
+        {% for skill in f.ask_skills %}
+        <form hx-post="/file/{{ f.id }}/ask/skill" hx-target="#file-answer" hx-swap="innerHTML" hx-indicator="#file-ask-spin">
+          <input type="hidden" name="skill_key" value="{{ skill.key }}">
+          <button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px">{{ skill.name }}</button>
+        </form>
+        {% endfor %}
+      </div>
       <form class="ask" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-swap="innerHTML"
             hx-indicator="#file-ask-spin">
         <input type="text" name="q" id="ask-q" placeholder="Ask a question about this recording…"

@@ -218,6 +218,8 @@ def migrate_ask_provenance_schema(engine: Engine) -> list[str]:
             ("resolved_profile_snapshot", "JSON"),
             ("usage", "JSON NOT NULL DEFAULT '{}'"),
             ("estimated_cost_usd", "FLOAT NOT NULL DEFAULT 0"),
+            ("skill_key", "VARCHAR(64)"),
+            ("skill_snapshot", "JSON"),
         ):
             if column not in columns:
                 connection.execute(text(f"ALTER TABLE ask_messages ADD COLUMN {column} {ddl}"))

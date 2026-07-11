@@ -441,6 +441,8 @@ class AskMessage(Base):
     resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
     usage: Mapped[dict] = mapped_column(JSON, default=dict)
     estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    skill_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    skill_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     thread: Mapped[AskThread] = relationship(back_populates="messages")
 

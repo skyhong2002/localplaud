@@ -55,8 +55,10 @@ interaction design:
   labels, an explicit polished-versus-raw transcript view, and find/replace;
 - notes that identify the template used, support multiple structured sections and a
   mind map, and keep generation feedback separate from editing;
-- Ask at both file and library scope, including suggested questions and reusable
-  skills such as action-item extraction, task tables, and insight generation;
+- Ask at both file and library scope, including suggested questions and versioned,
+  inspectable quick actions for action-item extraction, task tables, and insight
+  generation. Quick actions remain grounded and read-only until the user explicitly
+  saves an answer as a note;
 - a searchable template library with My Space and Explore, scenario/category
   browsing, first-party and community templates, descriptions, authorship, and
   popularity signals;

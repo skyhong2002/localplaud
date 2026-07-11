@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from sqlalchemy import create_engine, inspect, select, text
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -40,6 +42,25 @@ def _thread_id(html: str) -> str:
     match = re.search(r'name="thread_id" value="([^"]+)"', html)
     assert match
     return match.group(1)
+
+
+def test_ask_skill_provenance_migration_is_idempotent(tmp_path):
+    from localplaud.db.migrations import migrate_ask_provenance_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-ask.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE ask_messages (id INTEGER PRIMARY KEY, "
+                "thread_id VARCHAR(36), role VARCHAR(16), content TEXT, sources JSON)"
+            )
+        )
+    first = migrate_ask_provenance_schema(engine)
+    assert "ask_messages.skill_key" in first
+    assert "ask_messages.skill_snapshot" in first
+    assert migrate_ask_provenance_schema(engine) == []
+    columns = {item["name"] for item in inspect(engine).get_columns("ask_messages")}
+    assert {"skill_key", "skill_snapshot"} <= columns
 
 
 def test_single_recording_followup_persists_history_and_sources(monkeypatch, tmp_path):
@@ -173,3 +194,58 @@ def test_library_answer_with_multiple_recordings_saves_as_library_note(monkeypat
     assert note["file_id"] is None
     assert len(note["citations"]) == 2
     assert "Library · ask" in client.get("/notes").text
+
+
+def test_grounded_quick_action_is_durable_versioned_and_non_mutating(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    calls = []
+
+    def fake_answer(query, **kwargs):
+        calls.append((query, kwargs))
+        return {
+            "answer": "| Task | Owner | Due | Status | Evidence |\n|---|---|---|---|---|",
+            "sources": [
+                {
+                    "file_id": "r1",
+                    "filename": "Weekly Sync",
+                    "start": 8.0,
+                    "end": 12.0,
+                    "text": "Sky will prepare the draft",
+                }
+            ],
+        }
+
+    monkeypatch.setattr("localplaud.worker.qa.answer", fake_answer)
+    catalog = client.get("/api/ask/skills")
+    assert catalog.status_code == 200
+    assert [item["key"] for item in catalog.json()["skills"]] == [
+        "action_items",
+        "task_table",
+        "insights",
+    ]
+    response = client.post("/file/r1/ask/skill", data={"skill_key": "task_table"})
+    assert response.status_code == 200
+    assert "Task table" in response.text
+    assert "quick action · v1" in response.text
+    assert 'data-seek="8.0"' in response.text
+    assert calls[0][0] == "tasks assignments owners deadlines deliverables follow up"
+    assert "Create a Markdown table" in calls[0][1]["instruction"]
+    assert calls[0][1]["file_id"] == "r1"
+
+    from localplaud.db.models import AskMessage, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        messages = list(session.scalars(select(AskMessage).order_by(AskMessage.id)))
+        assert {message.skill_key for message in messages} == {"task_table"}
+        assert messages[0].skill_snapshot["version"] == 1
+        assert messages[0].content == "Task table"
+        assert list(session.scalars(select(UserNote))) == []
+
+    assert client.post(
+        "/file/r1/ask/skill", data={"skill_key": "missing"}
+    ).status_code == 404
+    assert client.post(
+        "/file/missing/ask/skill", data={"skill_key": "task_table"}
+    ).status_code == 404

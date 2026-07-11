@@ -1,7 +1,7 @@
 <div class="ask-thread" data-thread-id="{{ thread.thread_id or '' }}" style="display:flex;flex-direction:column;gap:10px;margin:8px 0 14px">
   {% for message in thread.messages %}
     {% if message.role == 'user' %}
-    <div style="align-self:flex-end;max-width:85%;background:var(--blue);color:white;border-radius:14px 14px 4px 14px;padding:8px 12px">{{ message.content }}</div>
+    <div style="align-self:flex-end;max-width:85%;background:var(--blue);color:white;border-radius:14px 14px 4px 14px;padding:8px 12px">{{ message.content }}{% if message.skill_key %}<span style="display:block;font-size:10px;opacity:.8;margin-top:3px">quick action · v{{ message.skill_snapshot.version }}</span>{% endif %}</div>
     {% else %}
     <div class="panel" style="border-color:var(--border2);padding:13px 14px">
       <div class="md" style="white-space:pre-wrap">{{ message.content }}</div>

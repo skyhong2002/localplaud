@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, update
 
+from ..ask_skills import get_ask_skill, list_ask_skills
 from ..ask_threads import thread_to_dict
 from ..config import get_settings
 from ..db.models import (
@@ -1265,6 +1266,7 @@ def file_detail(
         if selected_ask_thread is not None and selected_ask_thread.file_id != file_id:
             selected_ask_thread = None
         f["ask_threads"] = [{"id": row.id, "title": row.title} for row in recent_ask_threads]
+        f["ask_skills"] = list_ask_skills()
         f["selected_ask_thread"] = (
             thread_to_dict(selected_ask_thread) if selected_ask_thread is not None else None
         )
@@ -1530,6 +1532,41 @@ def file_ask(
         return HTMLResponse(str(exc), status_code=409)
     except Exception:  # noqa: BLE001 - embeddings/LLM provider may be unavailable
         thread = _unavailable_ask_thread(q, thread_id, file_id=file_id)
+    return templates.TemplateResponse(
+        request=request,
+        name="_ask_thread.html",
+        context={"thread": thread, "file_id": file_id, "target": "file-answer"},
+    )
+
+
+@app.get("/api/ask/skills")
+def ask_skills_catalog():
+    """Reusable local quick actions. Prompts are inspectable and versioned."""
+    return {"skills": list_ask_skills()}
+
+
+@app.post("/file/{file_id}/ask/skill", response_class=HTMLResponse)
+def file_ask_skill(request: Request, file_id: str, skill_key: str = Form(...)):
+    """Run a read-only skill through the same grounded, durable file Ask path."""
+    with session_scope() as session:
+        if session.get(PlaudFile, file_id) is None:
+            return HTMLResponse("Not found", status_code=404)
+    try:
+        skill = get_ask_skill(skill_key)
+    except LookupError as exc:
+        return HTMLResponse(str(exc), status_code=404)
+    from ..ask_threads import ask_in_thread
+
+    try:
+        thread = ask_in_thread(
+            skill["retrieval_query"],
+            file_id=file_id,
+            display_query=skill["name"],
+            instruction=skill["instruction"],
+            skill_snapshot=skill,
+        )
+    except Exception:  # noqa: BLE001 - embeddings/LLM provider may be unavailable
+        thread = _unavailable_ask_thread(skill["name"], None, file_id=file_id)
     return templates.TemplateResponse(
         request=request,
         name="_ask_thread.html",

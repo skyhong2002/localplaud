@@ -25,6 +25,8 @@ def _message(row: AskMessage) -> dict:
         "usage": row.usage or {},
         "estimated_cost_usd": row.estimated_cost_usd or 0,
         "fallback": profile.get("fallback"),
+        "skill_key": row.skill_key,
+        "skill_snapshot": row.skill_snapshot,
     }
 
 
@@ -43,6 +45,9 @@ def ask_in_thread(
     file_id: str | None = None,
     thread_id: str | None = None,
     settings: Settings | None = None,
+    display_query: str | None = None,
+    instruction: str | None = None,
+    skill_snapshot: dict | None = None,
 ) -> dict:
     query = query.strip()
     if not query:
@@ -77,6 +82,7 @@ def ask_in_thread(
         file_id=file_id,
         history=history,
         spent_cost_usd=ask_spent + pipeline_spent,
+        instruction=instruction,
     )
     with session_scope() as session:
         thread = session.get(AskThread, thread_id) if thread_id else None
@@ -86,13 +92,19 @@ def ask_in_thread(
             thread = AskThread(
                 id=str(uuid4()),
                 file_id=file_id,
-                title=query[:200],
+                title=(display_query or query)[:200],
             )
             session.add(thread)
             session.flush()
         thread.messages.extend(
             [
-                AskMessage(role="user", content=query, sources=[]),
+                AskMessage(
+                    role="user",
+                    content=display_query or query,
+                    sources=[],
+                    skill_key=(skill_snapshot or {}).get("key"),
+                    skill_snapshot=skill_snapshot,
+                ),
                 AskMessage(
                     role="assistant",
                     content=result["answer"],
@@ -104,6 +116,8 @@ def ask_in_thread(
                     ),
                     usage=result.get("usage", {}),
                     estimated_cost_usd=result.get("estimated_cost_usd", 0),
+                    skill_key=(skill_snapshot or {}).get("key"),
+                    skill_snapshot=skill_snapshot,
                 ),
             ]
         )

@@ -134,7 +134,13 @@ def test_file_ask_renders_playable_citations(monkeypatch, tmp_path):
     _seed_file()
 
     def fake_answer(
-        q, top_k=6, settings=None, file_id=None, history=None, spent_cost_usd=0
+        q,
+        top_k=6,
+        settings=None,
+        file_id=None,
+        history=None,
+        spent_cost_usd=0,
+        instruction=None,
     ):
         assert file_id == "r1"
         assert history == []
