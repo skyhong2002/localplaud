@@ -956,7 +956,13 @@ def file_detail(
                 select(PlaudFile).order_by(PlaudFile.start_time_ms.desc()).limit(300)
             )
         ]
-    ctx = _base_ctx(request, "recordings") | {"f": f, "files": files, "q": ""}
+        organization = _organization_summary(session)
+    ctx = _base_ctx(request, "recordings") | {
+        "f": f,
+        "files": files,
+        "q": "",
+        "organization": organization,
+    }
     return templates.TemplateResponse(request=request, name="detail.html", context=ctx)
 
 

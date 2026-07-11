@@ -19,10 +19,11 @@
           {% if f.transcript %} · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %} · {{ f.transcript.kind }}{% if f.transcript.revision %} rev {{ f.transcript.revision }}{% endif %}{% endif %}
           · <span class="st {{ f.status }}">{{ f.status }}</span>
         </div>
-        {% if f.folder or f.tags %}<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:7px">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:7px">
           {% if f.folder %}<a class="chip on" href="/?folder={{ f.folder.id }}">▰ {{ f.folder.name }}</a>{% endif %}
           {% for tag in f.tags %}<a class="chip" href="/?tag={{ tag.id }}">● {{ tag.name }}</a>{% endfor %}
-        </div>{% endif %}
+          <button type="button" id="edit-recording-metadata" style="border:0;background:none;color:var(--blue);cursor:pointer;font-size:11.5px;padding:2px 4px">{% if f.folder or f.tags %}Edit metadata{% else %}Add folder or tags{% endif %}</button>
+        </div>
       </div>
       <div style="display:flex; gap:7px">
         {% if not f.has_audio and f.origin == 'plaud' %}<button class="btn" id="import-recording-audio" type="button" style="padding:8px 12px;font-size:13px">☁ Import audio</button>{% endif %}
@@ -270,6 +271,17 @@
     {% endif %}
   </div></section>
 </div>
+<div class="import-backdrop" id="metadata-backdrop" hidden>
+  <section class="import-modal" style="width:min(520px,100%);min-height:0" role="dialog" aria-modal="true" aria-labelledby="metadata-title">
+    <div class="import-head"><span id="metadata-title">Folder and tags</span><button class="import-close" id="metadata-close" type="button">×</button></div>
+    <form id="metadata-form" class="import-body" style="gap:14px">
+      <label><strong>Folder</strong><select class="search-input" name="folder_id" style="width:100%;margin-top:6px"><option value="">No folder</option>{% for folder in organization.folders %}<option value="{{ folder.id }}" {% if f.folder and f.folder.id==folder.id %}selected{% endif %}>{{ folder.name }} · {{ folder.count }} recordings</option>{% endfor %}</select></label>
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:11px"><legend><strong>Tags</strong></legend><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">{% for tag in organization.tags %}<label style="font-size:13px"><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag.id in (f.tags|map(attribute='id')|list) %}checked{% endif %}> {{ tag.name }} <span class="sub">({{ tag.count }})</span></label>{% else %}<span class="sub">No tags yet. Create tags from the Library organization panel.</span>{% endfor %}</div></fieldset>
+      <div id="metadata-status" class="sub" style="font-size:12px"></div>
+      <div style="display:flex;justify-content:space-between;gap:8px"><button class="btn sec" id="clear-recording-metadata" type="button">Clear all</button><div style="display:flex;gap:8px"><button class="btn sec" id="metadata-cancel" type="button">Cancel</button><button class="btn" type="submit">Save</button></div></div>
+    </form>
+  </section>
+</div>
 {% if f.transcript or f.summaries or f.has_audio %}
 <div class="import-backdrop" id="export-backdrop" hidden>
   <section class="import-modal" style="min-height:0;width:min(560px,100%)" role="dialog" aria-modal="true" aria-labelledby="export-title">
@@ -312,6 +324,11 @@
 
 {% block scripts %}
 <script>
+  const metadataBackdrop=document.getElementById('metadata-backdrop'),currentTagIds={{ f.tags|map(attribute='id')|list|tojson }};
+  document.getElementById('edit-recording-metadata').onclick=()=>{metadataBackdrop.hidden=false;};
+  const closeMetadata=()=>{metadataBackdrop.hidden=true;};document.getElementById('metadata-close').onclick=closeMetadata;document.getElementById('metadata-cancel').onclick=closeMetadata;metadataBackdrop.addEventListener('click',event=>{if(event.target===metadataBackdrop)closeMetadata();});
+  async function saveMetadata(folderId,tagIds){const current=new Set(currentTagIds),selected=new Set(tagIds),body={file_ids:['{{ f.id }}'],folder_id:folderId,add_tag_ids:[...selected].filter(id=>!current.has(id)),remove_tag_ids:[...current].filter(id=>!selected.has(id))};const response=await fetch('/api/files/organize',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await response.json();if(response.ok){location.reload();return;}document.getElementById('metadata-status').textContent=data.detail||'Could not save metadata';}
+  document.getElementById('metadata-form').addEventListener('submit',event=>{event.preventDefault();const data=new FormData(event.currentTarget),folder=data.get('folder_id');saveMetadata(folder?+folder:null,data.getAll('tag_ids').map(Number));});document.getElementById('clear-recording-metadata').onclick=()=>saveMetadata(null,[]);
   document.getElementById('recording-title-form')?.addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('recording-title'),button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:input.value})}),data=await response.json();if(response.ok)location.reload();else{button.disabled=false;button.textContent=data.detail||'Save failed';}});
   document.getElementById('clear-local-title')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:null})});if(response.ok)location.reload();else event.currentTarget.disabled=false;});
   const findInput=document.getElementById('transcript-find');

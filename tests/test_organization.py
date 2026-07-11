@@ -157,6 +157,11 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert detail.status_code == 200
     assert 'href="/?folder=' in detail.text and "Research" in detail.text
     assert 'href="/?tag=' in detail.text and "Interview" in detail.text
+    assert 'id="edit-recording-metadata"' in detail.text
+    assert 'id="metadata-form"' in detail.text
+    assert f'value="{folder["id"]}" selected' in detail.text
+    assert f'value="{tag["id"]}" checked' in detail.text
+    assert f"currentTagIds=[{tag['id']}]" in detail.text
 
     trash = client.get("/?view=trash")
     assert 'id="bulkbar"' not in trash.text

@@ -270,7 +270,8 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Added local folders and tags with additive legacy-DB migration, guarded CRUD,
   counts and filters, a true uncategorized view, deterministic metadata in the JSON
   API, folder/tag pills on library and detail views, and atomic multi-recording bulk
-  move/add/remove controls. Organization never mutates Plaud cloud or trash state.
+  move/add/remove controls. The recording workspace now edits or clears folder/tags
+  through the same atomic API. Organization never mutates Plaud cloud or trash state.
 - ✅ Added a Plaud-style Add audio surface with local upload and a durable,
   background Import from Plaud job. It refreshes the full metadata catalog and any
   paid Plaud transcript/summary, never downloads audio during catalog import, and

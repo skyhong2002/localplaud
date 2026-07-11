@@ -203,6 +203,10 @@ not overwritten by later metadata sync. The latest cloud title remains visible a
 can be restored with one action; every local user-facing/search/export surface uses
 the override consistently.
 
+Folder and tag metadata is editable directly from the recording header through the
+same atomic organization contract used by Library bulk actions. Counts and filters
+update immediately, and clearing organization remains entirely local.
+
 ### 7. Settings and system health
 
 - Plaud OAuth and last successful sync.
