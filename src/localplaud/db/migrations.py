@@ -84,6 +84,29 @@ def migrate_note_template_schema(engine: Engine) -> list[str]:
     return migrated
 
 
+def migrate_import_schema(engine: Engine) -> list[str]:
+    """Add recording origin to existing SQLite libraries."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "plaud_files" not in inspector.get_table_names():
+        return []
+    columns = {item["name"] for item in inspector.get_columns("plaud_files")}
+    if "origin" in columns:
+        return []
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE plaud_files ADD COLUMN origin "
+                "VARCHAR(32) NOT NULL DEFAULT 'plaud'"
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_plaud_files_origin ON plaud_files (origin)")
+        )
+    return ["plaud_files.origin"]
+
+
 def migrate_profile_snapshot_columns(engine: Engine) -> list[str]:
     """Add immutable profile provenance to existing SQLite artifact tables."""
     if engine.dialect.name != "sqlite":

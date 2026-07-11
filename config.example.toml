@@ -41,6 +41,7 @@ api_base = "https://api-apse1.plaud.ai"
 [poller]
 enabled = true
 interval_seconds = 300           # how often to poll the Plaud cloud
+auto_download = false            # metadata first; fetch audio only when requested
 include_trash = false
 download_dir = "./data/audio"    # where downloaded .opus files land
 max_concurrent_downloads = 2

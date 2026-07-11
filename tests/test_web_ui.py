@@ -20,7 +20,7 @@ def _client(monkeypatch, tmp_path):
     return TestClient(app)
 
 
-def _seed():
+def _seed(audio_path: str | None = None):
     from localplaud.db.models import (
         FileStatus,
         PlaudFile,
@@ -34,7 +34,8 @@ def _seed():
 
     with session_scope() as s:
         s.add(PlaudFile(id="r1", filename="Weekly Sync", status=FileStatus.done,
-                        duration_ms=600000, start_time_ms=1783582737000, scene=1))
+                        duration_ms=600000, start_time_ms=1783582737000, scene=1,
+                        audio_path=audio_path))
         s.add(Transcript(file_id="r1", provider="faster-whisper", language="en", has_speakers=True,
                          text="hi", segments=[{"text": "hello team", "start": 1.0, "end": 2.0, "speaker": "SPEAKER_00"}]))
         s.add(Summary(file_id="r1", template="meeting", title="Sync", content_md="# Sync\n\n- point"))
@@ -60,7 +61,9 @@ def test_dashboard_renders(monkeypatch, tmp_path):
 
 def test_detail_page_renders(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
-    _seed()
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    _seed(str(audio))
     r = c.get("/file/r1")
     assert r.status_code == 200
     assert "SPEAKER_00" in r.text
@@ -70,6 +73,16 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "embedding model unavailable" in r.text
     assert "Resume" in r.text and "Rebuild all" in r.text
     assert "Execution profile" in r.text and "Current Settings" in r.text
+
+
+def test_metadata_only_plaud_recording_offers_audio_import(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    r = c.get("/file/r1")
+    assert r.status_code == 200
+    assert "Import audio" in r.text
+    assert 'hx-post="/api/files/r1/reprocess"' not in r.text
+    assert 'hx-post="/api/files/r1/reprocess?force=true"' not in r.text
 
 
 def test_recording_profile_picker_persists_override(monkeypatch, tmp_path):

@@ -76,7 +76,9 @@ def test_sync_redownloads_when_md5_changes(monkeypatch, tmp_path):
             # same version, but the audio md5 changed -> must force re-download
             yield PlaudFileDTO(id="f1", file_md5="NEW", version=1, version_ms=1)
 
-    new, changed = sync_file_list(FakeClient(), get_settings())
+    settings = get_settings()
+    settings.poller.auto_download = True
+    new, changed = sync_file_list(FakeClient(), settings)
     assert (new, changed) == (0, 1)
     with session_scope() as s:
         assert s.get(PlaudFile, "f1").status == FileStatus.discovered  # not "downloaded"

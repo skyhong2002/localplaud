@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from ..config import Settings, get_settings
 from ..db.models import FileStatus, PlaudFile
@@ -76,7 +76,15 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
         for dto in client.iter_files(include_trash=settings.poller.include_trash):
             row = session.get(PlaudFile, dto.id)
             if row is None:
-                row = PlaudFile(id=dto.id, status=FileStatus.discovered)
+                row = PlaudFile(
+                    id=dto.id,
+                    status=(
+                        FileStatus.discovered
+                        if settings.poller.auto_download
+                        else FileStatus.metadata_only
+                    ),
+                    origin="plaud",
+                )
                 _apply_dto(row, dto)
                 session.add(row)
                 new_count += 1
@@ -101,8 +109,13 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                     FileStatus.error,
                 ):
                     if md5_changed or not row.audio_path:
-                        # The audio itself changed — force a fresh download.
-                        row.status = FileStatus.discovered
+                        # The audio itself changed; queue it only when automatic
+                        # downloading is explicitly enabled.
+                        row.status = (
+                            FileStatus.discovered
+                            if settings.poller.auto_download
+                            else FileStatus.metadata_only
+                        )
                     else:
                         row.status = FileStatus.downloaded
                     changed_count += 1
@@ -302,6 +315,70 @@ def _ingest_artifacts_for(client, file_id: str) -> bool:
     return stored
 
 
+def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
+    """Refresh Plaud transcript/summary for one metadata import.
+
+    Returns ``(transcript_present, summary_present)``. Existing cloud rows are
+    replaced only after a successful detail fetch, so a network failure never
+    destroys the last mirrored artifact.
+    """
+    from ..db.models import Summary as SummaryRow
+    from ..db.models import Transcript as TranscriptRow
+
+    detail = client.get_detail(file_id)
+    summary_md = client.get_cloud_summary_md(file_id, detail)
+    segments = client.get_cloud_transcript_segments(file_id, detail)
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            return (False, False)
+        session.execute(
+            delete(SummaryRow).where(
+                SummaryRow.file_id == file_id, SummaryRow.source.in_(("cloud", "plaud"))
+            )
+        )
+        session.execute(
+            delete(TranscriptRow).where(
+                TranscriptRow.file_id == file_id,
+                TranscriptRow.source.in_(("cloud", "plaud")),
+            )
+        )
+        if summary_md:
+            title = next(
+                (line[2:].strip() for line in summary_md.splitlines() if line.startswith("# ")),
+                None,
+            )
+            session.add(
+                SummaryRow(
+                    file_id=file_id,
+                    template="plaud",
+                    title=title,
+                    content_md=summary_md,
+                    source="cloud",
+                )
+            )
+        if segments:
+            session.add(
+                TranscriptRow(
+                    file_id=file_id,
+                    provider="plaud",
+                    source="cloud",
+                    has_speakers=any(segment.get("speaker") for segment in segments),
+                    text="\n".join(
+                        segment["text"] for segment in segments if segment.get("text")
+                    ),
+                    segments=segments,
+                )
+            )
+        row.cloud_is_summary = bool(summary_md)
+        row.cloud_is_trans = bool(segments)
+        row.raw = {
+            **(row.raw or {}),
+            _ARTIFACT_CHECKED_KEY: row.filename,
+        }
+    return (bool(segments), bool(summary_md))
+
+
 def ingest_cloud_artifacts(client, settings: Settings) -> int:
     """Mirror Plaud's own transcript (with speakers) and summary (markdown)
     for files that have them, stored as ``source="cloud"`` rows. Automatic use is
@@ -351,11 +428,12 @@ def poll_once(settings: Settings | None = None) -> dict:
     explicit migration mode is enabled)."""
     settings = settings or get_settings()
     reset_inflight()
-    reset_download_errors()
+    if settings.poller.auto_download:
+        reset_download_errors()
     with make_plaud_client(settings.plaud) as client:
         new, changed = sync_file_list(client, settings)
         enriched_new, enriched_changed = enrich_from_apse1(settings)
-        downloaded = download_pending(client, settings)
+        downloaded = download_pending(client, settings) if settings.poller.auto_download else 0
         cloud_artifacts = (
             ingest_cloud_artifacts(client, settings)
             if settings.pipeline.cloud_import_enabled

@@ -38,6 +38,7 @@ from ..db.session import init_db, session_scope
 from ..remote.server import resume_pending_jobs
 from ..remote.server import router as worker_router
 from ..store.speakers import display_names, speaker_keys_from_segments
+from .imports import router as imports_router
 from .note_templates import router as note_templates_router
 from .notes import router as notes_router
 from .providers import router as providers_router
@@ -49,6 +50,9 @@ templates = Jinja2Templates(directory=str(_HERE / "templates"))
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     init_db()
+    from ..imports import recover_interrupted_imports
+
+    recover_interrupted_imports()
     import threading
 
     threading.Thread(target=resume_pending_jobs, daemon=True).start()
@@ -59,6 +63,7 @@ app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
 app.include_router(providers_router)
 app.include_router(note_templates_router)
 app.include_router(notes_router)
+app.include_router(imports_router)
 app.include_router(worker_router)
 
 _static = _HERE / "static"
@@ -130,6 +135,7 @@ def _file_summary(r: PlaudFile) -> dict:
         "has_summary": any(s.source == "local" for s in r.summaries),
         "has_imported_summary": any(s.source in {"cloud", "plaud"} for s in r.summaries),
         "has_audio": bool(r.audio_path),
+        "origin": r.origin or "plaud",
         "speakers": transcript.has_speakers if transcript else False,
         "folder": (
             {"id": r.folder.id, "name": r.folder.name, "color": r.folder.color}
@@ -175,6 +181,7 @@ def _parse_library_params(
     view: str | None,
     folder: str | None = None,
     tag: str | None = None,
+    origin: str | None = None,
 ) -> dict:
     """Normalize library query params, falling back to defaults on bad input."""
     sort_key = sort if sort in _SORT_COLUMNS else "recorded"
@@ -201,6 +208,7 @@ def _parse_library_params(
         "view": view_val,
         "folder": optional_int(folder),
         "tag": optional_int(tag),
+        "origin": origin if origin in {"plaud", "local"} else None,
     }
 
 
@@ -223,6 +231,8 @@ def _library_query(params: dict):
         stmt = stmt.where(PlaudFile.folder_id == params["folder"])
     if params["tag"] is not None:
         stmt = stmt.where(PlaudFile.tags.any(Tag.id == params["tag"]))
+    if params["origin"] is not None:
+        stmt = stmt.where(PlaudFile.origin == params["origin"])
     return stmt
 
 
@@ -242,7 +252,22 @@ def _library_facets(session, params: dict) -> dict:
         for sc, n in scene_rows
         if sc is not None
     ]
-    return {"trash_count": trash_count, "scenes": scenes}
+    origin_rows = session.execute(
+        select(PlaudFile.origin, func.count())
+        .where(PlaudFile.is_trash.is_(False))
+        .group_by(PlaudFile.origin)
+        .order_by(PlaudFile.origin)
+    ).all()
+    origins = [
+        {
+            "value": value or "plaud",
+            "label": "Plaud cloud" if (value or "plaud") == "plaud" else "Local import",
+            "count": count,
+            "active": (value or "plaud") == params["origin"],
+        }
+        for value, count in origin_rows
+    ]
+    return {"trash_count": trash_count, "scenes": scenes, "origins": origins}
 
 
 # --------------------------------------------------------------------------- #
@@ -265,8 +290,9 @@ def api_files(
     view: str | None = None,
     folder: str | None = None,
     tag: str | None = None,
+    origin: str | None = None,
 ) -> JSONResponse:
-    params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag)
+    params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag, origin)
     with session_scope() as session:
         rows = session.scalars(_library_query(params).limit(300))
         data = [_file_summary(r) for r in rows]
@@ -473,8 +499,9 @@ def index(
     folder: str | None = None,
     tag: str | None = None,
     ask_thread: str | None = None,
+    origin: str | None = None,
 ):
-    params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag)
+    params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag, origin)
     with session_scope() as session:
         rows = list(session.scalars(_library_query(params).limit(300)))
         files = [_file_summary(r) for r in rows]
@@ -670,6 +697,7 @@ def file_detail(
             "duration_ms": r.duration_ms,
             "start_time_ms": r.start_time_ms,
             "has_audio": bool(r.audio_path and Path(r.audio_path).exists()),
+            "origin": r.origin or "plaud",
             "transcript": transcript,
             "imported_transcript": imported_transcript,
             "speakers": speakers,

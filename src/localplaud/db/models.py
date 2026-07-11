@@ -40,7 +40,8 @@ class Base(DeclarativeBase):
 class FileStatus(enum.StrEnum):
     """Local lifecycle of a file, independent of the cloud's own flags."""
 
-    discovered = "discovered"  # seen in the cloud listing, not yet downloaded
+    discovered = "discovered"  # seen in the cloud listing, queued for download
+    metadata_only = "metadata_only"  # visible locally; audio stays remote until requested
     downloading = "downloading"
     downloaded = "downloaded"  # audio on disk, pipeline not finished
     processing = "processing"
@@ -146,6 +147,7 @@ class PlaudFile(Base):
     wav_path: Mapped[str | None] = mapped_column(String(1024), default=None)  # converted
     downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    origin: Mapped[str] = mapped_column(String(32), default="plaud", index=True)
     folder_id: Mapped[int | None] = mapped_column(
         ForeignKey("folders.id", ondelete="SET NULL"), default=None, index=True
     )
@@ -408,6 +410,30 @@ class UserNote(Base):
         DateTime(timezone=True), default=_now, onupdate=_now
     )
     file: Mapped[PlaudFile | None] = relationship(back_populates="user_notes")
+
+
+class ImportRun(Base):
+    """Durable progress for a user-triggered metadata-only import."""
+
+    __tablename__ = "import_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), default="plaud")
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    processed: Mapped[int] = mapped_column(Integer, default=0)
+    new_count: Mapped[int] = mapped_column(Integer, default=0)
+    changed_count: Mapped[int] = mapped_column(Integer, default=0)
+    transcript_count: Mapped[int] = mapped_column(Integer, default=0)
+    summary_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
 
 
 class Chunk(Base):

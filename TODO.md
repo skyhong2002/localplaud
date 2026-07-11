@@ -271,6 +271,11 @@ embedding raw provider credentials or model settings in each rule.
   counts and filters, a true uncategorized view, deterministic metadata in the JSON
   API, folder/tag pills on library and detail views, and atomic multi-recording bulk
   move/add/remove controls. Organization never mutates Plaud cloud or trash state.
+- ✅ Added a Plaud-style Add audio surface with local upload and a durable,
+  background Import from Plaud job. It refreshes the full metadata catalog and any
+  paid Plaud transcript/summary, never downloads audio during catalog import, and
+  exposes a per-recording Import audio action for metadata-only rows. Scheduled
+  polling now follows the same metadata-first default.
 - ✅ (partial) Explicit raw-ASR versus corrected-canonical transcript switch with
   synchronized timestamps/speaker labels is live, and edits are preserved
   independently from the raw artifact. Remaining: transcript-local search and

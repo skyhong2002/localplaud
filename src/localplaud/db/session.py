@@ -41,6 +41,7 @@ def init_db() -> dict[str, int] | None:
     Base.metadata.create_all(engine)
     from ..providers.service import bootstrap_default_profile
     from .migrations import (
+        migrate_import_schema,
         migrate_note_template_schema,
         migrate_organization_schema,
         migrate_profile_snapshot_columns,
@@ -49,6 +50,7 @@ def init_db() -> dict[str, int] | None:
     migrate_profile_snapshot_columns(engine)
     migrate_organization_schema(engine)
     migrate_note_template_schema(engine)
+    migrate_import_schema(engine)
     with Session(engine) as session:
         bootstrap_default_profile(session, get_settings())
         from ..worker.summary_templates import bootstrap_note_templates

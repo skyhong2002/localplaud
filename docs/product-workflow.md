@@ -45,6 +45,10 @@ interaction design:
   Settings;
 - a recent-files home and an all-files table with name, duration, creation date,
   sortable columns, folders, uncategorized/trash views, and capture-source facets;
+- an Add audio entry point with local file upload and Import from Plaud. The latter
+  refreshes all recording metadata and existing Plaud transcript/summary artifacts
+  without downloading raw audio; a metadata-only recording offers an explicit,
+  per-file Import audio action when opened;
 - a file workspace that keeps the library context available while switching between
   transcript and notes, with file-level Ask and compact share/export/more actions;
 - a transcript reader with a synchronized duration/player, timestamps, speaker

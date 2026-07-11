@@ -7,6 +7,7 @@
 {%- if scene is not none and scene != '' %}&amp;scene={{ scene }}{% endif -%}
 {%- if lib.folder is not none %}&amp;folder={{ lib.folder }}{% endif -%}
 {%- if lib.tag is not none %}&amp;tag={{ lib.tag }}{% endif -%}
+{%- if lib.origin %}&amp;origin={{ lib.origin }}{% endif -%}
 {%- endmacro -%}
 
 {%- macro sorth(col, label) -%}
@@ -167,6 +168,13 @@
         {% endfor %}
       </div>
       {% endif %}
+      {% if facets.origins %}
+      <div class="filtrow">
+        <span class="lbl">Comes from</span>
+        <a class="fchip {% if not lib.origin %}on{% endif %}" href="/?view={{ lib.view }}">All</a>
+        {% for source in facets.origins %}<a class="fchip {% if source.active %}on{% endif %}" href="/?view={{ lib.view }}&amp;origin={{ source.value }}">{{ source.label }} <span class="n">{{ source.count }}</span></a>{% endfor %}
+      </div>
+      {% endif %}
       <div class="filtrow">
         <span class="lbl">View</span>
         <a class="fchip {% if lib.view == 'all' %}on{% endif %}"
@@ -189,7 +197,7 @@
     <div class="empty"><div class="big">🎙️</div>
       {% if lib.view == 'trash' %}
         Nothing in trash.
-      {% elif lib.q or lib.state or lib.scene is not none or lib.folder is not none or lib.tag is not none or lib.view == 'uncategorized' %}
+      {% elif lib.q or lib.state or lib.scene is not none or lib.folder is not none or lib.tag is not none or lib.origin or lib.view == 'uncategorized' %}
         No recordings match these filters.
       {% else %}
         No recordings yet.<br>Run <code>localplaud auth import</code> then <code>localplaud poll --once</code> to sync.
@@ -232,8 +240,8 @@
               {% for tag in f.tags %}<span class="orgpill tag" style="--c:{{ tag.color or 'var(--purple)' }}">{{ tag.name }}</span>{% endfor %}
             </div>{% endif %}
           </td>
-          <td data-label="Source" class="src">{{ f.scene_label }}</td>
-          <td data-label="State"><span class="st {{ f.status }}">{{ f.status }}</span></td>
+          <td data-label="Source" class="src">{{ 'Plaud cloud' if f.origin == 'plaud' else 'Local import' }}<br><span style="font-size:10.5px">{{ f.scene_label }}</span></td>
+          <td data-label="State"><span class="st {{ f.status }}">{{ f.status | replace('_',' ') }}</span></td>
           <td data-label="Duration" class="num">{{ f.duration_ms | dur }}</td>
           <td data-label="Recorded" class="num">{{ f.start_time_ms | dt }}</td>
         </tr>

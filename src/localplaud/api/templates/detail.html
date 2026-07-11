@@ -20,16 +20,19 @@
         </div>{% endif %}
       </div>
       <div style="display:flex; gap:7px">
+        {% if not f.has_audio and f.origin == 'plaud' %}<button class="btn" id="import-recording-audio" type="button" style="padding:8px 12px;font-size:13px">☁ Import audio</button>{% endif %}
         {% if f.transcript or f.summaries %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:8px 12px; font-size:13px">Export</a>{% endif %}
+        {% if f.has_audio %}
         <button class="btn sec" style="padding:8px 12px; font-size:13px"
           hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
           hx-confirm="Resume failed or missing processing stages?">Resume</button>
         <button class="btn sec" style="padding:8px 12px; font-size:13px"
           hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML"
           hx-confirm="Rebuild every local artifact for this recording?">Rebuild all</button>
+        {% endif %}
       </div>
     </div>
-    <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px"></div>
+    <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px">{% if not f.has_audio and f.origin == 'plaud' %}Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.{% endif %}</div>
 
     {% if f.profiles %}
     <form method="post" action="/file/{{ f.id }}/profile" class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
@@ -213,6 +216,15 @@
 
 {% block scripts %}
 <script>
+  document.getElementById('import-recording-audio')?.addEventListener('click',async()=>{
+    const button=document.getElementById('import-recording-audio'),out=document.getElementById('reprocess-msg');button.disabled=true;button.textContent='Importing…';
+    const response=await fetch('/api/imports/plaud/files/{{ f.id }}/audio',{method:'POST'}),data=await response.json();
+    if(!response.ok){out.textContent=data.detail||'Could not start audio import';button.disabled=false;button.textContent='☁ Import audio';return;}
+    const poll=async()=>{const status=await fetch('/api/imports/plaud/files/{{ f.id }}/audio/status').then(r=>r.json());
+      if(status.has_audio){out.textContent='Audio imported. Reloading…';location.reload();return;}
+      if(status.status==='error'){out.textContent=status.error||'Audio import failed';button.disabled=false;button.textContent='Retry audio import';return;}
+      out.textContent='Downloading this recording from Plaud…';setTimeout(poll,1000);};poll();
+  });
   document.getElementById('save-note-template')?.addEventListener('click', async () => {
     const button=document.getElementById('save-note-template');
     const out=document.getElementById('note-template-result');

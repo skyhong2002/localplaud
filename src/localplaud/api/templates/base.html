@@ -52,6 +52,13 @@
     .navi:hover { background:var(--panel); }
     .navi.on { background:var(--panel); color:var(--blue); font-weight:600; box-shadow:var(--shadow); }
     .navi.red { color:var(--red); }
+    .add-wrap { position:relative; margin:0 6px 8px; }
+    .add-audio { width:100%; display:flex;align-items:center;justify-content:center;gap:7px;padding:9px 12px;
+      border:1px solid var(--border2);border-radius:8px;background:var(--panel);color:var(--fg);font-weight:600;cursor:pointer; }
+    .add-audio:hover { border-color:var(--blue);background:var(--blue-soft); }
+    .add-menu { position:absolute;left:0;right:0;top:44px;z-index:40;padding:5px;background:var(--panel);border:1px solid var(--border2);border-radius:9px;box-shadow:var(--shadow); }
+    .add-menu button { width:100%;display:flex;align-items:center;gap:9px;padding:9px 10px;border:0;border-radius:7px;background:none;color:var(--fg);font:inherit;text-align:left;cursor:pointer; }
+    .add-menu button:hover { background:var(--panel2); }
     .nav-h { font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--faint); padding:12px 10px 4px; }
     .sidebar .grow { flex:1; }
     .sidebar .foot { padding:8px 10px; font-size:11.5px; color:var(--faint); }
@@ -88,6 +95,22 @@
     .st.failed{color:var(--red);background:var(--red-soft);}
     .st.processing,.st.downloading{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent);}
     .st.downloaded,.st.discovered{color:var(--muted);background:var(--panel2);}
+    .st.metadata_only{color:var(--blue);background:var(--blue-soft);}
+
+    .import-backdrop { position:fixed;inset:0;z-index:100;background:rgba(16,24,40,.52);display:flex;align-items:center;justify-content:center;padding:20px; }
+    .import-modal { width:min(660px,100%);min-height:430px;background:var(--panel);border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,.25);display:flex;flex-direction:column; }
+    .import-head { display:flex;align-items:center;justify-content:space-between;padding:17px 18px;border-bottom:1px solid var(--border);font-size:16px;font-weight:650; }
+    .import-close { border:0;background:none;color:var(--muted);font-size:22px;cursor:pointer; }
+    .import-body { flex:1;padding:18px;display:flex;flex-direction:column; }
+    .import-tabs { display:flex;gap:4px;margin-bottom:15px; }
+    .import-tabs button { flex:1;border:1px solid var(--border);background:var(--panel);color:var(--muted);padding:9px;border-radius:8px;font-weight:600;cursor:pointer; }
+    .import-tabs button.on { color:var(--blue);border-color:var(--blue-br);background:var(--blue-soft); }
+    .drop-zone { flex:1;min-height:270px;border:1.5px dashed var(--border2);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;cursor:pointer; }
+    .drop-zone:hover,.drop-zone.drag { border-color:var(--blue);background:var(--blue-soft); }
+    .import-icon { width:52px;height:52px;border:1px solid var(--border2);border-radius:50%;display:grid;place-items:center;font-size:25px;margin-bottom:13px;background:var(--panel); }
+    .plaud-import-card { flex:1;min-height:270px;border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:34px; }
+    .import-progress { width:min(420px,100%);height:7px;background:var(--panel2);border-radius:999px;overflow:hidden;margin:15px 0 7px; }
+    .import-progress span { display:block;height:100%;background:var(--blue);transition:width .25s; }
 
     /* headings, inputs, buttons */
     h1.page { font-size:22px; margin:0 0 3px; letter-spacing:-.02em; font-weight:700; }
@@ -148,6 +171,7 @@
       body { overflow:auto; height:auto; flex-direction:column; }
       .sidebar { width:auto; flex-direction:row; align-items:center; padding:8px 10px; gap:2px; border-right:0; border-bottom:1px solid var(--border); overflow-x:auto; position:sticky; top:0; z-index:20; }
       .sidebar .brand{ padding:4px 6px; } .sidebar .nav-h, .sidebar .grow, .sidebar .foot{ display:none; } .navi .lbl{ display:none; } .navi{ padding:8px 10px; } .navi .ic{ font-size:16px; }
+      .add-wrap{margin:0}.add-audio{width:40px;height:38px;padding:0}.add-audio .add-label{display:none}.add-menu{position:fixed;left:10px;right:10px;top:58px}
       .shell { flex-direction:column; } .filelist{ width:auto; border-right:0; }
       .filelist.has-active { display:none; } .backlink{ display:inline-flex; }
       .stats{ grid-template-columns:repeat(2,1fr); } .pane-inner{ padding:20px 16px 60px; }
@@ -167,6 +191,13 @@
       </svg>
       <span class="wm lbl"><span class="a">local</span><span class="b">plaud</span></span>
     </div>
+    <div class="add-wrap">
+      <button class="add-audio" id="add-audio-button" type="button"><span>＋</span><span class="add-label">Add audio</span></button>
+      <div class="add-menu" id="add-audio-menu" hidden>
+        <button type="button" data-import-mode="device"><span>⬆</span><span><strong>Import audio</strong><br><small class="sub">From this device</small></span></button>
+        <button type="button" data-import-mode="plaud"><span>☁</span><span><strong>Import from Plaud</strong><br><small class="sub">Metadata first · audio on demand</small></span></button>
+      </div>
+    </div>
     <a class="navi {% if active=='recordings' %}on{% endif %}" href="/"><span class="ic">🎙️</span><span class="lbl">All files</span></a>
     <a class="navi {% if active=='search' %}on{% endif %}" href="/search"><span class="ic">🔍</span><span class="lbl">Ask &amp; Search</span></a>
     <a class="navi {% if active=='notes' %}on{% endif %}" href="/notes"><span class="ic">📝</span><span class="lbl">Saved notes</span></a>
@@ -176,9 +207,75 @@
     <div class="foot lbl">self-hosted</div>
   </aside>
   {% block body %}{% endblock %}
+  <div class="import-backdrop" id="import-backdrop" hidden>
+    <section class="import-modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
+      <div class="import-head"><span id="import-title">Import audio</span><button class="import-close" id="import-close" type="button" aria-label="Close">×</button></div>
+      <div class="import-body">
+        <div class="import-tabs"><button type="button" data-import-tab="device">From this device</button><button type="button" data-import-tab="plaud">From Plaud</button></div>
+        <div id="device-import-panel">
+          <label class="drop-zone" id="audio-drop-zone">
+            <span class="import-icon">⇧</span><strong>Click or drag an audio file to import</strong>
+            <span class="sub" style="margin-top:7px">MP3, MP4, M4A, WAV, OGG, Opus, WebM, FLAC or AAC · up to 2 GB</span>
+            <input id="audio-file-input" type="file" accept="audio/*,video/mp4,video/webm,.opus,.m4a,.flac,.aac" hidden>
+          </label>
+          <div class="sub" id="local-import-status" style="text-align:center;margin-top:10px"></div>
+        </div>
+        <div class="plaud-import-card" id="plaud-import-panel" hidden>
+          <span class="import-icon">☁</span><strong>Mirror your Plaud library</strong>
+          <p class="sub" style="max-width:440px;margin:8px 0 0">Imports the latest recording metadata and any existing Plaud transcript or summary. Audio stays in Plaud until you request it from a recording.</p>
+          <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">Import metadata from Plaud</button>
+          <div id="plaud-import-progress" hidden style="width:100%;max-width:440px">
+            <div class="import-progress"><span style="width:0%"></span></div>
+            <div class="sub" data-progress-label></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
   <script>
     window.spkColor = (() => { const m={}, n=8; let i=0;
       return s => { if(!s) return null; if(!(s in m)) m[s]=i++%n; return m[s]; }; })();
+    (()=>{
+      const button=document.getElementById('add-audio-button'),menu=document.getElementById('add-audio-menu'),backdrop=document.getElementById('import-backdrop');
+      const devicePanel=document.getElementById('device-import-panel'),plaudPanel=document.getElementById('plaud-import-panel');let progressTimer=null;
+      function choose(mode){
+        backdrop.hidden=false;menu.hidden=true;devicePanel.hidden=mode!=='device';plaudPanel.hidden=mode!=='plaud';
+        document.querySelectorAll('[data-import-tab]').forEach(tab=>tab.classList.toggle('on',tab.dataset.importTab===mode));
+        document.getElementById('import-title').textContent=mode==='plaud'?'Import from Plaud':'Import audio';
+        if(mode==='plaud')pollPlaudImport(false);
+      }
+      button.addEventListener('click',()=>menu.hidden=!menu.hidden);
+      document.querySelectorAll('[data-import-mode]').forEach(item=>item.addEventListener('click',()=>choose(item.dataset.importMode)));
+      document.querySelectorAll('[data-import-tab]').forEach(tab=>tab.addEventListener('click',()=>choose(tab.dataset.importTab)));
+      document.getElementById('import-close').addEventListener('click',()=>{backdrop.hidden=true;if(progressTimer)clearTimeout(progressTimer);});
+      backdrop.addEventListener('click',event=>{if(event.target===backdrop)document.getElementById('import-close').click();});
+      const input=document.getElementById('audio-file-input'),drop=document.getElementById('audio-drop-zone'),localStatus=document.getElementById('local-import-status');
+      ['dragenter','dragover'].forEach(name=>drop.addEventListener(name,event=>{event.preventDefault();drop.classList.add('drag');}));
+      ['dragleave','drop'].forEach(name=>drop.addEventListener(name,event=>{event.preventDefault();drop.classList.remove('drag');}));
+      drop.addEventListener('drop',event=>{if(event.dataTransfer.files[0])uploadLocal(event.dataTransfer.files[0]);});
+      input.addEventListener('change',()=>{if(input.files[0])uploadLocal(input.files[0]);});
+      async function uploadLocal(file){
+        localStatus.textContent=`Importing ${file.name}…`;const body=new FormData();body.append('file',file);
+        const response=await fetch('/api/imports/local/audio',{method:'POST',body});const data=await response.json();
+        if(response.ok){localStatus.textContent='Imported. Opening recording…';location.href=`/file/${data.id}`;}
+        else localStatus.textContent=data.detail||'Import failed';
+      }
+      document.getElementById('start-plaud-import').addEventListener('click',async()=>{
+        const response=await fetch('/api/imports/plaud/metadata',{method:'POST'}),data=await response.json();
+        if(!response.ok&&response.status!==409){showProgress({status:'failed',error:data.detail});return;}pollPlaudImport(true);
+      });
+      async function pollPlaudImport(repeat){
+        const response=await fetch('/api/imports/plaud/metadata/status');if(!response.ok)return;const data=await response.json();showProgress(data);
+        if(repeat&&['queued','running'].includes(data.status))progressTimer=setTimeout(()=>pollPlaudImport(true),1000);
+      }
+      function showProgress(data){
+        const box=document.getElementById('plaud-import-progress'),label=box.querySelector('[data-progress-label]'),bar=box.querySelector('span');
+        if(data.status==='idle'){box.hidden=true;return;}box.hidden=false;const pct=data.total?Math.round(data.processed/data.total*100):0;bar.style.width=`${pct}%`;
+        if(data.status==='completed')label.textContent=`Complete · ${data.processed} recordings · ${data.transcripts} transcripts · ${data.summaries} summaries`;
+        else if(data.status==='failed')label.textContent=`Import stopped · ${data.error||'Unknown error'}`;
+        else label.textContent=`${data.processed||0} of ${data.total||'…'} · metadata only, audio not downloaded`;
+      }
+    })();
   </script>
   {% block scripts %}{% endblock %}
 </body>

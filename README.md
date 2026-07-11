@@ -35,8 +35,9 @@ experience, not the recorder or the App's device-upload role.
 
 ## Status
 
-The core skeleton works: OAuth polling through **Plaud's official Open API**, raw
-audio download, pluggable local ASR, diarization, LLM notes, embeddings/Q&A, audio
+The core skeleton works: OAuth polling through **Plaud's official Open API**,
+metadata-first library sync with on-demand raw-audio download, pluggable local ASR,
+diarization, LLM notes, embeddings/Q&A, audio
 playback, and a FastAPI Web App. It runs natively and in Docker profiles.
 
 The subscription-replacement experience is **in progress**, not complete. The
@@ -46,7 +47,10 @@ rows for local ASR. Durable stage records preserve attempts, provider/model
 provenance, timing, and actionable failures; optional-stage failures retain usable
 transcripts and notes for targeted resume. Full-transcript hierarchical notes,
 resumable mind maps, transcript revisions, editable per-recording speaker names,
-single-file Ask with playable citations, and richer library filters are implemented.
+single-file Ask with playable citations, richer library filters, and Plaud-style
+Add audio / Import from Plaud flows are implemented. A Plaud import refreshes the
+entire metadata catalog plus any existing Plaud transcript/summary while leaving raw
+audio remote until the user requests one recording.
 The next foundation is durable provider/model/execution profiles with explicit
 capabilities and privacy/cost policy, followed by production diarization and
 alignment validation, richer exports and organization, automation, and Plaud-level
