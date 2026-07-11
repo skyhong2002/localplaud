@@ -40,6 +40,17 @@
     </div>
     <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px">{% if not f.has_audio and f.origin == 'plaud' %}Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.{% endif %}</div>
 
+    <details class="panel" style="margin-top:10px;padding:10px 12px">
+      <summary style="cursor:pointer;font-weight:650">Local data</summary>
+      <div class="sub" style="font-size:12px;margin-top:9px">Audio {{ (f.local_data.audio_bytes / 1048576) | round(1) }} MB · {{ f.local_data.transcripts }} local transcript · {{ f.local_data.revisions }} corrections · {{ f.local_data.notes }} generated notes · {{ f.local_data.chunks }} search chunks</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">
+        {% if f.local_data.transcripts or f.local_data.revisions or f.local_data.notes or f.local_data.chunks or f.local_data.stages %}<button class="btn sec" id="delete-local-processing" type="button" style="padding:7px 10px;color:var(--red)">Delete local processing</button>{% endif %}
+        {% if f.has_audio and f.origin == 'plaud' %}<button class="btn sec" id="delete-local-audio" type="button" style="padding:7px 10px;color:var(--red)">Remove local audio</button>{% endif %}
+      </div>
+      <div class="sub" style="font-size:11px;margin-top:7px">Plaud metadata and imported Plaud transcript/summary are preserved. Saved notes and Ask history are never removed here.</div>
+      <div id="local-data-result" class="sub" style="font-size:12px;margin-top:6px"></div>
+    </details>
+
     {% if f.profiles %}
     <form method="post" action="/file/{{ f.id }}/profile" class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
       <label for="profile-select" style="font-weight:650">Execution profile</label>
@@ -324,6 +335,9 @@
 
 {% block scripts %}
 <script>
+  async function deleteLocalData(kind,message){if(!confirm(message))return;const output=document.getElementById('local-data-result');output.textContent='Removing local data…';const response=await fetch(`/api/files/{{ f.id }}/${kind}`,{method:'DELETE'}),data=await response.json();if(response.ok){output.textContent='Removed. Reloading…';location.reload();}else output.textContent=data.detail||'Could not remove local data';}
+  document.getElementById('delete-local-processing')?.addEventListener('click',()=>deleteLocalData('local-processing','Delete local transcript, corrections, generated notes, mind map, search index, and processing history? Saved notes and Plaud imports will remain.'));
+  document.getElementById('delete-local-audio')?.addEventListener('click',()=>deleteLocalData('local-audio','Remove this downloaded audio and waveform from this host? It can be imported again from Plaud later.'));
   const metadataBackdrop=document.getElementById('metadata-backdrop'),currentTagIds={{ f.tags|map(attribute='id')|list|tojson }};
   document.getElementById('edit-recording-metadata').onclick=()=>{metadataBackdrop.hidden=false;};
   const closeMetadata=()=>{metadataBackdrop.hidden=true;};document.getElementById('metadata-close').onclick=closeMetadata;document.getElementById('metadata-cancel').onclick=closeMetadata;metadataBackdrop.addEventListener('click',event=>{if(event.target===metadataBackdrop)closeMetadata();});

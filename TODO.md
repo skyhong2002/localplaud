@@ -291,6 +291,9 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Replaced the native audio control with a responsive persistent player: locally
   generated/cached waveform, click/range seek, play/pause, −10/+30 seconds, playback
   speed, keyboard controls, deep-link seeking, and active transcript synchronization.
+- ✅ Added explicit local-data lifecycle controls. Plaud-sourced audio/waveform can
+  return to metadata-only for space recovery; local processing can be reset without
+  deleting cloud artifacts, Saved notes, Ask history, organization, or Plaud data.
 - ✅ Added durable local recording-title overrides with inline edit/revert. Plaud
   keeps its latest cloud title separately; local names survive sync and consistently
   drive library sort/search, detail, Ask/search citations, automation, CLI, and export.

@@ -212,6 +212,11 @@ It presents recent recordings, mirror/import progress, metadata-only versus loca
 audio counts, current processing, AutoFlow activity, attention items, and direct
 import actions; the Library remains the dense filtering and bulk-management surface.
 
+Local-data cleanup is explicit and scoped: Plaud-backed audio and waveform caches can
+be removed and re-imported later, while local ASR/notes/map/index/history can be reset
+separately. Plaud metadata/cloud artifacts, Saved notes, Ask history, title/folder/
+tags, and the remote source are preserved by both operations.
+
 ### 7. Settings and system health
 
 - Plaud OAuth and last successful sync.

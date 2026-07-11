@@ -500,6 +500,28 @@ def update_recording_title(file_id: str, body: RecordingTitleBody) -> dict:
         }
 
 
+@app.delete("/api/files/{file_id}/local-audio")
+def delete_recording_local_audio(file_id: str) -> dict:
+    from ..local_cleanup import remove_local_audio
+
+    try:
+        return remove_local_audio(file_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.delete("/api/files/{file_id}/local-processing")
+def delete_recording_local_processing(file_id: str) -> dict:
+    from ..local_cleanup import delete_local_processing
+
+    try:
+        return delete_local_processing(file_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 # --------------------------------------------------------------------------- #
 # pages
 # --------------------------------------------------------------------------- #
@@ -979,6 +1001,20 @@ def file_detail(
                 }
                 for stage in r.stage_runs
             ],
+            "local_data": {
+                "audio_bytes": (
+                    Path(r.audio_path).stat().st_size
+                    if r.audio_path and Path(r.audio_path).exists()
+                    else 0
+                ),
+                "transcripts": sum(item.source == "local" for item in r.transcripts),
+                "revisions": sum(
+                    item.source == "local" for item in r.transcript_revisions
+                ),
+                "notes": sum(item.source == "local" for item in r.summaries),
+                "chunks": len(r.chunks),
+                "stages": len(r.stage_runs),
+            },
         }
         profile_rows = list(
             session.scalars(
