@@ -166,7 +166,7 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
     elif request.stage == JobStage.summarize:
         from ..worker.summarize import summarize
 
-        payload = summarize(transcript, settings)
+        payload = summarize(transcript, settings, request.options.get("template"))
     elif request.stage == JobStage.mind_map:
         from ..worker.mindmap import generate_mind_map
 

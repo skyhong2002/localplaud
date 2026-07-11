@@ -82,7 +82,10 @@ def render_markdown(file_id: str) -> str:
         for summary in summaries:
             if summary.template == "mind_map":
                 continue
-            heading = f"## {summary.template}"
+            snapshot = summary.template_snapshot or {}
+            template_name = snapshot.get("name") or summary.template.replace("-", " ").title()
+            version = f" · v{summary.template_version}" if summary.template_version else ""
+            heading = f"## {template_name}{version}"
             if summary.title:
                 heading += f": {summary.title}"
             parts += [heading, "", summary.content_md.strip(), ""]

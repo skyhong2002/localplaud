@@ -41,7 +41,7 @@ from ..remote.client import RemoteWorkerClient
 from ..remote.protocol import InputReference, JobStage, JobSubmitRequest
 from ..store.files import wav_path
 from ..store.speakers import speaker_keys_from_segments, sync_speakers
-from . import convert, index, mindmap, summarize, transcribe
+from . import convert, index, mindmap, summarize, summary_templates, transcribe
 from .diarize import DiarizationUnavailable, diarize
 
 log = logging.getLogger(__name__)
@@ -313,6 +313,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         row.error = None
         audio = Path(row.audio_path)
         existing_wav = row.wav_path
+        template_key = row.note_template_key or pcfg.summary_template
         snapshot = resolve_recording_profile(session, file_id).to_dict()
 
     profile_token = _PROFILE_SNAPSHOT.set(snapshot)
@@ -320,6 +321,8 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
     diarize_settings = _settings_for_stage(settings, snapshot, "diarize")
     summarize_settings = _settings_for_stage(settings, snapshot, "summarize")
     mind_map_settings = _settings_for_stage(settings, snapshot, "mind_map")
+    summarize_settings.pipeline.summary_template = template_key
+    mind_map_settings.pipeline.summary_template = template_key
     embed_settings = _settings_for_stage(settings, snapshot, "embed")
 
     partial_errors: list[str] = []
@@ -472,7 +475,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
 
         # --- summarize (skip if this template's summary already exists) #
         if pcfg.summarize and transcript is not None:
-            if force or not _has_summary(file_id, pcfg.summary_template):
+            if force or not _has_summary(file_id, template_key):
                 _begin_stage(file_id, StageName.summarize)
                 try:
                     if _remote_selection(snapshot, "summarize"):
@@ -481,6 +484,11 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                             snapshot,
                             "summarize",
                             [_remote_json_input("transcript", _transcript_payload(transcript))],
+                            options={
+                                "template": summary_templates.template_snapshot(
+                                    summary_templates.get_effective_template(template_key)
+                                )
+                            },
                         )
                         result.setdefault("provider", "remote-worker")
                         result.setdefault("model", snapshot["stages"]["summarize"].get("model"))
@@ -507,7 +515,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                     file_id,
                     StageName.summarize,
                     artifact_source="local",
-                    detail={"reused": True, "template": pcfg.summary_template},
+                    detail={"reused": True, "template": template_key},
                 )
         else:
             _skip_stage(
@@ -521,7 +529,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
             if force or not _has_summary(file_id, "mind_map"):
                 _begin_stage(file_id, StageName.mind_map)
                 try:
-                    summary_md = _load_summary_md(file_id, pcfg.summary_template)
+                    summary_md = _load_summary_md(file_id, template_key)
                     if _remote_selection(snapshot, "mind_map"):
                         result = _run_remote_stage(
                             file_id,
@@ -660,6 +668,11 @@ def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str]
 
 
 def _has_summary(file_id: str, template: str) -> bool:
+    expected_version = (
+        None
+        if template == "mind_map"
+        else summary_templates.get_effective_template(template).version
+    )
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
         stage = StageName.mind_map if template == "mind_map" else StageName.summarize
@@ -667,7 +680,12 @@ def _has_summary(file_id: str, template: str) -> bool:
         if run is not None and (run.detail or {}).get("stale"):
             return False
         return any(
-            s.template == template and s.source == "local"
+            s.template == template
+            and s.source == "local"
+            and (
+                template == "mind_map"
+                or (s.template_version or 1) == expected_version
+            )
             for s in row.summaries
         )
 
@@ -742,6 +760,8 @@ def _persist_summary(file_id: str, result: dict) -> None:
             SummaryRow(
                 file_id=file_id,
                 template=template,
+                template_version=result.get("template_version"),
+                template_snapshot=result.get("template_snapshot"),
                 title=result.get("title"),
                 content_md=result.get("content_md", ""),
                 llm_provider=result.get("provider"),

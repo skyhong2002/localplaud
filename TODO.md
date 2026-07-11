@@ -3,10 +3,10 @@
 Working notes for continuing development (synced across machines via git).
 No secrets here — those live in `.env` / the Caddyfile, never committed.
 
-## Status snapshot (2026-07-10)
+## Status snapshot (2026-07-11)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (197 tests passing locally).
+  Active development is merged directly to `main` (227 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -228,8 +228,12 @@ embedding raw provider credentials or model settings in each rule.
   only). Stored as a provenanced `mind_map` note, resumable/degradable like other
   optional stages, rendered as a collapsible tree tab in the Web detail page, and
   included in Markdown export. PNG mind-map export remains.
-- Make templates editable data; support auto selection, per-file custom generation,
-  multiple note tabs, provenance, and safe regeneration.
+- ✅ Note templates are editable, versioned database records seeded from the built-in
+  catalog. Settings can create templates or immutable new versions; recordings select
+  a template independently, changes mark notes/maps stale for explicit Resume, remote
+  workers receive the exact prompt snapshot, and generated notes/export retain the
+  template version and full prompt provenance. Multiple template notes remain visible
+  as tabs. Remaining: optional automatic template selection rules.
 - ✅ Single-file Ask: `/file/{id}/ask` answers grounded only in one recording, with
   citations rendered as playable timestamp buttons that seek the player; suggested
   grounded question chips; graceful degrade when unindexed or providers are down.

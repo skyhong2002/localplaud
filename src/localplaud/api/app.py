@@ -19,6 +19,7 @@ from ..db.models import (
     ExecutionProfile,
     FileStatus,
     Folder,
+    NoteTemplate,
     PlaudFile,
     RecordingProfileOverride,
     Speaker,
@@ -34,6 +35,7 @@ from ..db.session import init_db, session_scope
 from ..remote.server import resume_pending_jobs
 from ..remote.server import router as worker_router
 from ..store.speakers import display_names, speaker_keys_from_segments
+from .note_templates import router as note_templates_router
 from .providers import router as providers_router
 
 _HERE = Path(__file__).parent
@@ -51,6 +53,7 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
 app.include_router(providers_router)
+app.include_router(note_templates_router)
 app.include_router(worker_router)
 
 _static = _HERE / "static"
@@ -564,8 +567,16 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
             if (run.detail or {}).get("stale")
         }
         summaries = sorted(
-            (
-                {"title": s.title, "content_md": s.content_md, "template": s.template, "source": s.source}
+            [
+                {
+                    "title": s.title,
+                    "content_md": s.content_md,
+                    "template": s.template,
+                    "template_name": (s.template_snapshot or {}).get("name")
+                    or s.template.replace("-", " ").title(),
+                    "template_version": s.template_version,
+                    "source": s.source,
+                }
                 for s in r.summaries
                 if not (
                     s.source == "local"
@@ -574,7 +585,7 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
                         or (s.template != "mind_map" and StageName.summarize in stale_stages)
                     )
                 )
-            ),
+            ],
             key=lambda s: (s["template"] != "default", s["template"]),
         )
         transcript = None
@@ -647,6 +658,7 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
                 _organization_item(tag)
                 for tag in sorted(r.tags, key=lambda tag: (tag.name.casefold(), tag.id))
             ],
+            "note_template_key": r.note_template_key or settings.pipeline.summary_template,
             "stages": [
                 {
                     "name": stage.stage.value,
@@ -682,6 +694,18 @@ def file_detail(request: Request, file_id: str, view: str | None = None):
         f["profile_id"] = override.profile_id if override is not None else next(
             (profile.id for profile in profile_rows if profile.is_system_default), None
         )
+        f["note_templates"] = [
+            {
+                "key": item.key,
+                "name": item.name,
+                "version": item.version,
+            }
+            for item in session.scalars(
+                select(NoteTemplate)
+                .where(NoteTemplate.is_active.is_(True))
+                .order_by(NoteTemplate.name)
+            )
+        ]
         files = [
             _file_summary(x)
             for x in session.scalars(
@@ -764,6 +788,21 @@ def settings_page(request: Request):
             "profiles": list_profiles(session),
             "workers": list_workers(session),
             "provider_stages": [stage.value for stage in ProviderStage],
+            "note_templates": [
+                {
+                    "key": item.key,
+                    "name": item.name,
+                    "version": item.version,
+                    "system_prompt": item.system_prompt,
+                    "instructions": item.instructions,
+                    "is_builtin": item.is_builtin,
+                }
+                for item in session.scalars(
+                    select(NoteTemplate)
+                    .where(NoteTemplate.is_active.is_(True))
+                    .order_by(NoteTemplate.name)
+                )
+            ],
         }
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
 

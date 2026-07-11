@@ -116,7 +116,9 @@ accessibility require a different design.
 - Auto mode chooses a sensible workflow from recording metadata/content.
 - Custom mode selects language, ASR profile, speaker settings, note templates, and
   LLM per file.
-- Users can create and edit templates as structured prompts.
+- Users can create templates as structured prompts and edit them by creating a new
+  immutable version. Generated notes retain the exact version and prompt snapshot;
+  remote execution receives the same snapshot.
 - Template management has separate personal and discovery surfaces, search,
   scenario/category browsing, first-party/community provenance, description,
   authorship, and optional popularity signals.
@@ -309,9 +311,8 @@ ASR row, survive re-ASR, re-index in the background without rerunning ASR, and h
 stale notes/maps until explicit regeneration, with a labelled raw-versus-corrected
 view switch. Plaud-derived edits remain excluded from independent mode. Transcript
 find/replace, dependent-artifact revision links, and a revision history browser
-remain. Other major gaps include editable notes/templates, Ask save-to-note and
-follow-up threads, richer organization/export, automation, and UI polish. Current
-ASR, LLM, and embedding provider settings are config-time integrations rather than a
-complete provider system: there is no shared capability catalog, durable execution
-profile schema/resolver, Web profile editor, privacy/cost-aware fallback policy, or
-versioned remote GPU worker protocol yet.
+remain. Other major gaps include editable note bodies, Ask save-to-note and
+follow-up threads, automatic template selection, richer export, automation, and UI
+polish. Provider/model/profile management and the versioned remote-worker protocol
+are implemented; cross-provider fallback/cost accounting and the remaining hardware
+acceptance matrix are still open.

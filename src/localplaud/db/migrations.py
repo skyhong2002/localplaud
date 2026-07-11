@@ -62,6 +62,28 @@ def migrate_organization_schema(engine: Engine) -> list[str]:
     return migrated
 
 
+def migrate_note_template_schema(engine: Engine) -> list[str]:
+    """Add editable-note-template metadata to an existing SQLite library."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for table, column, ddl in (
+            ("plaud_files", "note_template_key", "VARCHAR(64)"),
+            ("summaries", "template_version", "INTEGER"),
+            ("summaries", "template_snapshot", "JSON"),
+        ):
+            if table not in tables:
+                continue
+            columns = {item["name"] for item in inspector.get_columns(table)}
+            if column not in columns:
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+                migrated.append(f"{table}.{column}")
+    return migrated
+
+
 def migrate_profile_snapshot_columns(engine: Engine) -> list[str]:
     """Add immutable profile provenance to existing SQLite artifact tables."""
     if engine.dialect.name != "sqlite":

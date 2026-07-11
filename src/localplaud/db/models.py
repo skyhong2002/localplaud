@@ -149,6 +149,7 @@ class PlaudFile(Base):
     folder_id: Mapped[int | None] = mapped_column(
         ForeignKey("folders.id", ondelete="SET NULL"), default=None, index=True
     )
+    note_template_key: Mapped[str | None] = mapped_column(String(64), default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -316,6 +317,8 @@ class Summary(Base):
     # A file can have several notes under different templates (like Plaud's
     # multi-dimensional summaries).
     template: Mapped[str] = mapped_column(String(64), default="default")
+    template_version: Mapped[int | None] = mapped_column(Integer, default=None)
+    template_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
     title: Mapped[str | None] = mapped_column(String(512), default=None)
     content_md: Mapped[str] = mapped_column(Text, default="")  # markdown
     llm_provider: Mapped[str | None] = mapped_column(String(64), default=None)
@@ -328,6 +331,26 @@ class Summary(Base):
     file: Mapped[PlaudFile] = relationship(back_populates="summaries")
 
     __table_args__ = (UniqueConstraint("file_id", "template", name="uq_summary_file_template"),)
+
+
+class NoteTemplate(Base):
+    """Versioned, locally editable prompt used to generate structured notes."""
+
+    __tablename__ = "note_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(64), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(80))
+    system_prompt: Mapped[str] = mapped_column(Text)
+    instructions: Mapped[str] = mapped_column(Text)
+    is_builtin: Mapped[bool] = mapped_column(default=False)
+    is_active: Mapped[bool] = mapped_column(default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("key", "version", name="uq_note_template_key_version"),
+    )
 
 
 class Chunk(Base):

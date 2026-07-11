@@ -52,8 +52,8 @@ def seeded_db(monkeypatch, tmp_path):
 def test_render_markdown_contains_everything(seeded_db):
     md = render_markdown(FILE_ID)
     assert "# 2026-07-09 15:38:57" in md
-    assert "## default: A Chat" in md
-    assert "## meeting: Standup" in md
+    assert "## Default: A Chat" in md
+    assert "## Meeting: Standup" in md
     assert "## Transcript" in md
     assert "**[00:00] SPEAKER_00:** hello there" in md
     assert "**[01:05] SPEAKER_01:** general kenobi" in md

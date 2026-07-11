@@ -62,6 +62,29 @@
   </div>
 
   <div class="panel" style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <div><strong>Note templates</strong><div class="sub" style="font-size:12px">Editable, versioned prompts for structured notes. Existing notes keep their exact template snapshot.</div></div>
+    </div>
+    <div style="display:grid;gap:9px;margin-top:12px">
+      {% for template in note_templates %}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px">
+        <div><strong>{{ template.name }}</strong> <code>{{ template.key }}@{{ template.version }}</code>{% if template.is_builtin %} <span class="chip">Built-in</span>{% endif %}</div>
+        <div><button class="btn sec" style="padding:6px 9px" onclick="editNoteTemplate('{{ template.key }}')">New version</button>{% if template.key != 'default' %} <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="archiveNoteTemplate('{{ template.key }}')">Archive</button>{% endif %}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <form id="note-template-form" style="display:grid;gap:9px;margin-top:14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+        <input class="search-input" name="name" maxlength="80" placeholder="Template name" required>
+        <input class="search-input" name="key" maxlength="64" pattern="[a-z0-9][a-z0-9-]*" placeholder="Stable key, e.g. research-interview" required>
+      </div>
+      <label class="sub">System prompt<textarea class="search-input" name="system_prompt" rows="4" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical"></textarea></label>
+      <label class="sub">Markdown structure and instructions<textarea class="search-input" name="instructions" rows="9" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></label>
+      <div style="display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Create template</button><button class="btn sec" id="cancel-template-edit" type="button" hidden>Cancel edit</button><span id="note-template-result" class="sub"></span></div>
+    </form>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
     <strong>Create provider connection</strong>
     <form id="connection-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
       <input class="search-input" name="name" placeholder="Display name" required>
@@ -129,6 +152,34 @@
 const CONNECTIONS={{ connections|tojson }};
 const MODELS={{ models|tojson }};
 const PROFILES={{ profiles|tojson }};
+const NOTE_TEMPLATES={{ note_templates|tojson }};
+let editingNoteTemplate=null;
+function editNoteTemplate(key){
+  const t=NOTE_TEMPLATES.find(x=>x.key===key),form=document.getElementById('note-template-form');
+  editingNoteTemplate=key;form.elements.name.value=t.name;form.elements.key.value=t.key;form.elements.key.disabled=true;
+  form.elements.system_prompt.value=t.system_prompt;form.elements.instructions.value=t.instructions;
+  form.querySelector('button[type=submit]').textContent='Create new version';document.getElementById('cancel-template-edit').hidden=false;
+  form.scrollIntoView({behavior:'smooth'});
+}
+function resetNoteTemplateForm(){
+  const form=document.getElementById('note-template-form');editingNoteTemplate=null;form.reset();form.elements.key.disabled=false;
+  form.querySelector('button[type=submit]').textContent='Create template';document.getElementById('cancel-template-edit').hidden=true;
+}
+async function archiveNoteTemplate(key){
+  if(!confirm('Archive this template? Recordings using it will return to the system default. Existing notes are preserved.'))return;
+  const response=await fetch(`/api/note-templates/${key}`,{method:'DELETE'});const data=await response.json();
+  if(response.ok)location.reload();else alert(data.detail||'Could not archive template');
+}
+document.getElementById('cancel-template-edit').addEventListener('click',resetNoteTemplateForm);
+document.getElementById('note-template-form').addEventListener('submit',async event=>{
+  event.preventDefault();const form=event.target,data=new FormData(form);
+  const body={key:editingNoteTemplate||data.get('key'),name:data.get('name'),system_prompt:data.get('system_prompt'),instructions:data.get('instructions')};
+  const response=await fetch(editingNoteTemplate?`/api/note-templates/${editingNoteTemplate}`:'/api/note-templates',{
+    method:editingNoteTemplate?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)
+  });const result=await response.json();const out=document.getElementById('note-template-result');
+  if(response.ok){out.textContent=`Saved ${result.key} v${result.version}. Reloading…`;location.reload();}
+  else out.textContent=result.detail?.[0]?.msg||result.detail||'Could not save template';
+});
 async function removeItem(kind,id){
   if(!confirm(`Delete this ${kind.slice(0,-1)}?`))return;
   const r=await fetch(`/api/providers/${kind}/${id}`,{method:'DELETE'});

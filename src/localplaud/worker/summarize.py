@@ -117,12 +117,30 @@ Coverage notes:
 """
 
 
-def summarize(transcript: AsrTranscript, settings: Settings) -> dict:
+def summarize(
+    transcript: AsrTranscript, settings: Settings, template_override: dict | None = None
+) -> dict:
     """Return {title, content_md, provider, model, template}."""
-    from .summary_templates import render_prompt
+    from .summary_templates import (
+        get_effective_template,
+        render_resolved_prompt,
+        template_snapshot,
+    )
 
     llm = build_llm(settings.llm)
     template = settings.pipeline.summary_template
+    if template_override:
+        from .summary_templates import SummaryTemplate
+
+        resolved_template = SummaryTemplate(
+            name=template_override["key"],
+            version=int(template_override["version"]),
+            display_name=template_override.get("name"),
+            system=template_override["system_prompt"],
+            instructions=template_override["instructions"],
+        )
+    else:
+        resolved_template = get_effective_template(template)
     transcript_text = _render_transcript(transcript)
     chunk_chars = settings.pipeline.summary_chunk_chars
     chunks = _chunk_text(transcript_text, chunk_chars)
@@ -169,7 +187,7 @@ def summarize(transcript: AsrTranscript, settings: Settings) -> dict:
             "The following are ordered coverage notes derived from every part of the "
             "complete transcript:\n\n" + "\n\n".join(notes)
         )
-    system, prompt = render_prompt(template, source_text)
+    system, prompt = render_resolved_prompt(resolved_template, source_text)
     content = llm.complete(prompt, system=system, temperature=0.2, max_tokens=1500)
     title = _extract_title(content)
     return {
@@ -177,7 +195,9 @@ def summarize(transcript: AsrTranscript, settings: Settings) -> dict:
         "content_md": content,
         "provider": settings.llm.provider,
         "model": getattr(getattr(settings.llm, settings.llm.provider, None), "model", None),
-        "template": template,
+        "template": resolved_template.name,
+        "template_version": resolved_template.version,
+        "template_snapshot": template_snapshot(resolved_template),
         "coverage": {
             "strategy": strategy,
             "transcript_chars": len(transcript_text),

@@ -26,6 +26,8 @@ class SummaryTemplate:
     name: str
     system: str
     instructions: str  # the markdown-section instructions block
+    version: int = 1
+    display_name: str | None = None
 
 
 TEMPLATES: dict[str, SummaryTemplate] = {
@@ -153,10 +155,74 @@ def get_template(name: str) -> SummaryTemplate:
     return template
 
 
-def render_prompt(template_name: str, transcript_text: str) -> tuple[str, str]:
-    """Return ``(system, full_user_prompt)`` for the named template."""
-    template = get_template(template_name)
+def bootstrap_note_templates(session) -> None:
+    """Seed built-ins once without overwriting later user-created versions."""
+    from sqlalchemy import select
+
+    from ..db.models import NoteTemplate
+
+    existing = set(session.scalars(select(NoteTemplate.key)).all())
+    for key, template in TEMPLATES.items():
+        if key in existing:
+            continue
+        session.add(
+            NoteTemplate(
+                key=key,
+                version=1,
+                name=key.replace("-", " ").title(),
+                system_prompt=template.system,
+                instructions=template.instructions,
+                is_builtin=True,
+                is_active=True,
+            )
+        )
+
+
+def get_effective_template(name: str) -> SummaryTemplate:
+    """Resolve the active database version, with built-ins as a safe fallback."""
+    key = name.strip().lower()
+    try:
+        from sqlalchemy import select
+
+        from ..db.models import NoteTemplate
+        from ..db.session import session_scope
+
+        with session_scope() as session:
+            row = session.scalar(
+                select(NoteTemplate)
+                .where(NoteTemplate.key == key, NoteTemplate.is_active.is_(True))
+                .order_by(NoteTemplate.version.desc())
+            )
+            if row is not None:
+                return SummaryTemplate(
+                    name=row.key,
+                    system=row.system_prompt,
+                    instructions=row.instructions,
+                    version=row.version,
+                    display_name=row.name,
+                )
+    except Exception as exc:  # noqa: BLE001 - startup/standalone fallback
+        log.debug("could not resolve database note template: %s", exc)
+    return get_template(key)
+
+
+def template_snapshot(template: SummaryTemplate) -> dict:
+    return {
+        "key": template.name,
+        "version": template.version,
+        "name": template.display_name or template.name.replace("-", " ").title(),
+        "system_prompt": template.system,
+        "instructions": template.instructions,
+    }
+
+
+def render_resolved_prompt(template: SummaryTemplate, transcript_text: str) -> tuple[str, str]:
     prompt = _PROMPT_FRAME.format(
         instructions=template.instructions, transcript=transcript_text
     )
     return template.system, prompt
+
+
+def render_prompt(template_name: str, transcript_text: str) -> tuple[str, str]:
+    """Return ``(system, full_user_prompt)`` for the named template."""
+    return render_resolved_prompt(get_effective_template(template_name), transcript_text)

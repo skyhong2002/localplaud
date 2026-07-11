@@ -42,6 +42,15 @@
     </form>
     {% endif %}
 
+    <div class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
+      <label for="note-template-select" style="font-weight:650">Note template</label>
+      <select id="note-template-select" class="search-input" style="flex:1;min-width:220px;padding:7px 10px">
+        {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
+      </select>
+      <button class="btn sec" type="button" id="save-note-template" style="padding:8px 12px">Use template</button>
+      <span id="note-template-result" class="sub" style="font-size:12px">Applied on the next Resume or Rebuild.</span>
+    </div>
+
     {% if f.has_audio %}<audio id="player" controls preload="none" src="/audio/{{ f.id }}"></audio>{% endif %}
     {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}</div>{% endif %}
     {% if f.stages %}
@@ -67,7 +76,7 @@
     <div class="tabs">
       {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}
       {% if f.imported_transcript %}<button data-panel="imported" class="{% if not f.transcript and not f.summaries %}on{% endif %}">Plaud import ☁</button>{% endif %}
-      {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template|capitalize }}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
+      {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
       {% if mindmaps %}<button data-panel="mindmap" class="{% if not f.transcript and not notes %}on{% endif %}">Mind map</button>{% endif %}
       <button data-panel="ask" class="{% if not f.transcript and not f.imported_transcript and not f.summaries %}on{% endif %}">Ask</button>
     </div>
@@ -194,6 +203,18 @@
 
 {% block scripts %}
 <script>
+  document.getElementById('save-note-template')?.addEventListener('click', async () => {
+    const button=document.getElementById('save-note-template');
+    const out=document.getElementById('note-template-result');
+    button.disabled=true;out.textContent='Saving…';
+    const key=document.getElementById('note-template-select').value;
+    const response=await fetch('/api/files/{{ f.id }}/note-template',{
+      method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({key})
+    });
+    const data=await response.json();
+    if(response.ok)out.textContent='Saved. Resume to regenerate notes with this template.';
+    else{out.textContent=data.detail||'Could not save template';button.disabled=false;}
+  });
   const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   document.querySelectorAll('[data-md]').forEach(el => {
     el.innerHTML = esc(el.textContent.trim())
