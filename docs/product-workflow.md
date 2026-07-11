@@ -248,6 +248,11 @@ diarization/alignment stages, not by Whisper itself.
 | Transcript | TXT, Markdown, SRT, VTT, DOCX, PDF |
 | Notes | Markdown, TXT, DOCX, PDF |
 | Mind map | Markdown outline, PNG |
+
+The recording workspace now provides transcript TXT/SRT/VTT/DOCX/PDF exports with
+timestamp and speaker-label controls, notes Markdown/TXT/DOCX/PDF, original audio,
+and a combined Markdown archive. Converted MP3/WAV audio and PNG mind-map rendering
+remain to complete this matrix.
 | Ask result | Markdown, clipboard, saved local note |
 
 Transcript export must allow timestamps and speaker names to be toggled.

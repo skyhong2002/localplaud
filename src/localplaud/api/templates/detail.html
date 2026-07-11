@@ -21,7 +21,7 @@
       </div>
       <div style="display:flex; gap:7px">
         {% if not f.has_audio and f.origin == 'plaud' %}<button class="btn" id="import-recording-audio" type="button" style="padding:8px 12px;font-size:13px">☁ Import audio</button>{% endif %}
-        {% if f.transcript or f.summaries %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:8px 12px; font-size:13px">Export</a>{% endif %}
+        {% if f.transcript or f.summaries or f.has_audio %}<button class="btn sec" id="open-export" type="button" style="padding:8px 12px; font-size:13px">Export</button>{% endif %}
         {% if f.has_audio %}
         <button class="btn sec" style="padding:8px 12px; font-size:13px"
           hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
@@ -212,10 +212,57 @@
     {% endif %}
   </div></section>
 </div>
+{% if f.transcript or f.summaries or f.has_audio %}
+<div class="import-backdrop" id="export-backdrop" hidden>
+  <section class="import-modal" style="min-height:0;width:min(560px,100%)" role="dialog" aria-modal="true" aria-labelledby="export-title">
+    <div class="import-head"><span id="export-title">Export recording</span><button class="import-close" id="export-close" type="button" aria-label="Close">×</button></div>
+    <div class="import-body" style="gap:18px">
+      {% if f.transcript %}
+      <section>
+        <strong>Transcript</strong>
+        <div class="sub" style="font-size:12px;margin:3px 0 9px">Canonical corrected transcript when available</div>
+        <div style="display:flex;gap:14px;margin-bottom:10px;font-size:13px">
+          <label><input id="export-timestamps" type="checkbox" checked> Timestamps</label>
+          <label><input id="export-speakers" type="checkbox" checked> Speaker labels</label>
+        </div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap" data-export-group="transcript">
+          {% for fmt in ['txt','srt','vtt','docx','pdf'] %}<a class="btn sec" data-fmt="{{ fmt }}" href="#" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
+        </div>
+      </section>
+      {% endif %}
+      {% if f.summaries or f.user_notes %}
+      <section>
+        <strong>Notes</strong>
+        <div class="sub" style="font-size:12px;margin:3px 0 9px">Generated notes and saved notes, without transcript</div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          {% for fmt in ['md','txt','docx','pdf'] %}<a class="btn sec" href="/file/{{ f.id }}/export/notes.{{ fmt }}" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
+        </div>
+      </section>
+      {% endif %}
+      <section>
+        <strong>Combined archive</strong>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
+          {% if f.transcript or f.summaries %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:7px 11px">Markdown archive</a>{% endif %}
+          {% if f.has_audio %}<a class="btn sec" href="/file/{{ f.id }}/export/audio" style="padding:7px 11px">Original audio</a>{% endif %}
+        </div>
+      </section>
+    </div>
+  </section>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
+  const exportBackdrop=document.getElementById('export-backdrop');
+  document.getElementById('open-export')?.addEventListener('click',()=>{exportBackdrop.hidden=false;});
+  document.getElementById('export-close')?.addEventListener('click',()=>{exportBackdrop.hidden=true;});
+  exportBackdrop?.addEventListener('click',event=>{if(event.target===exportBackdrop)exportBackdrop.hidden=true;});
+  document.querySelectorAll('[data-export-group="transcript"] a').forEach(link=>link.addEventListener('click',event=>{
+    event.preventDefault();const timestamps=document.getElementById('export-timestamps').checked;
+    const speakers=document.getElementById('export-speakers').checked;
+    location.href=`/file/{{ f.id }}/export/transcript.${link.dataset.fmt}?timestamps=${timestamps}&speakers=${speakers}`;
+  }));
   document.getElementById('import-recording-audio')?.addEventListener('click',async()=>{
     const button=document.getElementById('import-recording-audio'),out=document.getElementById('reprocess-msg');button.disabled=true;button.textContent='Importing…';
     const response=await fetch('/api/imports/plaud/files/{{ f.id }}/audio',{method:'POST'}),data=await response.json();

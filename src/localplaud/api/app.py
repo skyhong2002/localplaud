@@ -7,7 +7,7 @@ from datetime import UTC
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
@@ -1037,6 +1037,67 @@ def export_markdown(file_id: str):
         md,
         media_type="text/markdown",
         headers={"Content-Disposition": f'attachment; filename="{file_id}.md"'},
+    )
+
+
+@app.get("/file/{file_id}/export/transcript.{fmt}")
+def export_transcript_format(
+    file_id: str,
+    fmt: str,
+    timestamps: bool = True,
+    speakers: bool = True,
+):
+    """Export the canonical transcript with explicit label options."""
+    from ..export_formats import render_transcript
+
+    if fmt not in {"txt", "srt", "vtt", "docx", "pdf"}:
+        raise HTTPException(status_code=404, detail="unsupported transcript format")
+    try:
+        content, media_type = render_transcript(
+            file_id, fmt, timestamps=timestamps, speakers=speakers
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(
+        content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{file_id}-transcript.{fmt}"'},
+    )
+
+
+@app.get("/file/{file_id}/export/notes.{fmt}")
+def export_notes_format(file_id: str, fmt: str):
+    """Export generated and user-authored notes separately from transcript."""
+    from ..export_formats import render_notes
+
+    if fmt not in {"md", "txt", "docx", "pdf"}:
+        raise HTTPException(status_code=404, detail="unsupported notes format")
+    try:
+        content, media_type = render_notes(file_id, fmt)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(
+        content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{file_id}-notes.{fmt}"'},
+    )
+
+
+@app.get("/file/{file_id}/export/audio")
+def export_original_audio(file_id: str):
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        path = Path(row.audio_path) if row and row.audio_path else None
+    if path is None or not path.exists():
+        raise HTTPException(status_code=409, detail="recording audio has not been imported")
+    return FileResponse(
+        path,
+        media_type=_AUDIO_MIME.get(path.suffix.lstrip(".").lower(), "application/octet-stream"),
+        filename=f"{file_id}{path.suffix}",
     )
 
 

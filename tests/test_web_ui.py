@@ -130,6 +130,24 @@ def test_export_markdown_endpoint(monkeypatch, tmp_path):
     assert c.get("/file/missing/export.md").status_code == 404
 
 
+def test_export_menu_and_format_endpoints(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    _seed(str(audio))
+    page = c.get("/file/r1")
+    assert "Export recording" in page.text
+    assert "Speaker labels" in page.text and "Original audio" in page.text
+    txt = c.get("/file/r1/export/transcript.txt?timestamps=false&speakers=false")
+    assert txt.status_code == 200 and "hello team" in txt.text
+    assert "SPEAKER_00" not in txt.text and "[00:01]" not in txt.text
+    assert c.get("/file/r1/export/transcript.srt").status_code == 200
+    assert c.get("/file/r1/export/transcript.docx").content.startswith(b"PK")
+    assert c.get("/file/r1/export/transcript.pdf").content.startswith(b"%PDF")
+    assert c.get("/file/r1/export/notes.txt").status_code == 200
+    assert c.get("/file/r1/export/audio").content == b"audio"
+
+
 def test_reprocess_missing_audio(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()  # r1 has no audio_path

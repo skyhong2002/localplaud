@@ -285,9 +285,10 @@ embedding raw provider credentials or model settings in each rule.
 - Build template My Space and Explore surfaces with search, categories/scenarios,
   first-party/community provenance, authorship, descriptions, and versioned install
   or copy-to-workspace behavior.
-- Consolidate copy/export actions in the file workspace. At minimum support the
-  audited transcript choices TXT/SRT/DOCX/PDF with timestamp and speaker-label
-  toggles, then retain the broader localplaud export targets below.
+- ✅ Consolidated recording exports in one modal: canonical transcript TXT/SRT/VTT/
+  DOCX/PDF with timestamp and speaker-label toggles, notes Markdown/TXT/DOCX/PDF,
+  combined Markdown archive, and original audio. Remaining broader targets: MP3/WAV
+  conversion and PNG mind maps.
 - Treat the Web App as the product, not a status viewer. CLI remains setup/ops tooling.
 - Add provider/model/profile management to Settings: connection setup, capability
   and model health, recommended local profiles, cost/privacy policy, remote workers,
@@ -295,9 +296,9 @@ embedding raw provider credentials or model settings in each rule.
   secrets masked and make the actual selected provider visible during processing.
 - Add original localplaud visual design with Plaud-like interaction density and
   information architecture; do not copy Plaud assets.
-- Export audio, TXT/Markdown/SRT/VTT/DOCX/PDF transcripts, Markdown/DOCX/PDF notes,
-  and PNG mind maps with speaker/timestamp options (Markdown mind-map export ships
-  in the combined Markdown export).
+- Export converted MP3/WAV audio and PNG mind maps. Transcript TXT/SRT/VTT/DOCX/PDF,
+  notes Markdown/TXT/DOCX/PDF, original audio, and the combined Markdown archive now
+  ship with speaker/timestamp options where applicable.
 
 ### P1 — Multi-host deployment
 

@@ -6,6 +6,7 @@ import localplaud.config as config
 import localplaud.db.session as db_session
 from localplaud.db.models import PlaudFile, Summary, Transcript, UserNote
 from localplaud.db.session import init_db, session_scope
+from localplaud.export_formats import render_notes, render_transcript
 from localplaud.exporter import export_to_file, render_markdown
 
 FILE_ID = "dab5c6ca728964152f32d93ed76c1950"
@@ -95,6 +96,29 @@ def test_export_to_file_explicit_dest(seeded_db, tmp_path):
     path = export_to_file(FILE_ID, dest)
     assert path == dest
     assert dest.exists()
+
+
+def test_transcript_portable_formats_and_options(seeded_db):
+    txt, media = render_transcript(FILE_ID, "txt", timestamps=False, speakers=False)
+    assert media == "text/plain"
+    assert b"hello there" in txt and b"[00:00]" not in txt and b"SPEAKER_00" not in txt
+
+    srt, _ = render_transcript(FILE_ID, "srt")
+    assert b"00:00:00,000 --> 00:00:01,500" in srt
+    assert b"SPEAKER_00: hello there" in srt
+    vtt, _ = render_transcript(FILE_ID, "vtt")
+    assert vtt.startswith(b"WEBVTT\n") and b"00:01:05.200" in vtt
+    docx, _ = render_transcript(FILE_ID, "docx")
+    pdf, _ = render_transcript(FILE_ID, "pdf")
+    assert docx.startswith(b"PK") and pdf.startswith(b"%PDF")
+
+
+def test_notes_portable_formats(seeded_db):
+    markdown, _ = render_notes(FILE_ID, "md")
+    assert b"## A Chat" in markdown and b"## Launch answer" in markdown
+    docx, _ = render_notes(FILE_ID, "docx")
+    pdf, _ = render_notes(FILE_ID, "pdf")
+    assert docx.startswith(b"PK") and pdf.startswith(b"%PDF")
 
 
 def test_independent_export_excludes_imported_plaud_artifacts(monkeypatch, tmp_path):
