@@ -639,6 +639,66 @@ class AutomationWebhookDelivery(Base):
     )
 
 
+class EmailIntegration(Base):
+    """Explicitly authorized SMTP email destination."""
+
+    __tablename__ = "email_integrations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120))
+    smtp_host: Mapped[str] = mapped_column(String(255))
+    smtp_port: Mapped[int] = mapped_column(Integer, default=587)
+    security: Mapped[str] = mapped_column(String(16), default="starttls")
+    allow_insecure_private: Mapped[bool] = mapped_column(default=False)
+    username: Mapped[str | None] = mapped_column(String(320), default=None)
+    password_ref: Mapped[str | None] = mapped_column(String(256), default=None)
+    from_address: Mapped[str] = mapped_column(String(320))
+    to_addresses: Mapped[list] = mapped_column(JSON, default=list)
+    subject_prefix: Mapped[str] = mapped_column(String(80), default="[localplaud]")
+    scopes: Mapped[list] = mapped_column(JSON, default=lambda: ["metadata"])
+    enabled: Mapped[bool] = mapped_column(default=True, index=True)
+    health: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class AutomationEmailDelivery(Base):
+    """Durable, independently retryable AutoFlow SMTP delivery."""
+
+    __tablename__ = "automation_email_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    automation_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_runs.id", ondelete="SET NULL"), index=True
+    )
+    integration_id: Mapped[int | None] = mapped_column(
+        ForeignKey("email_integrations.id", ondelete="SET NULL"), index=True
+    )
+    file_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(20), index=True, default="pending")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True)
+    message_id: Mapped[str] = mapped_column(String(255))
+    integration_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    payload_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "automation_run_id",
+            "integration_id",
+            name="uq_automation_email_run_integration",
+        ),
+    )
+
+
 class Chunk(Base):
     """A retrievable text chunk with its embedding, for Q&A / semantic search."""
 

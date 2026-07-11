@@ -22,6 +22,7 @@ from ..automations import (
 )
 from ..config import get_settings
 from ..db.models import (
+    AutomationEmailDelivery,
     AutomationExport,
     AutomationRule,
     AutomationRun,
@@ -62,6 +63,7 @@ class ActionsBody(BaseModel):
         default_factory=list, max_length=3
     )
     webhook_integration_ids: list[int] = Field(default_factory=list, max_length=10)
+    email_integration_ids: list[int] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
     def has_action(self):
@@ -69,6 +71,8 @@ class ActionsBody(BaseModel):
             raise ValueError("export formats must be unique")
         if len(set(self.webhook_integration_ids)) != len(self.webhook_integration_ids):
             raise ValueError("webhook integrations must be unique")
+        if len(set(self.email_integration_ids)) != len(self.email_integration_ids):
+            raise ValueError("email integrations must be unique")
         if not any(
             [
                 self.note_template_key,
@@ -77,6 +81,7 @@ class ActionsBody(BaseModel):
                 self.add_tag_ids,
                 self.export_formats,
                 self.webhook_integration_ids,
+                self.email_integration_ids,
             ]
         ):
             raise ValueError("at least one action is required")
@@ -205,6 +210,11 @@ def delete_rule(rule_id: int) -> dict:
             .values(automation_run_id=None)
         )
         session.execute(
+            update(AutomationEmailDelivery)
+            .where(AutomationEmailDelivery.automation_run_id.in_(run_ids))
+            .values(automation_run_id=None)
+        )
+        session.execute(
             update(Notification)
             .where(Notification.automation_run_id.in_(run_ids))
             .values(automation_run_id=None)
@@ -259,6 +269,13 @@ def list_runs(rule_id: int | None = None, limit: int = 100) -> dict:
                     .order_by(AutomationWebhookDelivery.id)
                 )
             )
+            emails = list(
+                session.scalars(
+                    select(AutomationEmailDelivery)
+                    .where(AutomationEmailDelivery.automation_run_id == row.id)
+                    .order_by(AutomationEmailDelivery.id)
+                )
+            )
             output.append(
                 {
                     "id": row.id,
@@ -272,6 +289,7 @@ def list_runs(rule_id: int | None = None, limit: int = 100) -> dict:
                     "created_at": row.created_at.isoformat(),
                     "exports": [_serialize_export(item) for item in exports],
                     "webhooks": [_serialize_webhook_delivery(item) for item in webhooks],
+                    "emails": [_serialize_email_delivery(item) for item in emails],
                 }
             )
         return {"runs": output}
@@ -446,3 +464,39 @@ def retry_webhook_delivery(delivery_id: int) -> dict:
         run_id = row.automation_run_id
         snapshot = dict(row.integration_snapshot or {})
     return deliver_webhook(run_id, snapshot)
+
+
+def _serialize_email_delivery(row: AutomationEmailDelivery) -> dict:
+    snapshot = row.integration_snapshot or {}
+    return {
+        "id": row.id,
+        "automation_run_id": row.automation_run_id,
+        "integration_id": row.integration_id,
+        "integration_name": snapshot.get("name") or f"Email #{row.integration_id}",
+        "file_id": row.file_id,
+        "status": row.status,
+        "attempt_count": row.attempt_count,
+        "idempotency_key": row.idempotency_key,
+        "message_id": row.message_id,
+        "scopes": snapshot.get("scopes", []),
+        "recipients": snapshot.get("to_addresses", []),
+        "payload_sha256": row.payload_sha256,
+        "error": row.error,
+        "created_at": row.created_at.isoformat(),
+        "updated_at": row.updated_at.isoformat(),
+    }
+
+
+@router.post("/emails/{delivery_id}/retry")
+def retry_email_delivery(delivery_id: int) -> dict:
+    from ..email_integrations import deliver_email
+
+    with session_scope() as session:
+        row = session.get(AutomationEmailDelivery, delivery_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="email delivery not found")
+        if row.automation_run_id is None:
+            raise HTTPException(status_code=409, detail="source automation run was deleted")
+        run_id = row.automation_run_id
+        snapshot = dict(row.integration_snapshot or {})
+    return deliver_email(run_id, snapshot)

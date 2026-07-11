@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-11)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (310 tests passing locally).
+  Active development is merged directly to `main` (313 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -387,12 +387,18 @@ embedding raw provider credentials or model settings in each rule.
   environment-only bearer secret references, HTTPS/private-network policy, health,
   last use, revocation, immutable run snapshots, bounded responses, idempotency keys,
   durable delivery status, and independent retry. Non-2xx or missing-secret failures
-  never roll back local rule actions. Remaining downstream action: email.
+  never roll back local rule actions.
+- ✅ Authorized SMTP email integrations support STARTTLS, implicit TLS, and explicitly
+  allowed private/LAN plain SMTP; environment-only password references; validated
+  From/To/subject headers; metadata/transcript/notes scopes; stable Message-ID and
+  delivery idempotency; health, last use, revocation, immutable run snapshots, payload
+  hashes, durable failures, and independent retry. Email failures or later disablement
+  never roll back local rule actions. All planned downstream action types are present.
 - ✅ Added a Discover hub for locally owned/editable AutoFlow rules, create/edit/
   delete controls, Run now, history, and notification policy, plus a responsive
-  notification inbox with an unread badge. Settings now includes the first authorized
-  integration catalog for webhooks. Remaining: broader local applications catalog and
-  externally owned read-only rules.
+  notification inbox with an unread badge. Settings now includes authorized webhook
+  and SMTP email catalogs. Remaining: broader local applications catalog and externally
+  owned read-only rules.
 - Add settings sections for account/security and active sessions, workspace
   personalization, locale/preferences, vocabulary, private sync/backup, authorized
   apps/integrations, support, and version/about. Show integration scopes, health,

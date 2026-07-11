@@ -908,6 +908,7 @@ def template_library(
 
 @app.get("/discover", response_class=HTMLResponse)
 def discover_automations(request: Request):
+    from ..email_integrations import list_email_integrations
     from ..integrations import list_webhook_integrations
     from .automations import list_rules, list_runs
 
@@ -937,6 +938,9 @@ def discover_automations(request: Request):
         "note_templates": note_templates,
         "webhook_integrations": [
             item for item in list_webhook_integrations(session) if item["enabled"]
+        ],
+        "email_integrations": [
+            item for item in list_email_integrations(session) if item["enabled"]
         ],
     }
     return templates.TemplateResponse(request=request, name="discover.html", context=ctx)
@@ -1392,6 +1396,7 @@ def status_page(request: Request):
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
+    from ..email_integrations import list_email_integrations
     from ..integrations import list_webhook_integrations
     from ..providers.contracts import ProviderStage
     from ..providers.hardware import hardware_recommendations
@@ -1415,6 +1420,7 @@ def settings_page(request: Request):
             "profiles": list_profiles(session),
             "workers": list_workers(session),
             "webhook_integrations": list_webhook_integrations(session),
+            "email_integrations": list_email_integrations(session),
             "provider_stages": [stage.value for stage in ProviderStage],
             "note_templates": [
                 {

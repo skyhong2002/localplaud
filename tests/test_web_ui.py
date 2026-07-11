@@ -64,6 +64,15 @@ def test_dashboard_renders(monkeypatch, tmp_path):
     assert "Total audio" in r.text  # stat tiles present
 
 
+def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    response = c.get("/")
+    assert response.status_code == 200
+    assert '[hidden] { display:none !important; }' in response.text
+    assert 'id="import-backdrop" hidden' in response.text
+    assert "document.getElementById('import-close').addEventListener('click'" in response.text
+
+
 def test_browser_runtime_is_vendored_and_checksum_pinned(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     page = c.get("/")

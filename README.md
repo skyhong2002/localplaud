@@ -58,7 +58,8 @@ produces the required transcript TXT/SRT/VTT formats with timestamp/speaker
 controls. Existing notes, original-audio, and Markdown archive exports remain
 available as conveniences. Durable provider/model/execution profiles, explicit
 stage fallbacks, remote workers, local AutoFlow rules, inbox notifications,
-TXT/SRT/VTT AutoFlow exports, and scoped authorized webhooks are also implemented.
+TXT/SRT/VTT AutoFlow exports, scoped authorized webhooks, and authorized SMTP email
+delivery are also implemented.
 The remaining work centers on production diarization/alignment acceptance across
 real hardware, broader integrations, and Plaud-level Web App polish. Plaud-produced
 transcripts and summaries may be imported for
