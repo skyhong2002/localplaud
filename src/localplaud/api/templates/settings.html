@@ -78,6 +78,7 @@
         <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ m.display_name }}</strong><span><button class="btn sec" style="padding:5px 8px" onclick="testModel({{ m.id }})">Test</button> <button class="btn sec" style="padding:5px 8px" onclick="editModel({{ m.id }})">Edit</button> <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="removeItem('models',{{ m.id }})">Delete</button></span></div>
         <div class="sub" style="font-size:11px;margin-top:3px">{{ m.connection_key }} · <code>{{ m.model_key }}</code></div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">{% for capability in m.capabilities.stages or [] %}<span class="chip">{{ capability.stage }}</span>{% endfor %}</div>
+        {% set pricing=(m.capabilities.metadata or {}).pricing or {} %}{% if pricing %}<div class="sub" style="font-size:10.5px;margin-top:6px">Pricing · input {{ pricing.input_per_million_tokens_usd or 0 }}/M · output {{ pricing.output_per_million_tokens_usd or 0 }}/M · audio {{ pricing.audio_per_minute_usd or 0 }}/min</div>{% endif %}
         <div id="model-health-{{ m.id }}" class="sub" style="font-size:11px;margin-top:7px">{{ (m.capabilities.health or {}).status or 'not tested' }}</div>
       </div>
       {% endfor %}
@@ -146,6 +147,9 @@
       <input class="search-input" name="model_key" placeholder="Model identifier" required>
       <input class="search-input" name="display_name" placeholder="Display name" required>
       <div class="sub" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">{% for stage in provider_stages %}<label><input type="checkbox" name="capability" value="{{ stage }}"> {{ stage }}</label>{% endfor %}</div>
+      <input class="search-input" type="number" min="0" step="0.000001" name="input_price" placeholder="Input $ / 1M tokens (optional)">
+      <input class="search-input" type="number" min="0" step="0.000001" name="output_price" placeholder="Output $ / 1M tokens (optional)">
+      <input class="search-input" type="number" min="0" step="0.000001" name="audio_price" placeholder="Audio $ / minute (optional)">
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Add model</button><span id="model-result" class="sub"></span></div>
     </form>
   </div>
@@ -276,7 +280,8 @@ document.getElementById('connection-form').addEventListener('submit',async e=>{
 document.getElementById('model-form').addEventListener('submit',async e=>{
   e.preventDefault();const f=new FormData(e.target);const select=e.target.elements.connection_id;const option=select.options[select.selectedIndex];
   const stages=f.getAll('capability').map(stage=>({stage,languages:['*'],timestamps:stage==='transcribe'||stage==='align'?'word':'none',speaker_output:stage==='diarize',batch:true,streaming:false}));
-  const body={connection_id:Number(f.get('connection_id')),model_key:f.get('model_key'),display_name:f.get('display_name'),enabled:true,capabilities:{execution_target:option.dataset.target,data_egress:option.dataset.egress==='true',health:{status:'unknown'},stages}};
+  const pricing={input_per_million_tokens_usd:Number(f.get('input_price')||0),output_per_million_tokens_usd:Number(f.get('output_price')||0),audio_per_minute_usd:Number(f.get('audio_price')||0)};for(const key of Object.keys(pricing))if(!pricing[key])delete pricing[key];
+  const body={connection_id:Number(f.get('connection_id')),model_key:f.get('model_key'),display_name:f.get('display_name'),enabled:true,capabilities:{execution_target:option.dataset.target,data_egress:option.dataset.egress==='true',health:{status:'unknown'},stages,metadata:{pricing}}};
   const r=await fetch('/api/providers/models',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const out=document.getElementById('model-result');
   if(r.ok){out.textContent='Added. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not add model';}
 });

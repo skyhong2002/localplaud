@@ -10,6 +10,7 @@
   <div class="tile"><div class="k">In progress</div><div class="v">{{ stats.processing }}</div></div>
   <div class="tile"><div class="k">Total audio</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
 </div>
+<div class="sub" style="margin:8px 2px 0">{{ usage_totals.attempts }} recorded stage attempts · {{ usage_totals.latency_hours }} execution hours{% if usage_totals.estimated_cost_usd %} · estimated provider cost ${{ usage_totals.estimated_cost_usd }}{% else %} · no priced provider usage recorded{% endif %}</div>
 
 <div class="cols" style="grid-template-columns:1fr 1fr; gap:16px">
   <div class="panel">

@@ -380,4 +380,9 @@ Provider/model/profile management and the versioned remote-worker protocol
 are implemented. Local hardware/runtime detection now provides evidence-backed,
 ranked Apple MLX, NVIDIA CUDA, and CPU ASR recommendations with guarded one-click
 profile creation that preserves the current non-ASR stages and policy. Cross-provider
-fallback/cost accounting and the remaining real-hardware acceptance matrix are open.
+fallback, cost-ceiling enforcement, and the remaining real-hardware acceptance matrix
+are open.
+Each concrete pipeline attempt is now retained in an append-only usage ledger with
+profile snapshot, provider/model, outcome, latency, normalized audio/text/token usage,
+and catalog-driven estimated cost. Recording and Status surfaces expose both attempts
+and aggregate totals; estimates remain zero when no explicit model pricing is stored.

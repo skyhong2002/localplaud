@@ -27,6 +27,7 @@ from ..db.models import (
     PlaudFile,
     RecordingProfileOverride,
     Speaker,
+    StageAttempt,
     StageName,
     StageRun,
     StageStatus,
@@ -84,7 +85,11 @@ async def _auth_gate(request: Request, call_next):
     """If api.auth_token is configured, require it on every request (except the
     health check) via an X-Auth-Token header or ?token= query param."""
     token = get_settings().api.auth_token
-    if token and request.url.path != "/healthz" and not request.url.path.startswith("/api/worker/v1"):
+    if (
+        token
+        and request.url.path != "/healthz"
+        and not request.url.path.startswith("/api/worker/v1")
+    ):
         supplied = request.headers.get("x-auth-token") or request.query_params.get("token")
         if supplied != token:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -144,9 +149,7 @@ def _file_summary(r: PlaudFile) -> dict:
         "retry": {
             "count": r.pipeline_retry_count or 0,
             "maximum": settings.pipeline.retry_max_attempts,
-            "next_at": (
-                r.pipeline_next_retry_at.isoformat() if r.pipeline_next_retry_at else None
-            ),
+            "next_at": (r.pipeline_next_retry_at.isoformat() if r.pipeline_next_retry_at else None),
             "exhausted": (
                 r.status.value in _ATTENTION_STATES
                 and (r.pipeline_retry_count or 0) >= settings.pipeline.retry_max_attempts
@@ -216,11 +219,13 @@ def _parse_library_params(
         except (TypeError, ValueError):
             scene_val = None
     view_val = view if view in {"all", "trash", "uncategorized"} else "all"
+
     def optional_int(value: str | None) -> int | None:
         try:
             return int(value) if value not in (None, "") else None
         except (TypeError, ValueError):
             return None
+
     return {
         "q": q or "",
         "sort": sort_key,
@@ -263,9 +268,12 @@ def _library_query(params: dict):
 
 def _library_facets(session, params: dict) -> dict:
     """Cheap aggregate context: trash count and distinct capture-source scenes."""
-    trash_count = session.scalar(
-        select(func.count()).select_from(PlaudFile).where(PlaudFile.is_trash.is_(True))
-    ) or 0
+    trash_count = (
+        session.scalar(
+            select(func.count()).select_from(PlaudFile).where(PlaudFile.is_trash.is_(True))
+        )
+        or 0
+    )
     scene_rows = session.execute(
         select(PlaudFile.scene, func.count())
         .where(PlaudFile.is_trash.is_(False))
@@ -322,6 +330,44 @@ def api_files(
         rows = session.scalars(_library_query(params).limit(300))
         data = [_file_summary(r) for r in rows]
     return JSONResponse({"files": data})
+
+
+@app.get("/api/files/{file_id}/usage")
+def file_usage(file_id: str) -> dict:
+    with session_scope() as session:
+        if session.get(PlaudFile, file_id) is None:
+            raise HTTPException(status_code=404, detail="recording not found")
+        rows = list(
+            session.scalars(
+                select(StageAttempt)
+                .where(StageAttempt.file_id == file_id)
+                .order_by(StageAttempt.id)
+            )
+        )
+    attempts = [
+        {
+            "stage": row.stage.value,
+            "attempt": row.attempt,
+            "status": row.status.value,
+            "provider": row.provider,
+            "model": row.model,
+            "latency_ms": row.latency_ms,
+            "usage": row.usage or {},
+            "estimated_cost_usd": row.estimated_cost_usd or 0,
+            "started_at": row.started_at.isoformat(),
+            "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        }
+        for row in rows
+    ]
+    return {
+        "file_id": file_id,
+        "attempts": attempts,
+        "totals": {
+            "attempts": len(attempts),
+            "latency_ms": sum(row.latency_ms or 0 for row in rows),
+            "estimated_cost_usd": round(sum(row.estimated_cost_usd or 0 for row in rows), 6),
+        },
+    }
 
 
 class OrganizationItemBody(BaseModel):
@@ -389,12 +435,9 @@ def _organization_summary(session) -> dict:
     )
     return {
         "folders": [
-            _organization_item(row) | {"count": folder_counts.get(row.id, 0)}
-            for row in folders
+            _organization_item(row) | {"count": folder_counts.get(row.id, 0)} for row in folders
         ],
-        "tags": [
-            _organization_item(row) | {"count": tag_counts.get(row.id, 0)} for row in tags
-        ],
+        "tags": [_organization_item(row) | {"count": tag_counts.get(row.id, 0)} for row in tags],
     }
 
 
@@ -441,7 +484,9 @@ def delete_folder(item_id: int) -> dict:
         row = session.get(Folder, item_id)
         if row is None:
             raise HTTPException(status_code=404, detail="not found")
-        session.execute(update(PlaudFile).where(PlaudFile.folder_id == item_id).values(folder_id=None))
+        session.execute(
+            update(PlaudFile).where(PlaudFile.folder_id == item_id).values(folder_id=None)
+        )
         session.delete(row)
     return {"deleted": True}
 
@@ -485,7 +530,11 @@ def organize_files(body: OrganizeFilesBody) -> dict:
             if folder is None:
                 raise HTTPException(status_code=404, detail="folder not found")
         requested_tag_ids = add_ids | remove_ids
-        tags = list(session.scalars(select(Tag).where(Tag.id.in_(requested_tag_ids)))) if requested_tag_ids else []
+        tags = (
+            list(session.scalars(select(Tag).where(Tag.id.in_(requested_tag_ids))))
+            if requested_tag_ids
+            else []
+        )
         if {tag.id for tag in tags} != requested_tag_ids:
             raise HTTPException(status_code=404, detail="one or more tags were not found")
         tags_by_id = {tag.id: tag for tag in tags}
@@ -544,14 +593,20 @@ def delete_recording_local_processing(file_id: str) -> dict:
 
 def _stats(session) -> dict:
     total = session.scalar(select(func.count()).select_from(PlaudFile)) or 0
-    done = session.scalar(
-        select(func.count()).select_from(PlaudFile).where(PlaudFile.status == FileStatus.done)
-    ) or 0
-    processing = session.scalar(
-        select(func.count())
-        .select_from(PlaudFile)
-        .where(PlaudFile.status.in_([FileStatus.processing, FileStatus.downloading]))
-    ) or 0
+    done = (
+        session.scalar(
+            select(func.count()).select_from(PlaudFile).where(PlaudFile.status == FileStatus.done)
+        )
+        or 0
+    )
+    processing = (
+        session.scalar(
+            select(func.count())
+            .select_from(PlaudFile)
+            .where(PlaudFile.status.in_([FileStatus.processing, FileStatus.downloading]))
+        )
+        or 0
+    )
     total_ms = session.scalar(select(func.coalesce(func.sum(PlaudFile.duration_ms), 0))) or 0
     return {
         "total": total,
@@ -583,25 +638,27 @@ def home(request: Request):
                 .limit(6)
             )
         )
-        metadata_only = session.scalar(
-            select(func.count())
-            .select_from(PlaudFile)
-            .where(PlaudFile.status == FileStatus.metadata_only)
-        ) or 0
-        audio_local = session.scalar(
-            select(func.count())
-            .select_from(PlaudFile)
-            .where(PlaudFile.audio_path.is_not(None))
-        ) or 0
+        metadata_only = (
+            session.scalar(
+                select(func.count())
+                .select_from(PlaudFile)
+                .where(PlaudFile.status == FileStatus.metadata_only)
+            )
+            or 0
+        )
+        audio_local = (
+            session.scalar(
+                select(func.count()).select_from(PlaudFile).where(PlaudFile.audio_path.is_not(None))
+            )
+            or 0
+        )
         import_run = session.scalar(
             select(ImportRun).order_by(ImportRun.created_at.desc()).limit(1)
         )
         automation_run = session.scalar(
             select(AutomationRun).order_by(AutomationRun.created_at.desc()).limit(1)
         )
-        automation_count = session.scalar(
-            select(func.count()).select_from(AutomationRun)
-        ) or 0
+        automation_count = session.scalar(select(func.count()).select_from(AutomationRun)) or 0
         stats = _stats(session)
         recent_files = [_file_summary(row) for row in recent_rows]
         attention_files = [_file_summary(row) for row in attention_rows]
@@ -681,9 +738,7 @@ def index(
         "organization": organization,
         "states": [s.value for s in FileStatus],
         "attention_states": _ATTENTION_STATES,
-        "ask_threads": [
-            {"id": row.id, "title": row.title} for row in recent_ask_threads
-        ],
+        "ask_threads": [{"id": row.id, "title": row.title} for row in recent_ask_threads],
         "selected_ask_thread": selected_ask_thread_data,
     }
     return templates.TemplateResponse(request=request, name="index.html", context=ctx)
@@ -837,7 +892,9 @@ def discover_automations(request: Request):
         profiles = [
             {"id": row.id, "name": row.name, "version": row.version}
             for row in session.scalars(
-                select(ExecutionProfile).order_by(ExecutionProfile.name, ExecutionProfile.version.desc())
+                select(ExecutionProfile).order_by(
+                    ExecutionProfile.name, ExecutionProfile.version.desc()
+                )
             )
         ]
         note_templates = [
@@ -934,11 +991,7 @@ def file_detail(
         if r is None:
             return HTMLResponse("Not found", status_code=404)
         # Default template first, then the rest.
-        stale_stages = {
-            run.stage
-            for run in r.stage_runs
-            if (run.detail or {}).get("stale")
-        }
+        stale_stages = {run.stage for run in r.stage_runs if (run.detail or {}).get("stale")}
         summaries = sorted(
             [
                 {
@@ -981,12 +1034,19 @@ def file_detail(
             for row in r.transcript_revisions
             if raw_row is not None and row.source == raw_row.source
         ]
-        preview_revision = next(
-            (row for row in revision_rows if row.revision == revision), None
+        attempt_rows = list(
+            session.scalars(
+                select(StageAttempt)
+                .where(StageAttempt.file_id == file_id)
+                .order_by(StageAttempt.id.desc())
+                .limit(50)
+            )
         )
+        preview_revision = next((row for row in revision_rows if row.revision == revision), None)
         # Canonical segments (latest correction wins) drive the speaker legend.
         canonical_segments = (
-            corrected.segments if corrected is not None
+            corrected.segments
+            if corrected is not None
             else (raw_row.segments if raw_row is not None else [])
         )
         speaker_names = display_names(session, r.id)
@@ -1105,6 +1165,31 @@ def file_detail(
                 }
                 for stage in r.stage_runs
             ],
+            "usage": {
+                "estimated_cost_usd": round(
+                    sum(item.estimated_cost_usd or 0 for item in attempt_rows), 6
+                ),
+                "latency_ms": sum(item.latency_ms or 0 for item in attempt_rows),
+                "audio_seconds": round(
+                    sum(
+                        float((item.usage or {}).get("audio_seconds") or 0) for item in attempt_rows
+                    ),
+                    2,
+                ),
+                "attempts": [
+                    {
+                        "stage": item.stage.value,
+                        "attempt": item.attempt,
+                        "status": item.status.value,
+                        "provider": item.provider,
+                        "model": item.model,
+                        "latency_ms": item.latency_ms,
+                        "usage": item.usage or {},
+                        "estimated_cost_usd": item.estimated_cost_usd or 0,
+                    }
+                    for item in attempt_rows
+                ],
+            },
             "local_data": {
                 "audio_bytes": (
                     Path(r.audio_path).stat().st_size
@@ -1112,9 +1197,7 @@ def file_detail(
                     else 0
                 ),
                 "transcripts": sum(item.source == "local" for item in r.transcripts),
-                "revisions": sum(
-                    item.source == "local" for item in r.transcript_revisions
-                ),
+                "revisions": sum(item.source == "local" for item in r.transcript_revisions),
                 "notes": sum(item.source == "local" for item in r.summaries),
                 "chunks": len(r.chunks),
                 "stages": len(r.stage_runs),
@@ -1138,8 +1221,10 @@ def file_detail(
             }
             for profile in profile_rows
         ]
-        f["profile_id"] = override.profile_id if override is not None else next(
-            (profile.id for profile in profile_rows if profile.is_system_default), None
+        f["profile_id"] = (
+            override.profile_id
+            if override is not None
+            else next((profile.id for profile in profile_rows if profile.is_system_default), None)
         )
         f["note_templates"] = [
             {
@@ -1189,9 +1274,7 @@ def status_page(request: Request):
     settings = get_settings()
     with session_scope() as session:
         counts = dict(
-            session.execute(
-                select(PlaudFile.status, func.count()).group_by(PlaudFile.status)
-            ).all()
+            session.execute(select(PlaudFile.status, func.count()).group_by(PlaudFile.status)).all()
         )
         stats = _stats(session)
         stage_counts = list(
@@ -1213,6 +1296,13 @@ def status_page(request: Request):
                 .limit(20)
             ).all()
         )
+        usage_totals = session.execute(
+            select(
+                func.coalesce(func.sum(StageAttempt.estimated_cost_usd), 0),
+                func.coalesce(func.sum(StageAttempt.latency_ms), 0),
+                func.count(StageAttempt.id),
+            )
+        ).one()
     status_rows = [(st.value, counts.get(st, 0)) for st in FileStatus]
     checks = _health_checks(settings)
     cfg = {
@@ -1233,9 +1323,7 @@ def status_page(request: Request):
         "stats": stats,
         "checks": checks,
         "cfg": cfg,
-        "stage_rows": [
-            (stage.value, state.value, count) for stage, state, count in stage_counts
-        ],
+        "stage_rows": [(stage.value, state.value, count) for stage, state, count in stage_counts],
         "stage_issues": [
             {
                 "file_id": run.file_id,
@@ -1246,6 +1334,11 @@ def status_page(request: Request):
             }
             for run, filename in recent_stage_issues
         ],
+        "usage_totals": {
+            "estimated_cost_usd": round(float(usage_totals[0]), 4),
+            "latency_hours": round(float(usage_totals[1]) / 3_600_000, 2),
+            "attempts": usage_totals[2],
+        },
     }
     return templates.TemplateResponse(request=request, name="status.html", context=ctx)
 
@@ -1303,7 +1396,9 @@ def settings_page(request: Request):
 def notes_page(request: Request):
     with session_scope() as session:
         rows = list(
-            session.scalars(select(UserNote).order_by(UserNote.updated_at.desc(), UserNote.id.desc()))
+            session.scalars(
+                select(UserNote).order_by(UserNote.updated_at.desc(), UserNote.id.desc())
+            )
         )
         file_names = {}
         for row in rows:
@@ -1343,9 +1438,24 @@ def _health_checks(settings) -> list[dict]:
     diarize_ok, diarize_detail = diarization_health(settings.diarize)
     add(f"diarization · {settings.diarize.provider}", diarize_ok, diarize_detail)
     for label, builder in (
-        (f"asr · {settings.asr.provider}", lambda: __import__("localplaud.asr.registry", fromlist=["build_provider"]).build_provider(settings.asr.provider, settings.asr)),
-        (f"llm · {settings.llm.provider}", lambda: __import__("localplaud.llm.base", fromlist=["build_llm"]).build_llm(settings.llm)),
-        (f"embeddings · {settings.embeddings.provider}", lambda: __import__("localplaud.embeddings.base", fromlist=["build_embedder"]).build_embedder(settings.embeddings)),
+        (
+            f"asr · {settings.asr.provider}",
+            lambda: __import__(
+                "localplaud.asr.registry", fromlist=["build_provider"]
+            ).build_provider(settings.asr.provider, settings.asr),
+        ),
+        (
+            f"llm · {settings.llm.provider}",
+            lambda: __import__("localplaud.llm.base", fromlist=["build_llm"]).build_llm(
+                settings.llm
+            ),
+        ),
+        (
+            f"embeddings · {settings.embeddings.provider}",
+            lambda: __import__(
+                "localplaud.embeddings.base", fromlist=["build_embedder"]
+            ).build_embedder(settings.embeddings),
+        ),
     ):
         try:
             provider = builder()
@@ -1528,7 +1638,9 @@ def reprocess(file_id: str, force: bool = False):
         r.status = FileStatus.downloaded
         reset_pipeline_retry(r)
 
-    threading.Thread(target=process_file, args=(file_id,), kwargs={"force": force}, daemon=True).start()
+    threading.Thread(
+        target=process_file, args=(file_id,), kwargs={"force": force}, daemon=True
+    ).start()
     return HTMLResponse('<span style="color:var(--warn)">re-running… refresh in a moment</span>')
 
 
@@ -1559,7 +1671,8 @@ def rename_speaker(file_id: str, key: str = Form(...), name: str = Form("")):
         raw_row = _canonical_raw_row(r, settings)
         corrected = _canonical_revision(r, raw_row)
         segments = (
-            corrected.segments if corrected is not None
+            corrected.segments
+            if corrected is not None
             else (raw_row.segments if raw_row is not None else [])
         )
         existing = session.scalar(

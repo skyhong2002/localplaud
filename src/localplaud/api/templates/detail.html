@@ -88,7 +88,7 @@
     {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}<div style="font-size:11.5px;margin-top:5px">{% if f.retry.exhausted %}Automatic retries exhausted after {{ f.retry.count }} failed cycles. Resume retries immediately and resets the budget.{% elif f.retry.next_at %}Automatic retry {{ f.retry.count + 1 }} of {{ f.retry.maximum }} scheduled for {{ f.retry.next_at }}.{% else %}Resume retries immediately.{% endif %}</div></div>{% endif %}
     {% if f.stages %}
     <details class="panel" style="margin-top:12px">
-      <summary style="cursor:pointer;font-weight:650">Processing details</summary>
+      <summary style="cursor:pointer;font-weight:650">Processing details <span class="sub" style="font-size:11px">· {{ f.usage.attempts|length }} attempts · {{ (f.usage.latency_ms / 1000)|round(1) }}s{% if f.usage.estimated_cost_usd %} · ~$ {{ f.usage.estimated_cost_usd }}{% endif %}</span></summary>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
         {% for stage in f.stages %}
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
@@ -103,6 +103,7 @@
         </div>
         {% endfor %}
       </div>
+      {% if f.usage.attempts %}<details style="margin-top:12px;border-top:1px solid var(--border);padding-top:9px"><summary class="sub" style="cursor:pointer">Attempt usage ledger</summary><div style="display:grid;gap:7px;margin-top:8px">{% for attempt in f.usage.attempts[:12] %}<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px"><span>{{ attempt.stage }} #{{ attempt.attempt }} · {{ attempt.provider or 'local' }}{% if attempt.model %}:{{ attempt.model }}{% endif %}</span><span class="sub">{{ ((attempt.latency_ms or 0) / 1000)|round(2) }}s{% if attempt.usage.audio_seconds %} · {{ attempt.usage.audio_seconds|round(1) }} audio s{% endif %}{% if attempt.usage.input_tokens %} · {{ attempt.usage.input_tokens }} in{% endif %}{% if attempt.usage.output_tokens %} / {{ attempt.usage.output_tokens }} out{% endif %}{% if attempt.estimated_cost_usd %} · ~$ {{ attempt.estimated_cost_usd }}{% endif %}</span></div>{% endfor %}</div></details>{% endif %}
     </details>
     {% endif %}
 

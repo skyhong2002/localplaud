@@ -170,6 +170,38 @@ def migrate_pipeline_retry_schema(engine: Engine) -> list[str]:
     return migrated
 
 
+def migrate_stage_attempt_schema(engine: Engine) -> list[str]:
+    """Create the append-only stage usage ledger for an existing library."""
+    if engine.dialect.name != "sqlite":
+        return []
+    if "stage_attempts" in inspect(engine).get_table_names():
+        return []
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE stage_attempts (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                file_id VARCHAR(64) NOT NULL REFERENCES plaud_files(id) ON DELETE CASCADE,
+                stage VARCHAR(32) NOT NULL,
+                attempt INTEGER NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                provider VARCHAR(64),
+                model VARCHAR(128),
+                resolved_profile_snapshot JSON,
+                usage JSON NOT NULL DEFAULT '{}',
+                estimated_cost_usd FLOAT NOT NULL DEFAULT 0,
+                latency_ms BIGINT,
+                error TEXT,
+                started_at DATETIME NOT NULL,
+                completed_at DATETIME,
+                CONSTRAINT uq_stage_attempt_number UNIQUE (file_id, stage, attempt)
+            )
+        """))
+        connection.execute(
+            text("CREATE INDEX ix_stage_attempts_file_id ON stage_attempts (file_id)")
+        )
+    return ["stage_attempts"]
+
+
 def migrate_vocabulary_schema(engine: Engine) -> list[str]:
     """Create the durable custom-vocabulary table for an existing library."""
     if engine.dialect.name != "sqlite":

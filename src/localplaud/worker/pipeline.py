@@ -28,6 +28,7 @@ from ..db.models import (
     FileStatus,
     PlaudFile,
     ProviderConnection,
+    StageAttempt,
     StageName,
     StageRun,
     StageStatus,
@@ -37,6 +38,7 @@ from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
 from ..providers.service import resolve_recording_profile
+from ..providers.usage import estimate_cost, normalize_usage, pricing_for_stage
 from ..remote.client import RemoteWorkerClient
 from ..remote.protocol import InputReference, JobStage, JobSubmitRequest
 from ..store.files import wav_path
@@ -48,9 +50,7 @@ log = logging.getLogger(__name__)
 _PROFILE_SNAPSHOT: ContextVar[dict | None] = ContextVar("resolved_profile_snapshot", default=None)
 
 
-def _settings_for_stage(
-    settings: Settings, snapshot: dict, stage: str
-) -> Settings:
+def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Settings:
     """Project one resolved stage selection onto an isolated Settings copy."""
     selected = snapshot.get("stages", {}).get(stage)
     if not selected:
@@ -79,7 +79,11 @@ def _settings_for_stage(
         family_config.model = selected.get("model")
 
     for key, value in selected.get("options", {}).items():
-        target = provider_config if provider_config is not None and hasattr(provider_config, key) else family_config
+        target = (
+            provider_config
+            if provider_config is not None and hasattr(provider_config, key)
+            else family_config
+        )
         if hasattr(target, key):
             setattr(target, key, value)
 
@@ -148,7 +152,12 @@ def _run_remote_stage(
         config = dict(connection.config or {})
     fingerprint = hashlib.sha256(
         json.dumps(
-            {"file": file_id, "stage": stage, "selection": selection, "inputs": [i.sha256 for i in inputs]},
+            {
+                "file": file_id,
+                "stage": stage,
+                "selection": selection,
+                "inputs": [i.sha256 for i in inputs],
+            },
             sort_keys=True,
         ).encode()
     ).hexdigest()
@@ -180,6 +189,7 @@ def _set_stage(
     model: str | None = None,
     artifact_source: str | None = None,
     detail: dict | None = None,
+    usage: dict | None = None,
     error: str | None = None,
 ) -> None:
     now = datetime.now(UTC)
@@ -197,6 +207,20 @@ def _set_stage(
             run.attempts = (run.attempts or 0) + 1
             run.started_at = now
             run.completed_at = None
+            selection = (snapshot or {}).get("stages", {}).get(stage.value) or {}
+            session.add(
+                StageAttempt(
+                    file_id=file_id,
+                    stage=stage,
+                    attempt=run.attempts,
+                    status=StageStatus.running,
+                    provider=(selection.get("connection") or "").split(":", 1)[-1]
+                    or None,
+                    model=selection.get("model"),
+                    resolved_profile_snapshot=snapshot,
+                    started_at=now,
+                )
+            )
         run.status = status
         if provider is not None:
             run.provider = provider
@@ -214,6 +238,36 @@ def _set_stage(
             StageStatus.skipped,
         }:
             run.completed_at = now
+            attempt = session.scalar(
+                select(StageAttempt).where(
+                    StageAttempt.file_id == file_id,
+                    StageAttempt.stage == stage,
+                    StageAttempt.attempt == run.attempts,
+                    StageAttempt.status == StageStatus.running,
+                )
+            )
+            if attempt is not None:
+                started = attempt.started_at
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=UTC)
+                latency_ms = max(0, int((now - started).total_seconds() * 1000))
+                normalized = normalize_usage(usage)
+                pricing = pricing_for_stage(session, snapshot, stage.value)
+                cost = estimate_cost(normalized, pricing)
+                attempt.status = status
+                attempt.provider = run.provider or attempt.provider
+                attempt.model = run.model or attempt.model
+                attempt.usage = normalized
+                attempt.estimated_cost_usd = cost
+                attempt.latency_ms = latency_ms
+                attempt.error = run.error
+                attempt.completed_at = now
+                run.detail = dict(run.detail or {}) | {
+                    "usage": normalized,
+                    "latency_ms": latency_ms,
+                    "estimated_cost_usd": cost,
+                    "pricing": pricing,
+                }
 
 
 def _begin_stage(file_id: str, stage: StageName) -> None:
@@ -286,9 +340,7 @@ def _select_raw_transcript(row: PlaudFile, settings: Settings) -> TranscriptRow 
     return local[-1] if local else None
 
 
-def _apply_speaker_display_names(
-    transcript: Transcript, names: dict[str, str]
-) -> Transcript:
+def _apply_speaker_display_names(transcript: Transcript, names: dict[str, str]) -> Transcript:
     """Use editable names in derived artifacts without mutating stored segments."""
     for segment in transcript.segments:
         if segment.speaker:
@@ -297,6 +349,12 @@ def _apply_speaker_display_names(
             if word.speaker:
                 word.speaker = names.get(word.speaker, word.speaker)
     return transcript
+
+
+def _audio_seconds(row: PlaudFile, transcript: Transcript | None = None) -> float:
+    if transcript is not None and transcript.duration is not None:
+        return float(transcript.duration)
+    return float(row.duration_ms or 0) / 1000
 
 
 def reset_pipeline_retry(row: PlaudFile) -> None:
@@ -365,6 +423,7 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         StageName.convert,
                         provider="ffmpeg",
                         artifact_source="local",
+                        usage={"audio_seconds": _audio_seconds(row)},
                     )
                 except Exception as exc:
                     _fail_stage(file_id, StageName.convert, exc)
@@ -421,6 +480,10 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         provider=transcript.provider,
                         model=transcript.model,
                         artifact_source="local",
+                        usage={
+                            "audio_seconds": _audio_seconds(row, transcript),
+                            "output_chars": len(transcript.text),
+                        },
                     )
                 except Exception as exc:
                     _fail_stage(file_id, StageName.transcribe, exc)
@@ -480,6 +543,11 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         else diarize_settings.diarize.model
                     ),
                     artifact_source="local",
+                    usage={
+                        "audio_seconds": _audio_seconds(row, transcript),
+                        "input_chars": len(transcript.text),
+                        "output_chars": len(transcript.text),
+                    },
                 )
             except DiarizationUnavailable as exc:
                 log.warning("Diarization degraded for %s: %s", file_id, exc)
@@ -560,6 +628,15 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                             "transcript": transcript_lineage,
                             "auto_template": auto_recommendation,
                         },
+                        usage={
+                            "input_chars": len(transcript.text),
+                            "output_chars": len(result.get("content_md") or ""),
+                            "requests": (
+                                (result.get("coverage") or {}).get("map_calls", 0)
+                                + (result.get("coverage") or {}).get("reduce_calls", 0)
+                                + 1
+                            ),
+                        },
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript remains usable
                     log.exception("Summarization failed for %s", file_id)
@@ -615,6 +692,15 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                             "transcript": transcript_lineage,
                             "auto_template": auto_recommendation,
                         },
+                        usage={
+                            "input_chars": len(transcript.text),
+                            "output_chars": len(result.get("content_md") or ""),
+                            "requests": (
+                                (result.get("detail") or {}).get("map_calls", 0)
+                                + (result.get("detail") or {}).get("reduce_calls", 0)
+                                + 1
+                            ),
+                        },
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript/notes stay usable
                     log.exception("Mind map generation failed for %s", file_id)
@@ -662,6 +748,10 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
                         model=model_name,
                         artifact_source="local",
                         detail={"transcript": transcript_lineage},
+                        usage={
+                            "input_chars": len(transcript.text),
+                            "input_items": len(transcript.segments),
+                        },
                     )
                 except Exception as exc:  # noqa: BLE001 - notes remain usable
                     log.exception("Indexing failed for %s", file_id)
@@ -732,9 +822,7 @@ def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str]
             return None
         transcript = _rehydrate_transcript(selected)
         names = {
-            speaker.key: speaker.display_name
-            for speaker in row.speakers
-            if speaker.display_name
+            speaker.key: speaker.display_name for speaker in row.speakers if speaker.display_name
         }
         return (_apply_speaker_display_names(transcript, names), selected.source)
 
@@ -771,10 +859,7 @@ def _has_summary(file_id: str, template: str) -> bool:
         return any(
             s.template == template
             and s.source == "local"
-            and (
-                template == "mind_map"
-                or (s.template_version or 1) == expected_version
-            )
+            and (template == "mind_map" or (s.template_version or 1) == expected_version)
             for s in row.summaries
         )
 
@@ -893,9 +978,7 @@ def _persist_chunks(
     return model_name
 
 
-def _persist_remote_chunks(
-    file_id: str, payload: dict, lineage: dict | None = None
-) -> str | None:
+def _persist_remote_chunks(file_id: str, payload: dict, lineage: dict | None = None) -> str | None:
     chunks = payload.get("chunks", [])
     vectors = payload.get("vectors_base64", [])
     if len(chunks) != len(vectors):

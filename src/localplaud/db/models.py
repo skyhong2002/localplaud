@@ -586,6 +586,35 @@ class StageRun(Base):
     __table_args__ = (UniqueConstraint("file_id", "stage", name="uq_stage_run_file_stage"),)
 
 
+class StageAttempt(Base):
+    """Append-only execution and usage ledger for a concrete stage attempt."""
+
+    __tablename__ = "stage_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), index=True
+    )
+    stage: Mapped[StageName] = mapped_column(Enum(StageName, native_enum=False, length=32))
+    attempt: Mapped[int] = mapped_column(Integer)
+    status: Mapped[StageStatus] = mapped_column(
+        Enum(StageStatus, native_enum=False, length=20), default=StageStatus.running
+    )
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    latency_ms: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    __table_args__ = (
+        UniqueConstraint("file_id", "stage", "attempt", name="uq_stage_attempt_number"),
+    )
+
+
 class ProviderConnection(Base):
     """Configured provider endpoint. Credentials live behind ``secret_ref`` only."""
 

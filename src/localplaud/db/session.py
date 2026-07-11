@@ -47,10 +47,12 @@ def init_db() -> dict[str, int] | None:
         migrate_organization_schema,
         migrate_pipeline_retry_schema,
         migrate_profile_snapshot_columns,
+        migrate_stage_attempt_schema,
         migrate_vocabulary_schema,
     )
 
     migrate_profile_snapshot_columns(engine)
+    migrate_stage_attempt_schema(engine)
     migrate_organization_schema(engine)
     migrate_pipeline_retry_schema(engine)
     migrate_note_template_schema(engine)
