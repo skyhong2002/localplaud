@@ -234,11 +234,20 @@
 
     <div class="sb-folders lbl">
       <span>Folders</span>
-      <button title="Folders are not available yet in localplaud" aria-disabled="true">
+      <button title="Folders are mirrored read-only from Plaud">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
       </button>
     </div>
-    <div class="sb-empty-folders lbl">No folders yet</div>
+    {% if folders %}
+    <nav class="sb-group">
+      {% for folder in folders %}
+      <a class="navi {% if selected_folder is defined and selected_folder == folder.id %}on{% endif %}" href="/file-list?categoryId=allFiles&amp;folder={{ folder.id|urlencode }}" title="{{ folder.name }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+        <span class="lbl">{{ folder.name }}</span><span class="cnt">({{ folder.count }})</span>
+      </a>
+      {% endfor %}
+    </nav>
+    {% else %}<div class="sb-empty-folders lbl">No synced folders</div>{% endif %}
 
     <div class="grow"></div>
 
