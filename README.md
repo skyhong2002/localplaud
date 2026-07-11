@@ -51,7 +51,7 @@ single-file Ask with playable citations, richer library filters, and Plaud-style
 Add audio / Import from Plaud flows are implemented. A Plaud import refreshes the
 entire metadata catalog plus any existing Plaud transcript/summary while leaving raw
 audio remote until the user requests one recording. The recording export dialog
-produces transcript TXT/SRT/VTT/DOCX/PDF, notes Markdown/TXT/DOCX/PDF, original
+produces transcript TXT/SRT/VTT, notes Markdown/TXT, original
 audio, and a combined Markdown archive with timestamp/speaker controls.
 The next foundation is durable provider/model/execution profiles with explicit
 capabilities and privacy/cost policy, followed by production diarization and

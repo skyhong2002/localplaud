@@ -2,17 +2,6 @@
 
 from __future__ import annotations
 
-from io import BytesIO
-
-from docx import Document
-from reportlab.lib.enums import TA_LEFT
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-
 from .config import get_settings
 from .db.models import PlaudFile, StageName
 from .db.session import session_scope
@@ -116,10 +105,6 @@ def render_transcript(
     title = data["title"]
     if fmt == "txt":
         return (f"{title}\n\n" + "\n".join(lines) + "\n").encode(), "text/plain"
-    if fmt == "docx":
-        return _docx(title, lines), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    if fmt == "pdf":
-        return _pdf(title, lines), "application/pdf"
     raise ValueError("unsupported transcript format")
 
 
@@ -136,49 +121,4 @@ def render_notes(file_id: str, fmt: str) -> tuple[bytes, str]:
         return "\n".join(markdown).encode(), "text/markdown"
     if fmt == "txt":
         return (data["title"] + "\n\n" + "\n".join(lines)).encode(), "text/plain"
-    if fmt == "docx":
-        return _docx(data["title"], lines), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    if fmt == "pdf":
-        return _pdf(data["title"], lines), "application/pdf"
     raise ValueError("unsupported notes format")
-
-
-def _docx(title: str, lines: list[str]) -> bytes:
-    document = Document()
-    document.add_heading(title, level=0)
-    for line in lines:
-        document.add_paragraph(line)
-    output = BytesIO()
-    document.save(output)
-    return output.getvalue()
-
-
-def _pdf(title: str, lines: list[str]) -> bytes:
-    try:
-        pdfmetrics.getFont("STSong-Light")
-    except KeyError:
-        pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-    output = BytesIO()
-    document = SimpleDocTemplate(
-        output, pagesize=A4, rightMargin=18 * mm, leftMargin=18 * mm,
-        topMargin=18 * mm, bottomMargin=18 * mm,
-    )
-    styles = getSampleStyleSheet()
-    body = ParagraphStyle(
-        "LocalplaudBody", parent=styles["BodyText"], fontName="STSong-Light",
-        fontSize=10, leading=15, alignment=TA_LEFT, spaceAfter=4,
-    )
-    heading = ParagraphStyle(
-        "LocalplaudHeading", parent=body, fontSize=18, leading=24, spaceAfter=12,
-    )
-    story = [Paragraph(_escape(title), heading)]
-    for line in lines:
-        story.append(Paragraph(_escape(line) or "&nbsp;", body))
-        if not line:
-            story.append(Spacer(1, 3 * mm))
-    document.build(story)
-    return output.getvalue()
-
-
-def _escape(value: str) -> str:
-    return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

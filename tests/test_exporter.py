@@ -108,17 +108,11 @@ def test_transcript_portable_formats_and_options(seeded_db):
     assert b"SPEAKER_00: hello there" in srt
     vtt, _ = render_transcript(FILE_ID, "vtt")
     assert vtt.startswith(b"WEBVTT\n") and b"00:01:05.200" in vtt
-    docx, _ = render_transcript(FILE_ID, "docx")
-    pdf, _ = render_transcript(FILE_ID, "pdf")
-    assert docx.startswith(b"PK") and pdf.startswith(b"%PDF")
 
 
 def test_notes_portable_formats(seeded_db):
     markdown, _ = render_notes(FILE_ID, "md")
     assert b"## A Chat" in markdown and b"## Launch answer" in markdown
-    docx, _ = render_notes(FILE_ID, "docx")
-    pdf, _ = render_notes(FILE_ID, "pdf")
-    assert docx.startswith(b"PK") and pdf.startswith(b"%PDF")
 
 
 def test_independent_export_excludes_imported_plaud_artifacts(monkeypatch, tmp_path):

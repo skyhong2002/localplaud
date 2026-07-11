@@ -226,7 +226,7 @@
           <label><input id="export-speakers" type="checkbox" checked> Speaker labels</label>
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap" data-export-group="transcript">
-          {% for fmt in ['txt','srt','vtt','docx','pdf'] %}<a class="btn sec" data-fmt="{{ fmt }}" href="#" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
+          {% for fmt in ['txt','srt','vtt'] %}<a class="btn sec" data-fmt="{{ fmt }}" href="#" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
         </div>
       </section>
       {% endif %}
@@ -235,7 +235,7 @@
         <strong>Notes</strong>
         <div class="sub" style="font-size:12px;margin:3px 0 9px">Generated notes and saved notes, without transcript</div>
         <div style="display:flex;gap:7px;flex-wrap:wrap">
-          {% for fmt in ['md','txt','docx','pdf'] %}<a class="btn sec" href="/file/{{ f.id }}/export/notes.{{ fmt }}" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
+          {% for fmt in ['md','txt'] %}<a class="btn sec" href="/file/{{ f.id }}/export/notes.{{ fmt }}" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
         </div>
       </section>
       {% endif %}

@@ -245,12 +245,12 @@ diarization/alignment stages, not by Whisper itself.
 | Content | Formats |
 | --- | --- |
 | Audio | original, MP3, WAV |
-| Transcript | TXT, Markdown, SRT, VTT, DOCX, PDF |
-| Notes | Markdown, TXT, DOCX, PDF |
+| Transcript | TXT, SRT, VTT |
+| Notes | Markdown, TXT |
 | Mind map | Markdown outline, PNG |
 
-The recording workspace now provides transcript TXT/SRT/VTT/DOCX/PDF exports with
-timestamp and speaker-label controls, notes Markdown/TXT/DOCX/PDF, original audio,
+The recording workspace now provides transcript TXT/SRT/VTT exports with timestamp
+and speaker-label controls, notes Markdown/TXT, original audio,
 and a combined Markdown archive. Converted MP3/WAV audio and PNG mind-map rendering
 remain to complete this matrix.
 | Ask result | Markdown, clipboard, saved local note |
