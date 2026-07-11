@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-11)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (307 tests passing locally).
+  Active development is merged directly to `main` (310 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -379,15 +379,20 @@ embedding raw provider credentials or model settings in each rule.
   after rule actions commit. Notifications support unread state, mark-all-read,
   dismissal, preserved rule/recording snapshots, and independent delivery retry;
   delivery failure never rolls back completed organization or processing actions.
-  ✅ Transcript export actions produce only the required TXT/SRT/VTT formats from
+- ✅ Transcript export actions produce only the required TXT/SRT/VTT formats from
   the canonical local transcript. Each run/format has a durable deduplicated ledger,
   checksum, byte count, transcript/revision provenance, safe download, and independent
   retry; missing transcripts or export failures never roll back completed rule actions.
-  Remaining downstream actions: email and webhook.
+- ✅ Authorized webhook integrations expose explicit metadata/transcript/notes scopes,
+  environment-only bearer secret references, HTTPS/private-network policy, health,
+  last use, revocation, immutable run snapshots, bounded responses, idempotency keys,
+  durable delivery status, and independent retry. Non-2xx or missing-secret failures
+  never roll back local rule actions. Remaining downstream action: email.
 - ✅ Added a Discover hub for locally owned/editable AutoFlow rules, create/edit/
   delete controls, Run now, history, and notification policy, plus a responsive
-  notification inbox with an unread badge. Remaining: local applications/integration
-  catalog and externally owned read-only rules.
+  notification inbox with an unread badge. Settings now includes the first authorized
+  integration catalog for webhooks. Remaining: broader local applications catalog and
+  externally owned read-only rules.
 - Add settings sections for account/security and active sessions, workspace
   personalization, locale/preferences, vocabulary, private sync/backup, authorized
   apps/integrations, support, and version/about. Show integration scopes, health,

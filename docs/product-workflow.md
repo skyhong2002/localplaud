@@ -195,11 +195,19 @@ move/tag recordings. Rules are ordered, versioned, idempotent, dry-runnable, loc
 editable, and retain per-recording history. Notification-enabled runs create durable,
 deduplicated local inbox items only after core actions commit; unread state, dismissal,
 preserved provenance, and delivery-only retry are available without rerunning ASR or
-rolling back successful actions. Email, webhook, and external integration actions
+rolling back successful actions. Email and additional external integration actions
 remain future work. AutoFlow transcript export is implemented for the required
 TXT/SRT/VTT formats: each run/format records canonical transcript lineage, checksum,
 size, status, error, and an independently retryable local file without rolling back
 the matched rule's core actions.
+
+Authorized webhook destinations are durable Settings records with explicit
+metadata/transcript/notes scopes and environment-only bearer secret references.
+Public destinations require HTTPS and private/LAN targets require a separate explicit
+allowance. AutoFlow stores a non-secret destination snapshot per run and sends a
+bounded JSON payload with a stable idempotency key. Response status/excerpt, payload
+hash, attempts, health, last use, and failures are retained; delivery-only retry does
+not rerun processing or organization actions. See [`webhooks.md`](webhooks.md).
 
 The recording workspace now has a sticky custom player backed by locally generated
 and cached ffmpeg waveform envelopes. Playback state survives tab switches and stays

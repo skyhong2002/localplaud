@@ -54,6 +54,11 @@ def rule_sentence(rule: AutomationRule | dict) -> str:
         effects.append("add tags " + ", ".join(f"#{value}" for value in actions["add_tag_ids"]))
     if actions.get("export_formats"):
         effects.append("export " + "/".join(value.upper() for value in actions["export_formats"]))
+    if actions.get("webhook_integration_ids"):
+        effects.append(
+            "send webhooks "
+            + ", ".join(f"#{value}" for value in actions["webhook_integration_ids"])
+        )
     notify = rule.notify if isinstance(rule, AutomationRule) else bool(rule.get("notify"))
     if notify:
         effects.append("notify you")
@@ -169,6 +174,13 @@ def evaluate_recording(file_id: str) -> list[dict]:
             if not matched:
                 continue
             try:
+                from .integrations import webhook_snapshots
+
+                webhook_requested = webhook_snapshots(
+                    session,
+                    list((rule.actions or {}).get("webhook_integration_ids", [])),
+                    require_enabled=False,
+                )
                 with session.begin_nested():
                     applied = _apply_actions(session, rule, recording)
                 run = AutomationRun(
@@ -183,6 +195,7 @@ def evaluate_recording(file_id: str) -> list[dict]:
                         "applied": applied,
                         "notification_requested": rule.notify,
                         "export_requested": list((rule.actions or {}).get("export_formats", [])),
+                        "webhook_requested": webhook_requested,
                     },
                 )
                 session.add(run)
@@ -219,6 +232,16 @@ def evaluate_recording(file_id: str) -> list[dict]:
                     exports.append({"format": fmt, "status": "failed", "error": str(exc)})
             if exports:
                 results[-1]["exports"] = exports
+            webhooks = []
+            for snapshot in _requested_webhooks(downstream_run_id):
+                try:
+                    from .integrations import deliver_webhook
+
+                    webhooks.append(deliver_webhook(downstream_run_id, snapshot))
+                except Exception as exc:  # noqa: BLE001 - actions remain committed
+                    webhooks.append({"status": "failed", "error": str(exc)})
+            if webhooks:
+                results[-1]["webhooks"] = webhooks
     return results
 
 
@@ -231,6 +254,18 @@ def _requested_export_formats(run_id: int) -> list[str]:
             value
             for value in (run.detail or {}).get("export_requested", [])
             if value in {"txt", "srt", "vtt"}
+        ]
+
+
+def _requested_webhooks(run_id: int) -> list[dict]:
+    with session_scope() as session:
+        run = session.get(AutomationRun, run_id)
+        if run is None:
+            return []
+        return [
+            dict(value)
+            for value in (run.detail or {}).get("webhook_requested", [])
+            if isinstance(value, dict) and value.get("id") is not None
         ]
 
 
@@ -396,3 +431,6 @@ def validate_rule_references(trigger: dict, actions: dict) -> None:
             select(NoteTemplate.id).where(NoteTemplate.key == key, NoteTemplate.is_active.is_(True))
         ) is None:
             raise ValueError("note template not found")
+        from .integrations import webhook_snapshots
+
+        webhook_snapshots(session, list(actions.get("webhook_integration_ids", [])))

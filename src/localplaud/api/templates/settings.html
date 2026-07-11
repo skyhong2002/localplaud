@@ -209,6 +209,28 @@
       <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center"><button class="btn" type="submit">Register worker</button><span id="worker-result" class="sub"></span></div>
     </form>
   </div>
+
+  <div class="panel" style="margin-top:16px" id="webhook-integrations">
+    <strong>Authorized webhooks</strong>
+    <p class="sub" style="margin:4px 0 12px">Outbound data delivery is opt-in. Rules reference these destinations; bearer secrets stay in environment variables.</p>
+    <div style="display:grid;gap:9px">
+      {% for integration in webhook_integrations %}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:9px;{% if not integration.enabled %}opacity:.55{% endif %}">
+        <div><strong>{{ integration.name }}</strong> <span class="chip">{{ integration.scopes|join(', ') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ integration.url }} · {{ 'private/LAN allowed' if integration.allow_private_network else 'public HTTPS only' }}{% if integration.last_used_at %} · used {{ integration.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div>
+        <div><span id="webhook-health-{{ integration.id }}" class="st {{ integration.health.status or 'unknown' }}" title="{{ integration.health.detail or '' }}">{{ integration.health.status or 'unknown' }}</span> <button class="btn sec" type="button" style="padding:6px 9px" onclick="testWebhook({{ integration.id }})">Test</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteWebhook({{ integration.id }})">Delete</button></div>
+      </div>
+      {% else %}<div class="sub">No webhook destinations authorized.</div>{% endfor %}
+    </div>
+    <form id="webhook-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
+      <input class="search-input" name="name" maxlength="120" placeholder="Webhook name" required>
+      <input class="search-input" name="url" type="url" maxlength="2048" placeholder="https://example.com/webhook" required>
+      <input class="search-input" name="secret_ref" maxlength="256" placeholder="Bearer secret ref, e.g. env:WEBHOOK_TOKEN">
+      <div class="sub" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><label><input type="checkbox" name="scope" value="metadata" checked> Metadata</label><label><input type="checkbox" name="scope" value="transcript"> Transcript</label><label><input type="checkbox" name="scope" value="notes"> Notes</label></div>
+      <label class="sub"><input type="checkbox" name="allow_private_network"> Explicitly allow private/LAN destination and HTTP</label>
+      <label class="sub"><input type="checkbox" name="enabled" checked> Enabled</label>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Authorize webhook</button><span id="webhook-result" class="sub"></span></div>
+    </form>
+  </div>
 </div></div>
 {% endblock %}
 {% block scripts %}
@@ -218,6 +240,7 @@ const MODELS={{ models|tojson }};
 const PROFILES={{ profiles|tojson }};
 const NOTE_TEMPLATES={{ note_templates|tojson }};
 const VOCABULARY={{ vocabulary_terms|tojson }};
+const WEBHOOKS={{ webhook_integrations|tojson }};
 let editingNoteTemplate=null;
 let editingVocabulary=null;
 document.querySelectorAll('.hardware-install').forEach(button=>button.addEventListener('click',async()=>{const out=document.getElementById('hardware-result');button.disabled=true;out.textContent='Creating a verified profile…';const response=await fetch(`/api/providers/hardware-recommendations/${button.dataset.key}/install`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({make_default:button.dataset.default==='true'})}),result=await response.json();if(response.ok){out.textContent=`Created ${result.name}. Reloading…`;location.reload();}else{button.disabled=false;out.textContent=result.detail||'Could not create profile';}}));
@@ -317,5 +340,8 @@ document.getElementById('worker-form').addEventListener('submit',async e=>{
   const r=await fetch('/api/providers/workers',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const out=document.getElementById('worker-result');
   if(r.ok){out.textContent='Registered. Reloading…';location.reload();}else{const data=await r.json();out.textContent=data.detail||'Could not register worker';}
 });
+async function testWebhook(id){const out=document.getElementById(`webhook-health-${id}`);out.textContent='checking…';const r=await fetch(`/api/integrations/webhooks/${id}/test`,{method:'POST'}),data=await r.json();out.textContent=data.status||'error';out.className=`st ${data.status||'error'}`;out.title=data.detail||'';}
+async function deleteWebhook(id){if(!confirm('Delete this webhook authorization? Delivery history is preserved.'))return;const r=await fetch(`/api/integrations/webhooks/${id}`,{method:'DELETE'});if(r.ok)location.reload();else{const data=await r.json();alert(data.detail||'Delete failed');}}
+document.getElementById('webhook-form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target),body={name:f.get('name'),url:f.get('url'),secret_ref:f.get('secret_ref')||null,scopes:f.getAll('scope'),enabled:f.get('enabled')==='on',allow_private_network:f.get('allow_private_network')==='on'};const r=await fetch('/api/integrations/webhooks',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await r.json(),out=document.getElementById('webhook-result');if(r.ok){out.textContent='Authorized. Reloading…';location.reload();}else out.textContent=data.detail?.[0]?.msg||data.detail||'Could not authorize webhook';});
 </script>
 {% endblock %}

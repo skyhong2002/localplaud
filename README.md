@@ -56,11 +56,12 @@ entire metadata catalog plus any existing Plaud transcript/summary while leaving
 audio remote until the user requests one recording. The recording export dialog
 produces the required transcript TXT/SRT/VTT formats with timestamp/speaker
 controls. Existing notes, original-audio, and Markdown archive exports remain
-available as conveniences.
-The next foundation is durable provider/model/execution profiles with explicit
-capabilities and privacy/cost policy, followed by production diarization and
-alignment validation, richer organization, automation, and Plaud-level
-Web App polish. Plaud-produced transcripts and summaries may be imported for
+available as conveniences. Durable provider/model/execution profiles, explicit
+stage fallbacks, remote workers, local AutoFlow rules, inbox notifications,
+TXT/SRT/VTT AutoFlow exports, and scoped authorized webhooks are also implemented.
+The remaining work centers on production diarization/alignment acceptance across
+real hardware, broader integrations, and Plaud-level Web App polish. Plaud-produced
+transcripts and summaries may be imported for
 migration or comparison, but are not part of the target primary workflow.
 
 ## How it works

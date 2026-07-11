@@ -46,6 +46,7 @@ from ..remote.server import router as worker_router
 from ..store.speakers import display_names, speaker_keys_from_segments
 from .automations import router as automations_router
 from .imports import router as imports_router
+from .integrations import router as integrations_router
 from .note_templates import _item as note_template_item
 from .note_templates import router as note_templates_router
 from .notes import router as notes_router
@@ -74,6 +75,7 @@ app.include_router(vocabulary_router)
 app.include_router(note_templates_router)
 app.include_router(notes_router)
 app.include_router(imports_router)
+app.include_router(integrations_router)
 app.include_router(automations_router)
 app.include_router(worker_router)
 
@@ -906,6 +908,7 @@ def template_library(
 
 @app.get("/discover", response_class=HTMLResponse)
 def discover_automations(request: Request):
+    from ..integrations import list_webhook_integrations
     from .automations import list_rules, list_runs
 
     with session_scope() as session:
@@ -932,6 +935,9 @@ def discover_automations(request: Request):
         "organization": organization,
         "profiles": profiles,
         "note_templates": note_templates,
+        "webhook_integrations": [
+            item for item in list_webhook_integrations(session) if item["enabled"]
+        ],
     }
     return templates.TemplateResponse(request=request, name="discover.html", context=ctx)
 
@@ -1386,6 +1392,7 @@ def status_page(request: Request):
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
+    from ..integrations import list_webhook_integrations
     from ..providers.contracts import ProviderStage
     from ..providers.hardware import hardware_recommendations
     from ..providers.service import list_connections, list_models, list_profiles
@@ -1407,6 +1414,7 @@ def settings_page(request: Request):
             "models": list_models(session),
             "profiles": list_profiles(session),
             "workers": list_workers(session),
+            "webhook_integrations": list_webhook_integrations(session),
             "provider_stages": [stage.value for stage in ProviderStage],
             "note_templates": [
                 {

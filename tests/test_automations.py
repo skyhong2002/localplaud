@@ -160,6 +160,7 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert 'id="rule-form"' in page.text and "Run now" in page.text
     assert 'href="/discover"' in page.text
     assert "Create a local inbox notification" in page.text
+    assert 'name="webhook_integration_id"' in page.text
 
 
 def test_notification_inbox_read_dismiss_and_rule_deletion(monkeypatch, tmp_path):

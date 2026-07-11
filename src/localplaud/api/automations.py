@@ -25,6 +25,7 @@ from ..db.models import (
     AutomationExport,
     AutomationRule,
     AutomationRun,
+    AutomationWebhookDelivery,
     Notification,
     PlaudFile,
 )
@@ -60,11 +61,14 @@ class ActionsBody(BaseModel):
     export_formats: list[Literal["txt", "srt", "vtt"]] = Field(
         default_factory=list, max_length=3
     )
+    webhook_integration_ids: list[int] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
     def has_action(self):
         if len(set(self.export_formats)) != len(self.export_formats):
             raise ValueError("export formats must be unique")
+        if len(set(self.webhook_integration_ids)) != len(self.webhook_integration_ids):
+            raise ValueError("webhook integrations must be unique")
         if not any(
             [
                 self.note_template_key,
@@ -72,6 +76,7 @@ class ActionsBody(BaseModel):
                 self.folder_id,
                 self.add_tag_ids,
                 self.export_formats,
+                self.webhook_integration_ids,
             ]
         ):
             raise ValueError("at least one action is required")
@@ -195,6 +200,11 @@ def delete_rule(rule_id: int) -> dict:
             .values(automation_run_id=None)
         )
         session.execute(
+            update(AutomationWebhookDelivery)
+            .where(AutomationWebhookDelivery.automation_run_id.in_(run_ids))
+            .values(automation_run_id=None)
+        )
+        session.execute(
             update(Notification)
             .where(Notification.automation_run_id.in_(run_ids))
             .values(automation_run_id=None)
@@ -242,6 +252,13 @@ def list_runs(rule_id: int | None = None, limit: int = 100) -> dict:
                     .order_by(AutomationExport.format)
                 )
             )
+            webhooks = list(
+                session.scalars(
+                    select(AutomationWebhookDelivery)
+                    .where(AutomationWebhookDelivery.automation_run_id == row.id)
+                    .order_by(AutomationWebhookDelivery.id)
+                )
+            )
             output.append(
                 {
                     "id": row.id,
@@ -254,6 +271,7 @@ def list_runs(rule_id: int | None = None, limit: int = 100) -> dict:
                     "error": row.error,
                     "created_at": row.created_at.isoformat(),
                     "exports": [_serialize_export(item) for item in exports],
+                    "webhooks": [_serialize_webhook_delivery(item) for item in webhooks],
                 }
             )
         return {"runs": output}
@@ -393,3 +411,38 @@ def download_export(export_id: int):
         media_type="text/plain" if fmt == "txt" else f"text/{fmt}",
         filename=f"transcript.{fmt}",
     )
+
+
+def _serialize_webhook_delivery(row: AutomationWebhookDelivery) -> dict:
+    snapshot = row.integration_snapshot or {}
+    return {
+        "id": row.id,
+        "automation_run_id": row.automation_run_id,
+        "integration_id": row.integration_id,
+        "integration_name": snapshot.get("name") or f"Webhook #{row.integration_id}",
+        "file_id": row.file_id,
+        "status": row.status,
+        "attempt_count": row.attempt_count,
+        "idempotency_key": row.idempotency_key,
+        "scopes": snapshot.get("scopes", []),
+        "payload_sha256": row.payload_sha256,
+        "response_status": row.response_status,
+        "error": row.error,
+        "created_at": row.created_at.isoformat(),
+        "updated_at": row.updated_at.isoformat(),
+    }
+
+
+@router.post("/webhooks/{delivery_id}/retry")
+def retry_webhook_delivery(delivery_id: int) -> dict:
+    from ..integrations import deliver_webhook
+
+    with session_scope() as session:
+        row = session.get(AutomationWebhookDelivery, delivery_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="webhook delivery not found")
+        if row.automation_run_id is None:
+            raise HTTPException(status_code=409, detail="source automation run was deleted")
+        run_id = row.automation_run_id
+        snapshot = dict(row.integration_snapshot or {})
+    return deliver_webhook(run_id, snapshot)

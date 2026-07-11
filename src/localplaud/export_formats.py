@@ -20,7 +20,7 @@ def _stamp(seconds: float, *, milliseconds: bool = False) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def _recording_data(file_id: str) -> dict:
+def recording_data(file_id: str) -> dict:
     with session_scope() as session:
         file = session.get(PlaudFile, file_id)
         if file is None:
@@ -80,7 +80,7 @@ def _recording_data(file_id: str) -> dict:
 
 def transcript_provenance(file_id: str) -> dict:
     """Return the canonical transcript lineage used by transcript exports."""
-    return _recording_data(file_id)["transcript_provenance"]
+    return recording_data(file_id)["transcript_provenance"]
 
 
 def render_transcript(
@@ -90,7 +90,7 @@ def render_transcript(
     timestamps: bool = True,
     speakers: bool = True,
 ) -> tuple[bytes, str]:
-    data = _recording_data(file_id)
+    data = recording_data(file_id)
     segments = data["segments"]
     if not segments:
         raise LookupError("recording has no exportable transcript")
@@ -124,7 +124,7 @@ def render_transcript(
 
 
 def render_notes(file_id: str, fmt: str) -> tuple[bytes, str]:
-    data = _recording_data(file_id)
+    data = recording_data(file_id)
     if not data["notes"]:
         raise LookupError("recording has no exportable notes")
     lines: list[str] = []
