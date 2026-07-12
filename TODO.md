@@ -468,7 +468,8 @@ embedding raw provider credentials or model settings in each rule.
   translates the global shell plus Home, Library, Search, Saved notes, Templates,
   Discover, Notifications, Status, and workspace preference controls through a
   centralized catalog. Recording Detail now covers playback, transcript search/edit,
-  profiles/templates, local-data controls, Ask, organization, and export. Settings
+  profiles/templates, local-data controls, Ask, organization, export, and dynamic
+  processing-stage/status/fallback/usage diagnostics. Settings
   section navigation and primary account, backup, provider/profile, integration, and
   support controls are translated. Remaining locale work is dynamic helper, health,
   error, and action messages. Access &
