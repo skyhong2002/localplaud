@@ -140,6 +140,54 @@ def test_template_discovery_metadata_migration(monkeypatch, tmp_path):
     assert migrate_note_template_schema(engine) == []
 
 
+def test_legacy_note_template_schema_is_rebuilt_without_losing_prompts(tmp_path):
+    from sqlalchemy import inspect
+
+    from localplaud.db.migrations import migrate_legacy_note_template_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path/'legacy-note-templates.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """CREATE TABLE note_templates (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(64) NOT NULL UNIQUE,
+                    system_prompt TEXT NOT NULL,
+                    instructions TEXT NOT NULL,
+                    description TEXT,
+                    category VARCHAR(80),
+                    scenario VARCHAR(80),
+                    author VARCHAR(120),
+                    provenance VARCHAR(32) NOT NULL,
+                    popularity INTEGER,
+                    version INTEGER NOT NULL,
+                    enabled BOOLEAN NOT NULL,
+                    created_at DATETIME NOT NULL
+                )"""
+            )
+        )
+        connection.execute(
+            text(
+                """INSERT INTO note_templates
+                    (id, name, system_prompt, instructions, provenance, version, enabled, created_at)
+                    VALUES (7, 'Meeting Notes', 'system', 'instructions', 'builtin', 2, 1, CURRENT_TIMESTAMP)"""
+            )
+        )
+
+    assert migrate_legacy_note_template_schema(engine) == ["note_templates"]
+    columns = {item["name"] for item in inspect(engine).get_columns("note_templates")}
+    assert {"key", "is_builtin", "is_active"} <= columns
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT id, key, version, system_prompt, instructions, is_builtin, is_active "
+                "FROM note_templates"
+            )
+        ).one()
+    assert tuple(row) == (7, "meeting-notes", 2, "system", "instructions", 1, 1)
+    assert migrate_legacy_note_template_schema(engine) == []
+
+
 def test_recording_selection_marks_notes_stale_and_archive_resets(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     from localplaud.db.models import PlaudFile, StageName, StageRun, StageStatus

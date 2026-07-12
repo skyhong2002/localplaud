@@ -135,6 +135,84 @@ def migrate_legacy_provider_profile_schema(engine: Engine) -> list[str]:
     return ["provider_connections", "execution_profiles"]
 
 
+def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
+    """Rebuild the deployed pre-versioned note-template table in place."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "note_templates" not in set(inspector.get_table_names()):
+        return []
+    columns = {column["name"] for column in inspector.get_columns("note_templates")}
+    if "key" in columns or not {"name", "system_prompt", "instructions"} <= columns:
+        return []
+
+    def legacy(column: str, default: str = "NULL") -> str:
+        return column if column in columns else default
+
+    raw = engine.raw_connection()
+    try:
+        cursor = raw.cursor()
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.executescript(f"""
+            BEGIN;
+            CREATE TABLE note_templates_new (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                key VARCHAR(64) NOT NULL,
+                version INTEGER NOT NULL,
+                name VARCHAR(80) NOT NULL,
+                system_prompt TEXT NOT NULL,
+                instructions TEXT NOT NULL,
+                category VARCHAR(80),
+                scenario VARCHAR(80),
+                description VARCHAR(512),
+                author VARCHAR(120),
+                provenance VARCHAR(32),
+                popularity INTEGER,
+                is_builtin BOOLEAN NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT 1,
+                created_at DATETIME NOT NULL,
+                CONSTRAINT uq_note_template_key_version UNIQUE (key, version)
+            );
+            INSERT INTO note_templates_new (
+                id, key, version, name, system_prompt, instructions, category,
+                scenario, description, author, provenance, popularity,
+                is_builtin, is_active, created_at
+            )
+            SELECT
+                id,
+                lower(replace(trim(name), ' ', '-')),
+                COALESCE({legacy('version', '1')}, 1),
+                name,
+                system_prompt,
+                instructions,
+                {legacy('category')},
+                {legacy('scenario')},
+                {legacy('description')},
+                {legacy('author')},
+                {legacy('provenance')},
+                {legacy('popularity')},
+                CASE WHEN {legacy('provenance')} = 'builtin' THEN 1 ELSE 0 END,
+                COALESCE({legacy('enabled', '1')}, 1),
+                {legacy('created_at', 'CURRENT_TIMESTAMP')}
+            FROM note_templates;
+            DROP TABLE note_templates;
+            ALTER TABLE note_templates_new RENAME TO note_templates;
+            CREATE INDEX ix_note_templates_key ON note_templates (key);
+            CREATE INDEX ix_note_templates_is_active ON note_templates (is_active);
+        """)
+        violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeError(f"legacy note-template migration broke foreign keys: {violations}")
+        raw.commit()
+        cursor.execute("PRAGMA foreign_keys=ON")
+    except Exception:
+        raw.rollback()
+        raise
+    finally:
+        raw.close()
+    return ["note_templates"]
+
+
 def migrate_automation_ownership_schema(engine: Engine) -> list[str]:
     """Add explicit local/external ownership to existing AutoFlow rules."""
     if engine.dialect.name != "sqlite":
