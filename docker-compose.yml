@@ -2,6 +2,8 @@
 #
 #   docker compose --profile cpu up -d --build   # CPU box / cloud VM — use a cloud ASR provider
 #   docker compose --profile gpu up -d --build   # NVIDIA host — local faster-whisper on CUDA
+#   docker compose --profile gpu --profile ollama up -d --build
+#                                                # NVIDIA ASR + optional local text generation
 #   docker compose --profile mac up -d --build   # Apple Silicon — see the note below
 #
 # Before first start:
@@ -76,6 +78,18 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  ollama-gpu:
+    image: ollama/ollama:0.31.2
+    profiles: ["ollama"]
+    environment:
+      OLLAMA_KEEP_ALIVE: "2m"
+    volumes:
+      - ollama_data:/root/.ollama
+    expose:
+      - "11434"
+    gpus: all
+    restart: unless-stopped
+
   caddy:
     image: caddy:2
     profiles: ["cpu", "gpu", "mac"]
@@ -105,3 +119,4 @@ volumes:
   caddy_data:
   caddy_config:
   model_cache:
+  ollama_data:

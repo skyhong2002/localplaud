@@ -18,3 +18,12 @@ def test_cuda_image_caches_dependencies_before_copying_application_source():
     source_copy = dockerfile.index("COPY src ./src")
     application_install = dockerfile.index("pip install --no-deps --force-reinstall .")
     assert dependency_install < source_copy < application_install
+
+
+def test_optional_ollama_runtime_is_private_and_persistent():
+    compose = Path("docker-compose.yml").read_text()
+    assert "ollama/ollama:0.31.2" in compose
+    assert 'profiles: ["ollama"]' in compose
+    assert "ollama_data:/root/.ollama" in compose
+    assert 'expose:\n      - "11434"' in compose
+    assert '11434:11434' not in compose

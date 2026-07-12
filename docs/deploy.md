@@ -85,6 +85,31 @@ diarization). Verify the GPU is visible: `docker compose exec localplaud-gpu nvi
 Set `[asr] provider = "faster-whisper"`, model `large-v3-turbo`, device `cuda`,
 and keep the diarization profile enabled with `[diarize] device = "cuda"`.
 
+For a fully local text path on the same NVIDIA host, enable the separately named
+Ollama profile and install an explicit model. Ollama is reachable only on the
+private Compose network; port 11434 is not published on the host:
+
+```bash
+docker compose --profile gpu --profile ollama up -d --build
+docker compose exec ollama-gpu ollama pull qwen3:4b
+```
+
+Point the stage-scoped LLM selections at the bundled service:
+
+```toml
+[llm]
+provider = "ollama"
+
+  [llm.ollama]
+  host = "http://ollama-gpu:11434"
+  model = "qwen3:4b"
+```
+
+The `ollama` profile is opt-in because provider choice and data-egress policy are
+explicit localplaud settings. Its model cache is durable in the `ollama_data`
+volume. On smaller GPUs, keep ASR, diarization, and text generation sequential and
+select a model that leaves enough memory for the configured context window.
+
 > **Running CUDA natively (no Docker)**: the NVIDIA driver alone isn't enough —
 > CTranslate2 needs cuBLAS and cuDNN 9. Install the `cuda` extra
 > (`uv sync --extra cuda`), which pulls `nvidia-cublas-cu12` + `nvidia-cudnn-cu12`,
