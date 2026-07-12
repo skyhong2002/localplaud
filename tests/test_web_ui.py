@@ -54,6 +54,20 @@ def _seed(audio_path: str | None = None):
                 error="embedding model unavailable",
             )
         )
+        s.add(
+            StageRun(
+                file_id="r1",
+                stage=StageName.align,
+                status=StageStatus.completed,
+                attempts=1,
+                provider="faster-whisper",
+                detail={
+                    "strategy": "provider-word-timestamps",
+                    "forced_alignment": False,
+                    "word_count": 42,
+                },
+            )
+        )
 
 
 def test_dashboard_renders(monkeypatch, tmp_path):
@@ -139,6 +153,9 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'data-start' in r.text  # seekable segments
     assert "meeting" in r.text.lower()  # summary tab
     assert "Processing details" in r.text
+    assert "Provider word timestamps validated" in r.text
+    assert "42 timed words" in r.text
+    assert "Forced alignment was not used" in r.text
     assert "embedding model unavailable" in r.text
     assert "Resume" in r.text and "Rebuild all" in r.text
     assert "Execution profile" in r.text and "Current Settings" in r.text
@@ -191,6 +208,9 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         "筆記範本",
         "處理詳情",
         "建立索引",
+        "已驗證供應商提供的逐字時間戳記",
+        "42 個具時間戳記的詞",
+        "未使用 forced alignment",
         "失敗",
         "逐字稿",
         "在逐字稿中尋找",
