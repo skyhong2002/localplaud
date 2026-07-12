@@ -5,15 +5,15 @@
   {% set active_id = f.id %}
   {% include "_filelist.html" %}
   <section class="pane"><div class="pane-inner">
-    <a class="backlink" href="/">← All files</a>
+    <a class="backlink" href="/">← {{ t('All files') }}</a>
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap">
       <div>
         <form id="recording-title-form" style="display:flex;align-items:center;gap:7px;max-width:min(680px,80vw)">
-          <input id="recording-title" value="{{ f.filename }}" maxlength="512" aria-label="Recording title" style="font:inherit;font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--fg);background:transparent;border:1px solid transparent;border-radius:6px;padding:3px 5px;min-width:180px;flex:1">
-          <button class="btn sec" type="submit" style="padding:6px 9px">Save title</button>
-          {% if f.local_title %}<button class="btn sec" id="clear-local-title" type="button" style="padding:6px 9px">Use Plaud title</button>{% endif %}
+          <input id="recording-title" value="{{ f.filename }}" maxlength="512" aria-label="{{ t('Recording title') }}" style="font:inherit;font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--fg);background:transparent;border:1px solid transparent;border-radius:6px;padding:3px 5px;min-width:180px;flex:1">
+          <button class="btn sec" type="submit" style="padding:6px 9px">{{ t('Save title') }}</button>
+          {% if f.local_title %}<button class="btn sec" id="clear-local-title" type="button" style="padding:6px 9px">{{ t('Use Plaud title') }}</button>{% endif %}
         </form>
-        {% if f.local_title %}<div class="sub" style="font-size:11.5px;margin:2px 5px">Plaud title: {{ f.cloud_filename or 'Untitled' }}</div>{% endif %}
+        {% if f.local_title %}<div class="sub" style="font-size:11.5px;margin:2px 5px">{{ t('Plaud title') }}: {{ f.cloud_filename or t('Untitled') }}</div>{% endif %}
         <div class="sub" style="margin-top:2px">
           {{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}
           {% if f.transcript %} · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %} · {{ f.transcript.kind }}{% if f.transcript.revision %} rev {{ f.transcript.revision }}{% endif %}{% endif %}
@@ -22,74 +22,74 @@
         <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:7px">
           {% if f.folder %}<a class="chip on" href="/?folder={{ f.folder.id }}">▰ {{ f.folder.name }}</a>{% endif %}
           {% for tag in f.tags %}<a class="chip" href="/?tag={{ tag.id }}">● {{ tag.name }}</a>{% endfor %}
-          <button type="button" id="edit-recording-metadata" style="border:0;background:none;color:var(--blue);cursor:pointer;font-size:11.5px;padding:2px 4px">{% if f.folder or f.tags %}Edit metadata{% else %}Add folder or tags{% endif %}</button>
+          <button type="button" id="edit-recording-metadata" style="border:0;background:none;color:var(--blue);cursor:pointer;font-size:11.5px;padding:2px 4px">{% if f.folder or f.tags %}{{ t('Edit metadata') }}{% else %}{{ t('Add folder or tags') }}{% endif %}</button>
         </div>
       </div>
       <div style="display:flex; gap:7px">
-        {% if not f.has_audio and f.origin == 'plaud' %}<button class="btn" id="import-recording-audio" type="button" style="padding:8px 12px;font-size:13px">☁ Import audio</button>{% endif %}
-        {% if f.transcript or f.summaries or f.has_audio %}<button class="btn sec" id="open-export" type="button" style="padding:8px 12px; font-size:13px">Export</button>{% endif %}
+        {% if not f.has_audio and f.origin == 'plaud' %}<button class="btn" id="import-recording-audio" type="button" style="padding:8px 12px;font-size:13px">☁ {{ t('Import audio') }}</button>{% endif %}
+        {% if f.transcript or f.summaries or f.has_audio %}<button class="btn sec" id="open-export" type="button" style="padding:8px 12px; font-size:13px">{{ t('Export') }}</button>{% endif %}
         {% if f.has_audio %}
         <button class="btn sec" style="padding:8px 12px; font-size:13px"
           hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
-          hx-confirm="Resume failed or missing processing stages?">Resume</button>
+          hx-confirm="Resume failed or missing processing stages?">{{ t('Resume') }}</button>
         <button class="btn sec" style="padding:8px 12px; font-size:13px"
           hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML"
-          hx-confirm="Rebuild every local artifact for this recording?">Rebuild all</button>
+          hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>
         {% endif %}
       </div>
     </div>
-    <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px">{% if not f.has_audio and f.origin == 'plaud' %}Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.{% endif %}</div>
+    <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px">{% if not f.has_audio and f.origin == 'plaud' %}{{ t('Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.') }}{% endif %}</div>
 
     <details class="panel" style="margin-top:10px;padding:10px 12px">
-      <summary style="cursor:pointer;font-weight:650">Local data</summary>
+      <summary style="cursor:pointer;font-weight:650">{{ t('Local data') }}</summary>
       <div class="sub" style="font-size:12px;margin-top:9px">Audio {{ (f.local_data.audio_bytes / 1048576) | round(1) }} MB · {{ f.local_data.transcripts }} local transcript · {{ f.local_data.revisions }} corrections · {{ f.local_data.notes }} generated notes · {{ f.local_data.chunks }} search chunks</div>
       <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">
-        {% if f.local_data.transcripts or f.local_data.revisions or f.local_data.notes or f.local_data.chunks or f.local_data.stages %}<button class="btn sec" id="delete-local-processing" type="button" style="padding:7px 10px;color:var(--red)">Delete local processing</button>{% endif %}
-        {% if f.has_audio and f.origin == 'plaud' %}<button class="btn sec" id="delete-local-audio" type="button" style="padding:7px 10px;color:var(--red)">Remove local audio</button>{% endif %}
+        {% if f.local_data.transcripts or f.local_data.revisions or f.local_data.notes or f.local_data.chunks or f.local_data.stages %}<button class="btn sec" id="delete-local-processing" type="button" style="padding:7px 10px;color:var(--red)">{{ t('Delete local processing') }}</button>{% endif %}
+        {% if f.has_audio and f.origin == 'plaud' %}<button class="btn sec" id="delete-local-audio" type="button" style="padding:7px 10px;color:var(--red)">{{ t('Remove local audio') }}</button>{% endif %}
       </div>
-      <div class="sub" style="font-size:11px;margin-top:7px">Plaud metadata and imported Plaud transcript/summary are preserved. Saved notes and Ask history are never removed here.</div>
+      <div class="sub" style="font-size:11px;margin-top:7px">{{ t('Plaud metadata and imported Plaud transcript/summary are preserved. Saved notes and Ask history are never removed here.') }}</div>
       <div id="local-data-result" class="sub" style="font-size:12px;margin-top:6px"></div>
     </details>
 
     {% if f.profiles %}
     <form method="post" action="/file/{{ f.id }}/profile" class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
-      <label for="profile-select" style="font-weight:650">Execution profile</label>
+      <label for="profile-select" style="font-weight:650">{{ t('Execution profile') }}</label>
       <select id="profile-select" name="profile_id" class="search-input" style="flex:1;min-width:220px;padding:7px 10px">
         {% for profile in f.profiles %}<option value="{{ profile.id }}" {% if profile.id == f.profile_id %}selected{% endif %}>{{ profile.label }}{% if profile.default %} · system default{% endif %}</option>{% endfor %}
       </select>
-      <button class="btn sec" type="submit" style="padding:8px 12px">Use profile</button>
-      <span class="sub" style="font-size:12px">Applied on the next Resume or Rebuild.</span>
+      <button class="btn sec" type="submit" style="padding:8px 12px">{{ t('Use profile') }}</button>
+      <span class="sub" style="font-size:12px">{{ t('Applied on the next Resume or Rebuild.') }}</span>
       {% if f.budget.ceiling_usd is not none %}<div class="sub" style="font-size:11.5px;flex-basis:100%">Cost boundary · ${{ f.budget.spent_usd }} spent · ${{ f.budget.remaining_usd }} remaining of ${{ f.budget.ceiling_usd }}{% if f.budget.exceeded %} · <span style="color:var(--red)">ceiling exceeded; choose another profile before resuming</span>{% endif %}</div>{% endif %}
     </form>
     {% endif %}
 
     <div class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
-      <label for="note-template-select" style="font-weight:650">Note template</label>
+      <label for="note-template-select" style="font-weight:650">{{ t('Note template') }}</label>
       <select id="note-template-select" class="search-input" style="flex:1;min-width:220px;padding:7px 10px">
-        <option value="auto" {% if f.note_template_key == 'auto' %}selected{% endif %}>Auto · choose from recording</option>
+        <option value="auto" {% if f.note_template_key == 'auto' %}selected{% endif %}>{{ t('Auto · choose from recording') }}</option>
         {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
       </select>
-      <button class="btn sec" type="button" id="save-note-template" style="padding:8px 12px">Use template</button>
-      <span id="note-template-result" class="sub" style="font-size:12px">Applied on the next Resume or Rebuild.</span>
+      <button class="btn sec" type="button" id="save-note-template" style="padding:8px 12px">{{ t('Use template') }}</button>
+      <span id="note-template-result" class="sub" style="font-size:12px">{{ t('Applied on the next Resume or Rebuild.') }}</span>
     </div>
 
     {% if f.has_audio %}
     <section id="persistent-player" class="panel" style="position:sticky;top:8px;z-index:12;margin:12px 0;padding:10px 12px;box-shadow:0 8px 24px rgba(15,23,42,.09)">
       <audio id="player" preload="metadata" src="/audio/{{ f.id }}"></audio>
       <div style="display:grid;grid-template-columns:auto auto minmax(180px,1fr) auto auto;gap:9px;align-items:center">
-        <button class="btn" id="player-toggle" type="button" aria-label="Play" style="width:38px;height:34px;padding:0">▶</button>
-        <div style="display:flex;gap:3px"><button class="btn sec" id="player-back" type="button" title="Back 10 seconds" style="padding:6px 8px">−10</button><button class="btn sec" id="player-forward" type="button" title="Forward 30 seconds" style="padding:6px 8px">+30</button></div>
-        <div style="min-width:0"><canvas id="waveform" height="42" style="display:block;width:100%;height:42px;cursor:pointer" aria-label="Audio waveform"></canvas><input id="player-progress" type="range" min="0" max="1000" value="0" aria-label="Playback position" style="width:100%;height:4px;margin:0;display:block"></div>
+        <button class="btn" id="player-toggle" type="button" aria-label="{{ t('Play') }}" style="width:38px;height:34px;padding:0">▶</button>
+        <div style="display:flex;gap:3px"><button class="btn sec" id="player-back" type="button" title="{{ t('Back 10 seconds') }}" style="padding:6px 8px">−10</button><button class="btn sec" id="player-forward" type="button" title="{{ t('Forward 30 seconds') }}" style="padding:6px 8px">+30</button></div>
+        <div style="min-width:0"><canvas id="waveform" height="42" style="display:block;width:100%;height:42px;cursor:pointer" aria-label="{{ t('Audio waveform') }}"></canvas><input id="player-progress" type="range" min="0" max="1000" value="0" aria-label="{{ t('Playback position') }}" style="width:100%;height:4px;margin:0;display:block"></div>
         <span id="player-clock" class="sub" style="font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap">0:00 / 0:00</span>
-        <select id="player-speed" class="search-input" aria-label="Playback speed" style="padding:6px 7px;width:72px"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+        <select id="player-speed" class="search-input" aria-label="{{ t('Playback speed') }}" style="padding:6px 7px;width:72px"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
       </div>
-      <div class="sub" style="font-size:10.5px;margin-top:5px">Space play/pause · ←/→ 5 seconds · Shift+←/→ 30 seconds</div>
+      <div class="sub" style="font-size:10.5px;margin-top:5px">{{ t('Space play/pause · ←/→ 5 seconds · Shift+←/→ 30 seconds') }}</div>
     </section>
     {% endif %}
     {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}<div style="font-size:11.5px;margin-top:5px">{% if f.retry.exhausted %}Automatic retries exhausted after {{ f.retry.count }} failed cycles. Resume retries immediately and resets the budget.{% elif f.retry.next_at %}Automatic retry {{ f.retry.count + 1 }} of {{ f.retry.maximum }} scheduled for {{ f.retry.next_at }}.{% else %}Resume retries immediately.{% endif %}</div></div>{% endif %}
     {% if f.stages %}
     <details class="panel" style="margin-top:12px">
-      <summary style="cursor:pointer;font-weight:650">Processing details <span class="sub" style="font-size:11px">· {{ f.usage.attempts|length }} attempts · {{ (f.usage.latency_ms / 1000)|round(1) }}s{% if f.usage.estimated_cost_usd %} · ~$ {{ f.usage.estimated_cost_usd }}{% endif %}</span></summary>
+      <summary style="cursor:pointer;font-weight:650">{{ t('Processing details') }} <span class="sub" style="font-size:11px">· {{ f.usage.attempts|length }} {{ t('attempts') }} · {{ (f.usage.latency_ms / 1000)|round(1) }}s{% if f.usage.estimated_cost_usd %} · ~$ {{ f.usage.estimated_cost_usd }}{% endif %}</span></summary>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
         {% for stage in f.stages %}
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
@@ -112,12 +112,12 @@
     {% set mindmaps = f.summaries | selectattr('template', 'equalto', 'mind_map') | list %}
     {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
     <div class="tabs">
-      {% if f.transcript %}<button data-panel="transcript" class="on">Transcript</button>{% endif %}
+      {% if f.transcript %}<button data-panel="transcript" class="on">{{ t('Transcript') }}</button>{% endif %}
       {% if f.imported_transcript %}<button data-panel="imported" class="{% if not f.transcript and not f.summaries %}on{% endif %}">Plaud import ☁</button>{% endif %}
       {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
       {% for note in f.user_notes %}<button data-panel="saved-{{ note.id }}">{{ note.title }}</button>{% endfor %}
-      {% if mindmaps %}<button data-panel="mindmap" class="{% if not f.transcript and not notes %}on{% endif %}">Mind map</button>{% endif %}
-      <button data-panel="ask" class="{% if not f.transcript and not f.imported_transcript and not f.summaries and not f.user_notes %}on{% endif %}">Ask</button>
+      {% if mindmaps %}<button data-panel="mindmap" class="{% if not f.transcript and not notes %}on{% endif %}">{{ t('Mind map') }}</button>{% endif %}
+      <button data-panel="ask" class="{% if not f.transcript and not f.imported_transcript and not f.summaries and not f.user_notes %}on{% endif %}">{{ t('Ask') }}</button>
     </div>
 
     {% if f.transcript %}
@@ -153,19 +153,19 @@
       {% endif %}
       <div class="panel" style="padding:9px 10px;margin:5px 0 12px">
         <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-          <input id="transcript-find" class="search-input" type="search" placeholder="Find in transcript" style="flex:1;min-width:180px;padding:7px 9px">
+          <input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript') }}" style="flex:1;min-width:180px;padding:7px 9px">
           <button class="btn sec" id="find-previous" type="button" style="padding:7px 10px">↑</button>
           <button class="btn sec" id="find-next" type="button" style="padding:7px 10px">↓</button>
-          <span id="find-count" class="sub" style="font-size:12px;min-width:48px">0 results</span>
+          <span id="find-count" class="sub" style="font-size:12px;min-width:48px">0 {{ t('results') }}</span>
         </div>
         {% if f.can_edit %}
         <div id="replace-row" style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:8px" hidden>
-          <input id="transcript-replace" class="search-input" type="text" placeholder="Replace with" style="flex:1;min-width:180px;padding:7px 9px">
-          <label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> Match case</label>
-          <button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">Replace all</button>
+          <input id="transcript-replace" class="search-input" type="text" placeholder="{{ t('Replace with') }}" style="flex:1;min-width:180px;padding:7px 9px">
+          <label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> {{ t('Match case') }}</label>
+          <button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">{{ t('Replace all') }}</button>
           <span id="replace-result" class="sub" style="font-size:12px"></span>
         </div>
-        <button type="button" id="toggle-replace" style="border:0;background:none;color:var(--blue);padding:6px 0 0;cursor:pointer;font-size:12px">Replace</button>
+        <button type="button" id="toggle-replace" style="border:0;background:none;color:var(--blue);padding:6px 0 0;cursor:pointer;font-size:12px">{{ t('Replace') }}</button>
         {% endif %}
       </div>
       {% if f.speakers %}
@@ -176,7 +176,7 @@
           <input type="hidden" name="key" value="{{ sp.key }}">
           <input class="spk-name" type="text" name="name" value="{{ sp.name or '' }}"
                  placeholder="{{ sp.key }}" aria-label="Display name for {{ sp.key }}">
-          <button class="spk-save" type="submit">Save</button>
+          <button class="spk-save" type="submit">{{ t('Save') }}</button>
         </form>
         {% endfor %}
       </div>
@@ -188,13 +188,13 @@
           <div class="txt">
             {% if seg.speaker %}<span class="who"><span class="dot"></span>{{ f.speaker_names.get(seg.speaker, seg.speaker) }}</span><br>{% endif %}{{ seg.text }}
             {% if f.can_edit %}
-            <button class="editbtn" type="button" title="Edit this segment" aria-label="Edit segment text">✎</button>
+            <button class="editbtn" type="button" title="{{ t('Edit this segment') }}" aria-label="{{ t('Edit segment text') }}">✎</button>
             <form class="segedit" method="post" action="/file/{{ f.id }}/transcript/segments/{{ loop.index0 }}" hidden>
               <input type="hidden" name="base_revision" value="{{ f.transcript.revision or 0 }}">
               <textarea name="text" rows="2">{{ seg.text }}</textarea>
               <div class="actions">
-                <button class="btn" type="submit">Save</button>
-                <button class="btn sec" type="button" data-cancel>Cancel</button>
+                <button class="btn" type="submit">{{ t('Save') }}</button>
+                <button class="btn sec" type="button" data-cancel>{{ t('Cancel') }}</button>
               </div>
             </form>
             {% endif %}
@@ -208,8 +208,7 @@
     {% if f.imported_transcript %}
     <div class="tabpanel" data-panel="imported" {% if f.transcript or f.summaries %}hidden{% endif %}>
       <div class="panel sub" style="margin:8px 0 14px">
-        Imported from Plaud for migration/comparison. Independent processing does not
-        use this transcript as its canonical result.
+        {{ t('Imported from Plaud for migration/comparison. Independent processing does not use this transcript as its canonical result.') }}
       </div>
       <div class="transcript-import">
         {% for seg in f.imported_transcript.segments %}
@@ -250,8 +249,8 @@
         .mindmap .mm-leaf { margin-left: 14px; padding: 2px 0 2px 10px; border-left: 1px solid var(--border); color: var(--fg); }
       </style>
       <div style="display:flex; gap:7px; margin-top:10px">
-        <button type="button" class="btn sec" id="mm-expand" style="padding:6px 10px; font-size:12px">Expand all</button>
-        <button type="button" class="btn sec" id="mm-collapse" style="padding:6px 10px; font-size:12px">Collapse all</button>
+        <button type="button" class="btn sec" id="mm-expand" style="padding:6px 10px; font-size:12px">{{ t('Expand all') }}</button>
+        <button type="button" class="btn sec" id="mm-collapse" style="padding:6px 10px; font-size:12px">{{ t('Collapse all') }}</button>
       </div>
       <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
       <div class="sub" style="font-size:11.5px;margin-top:8px">Generated from {{ mindmaps[-1].lineage_label }}{% if mindmaps[-1].input_transcript_source %} · {{ mindmaps[-1].input_transcript_source }}{% endif %}</div>
@@ -261,15 +260,15 @@
 
     <div class="tabpanel" data-panel="ask" {% if f.transcript or f.imported_transcript or f.summaries %}hidden{% endif %}>
       <div class="sub" style="margin:12px 0 8px; font-size:13px">
-        Ask about this recording. Answers stay grounded in its transcript and cite playable moments.
+        {{ t('Ask about this recording. Answers stay grounded in its transcript and cite playable moments.') }}
       </div>
       <div id="ask-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:11px">
         {% for chip in ["What was decided?", "List action items with owners", "What are the key topics?"] %}
-        <button type="button" class="btn sec ask-chip" data-q="{{ chip }}"
-          style="padding:5px 11px; font-size:12px">{{ chip }}</button>
+        <button type="button" class="btn sec ask-chip" data-q="{{ t(chip) }}"
+          style="padding:5px 11px; font-size:12px">{{ t(chip) }}</button>
         {% endfor %}
       </div>
-      <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:6px">QUICK ACTIONS · GROUNDED · READ ONLY</div>
+      <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:6px">{{ t('QUICK ACTIONS · GROUNDED · READ ONLY') }}</div>
       <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">
         {% for skill in f.ask_skills %}
         <form hx-post="/file/{{ f.id }}/ask/skill" hx-target="#file-answer" hx-swap="innerHTML" hx-indicator="#file-ask-spin">
@@ -280,43 +279,43 @@
       </div>
       <form class="ask" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-swap="innerHTML"
             hx-indicator="#file-ask-spin">
-        <input type="text" name="q" id="ask-q" placeholder="Ask a question about this recording…"
+        <input type="text" name="q" id="ask-q" placeholder="{{ t('Ask a question about this recording…') }}"
           autocomplete="off" required>
-        <button class="btn" type="submit">Ask</button>
+        <button class="btn" type="submit">{{ t('Ask') }}</button>
       </form>
-      <div id="file-ask-spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">thinking…</div>
+      <div id="file-ask-spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{{ t('thinking…') }}</div>
       {% if f.ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 10px"><span class="sub" style="font-size:11px">Recent threads</span>{% for thread in f.ask_threads %}<a class="chip {% if f.selected_ask_thread and f.selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/file/{{ f.id }}?ask_thread={{ thread.id }}">{{ thread.title | truncate(34) }}</a>{% endfor %}</div>{% endif %}
       <div id="file-answer">{% if f.selected_ask_thread %}{% set thread=f.selected_ask_thread %}{% set file_id=f.id %}{% set target='file-answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
     </div>
 
     {% if not f.transcript and not f.imported_transcript and not f.summaries %}
-    <div class="empty"><div class="big">📝</div>Not processed yet — no transcript or notes.</div>
+    <div class="empty"><div class="big">📝</div>{{ t('Not processed yet — no transcript or notes.') }}</div>
     {% endif %}
   </div></section>
 </div>
 <div class="import-backdrop" id="metadata-backdrop" hidden>
   <section class="import-modal" style="width:min(520px,100%);min-height:0" role="dialog" aria-modal="true" aria-labelledby="metadata-title">
-    <div class="import-head"><span id="metadata-title">Folder and tags</span><button class="import-close" id="metadata-close" type="button">×</button></div>
+    <div class="import-head"><span id="metadata-title">{{ t('Folder and tags') }}</span><button class="import-close" id="metadata-close" type="button">×</button></div>
     <form id="metadata-form" class="import-body" style="gap:14px">
-      <label><strong>Folder</strong><select class="search-input" name="folder_id" style="width:100%;margin-top:6px"><option value="">No folder</option>{% for folder in organization.folders %}<option value="{{ folder.id }}" {% if f.folder and f.folder.id==folder.id %}selected{% endif %}>{{ folder.name }} · {{ folder.count }} recordings</option>{% endfor %}</select></label>
-      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:11px"><legend><strong>Tags</strong></legend><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">{% for tag in organization.tags %}<label style="font-size:13px"><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag.id in (f.tags|map(attribute='id')|list) %}checked{% endif %}> {{ tag.name }} <span class="sub">({{ tag.count }})</span></label>{% else %}<span class="sub">No tags yet. Create tags from the Library organization panel.</span>{% endfor %}</div></fieldset>
+      <label><strong>{{ t('Folder') }}</strong><select class="search-input" name="folder_id" style="width:100%;margin-top:6px"><option value="">{{ t('No folder') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}" {% if f.folder and f.folder.id==folder.id %}selected{% endif %}>{{ folder.name }} · {{ folder.count }} {{ t('recordings') }}</option>{% endfor %}</select></label>
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:11px"><legend><strong>{{ t('Tags') }}</strong></legend><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">{% for tag in organization.tags %}<label style="font-size:13px"><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag.id in (f.tags|map(attribute='id')|list) %}checked{% endif %}> {{ tag.name }} <span class="sub">({{ tag.count }})</span></label>{% else %}<span class="sub">{{ t('No tags yet. Create tags from the Library organization panel.') }}</span>{% endfor %}</div></fieldset>
       <div id="metadata-status" class="sub" style="font-size:12px"></div>
-      <div style="display:flex;justify-content:space-between;gap:8px"><button class="btn sec" id="clear-recording-metadata" type="button">Clear all</button><div style="display:flex;gap:8px"><button class="btn sec" id="metadata-cancel" type="button">Cancel</button><button class="btn" type="submit">Save</button></div></div>
+      <div style="display:flex;justify-content:space-between;gap:8px"><button class="btn sec" id="clear-recording-metadata" type="button">{{ t('Clear all') }}</button><div style="display:flex;gap:8px"><button class="btn sec" id="metadata-cancel" type="button">{{ t('Cancel') }}</button><button class="btn" type="submit">{{ t('Save') }}</button></div></div>
     </form>
   </section>
 </div>
 {% if f.transcript or f.summaries or f.has_audio %}
 <div class="import-backdrop" id="export-backdrop" hidden>
   <section class="import-modal" style="min-height:0;width:min(560px,100%)" role="dialog" aria-modal="true" aria-labelledby="export-title">
-    <div class="import-head"><span id="export-title">Export recording</span><button class="import-close" id="export-close" type="button" aria-label="Close">×</button></div>
+    <div class="import-head"><span id="export-title">{{ t('Export recording') }}</span><button class="import-close" id="export-close" type="button" aria-label="{{ t('Close') }}">×</button></div>
     <div class="import-body" style="gap:18px">
       {% if f.transcript %}
       <section>
-        <strong>Transcript</strong>
-        <div class="sub" style="font-size:12px;margin:3px 0 9px">Canonical corrected transcript when available</div>
+        <strong>{{ t('Transcript') }}</strong>
+        <div class="sub" style="font-size:12px;margin:3px 0 9px">{{ t('Canonical corrected transcript when available') }}</div>
         <div style="display:flex;gap:14px;margin-bottom:10px;font-size:13px">
-          <label><input id="export-timestamps" type="checkbox" checked> Timestamps</label>
-          <label><input id="export-speakers" type="checkbox" checked> Speaker labels</label>
+          <label><input id="export-timestamps" type="checkbox" checked> {{ t('Timestamps') }}</label>
+          <label><input id="export-speakers" type="checkbox" checked> {{ t('Speaker labels') }}</label>
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap" data-export-group="transcript">
           {% for fmt in ['txt','srt','vtt'] %}<a class="btn sec" data-fmt="{{ fmt }}" href="#" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
@@ -325,18 +324,18 @@
       {% endif %}
       {% if f.summaries or f.user_notes %}
       <section>
-        <strong>Notes</strong>
-        <div class="sub" style="font-size:12px;margin:3px 0 9px">Generated notes and saved notes, without transcript</div>
+        <strong>{{ t('Notes') }}</strong>
+        <div class="sub" style="font-size:12px;margin:3px 0 9px">{{ t('Generated notes and saved notes, without transcript') }}</div>
         <div style="display:flex;gap:7px;flex-wrap:wrap">
           {% for fmt in ['md','txt'] %}<a class="btn sec" href="/file/{{ f.id }}/export/notes.{{ fmt }}" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
         </div>
       </section>
       {% endif %}
       <section>
-        <strong>Combined archive</strong>
+        <strong>{{ t('Combined archive') }}</strong>
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
-          {% if f.transcript or f.summaries %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:7px 11px">Markdown archive</a>{% endif %}
-          {% if f.has_audio %}<a class="btn sec" href="/file/{{ f.id }}/export/audio" style="padding:7px 11px">Original audio</a>{% endif %}
+          {% if f.transcript or f.summaries %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:7px 11px">{{ t('Markdown archive') }}</a>{% endif %}
+          {% if f.has_audio %}<a class="btn sec" href="/file/{{ f.id }}/export/audio" style="padding:7px 11px">{{ t('Original audio') }}</a>{% endif %}
         </div>
       </section>
     </div>

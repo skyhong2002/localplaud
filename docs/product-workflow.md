@@ -229,9 +229,11 @@ provider/profile, remote-worker, and authorized-integration controls behind a
 responsive section navigator with a direct system-health destination. Translated-
 interface locale now has a durable English / Traditional Chinese (Taiwan) selector,
 correct document language metadata, localized dates, and a centralized catalog used
-by the global shell and Home, Library, Search, Saved notes, Templates, Discover,
-Notifications, and Status pages. The remaining recording-workspace and deep Settings
-strings are tracked as translation coverage work rather than being represented by a
+by the global shell and Home, Library, recording workspace, Search, Saved notes,
+Templates, Discover, Notifications, and Status pages. The recording workspace covers
+transcript editing/search, playback, profiles/templates, local-data controls, Ask,
+organization, and export. Remaining deep Settings and dynamic error/action strings
+are tracked as translation coverage work rather than being represented by a
 non-functional control.
 
 Workspace display preferences are durable local data rather than browser-only state:

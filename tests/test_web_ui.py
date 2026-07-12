@@ -145,6 +145,36 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'id="persistent-player"' in r.text and 'id="waveform"' in r.text
 
 
+def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    _seed(str(audio))
+    with c:
+        preferences = c.get("/api/preferences/workspace").json()
+        assert c.put(
+            "/api/preferences/workspace",
+            json=preferences | {"locale": "zh-Hant-TW"},
+        ).status_code == 200
+        page = c.get("/file/r1")
+    assert page.status_code == 200
+    assert '<html lang="zh-Hant-TW"' in page.text
+    for text in (
+        "儲存標題",
+        "繼續處理",
+        "全部重建",
+        "本機資料",
+        "執行設定檔",
+        "筆記範本",
+        "處理詳情",
+        "逐字稿",
+        "在逐字稿中尋找",
+        "匯出錄音",
+        "時間戳記",
+    ):
+        assert text in page.text
+
+
 def test_metadata_only_plaud_recording_offers_audio_import(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()

@@ -419,8 +419,9 @@ embedding raw provider credentials or model settings in each rule.
   Traditional Chinese (Taiwan), sets correct document language/date formatting, and
   translates the global shell plus Home, Library, Search, Saved notes, Templates,
   Discover, Notifications, Status, and workspace preference controls through a
-  centralized catalog. Remaining locale work is the recording workspace, deep
-  Settings forms, and remaining dynamic status/action messages. Access &
+  centralized catalog. Recording Detail now covers playback, transcript search/edit,
+  profiles/templates, local-data controls, Ask, organization, and export. Remaining
+  locale work is deep Settings forms and remaining dynamic error/action messages. Access &
   security now truthfully reports the stateless token/reverse-proxy boundary and
   explains why app-managed active sessions do not exist; Support & About shows
   runtime/build identity and downloads a tested redacted diagnostics bundle with no
