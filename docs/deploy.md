@@ -93,11 +93,10 @@ optional runtime:
 uv sync --extra faster-whisper --extra forced-align --extra diarize
 ```
 
-The bundled CUDA image does not yet install the `forced-align` extra. Selecting the
-WhisperX profile in that image therefore reports an actionable degraded align stage;
-build a derived image with the extra before enabling it. Keep provider timestamps as
-the production selection until the language-specific model has been benchmarked on
-owned Taiwan Mandarin and Mandarin/English recordings.
+The bundled CUDA image installs this extra, but provider timestamps remain the safe
+initial selection. Enable WhisperX only after its language-specific model has passed
+a real-audio runtime check and Taiwan Mandarin / Mandarin-English benchmark on the
+target host; model availability alone is not quality evidence.
 
 For a fully local text path on the same NVIDIA host, enable the separately named
 Ollama profile and install an explicit model. Ollama is reachable only on the

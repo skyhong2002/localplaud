@@ -14,7 +14,9 @@ def test_cuda_image_pins_pyannote_compatible_torch_stack():
 
 def test_cuda_image_caches_dependencies_before_copying_application_source():
     dockerfile = Path("Dockerfile.cuda").read_text()
-    dependency_install = dockerfile.index('pip install ".[faster-whisper,diarize,cloud,local-llm]"')
+    dependency_install = dockerfile.index(
+        'pip install ".[faster-whisper,forced-align,diarize,cloud,local-llm]"'
+    )
     source_copy = dockerfile.index("COPY src ./src")
     application_install = dockerfile.index("pip install --no-deps --force-reinstall .")
     assert dependency_install < source_copy < application_install
@@ -29,3 +31,8 @@ def test_optional_ollama_runtime_is_private_and_persistent():
     assert 'expose:\n      - "11434"' in compose
     assert '11434:11434' not in compose
     assert "qwen3:4b-instruct-2507-q4_K_M" in deploy
+
+
+def test_cuda_image_installs_selectable_forced_alignment_runtime():
+    dockerfile = Path("Dockerfile.cuda").read_text()
+    assert "forced-align" in dockerfile
