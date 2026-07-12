@@ -20,6 +20,25 @@ segment IDs, and speaker ownership. Use Traditional Chinese (Taiwan) where Chine
 is present. Never summarize, invent, merge, split, or add commentary. Return only
 JSON: {\"segments\":[{\"id\":integer,\"text\":string}, ...]} with exactly one
 entry for every target segment and no context segments."""
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "segments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "text": {"type": "string"},
+                },
+                "required": ["id", "text"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["segments"],
+    "additionalProperties": False,
+}
 
 
 def _chunks(segments: list[dict], limit: int) -> list[tuple[int, int]]:
@@ -98,6 +117,7 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
             system=SYSTEM_PROMPT,
             temperature=0.1,
             max_tokens=max(2048, len(targets) * 80),
+            json_schema=RESPONSE_SCHEMA,
         )
         try:
             response = _json_completion(raw_response)

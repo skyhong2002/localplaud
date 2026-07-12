@@ -31,7 +31,9 @@ class AnthropicLLM:
         system: str | None = None,
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        json_schema: dict | None = None,
     ) -> str:
+        del json_schema  # The Messages API path still relies on prompt + validation.
         if not self.cfg.api_key:
             raise LLMUnavailable("Anthropic LLM: no API key configured")
         try:

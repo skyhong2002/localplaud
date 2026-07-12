@@ -57,8 +57,11 @@ class OpenCodeGoLLM:
         system: str | None = None,
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        json_schema: dict | None = None,
     ) -> str:
-        del temperature, max_tokens  # The selected OpenCode agent owns these limits.
+        # The selected OpenCode agent owns limits and output validation remains
+        # in the calling stage.
+        del temperature, max_tokens, json_schema
         if not self.available():
             raise LLMUnavailable(f"{self.cfg.executable} is not on PATH")
         payload = f"{system}\n\n{prompt}" if system else prompt

@@ -35,6 +35,7 @@ class OllamaProvider:
         system: str | None = None,
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        json_schema: dict | None = None,
     ) -> str:
         import httpx
 
@@ -43,22 +44,25 @@ class OllamaProvider:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
+        payload = {
+            "model": self.cfg.model,
+            "messages": messages,
+            "stream": False,
+            # Keep the token budget for visible output. Thinking-capable
+            # local models can otherwise spend the whole response on a
+            # hidden reasoning field and return empty content.
+            "think": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+        }
+        if json_schema is not None:
+            payload["format"] = json_schema
         try:
             resp = httpx.post(
                 f"{self.cfg.host}/api/chat",
-                json={
-                    "model": self.cfg.model,
-                    "messages": messages,
-                    "stream": False,
-                    # Keep the token budget for visible output. Thinking-capable
-                    # local models can otherwise spend the whole response on a
-                    # hidden reasoning field and return empty content.
-                    "think": False,
-                    "options": {
-                        "temperature": temperature,
-                        "num_predict": max_tokens,
-                    },
-                },
+                json=payload,
                 timeout=600,
             )
         except httpx.ConnectError as exc:

@@ -23,6 +23,7 @@ class FakePolisher:
         return True
 
     def complete(self, prompt, **_kwargs):
+        assert _kwargs["json_schema"]["required"] == ["segments"]
         request = json.loads(prompt)
         self.requests.append(request)
         return json.dumps(

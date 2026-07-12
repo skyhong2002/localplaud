@@ -43,6 +43,7 @@ class LLMProvider(Protocol):
         system: str | None = None,
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        json_schema: dict | None = None,
     ) -> str:
         """Return the completion text for ``prompt``. Raise
         :class:`LLMUnavailable` if the provider can't run, :class:`LLMError`

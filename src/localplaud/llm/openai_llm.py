@@ -32,6 +32,7 @@ class OpenAILLM:
         system: str | None = None,
         temperature: float = 0.3,
         max_tokens: int = 2048,
+        json_schema: dict | None = None,
     ) -> str:
         if not self.cfg.api_key:
             raise LLMUnavailable("OpenAI LLM: no API key configured")
@@ -48,11 +49,23 @@ class OpenAILLM:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
+        request = {
+            "model": self.cfg.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if json_schema is not None:
+            request["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "localplaud_response",
+                    "strict": True,
+                    "schema": json_schema,
+                },
+            }
         resp = client.chat.completions.create(
-            model=self.cfg.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
+            **request,
         )
         content = resp.choices[0].message.content
         if content is None:
