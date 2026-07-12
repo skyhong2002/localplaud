@@ -26,6 +26,7 @@ x-localplaud: &localplaud
   volumes:
     - ./data:/app/data
     - ./config.toml:/app/config.toml:ro
+    - model_cache:/home/localplaud/.cache
   expose:
     - "8080"
   restart: unless-stopped
@@ -99,3 +100,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  model_cache:
