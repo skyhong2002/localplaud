@@ -152,6 +152,19 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
     raw = engine.raw_connection()
     try:
         cursor = raw.cursor()
+        unsupported = [
+            column
+            for column in ("language", "execution_profile_id")
+            if column in columns
+            and cursor.execute(
+                f"SELECT 1 FROM note_templates WHERE {column} IS NOT NULL LIMIT 1"
+            ).fetchone()
+        ]
+        if unsupported:
+            raise RuntimeError(
+                "legacy note-template migration cannot preserve non-empty columns: "
+                + ", ".join(unsupported)
+            )
         cursor.execute("PRAGMA foreign_keys=OFF")
         cursor.executescript(f"""
             BEGIN;
@@ -209,6 +222,7 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
         raw.rollback()
         raise
     finally:
+        raw.cursor().execute("PRAGMA foreign_keys=ON")
         raw.close()
     return ["note_templates"]
 
@@ -685,10 +699,122 @@ def migrate_ask_provenance_schema(engine: Engine) -> list[str]:
     tables = set(inspector.get_table_names())
     if not {"ask_messages", "ask_threads"} & tables:
         return []
+
+    message_columns = (
+        {item["name"] for item in inspector.get_columns("ask_messages")}
+        if "ask_messages" in tables
+        else set()
+    )
+    thread_columns = (
+        {item["name"] for item in inspector.get_columns("ask_threads")}
+        if "ask_threads" in tables
+        else set()
+    )
+    legacy_ask = bool(
+        {"citations", "profile_snapshot", "estimated_cost", "actual_cost"}
+        & message_columns
+    ) or (
+        "ask_threads" in tables
+        and str(next(
+            item["type"]
+            for item in inspector.get_columns("ask_threads")
+            if item["name"] == "id"
+        )).upper().startswith("INTEGER")
+    )
+    if legacy_ask and {"ask_messages", "ask_threads"} <= tables:
+        def legacy(columns: set[str], column: str, default: str = "NULL") -> str:
+            return column if column in columns else default
+
+        raw = engine.raw_connection()
+        try:
+            cursor = raw.cursor()
+            cursor.execute("PRAGMA foreign_keys=OFF")
+            cursor.executescript(f"""
+                BEGIN;
+                CREATE TABLE ask_threads_new (
+                    id VARCHAR(36) NOT NULL PRIMARY KEY,
+                    file_id VARCHAR(64) REFERENCES plaud_files(id) ON DELETE CASCADE,
+                    title VARCHAR(200) NOT NULL,
+                    retrieval_scope JSON NOT NULL DEFAULT '{{}}',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                );
+                INSERT INTO ask_threads_new (
+                    id, file_id, title, retrieval_scope, created_at, updated_at
+                )
+                SELECT
+                    CAST(id AS TEXT), file_id, COALESCE(title, 'Ask thread'),
+                    COALESCE({legacy(thread_columns, 'retrieval_scope', "'{}'")}, '{{}}'),
+                    {legacy(thread_columns, 'created_at', 'CURRENT_TIMESTAMP')},
+                    {legacy(thread_columns, 'updated_at', 'CURRENT_TIMESTAMP')}
+                FROM ask_threads;
+
+                CREATE TABLE ask_messages_new (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    thread_id VARCHAR(36) NOT NULL
+                        REFERENCES ask_threads_new(id) ON DELETE CASCADE,
+                    role VARCHAR(16) NOT NULL,
+                    content TEXT NOT NULL,
+                    sources JSON NOT NULL DEFAULT '[]',
+                    provider VARCHAR(64),
+                    model VARCHAR(128),
+                    resolved_profile_snapshot JSON,
+                    usage JSON NOT NULL DEFAULT '{{}}',
+                    estimated_cost_usd FLOAT NOT NULL DEFAULT 0,
+                    skill_key VARCHAR(64),
+                    skill_snapshot JSON,
+                    created_at DATETIME NOT NULL
+                );
+                INSERT INTO ask_messages_new (
+                    id, thread_id, role, content, sources, provider, model,
+                    resolved_profile_snapshot, usage, estimated_cost_usd,
+                    skill_key, skill_snapshot, created_at
+                )
+                SELECT
+                    id, CAST(thread_id AS TEXT), role, content,
+                    COALESCE(
+                        {legacy(message_columns, 'sources')},
+                        {legacy(message_columns, 'citations', "'[]'")}, '[]'
+                    ),
+                    {legacy(message_columns, 'provider')},
+                    {legacy(message_columns, 'model')},
+                    COALESCE(
+                        {legacy(message_columns, 'resolved_profile_snapshot')},
+                        {legacy(message_columns, 'profile_snapshot')}
+                    ),
+                    COALESCE({legacy(message_columns, 'usage', "'{}'")}, '{{}}'),
+                    COALESCE(
+                        {legacy(message_columns, 'estimated_cost_usd')},
+                        {legacy(message_columns, 'estimated_cost', '0')}, 0
+                    ),
+                    {legacy(message_columns, 'skill_key')},
+                    {legacy(message_columns, 'skill_snapshot')},
+                    {legacy(message_columns, 'created_at', 'CURRENT_TIMESTAMP')}
+                FROM ask_messages;
+
+                DROP TABLE ask_messages;
+                DROP TABLE ask_threads;
+                ALTER TABLE ask_threads_new RENAME TO ask_threads;
+                ALTER TABLE ask_messages_new RENAME TO ask_messages;
+                CREATE INDEX ix_ask_threads_file_id ON ask_threads (file_id);
+                CREATE INDEX ix_ask_messages_thread_id ON ask_messages (thread_id);
+            """)
+            violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise RuntimeError(f"legacy Ask migration broke foreign keys: {violations}")
+            raw.commit()
+            cursor.execute("PRAGMA foreign_keys=ON")
+        except Exception:
+            raw.rollback()
+            raise
+        finally:
+            raw.cursor().execute("PRAGMA foreign_keys=ON")
+            raw.close()
+        return ["ask_threads", "ask_messages"]
+
     migrated: list[str] = []
     with engine.begin() as connection:
         if "ask_messages" in tables:
-            columns = {item["name"] for item in inspector.get_columns("ask_messages")}
             for column, ddl in (
                 ("provider", "VARCHAR(64)"),
                 ("model", "VARCHAR(128)"),
@@ -698,16 +824,18 @@ def migrate_ask_provenance_schema(engine: Engine) -> list[str]:
                 ("skill_key", "VARCHAR(64)"),
                 ("skill_snapshot", "JSON"),
             ):
-                if column not in columns:
+                if column not in message_columns:
                     connection.execute(
                         text(f"ALTER TABLE ask_messages ADD COLUMN {column} {ddl}")
                     )
                     migrated.append(f"ask_messages.{column}")
         if "ask_threads" in tables:
-            columns = {item["name"] for item in inspector.get_columns("ask_threads")}
-            if "retrieval_scope" not in columns:
+            if "retrieval_scope" not in thread_columns:
                 connection.execute(
-                    text("ALTER TABLE ask_threads ADD COLUMN retrieval_scope JSON DEFAULT '{}'")
+                    text(
+                        "ALTER TABLE ask_threads ADD COLUMN "
+                        "retrieval_scope JSON NOT NULL DEFAULT '{}'"
+                    )
                 )
                 migrated.append("ask_threads.retrieval_scope")
     return migrated

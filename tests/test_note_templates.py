@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import create_engine, inspect, text
 
 
@@ -186,6 +187,31 @@ def test_legacy_note_template_schema_is_rebuilt_without_losing_prompts(tmp_path)
         ).one()
     assert tuple(row) == (7, "meeting-notes", 2, "system", "instructions", 1, 1)
     assert migrate_legacy_note_template_schema(engine) == []
+
+
+def test_legacy_note_template_migration_rejects_unmapped_user_settings(tmp_path):
+    from localplaud.db.migrations import migrate_legacy_note_template_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path/'legacy-note-settings.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE note_templates (
+                id INTEGER PRIMARY KEY, name VARCHAR(64) NOT NULL,
+                system_prompt TEXT NOT NULL, instructions TEXT NOT NULL,
+                language VARCHAR(16), execution_profile_id INTEGER,
+                created_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO note_templates (
+                id, name, system_prompt, instructions, language, created_at
+            ) VALUES (1, 'Custom', 'system', 'instructions', 'zh-TW', CURRENT_TIMESTAMP)
+        """))
+
+    with pytest.raises(RuntimeError, match="cannot preserve.*language"):
+        migrate_legacy_note_template_schema(engine)
+    columns = {item["name"] for item in inspect(engine).get_columns("note_templates")}
+    assert "language" in columns and "key" not in columns
 
 
 def test_recording_selection_marks_notes_stale_and_archive_resets(monkeypatch, tmp_path):

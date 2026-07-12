@@ -68,8 +68,75 @@ def test_ask_skill_provenance_migration_is_idempotent(tmp_path):
     assert migrate_ask_provenance_schema(engine) == []
     columns = {item["name"] for item in inspect(engine).get_columns("ask_messages")}
     assert {"skill_key", "skill_snapshot"} <= columns
-    thread_columns = {item["name"] for item in inspect(engine).get_columns("ask_threads")}
+    inspected_thread_columns = inspect(engine).get_columns("ask_threads")
+    thread_columns = {item["name"] for item in inspected_thread_columns}
     assert "retrieval_scope" in thread_columns
+    retrieval_scope = next(
+        item for item in inspected_thread_columns if item["name"] == "retrieval_scope"
+    )
+    assert retrieval_scope["nullable"] is False
+
+
+def test_legacy_deployed_ask_schema_is_rebuilt_without_losing_messages(tmp_path):
+    from localplaud.db.migrations import migrate_ask_provenance_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-deployed-ask.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
+        connection.execute(text("INSERT INTO plaud_files (id) VALUES ('recording')"))
+        connection.execute(text("""
+            CREATE TABLE ask_threads (
+                id INTEGER PRIMARY KEY, file_id VARCHAR(64), title VARCHAR(256),
+                created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            CREATE TABLE ask_messages (
+                id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL,
+                role VARCHAR(16) NOT NULL, content TEXT NOT NULL,
+                citations JSON NOT NULL, provider VARCHAR(64), model VARCHAR(128),
+                profile_snapshot JSON NOT NULL, usage JSON NOT NULL,
+                estimated_cost FLOAT, actual_cost FLOAT, created_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO ask_threads
+                (id, file_id, title, created_at, updated_at)
+            VALUES (7, 'recording', 'History', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """))
+        connection.execute(text("""
+            INSERT INTO ask_messages (
+                id, thread_id, role, content, citations, provider, model,
+                profile_snapshot, usage, estimated_cost, created_at
+            ) VALUES (
+                9, 7, 'assistant', 'Answer', '[{"second": 12}]', 'ollama', 'qwen',
+                '{"version": 2}', '{"output_tokens": 4}', 0.5, CURRENT_TIMESTAMP
+            )
+        """))
+
+    assert migrate_ask_provenance_schema(engine) == ["ask_threads", "ask_messages"]
+    assert migrate_ask_provenance_schema(engine) == []
+    thread_columns = {item["name"] for item in inspect(engine).get_columns("ask_threads")}
+    message_columns = {item["name"] for item in inspect(engine).get_columns("ask_messages")}
+    assert "retrieval_scope" in thread_columns
+    assert {"sources", "resolved_profile_snapshot", "estimated_cost_usd"} <= message_columns
+    assert not {"citations", "profile_snapshot", "actual_cost"} & message_columns
+    with engine.connect() as connection:
+        thread = connection.execute(
+            text("SELECT id, file_id, title, retrieval_scope FROM ask_threads")
+        ).one()
+        message = connection.execute(text("""
+            SELECT id, thread_id, sources, resolved_profile_snapshot, usage,
+                   estimated_cost_usd
+            FROM ask_messages
+        """)).one()
+        assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
+    assert tuple(thread) == ("7", "recording", "History", "{}")
+    assert message.id == 9 and message.thread_id == "7"
+    assert '"second": 12' in message.sources
+    assert '"version": 2' in message.resolved_profile_snapshot
+    assert '"output_tokens": 4' in message.usage
+    assert message.estimated_cost_usd == 0.5
 
 
 def test_editable_note_source_migration_is_idempotent(tmp_path):
