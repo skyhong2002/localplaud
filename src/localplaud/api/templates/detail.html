@@ -379,25 +379,26 @@
 
 {% block scripts %}
 <script>
-  async function deleteLocalData(kind,message){if(!confirm(message))return;const output=document.getElementById('local-data-result');output.textContent='Removing local data…';const response=await fetch(`/api/files/{{ f.id }}/${kind}`,{method:'DELETE'}),data=await response.json();if(response.ok){output.textContent='Removed. Reloading…';location.reload();}else output.textContent=data.detail||'Could not remove local data';}
-  document.getElementById('delete-local-processing')?.addEventListener('click',()=>deleteLocalData('local-processing','Delete local transcript, corrections, generated notes, mind map, search index, and processing history? Saved notes and Plaud imports will remain.'));
-  document.getElementById('delete-local-audio')?.addEventListener('click',()=>deleteLocalData('local-audio','Remove this downloaded audio and waveform from this host? It can be imported again from Plaud later.'));
+  const tr=window.localplaudT;
+  async function deleteLocalData(kind,message){if(!confirm(message))return;const output=document.getElementById('local-data-result');output.textContent=tr('Removing local data…');const response=await fetch(`/api/files/{{ f.id }}/${kind}`,{method:'DELETE'}),data=await response.json();if(response.ok){output.textContent=tr('Removed. Reloading…');location.reload();}else output.textContent=data.detail||tr('Could not remove local data');}
+  document.getElementById('delete-local-processing')?.addEventListener('click',()=>deleteLocalData('local-processing',tr('Delete local transcript, corrections, generated notes, mind map, search index, and processing history? Saved notes and Plaud imports will remain.')));
+  document.getElementById('delete-local-audio')?.addEventListener('click',()=>deleteLocalData('local-audio',tr('Remove this downloaded audio and waveform from this host? It can be imported again from Plaud later.')));
   const metadataBackdrop=document.getElementById('metadata-backdrop'),currentTagIds={{ f.tags|map(attribute='id')|list|tojson }};
   document.getElementById('edit-recording-metadata').onclick=()=>{metadataBackdrop.hidden=false;};
   const closeMetadata=()=>{metadataBackdrop.hidden=true;};document.getElementById('metadata-close').onclick=closeMetadata;document.getElementById('metadata-cancel').onclick=closeMetadata;metadataBackdrop.addEventListener('click',event=>{if(event.target===metadataBackdrop)closeMetadata();});
-  async function saveMetadata(folderId,tagIds){const current=new Set(currentTagIds),selected=new Set(tagIds),body={file_ids:['{{ f.id }}'],folder_id:folderId,add_tag_ids:[...selected].filter(id=>!current.has(id)),remove_tag_ids:[...current].filter(id=>!selected.has(id))};const response=await fetch('/api/files/organize',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await response.json();if(response.ok){location.reload();return;}document.getElementById('metadata-status').textContent=data.detail||'Could not save metadata';}
+  async function saveMetadata(folderId,tagIds){const current=new Set(currentTagIds),selected=new Set(tagIds),body={file_ids:['{{ f.id }}'],folder_id:folderId,add_tag_ids:[...selected].filter(id=>!current.has(id)),remove_tag_ids:[...current].filter(id=>!selected.has(id))};const response=await fetch('/api/files/organize',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await response.json();if(response.ok){location.reload();return;}document.getElementById('metadata-status').textContent=data.detail||tr('Could not save metadata');}
   document.getElementById('metadata-form').addEventListener('submit',event=>{event.preventDefault();const data=new FormData(event.currentTarget),folder=data.get('folder_id');saveMetadata(folder?+folder:null,data.getAll('tag_ids').map(Number));});document.getElementById('clear-recording-metadata').onclick=()=>saveMetadata(null,[]);
-  document.getElementById('recording-title-form')?.addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('recording-title'),button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:input.value})}),data=await response.json();if(response.ok)location.reload();else{button.disabled=false;button.textContent=data.detail||'Save failed';}});
+  document.getElementById('recording-title-form')?.addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('recording-title'),button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:input.value})}),data=await response.json();if(response.ok)location.reload();else{button.disabled=false;button.textContent=data.detail||tr('Save failed');}});
   document.getElementById('clear-local-title')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:null})});if(response.ok)location.reload();else event.currentTarget.disabled=false;});
   const findInput=document.getElementById('transcript-find');
   if(findInput){
     const segments=[...document.querySelectorAll('#transcript .seg')],count=document.getElementById('find-count');let matches=[],position=-1;
     const focusMatch=next=>{if(!matches.length)return;position=(position+next+matches.length)%matches.length;matches.forEach((segment,index)=>segment.style.outline=index===position?'2px solid var(--blue)':'');matches[position].scrollIntoView({behavior:'smooth',block:'center'});count.textContent=`${position+1} / ${matches.length}`;};
-    const search=()=>{segments.forEach(segment=>segment.style.outline='');const query=findInput.value.trim().toLocaleLowerCase();matches=query?segments.filter(segment=>segment.querySelector('.txt')?.textContent.toLocaleLowerCase().includes(query)):[];position=-1;count.textContent=`${matches.length} result${matches.length===1?'':'s'}`;if(matches.length)focusMatch(1);};
+    const search=()=>{segments.forEach(segment=>segment.style.outline='');const query=findInput.value.trim().toLocaleLowerCase();matches=query?segments.filter(segment=>segment.querySelector('.txt')?.textContent.toLocaleLowerCase().includes(query)):[];position=-1;count.textContent=`${matches.length} ${tr('results')}`;if(matches.length)focusMatch(1);};
     findInput.addEventListener('input',search);document.getElementById('find-next').onclick=()=>focusMatch(1);document.getElementById('find-previous').onclick=()=>focusMatch(-1);
     findInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();focusMatch(event.shiftKey?-1:1);}});
     document.getElementById('toggle-replace')?.addEventListener('click',()=>{const row=document.getElementById('replace-row');row.hidden=!row.hidden;if(!row.hidden)document.getElementById('transcript-replace').focus();});
-    document.getElementById('replace-all')?.addEventListener('click',async()=>{const output=document.getElementById('replace-result'),button=document.getElementById('replace-all');if(!findInput.value.trim()){output.textContent='Enter text to find';return;}button.disabled=true;output.textContent='Replacing…';const body=new FormData();body.set('find',findInput.value);body.set('replace',document.getElementById('transcript-replace').value);body.set('base_revision','{{ f.transcript.revision if f.transcript else 0 }}');body.set('case_sensitive',document.getElementById('replace-case').checked?'true':'false');const response=await fetch('/file/{{ f.id }}/transcript/replace',{method:'POST',body}),data=await response.json();if(response.ok&&data.replacements){output.textContent=`Replaced ${data.replacements}. Reloading…`;location.href='/file/{{ f.id }}?view=corrected';return;}output.textContent=response.ok?'No matches':(data.error||'Replace failed');button.disabled=false;});
+    document.getElementById('replace-all')?.addEventListener('click',async()=>{const output=document.getElementById('replace-result'),button=document.getElementById('replace-all');if(!findInput.value.trim()){output.textContent=tr('Enter text to find');return;}button.disabled=true;output.textContent=tr('Replacing…');const body=new FormData();body.set('find',findInput.value);body.set('replace',document.getElementById('transcript-replace').value);body.set('base_revision','{{ f.transcript.revision if f.transcript else 0 }}');body.set('case_sensitive',document.getElementById('replace-case').checked?'true':'false');const response=await fetch('/file/{{ f.id }}/transcript/replace',{method:'POST',body}),data=await response.json();if(response.ok&&data.replacements){output.textContent=`${tr('Replaced')} ${data.replacements}. ${tr('Reloading…')}`;location.href='/file/{{ f.id }}?view=corrected';return;}output.textContent=response.ok?tr('No matches'):(data.error||tr('Replace failed'));button.disabled=false;});
   }
   const exportBackdrop=document.getElementById('export-backdrop');
   document.getElementById('open-export')?.addEventListener('click',()=>{exportBackdrop.hidden=false;});
@@ -409,29 +410,29 @@
     location.href=`/file/{{ f.id }}/export/transcript.${link.dataset.fmt}?timestamps=${timestamps}&speakers=${speakers}`;
   }));
   document.getElementById('import-recording-audio')?.addEventListener('click',async()=>{
-    const button=document.getElementById('import-recording-audio'),out=document.getElementById('reprocess-msg');button.disabled=true;button.textContent='Importing…';
+    const button=document.getElementById('import-recording-audio'),out=document.getElementById('reprocess-msg');button.disabled=true;button.textContent=tr('Importing…');
     const response=await fetch('/api/imports/plaud/files/{{ f.id }}/audio',{method:'POST'}),data=await response.json();
-    if(!response.ok){out.textContent=data.detail||'Could not start audio import';button.disabled=false;button.textContent='☁ Import audio';return;}
+    if(!response.ok){out.textContent=data.detail||tr('Could not start audio import');button.disabled=false;button.textContent=`☁ ${tr('Import audio')}`;return;}
     const poll=async()=>{const status=await fetch('/api/imports/plaud/files/{{ f.id }}/audio/status').then(r=>r.json());
-      if(status.has_audio){out.textContent='Audio imported. Reloading…';location.reload();return;}
-      if(status.status==='error'){out.textContent=status.error||'Audio import failed';button.disabled=false;button.textContent='Retry audio import';return;}
-      out.textContent='Downloading this recording from Plaud…';setTimeout(poll,1000);};poll();
+      if(status.has_audio){out.textContent=tr('Audio imported. Reloading…');location.reload();return;}
+      if(status.status==='error'){out.textContent=status.error||tr('Audio import failed');button.disabled=false;button.textContent=tr('Retry audio import');return;}
+      out.textContent=tr('Downloading this recording from Plaud…');setTimeout(poll,1000);};poll();
   });
   document.getElementById('save-note-template')?.addEventListener('click', async () => {
     const button=document.getElementById('save-note-template');
     const out=document.getElementById('note-template-result');
-    button.disabled=true;out.textContent='Saving…';
+    button.disabled=true;out.textContent=tr('Saving…');
     const key=document.getElementById('note-template-select').value;
     const response=await fetch('/api/files/{{ f.id }}/note-template',{
       method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({key})
     });
     const data=await response.json();
-    if(response.ok)out.textContent='Saved. Resume to regenerate notes with this template.';
-    else{out.textContent=data.detail||'Could not save template';button.disabled=false;}
+    if(response.ok)out.textContent=tr('Saved. Resume to regenerate notes with this template.');
+    else{out.textContent=data.detail||tr('Could not save template');button.disabled=false;}
   });
   const noteTemplateSelect=document.getElementById('note-template-select');
-  async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent='Checking recording signals…';const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`Auto suggests ${data.template?.name||data.key} · ${data.confidence} confidence · ${reason}`;}else out.textContent=data.detail||'Could not preview Auto selection';}
-  noteTemplateSelect?.addEventListener('change',()=>{if(noteTemplateSelect.value==='auto')previewAutoTemplate();else document.getElementById('note-template-result').textContent='Applied on the next Resume or Rebuild.';});
+  async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent=tr('Checking recording signals…');const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`${tr('Auto suggests')} ${data.template?.name||data.key} · ${data.confidence} ${tr('confidence')} · ${reason}`;}else out.textContent=data.detail||tr('Could not preview Auto selection');}
+  noteTemplateSelect?.addEventListener('change',()=>{if(noteTemplateSelect.value==='auto')previewAutoTemplate();else document.getElementById('note-template-result').textContent=tr('Applied on the next Resume or Rebuild.');});
   if(noteTemplateSelect?.value==='auto')previewAutoTemplate();
   const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   document.querySelectorAll('[data-md]').forEach(el => {

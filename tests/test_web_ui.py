@@ -223,6 +223,11 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         page = c.get("/file/r1")
     assert page.status_code == 200
     assert '<html lang="zh-Hant-TW"' in page.text
+    assert "const tr=window.localplaudT" in page.text
+    assert "output.textContent=tr('Removing local data…')" in page.text
+    assert "output.textContent=tr('Replacing…')" in page.text
+    assert "button.textContent=tr('Importing…')" in page.text
+    assert "out.textContent=tr('Checking recording signals…')" in page.text
     for text in (
         "儲存標題",
         "繼續處理",
