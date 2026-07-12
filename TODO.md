@@ -117,7 +117,10 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
 - ✅ Pipeline stages now dispatch through the resolved recording profile without
   mutating process-wide Settings. The immutable snapshot is persisted on stage runs,
   transcripts, notes, and embedding chunks; local-only profiles disable legacy cloud
-  fallback. Recordings expose a profile picker for the next Resume/Rebuild.
+  fallback. Recordings expose a profile picker for the next Resume/Rebuild. Deployed
+  partial defaults are reconciled through a new immutable version with explicit
+  transcribe, align, diarize, correct, summarize, mind-map, embed, and Ask selections;
+  production is on complete profile version 4 rather than implicit Settings fallback.
 - ✅ Added provider/model/profile CRUD APIs, connection configuration health, and a
   Settings surface for inspecting connections/profiles, testing health, and creating
   secret-reference-only connections. Raw credentials are rejected by the API.
