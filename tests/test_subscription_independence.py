@@ -20,6 +20,7 @@ def _setup(monkeypatch, tmp_path):
 
 def _providers(monkeypatch):
     from localplaud.asr.base import Segment, Transcript, Word
+    from localplaud.worker.align import AlignmentResult
 
     monkeypatch.setattr(
         "localplaud.worker.pipeline.transcribe.run_asr",
@@ -55,6 +56,22 @@ def _providers(monkeypatch):
             "model": "local-llm",
             "template": settings.pipeline.summary_template,
         },
+    )
+    monkeypatch.setattr(
+        "localplaud.worker.pipeline.align.run_alignment",
+        lambda _audio, transcript, **_kwargs: AlignmentResult(
+            transcript=transcript,
+            provider="whisperx",
+            model="wav2vec2-auto",
+            detail={
+                "strategy": "whisperx-wav2vec2",
+                "forced_alignment": True,
+                "word_count": 1,
+                "timed_segments": 1,
+                "segment_count": 1,
+                "segment_coverage": 1.0,
+            },
+        ),
     )
     monkeypatch.setattr(
         "localplaud.worker.pipeline.mindmap.generate_mind_map",
@@ -128,8 +145,10 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         assert all(summary.input_transcript_revision == 1 for summary in row.summaries)
         alignment = next(stage for stage in row.stage_runs if stage.stage == StageName.align)
         assert alignment.status == StageStatus.completed
-        assert alignment.detail["strategy"] == "provider-word-timestamps"
-        assert alignment.detail["forced_alignment"] is False
+        assert alignment.provider == "whisperx"
+        assert alignment.model == "wav2vec2-auto"
+        assert alignment.detail["strategy"] == "whisperx-wav2vec2"
+        assert alignment.detail["forced_alignment"] is True
         correct = next(stage for stage in row.stage_runs if stage.stage.value == "correct")
         assert correct.status.value == "completed"
         assert correct.provider == "ollama"
@@ -152,6 +171,29 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         "required_exports",
     }
     assert all(item["passed"] for item in report["checks"])
+
+    # Whisper-native word timestamps are useful evidence, but they are not a
+    # substitute for the forced-alignment requirement in the product gate.
+    with session_scope() as session:
+        row = session.get(PlaudFile, "clean")
+        alignment = next(stage for stage in row.stage_runs if stage.stage == StageName.align)
+        alignment.detail = dict(alignment.detail) | {
+            "strategy": "provider-word-timestamps",
+            "forced_alignment": False,
+        }
+    native_timing_report = subscription_independence_report("clean")
+    native_alignment = next(
+        item for item in native_timing_report["checks"] if item["name"] == "word_alignment"
+    )
+    assert native_alignment["passed"] is False
+    assert native_alignment["detail"] == "no completed forced-alignment evidence"
+    with session_scope() as session:
+        row = session.get(PlaudFile, "clean")
+        alignment = next(stage for stage in row.stage_runs if stage.stage == StageName.align)
+        alignment.detail = dict(alignment.detail) | {
+            "strategy": "whisperx-wav2vec2",
+            "forced_alignment": True,
+        }
 
     # Exercise the user-facing grounded Ask path from the locally indexed recording.
     class LocalAskModel:

@@ -41,6 +41,9 @@ cuda = ["faster-whisper>=1.0", "nvidia-cublas-cu12", "nvidia-cudnn-cu12>=9.0"]
 mlx = ["mlx-whisper>=0.4", "numpy>=1.26,<2.5"]
 # Local speaker diarization + alignment.
 diarize = ["pyannote.audio>=4.0", "torch>=2.8"]
+# True wav2vec2 word alignment through WhisperX. Optional because it downloads
+# language-specific alignment models and adds a substantial native torch stack.
+forced-align = ["whisperx>=3.4"]
 # Voice Activity Detection for the local (mlx/whispercpp) ASR path. faster-whisper
 # bundles its own silero VAD, so it does NOT need this extra.
 vad = ["silero-vad>=5.1", "torch>=2.8"]

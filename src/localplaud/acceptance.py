@@ -88,14 +88,12 @@ def subscription_independence_report(file_id: str) -> dict:
                 word_count > 0
                 and align_stage is not None
                 and align_stage.status == StageStatus.completed
-                and (
-                    align_stage.detail.get("strategy") == "provider-word-timestamps"
-                    or align_stage.detail.get("method") == "asr-word-timestamps"
-                ),
+                and align_stage.detail.get("forced_alignment") is True,
                 (
-                    f"{word_count} word timestamp(s) validated by durable align stage"
-                    if word_count
-                    else "no word-level timestamp evidence"
+                    f"{word_count} word timestamp(s) forced-aligned by "
+                    f"{align_stage.provider}:{align_stage.model}"
+                    if word_count and align_stage and align_stage.detail.get("forced_alignment") is True
+                    else "no completed forced-alignment evidence"
                 ),
             ),
             _check(

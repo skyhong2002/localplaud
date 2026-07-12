@@ -242,13 +242,19 @@ embedding raw provider credentials or model settings in each rule.
   completion evidence. Local pyannote device selection is explicit and durable:
   `auto` uses CUDA only when PyTorch reports it available and otherwise uses CPU;
   an explicitly unavailable CUDA target fails actionably instead of silently falling
-  back. MPS is not claimed. VAD validation and word-level forced alignment remain.
+  back. MPS is not claimed. VAD and forced-alignment quality benchmarks remain.
 - ✅ Activated the durable `align` stage between ASR and diarization. It validates
   finite, ordered word timestamps, records coverage/provider/model/profile evidence,
   reuses valid results on Resume, and reports a clear degraded state when a provider
   supplies only segment timing. The strategy is explicitly labelled
   `provider-word-timestamps` with `forced_alignment=false`; it does not misrepresent
   Whisper timing as wav2vec2/WhisperX forced alignment.
+- ✅ Added an explicit local `align:whisperx` provider and `wav2vec2-auto` catalog
+  model. A profile can select CUDA or CPU forced alignment independently from ASR;
+  aligned timings update the local transcript in place, preserve transcript/revision
+  identity, retain provider/model/version/coverage provenance, and resume without
+  repeating a completed attempt. The subscription-independence gate now requires
+  `forced_alignment=true` instead of accepting Whisper's native word timing.
 - ✅ Added optional VAD groundwork behind a **default-off** `asr.vad.enabled` flag
   (`asr/vad.py`): provider-agnostic silero-vad detection + region merge/pad/split
   planning, ffmpeg region slicing, and honest `health()`. The mlx path transcribes
@@ -257,10 +263,9 @@ embedding raw provider credentials or model settings in each rule.
   optional `vad` extra is a *degraded* (not failed) state: ASR logs a warning,
   falls back to whole-file transcription, and the provider `health()` says so.
   Remaining: validate VAD on real Taiwan Mandarin / code-switch recordings before
-  enabling it by default. **Word-level forced alignment is deliberately NOT
-  claimed** — the active align stage validates Whisper's own word timestamps. A
-  future wav2vec2/WhisperX strategy would require per-language models and explicit
-  Mandarin/code-switch accuracy validation before selection.
+  enabling it by default. WhisperX forced alignment is selectable but remains
+  default-off until its language-specific models pass explicit Taiwan Mandarin and
+  Mandarin/English accuracy, timestamp, speed, and memory validation.
 - ✅ Persist stable speaker IDs separately from editable display names: `speakers`
   rows mirror the diarization keys per recording, renames are upserted from the
   Web detail page (legend inline forms), and flow into transcript view, regenerated

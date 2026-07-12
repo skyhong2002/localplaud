@@ -86,7 +86,8 @@ flowchart LR
 - **store** — audio bytes on the filesystem; metadata, transcripts, summaries
   and embeddings in SQLite.
 - **worker** — the independent pipeline: audio → Whisper large-v3-turbo → durable
-  word-timestamp alignment evidence → speaker diarization → notes/mind map → embeddings.
+  word alignment (selectable WhisperX/wav2vec2 forced alignment) → speaker diarization
+  → notes/mind map → embeddings.
 - **api / ui** — the primary daily-use Web App: browse, listen, review, edit,
   regenerate, organize, Ask, and export.
 
@@ -101,6 +102,7 @@ cd localplaud
 
 # install (choose extras for the ASR you want — see below)
 uv sync --extra faster-whisper          # local ASR, CPU/CUDA
+# Add --extra forced-align for selectable WhisperX/wav2vec2 word alignment.
 #   or: pip install -e ".[faster-whisper]"
 # Apple Silicon: uv sync --extra mlx
 #   or: pip install -e ".[mlx]"

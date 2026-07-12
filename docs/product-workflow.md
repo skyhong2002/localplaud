@@ -437,11 +437,15 @@ default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-times
 region offsetting; faster-whisper's native bundled VAD filter), and degrades honestly
 to whole-file transcription with a visible health note when the optional `vad` extra
 is absent — but it still needs real Taiwan Mandarin / code-switch validation before
-being enabled by default. The durable align stage now validates Whisper word timing,
-records coverage and provenance, and degrades visibly when word timestamps are
-unavailable. It explicitly reports `forced_alignment=false`; a whisperX-style
-wav2vec2 strategy still needs per-language models and accuracy validation before it
-can be selected. Authenticated real-audio diarization is verified on SkyLabMac, including
+being enabled by default. The durable align stage validates Whisper word timing
+without calling it forced alignment. An explicit local `align:whisperx` provider now
+dispatches language-specific wav2vec2 forced alignment on CUDA or CPU, persists
+provider/model/version/coverage evidence, updates timing without replacing the raw
+transcript identity or user revisions, and resumes completed work. It remains
+default-off until owned Taiwan Mandarin and Mandarin/English recordings validate the
+language models, accuracy, timestamps, speed, and memory. The subscription-
+independence gate requires this `forced_alignment=true` evidence. Authenticated
+real-audio diarization is verified on SkyLabMac, including
 durable speaker output and resume behavior. Single-file
 Ask now answers grounded only in one recording and renders each citation as a
 playable timestamp that seeks the player, and whole-library Ask citations deep-link

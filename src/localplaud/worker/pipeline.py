@@ -589,10 +589,21 @@ def _process_file_claimed(
         align_run = next(
             (run for run in row.stage_runs if run.stage == StageName.align), None
         )
+        align_selection = (snapshot.get("stages") or {}).get("align") or {}
+        previous_align_selection = (
+            ((align_run.resolved_profile_snapshot or {}).get("stages") or {}).get("align") or {}
+            if align_run is not None
+            else {}
+        )
         reusable_alignment = bool(
             not force
             and align_run is not None
             and align_run.status in {StageStatus.completed, StageStatus.degraded}
+            and previous_align_selection == align_selection
+            and (
+                align_run.status == StageStatus.completed
+                or not align.selection_uses_forced_alignment(align_selection)
+            )
         )
 
     profile_token = _PROFILE_SNAPSHOT.set(snapshot)
@@ -693,7 +704,7 @@ def _process_file_claimed(
         else:
             _skip_stage(file_id, StageName.transcribe, "disabled")
 
-        # --- align (durable word timing evidence; honestly degradable) -- #
+        # --- align (provider timestamps or explicitly selected forced alignment) -- #
         if transcript is None:
             _skip_stage(file_id, StageName.align, "no transcript")
         elif not pcfg.align:
@@ -710,29 +721,76 @@ def _process_file_claimed(
                 detail=dict(align_run.detail or {}) | {"reused": True},
             )
         else:
-            _begin_stage(file_id, StageName.align)
+            def alignment_selection(candidate):
+                selected = (candidate.get("stages") or {}).get("align")
+                if selected:
+                    return selected
+                provider = transcript.provider or align.PROVIDER_TIMESTAMPS
+                return {
+                    "connection": f"asr:{provider}",
+                    "provider_type": provider,
+                    "model": transcript.model,
+                    "options": {},
+                }
+
             try:
-                alignment_detail = align.inspect_word_alignment(transcript)
-                _finish_stage(
+                def run_align(candidate):
+                    selection = alignment_selection(candidate)
+                    if _remote_selection(candidate, "align"):
+                        raise align.AlignmentUnavailable(
+                            "remote-worker protocol v1 does not support alignment jobs"
+                        )
+                    provider = selection.get("provider_type") or str(
+                        selection["connection"]
+                    ).split(":", 1)[-1]
+                    options = dict(selection.get("configuration") or {}) | dict(
+                        selection.get("options") or {}
+                    )
+                    result = align.run_alignment(
+                        wav,
+                        transcript,
+                        provider=provider,
+                        model=selection.get("model"),
+                        options=options,
+                    )
+                    if result.detail.get("forced_alignment"):
+                        _persist_aligned_transcript(file_id, result.transcript)
+                    return {
+                        "value": result.transcript,
+                        "provider": result.provider,
+                        "model": result.model,
+                        "artifact_source": transcript_source,
+                        "detail": result.detail,
+                        "usage": {"input_words": result.detail["word_count"]},
+                    }
+
+                transcript, _selected_snapshot = _run_fallback_stage(
                     file_id,
+                    "align",
                     StageName.align,
-                    provider=transcript.provider,
-                    model=transcript.model,
-                    artifact_source=transcript_source,
-                    detail=alignment_detail,
-                    usage={"input_words": alignment_detail["word_count"]},
+                    snapshot,
+                    run_align,
                 )
             except align.AlignmentUnavailable as exc:
+                failed_selection = alignment_selection(
+                    candidate_snapshots(snapshot, "align")[-1]
+                )
+                failed_provider = failed_selection.get("provider_type") or str(
+                    failed_selection["connection"]
+                ).split(":", 1)[-1]
+                if failed_provider == align.WHISPERX_PROVIDER:
+                    partial_errors.append(f"align: {exc}")
                 _set_stage(
                     file_id,
                     StageName.align,
                     StageStatus.degraded,
-                    provider=transcript.provider,
-                    model=transcript.model,
+                    provider=failed_provider,
+                    model=failed_selection.get("model"),
                     artifact_source=transcript_source,
                     detail={
                         "strategy": "unavailable",
-                        "forced_alignment": False,
+                        "forced_alignment": failed_provider == align.WHISPERX_PROVIDER,
+                        "retryable": failed_provider == align.WHISPERX_PROVIDER,
                         "reason": str(exc),
                     },
                     error=str(exc),
@@ -1300,6 +1358,25 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> dict[str, str]:
         # Register stable speaker identities; existing display names are kept.
         sync_speakers(session, file_id, speaker_keys_from_segments(segments))
     return speaker_mapping
+
+
+def _persist_aligned_transcript(file_id: str, transcript: Transcript) -> None:
+    """Update timing in place so forced alignment preserves ASR identity and edits."""
+    with session_scope() as session:
+        row = session.scalar(
+            select(TranscriptRow)
+            .where(TranscriptRow.file_id == file_id, TranscriptRow.source == "local")
+            .order_by(TranscriptRow.id.desc())
+        )
+        if row is None:
+            raise ValueError("forced alignment requires a persisted local transcript")
+        segments = [asdict(segment) for segment in transcript.segments]
+        row.text = transcript.text
+        row.segments = segments
+        row.has_speakers = transcript.has_speakers
+        if (snapshot := _PROFILE_SNAPSHOT.get()) is not None:
+            row.resolved_profile_snapshot = snapshot
+        sync_speakers(session, file_id, speaker_keys_from_segments(segments))
 
 
 def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -> int:

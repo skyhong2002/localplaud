@@ -208,6 +208,60 @@ def _ensure_settings_entries(
     return entries
 
 
+def _ensure_forced_alignment_entry(
+    session: Session,
+) -> tuple[ProviderConnection, ModelCatalogEntry]:
+    """Catalog the optional local WhisperX aligner without selecting it by default."""
+    connection = session.scalar(
+        select(ProviderConnection).where(ProviderConnection.key == "align:whisperx")
+    )
+    if connection is None:
+        connection = ProviderConnection(
+            key="align:whisperx",
+            name="WhisperX forced alignment",
+            provider_type="whisperx",
+            execution_target="local",
+            data_egress=False,
+            config={"device": "auto", "interpolate_method": "nearest"},
+            health={"status": "unknown", "detail": "optional runtime not checked"},
+        )
+        session.add(connection)
+        session.flush()
+    model = session.scalar(
+        select(ModelCatalogEntry).where(
+            ModelCatalogEntry.connection_id == connection.id,
+            ModelCatalogEntry.model_key == "wav2vec2-auto",
+        )
+    )
+    if model is None:
+        model = ModelCatalogEntry(
+            connection_id=connection.id,
+            model_key="wav2vec2-auto",
+            display_name="WhisperX language-specific wav2vec2 (auto)",
+            capabilities=Capability(
+                execution_target="local",
+                data_egress=False,
+                health=Health(status="unknown", detail="optional runtime not checked"),
+                stages=(
+                    StageCapabilities(
+                        stage=ProviderStage.align,
+                        languages=("en", "zh"),
+                        timestamps="word",
+                        hardware_requirement="CUDA recommended; CPU supported",
+                    ),
+                ),
+                metadata={
+                    "forced_alignment": True,
+                    "implementation": "whisperx-wav2vec2",
+                    "model_selection": "language-specific",
+                },
+            ).model_dump(mode="json"),
+        )
+        session.add(model)
+        session.flush()
+    return connection, model
+
+
 def _profile_is_complete(session: Session, profile: ExecutionProfile) -> bool:
     by_stage = {selection.stage: selection for selection in profile.stage_selections}
     if set(by_stage) != set(_STAGE_FAMILY):
@@ -228,6 +282,7 @@ def _profile_is_complete(session: Session, profile: ExecutionProfile) -> bool:
 
 def bootstrap_default_profile(session: Session, settings: Settings) -> ExecutionProfile:
     """Create a Settings-equivalent profile once, without changing runtime dispatch."""
+    _ensure_forced_alignment_entry(session)
     existing = session.scalar(
         select(ExecutionProfile)
         .where(ExecutionProfile.key == DEFAULT_PROFILE_KEY)
@@ -507,6 +562,11 @@ def _probe_connection(row: ProviderConnection, model_key: str | None = None) -> 
     settings = get_settings().model_copy(deep=True)
     secret = _secret_value(row.secret_ref)
 
+    if family == "align":
+        from ..worker.align import health
+
+        options = dict(row.config or {})
+        return health(row.provider_type, model_key, options)
     if family == "asr":
         from ..asr.registry import build_provider
 

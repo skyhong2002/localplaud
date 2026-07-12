@@ -8,6 +8,7 @@ from ..asr.base import AsrUnavailable
 from ..embeddings.base import EmbeddingUnavailable
 from ..llm.base import LLMUnavailable
 from ..remote.client import RemoteWorkerError
+from ..worker.align import AlignmentUnavailable
 from ..worker.diarize import DiarizationUnavailable
 from .usage import CostPolicyError
 
@@ -35,6 +36,7 @@ def is_retryable_fallback_error(exc: Exception) -> bool:
         exc,
         (
             AsrUnavailable,
+            AlignmentUnavailable,
             DiarizationUnavailable,
             LLMUnavailable,
             EmbeddingUnavailable,

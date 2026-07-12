@@ -42,7 +42,7 @@ database_url = "sqlite:///./data/localplaud.db"
 # Local processing stages to run after each download.
 convert = true                   # opus -> 16kHz mono wav (needs ffmpeg)
   transcribe = true
-  align = true
+  align = true                      # provider/model is selected by execution profile
   diarize = true
 polish = true                    # contextual AI cleanup; raw ASR stays immutable
 summarize = true

@@ -92,8 +92,13 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
         second = bootstrap_default_profile(session, Settings())
         session.commit()
         assert second.id == first_id
-        assert len(list_connections(session)) == 5
-        assert len(list_models(session)) == 5
+        assert len(list_connections(session)) == 6
+        assert len(list_models(session)) == 6
+        forced = next(
+            model for model in list_models(session) if model["connection_key"] == "align:whisperx"
+        )
+        assert forced["model_key"] == "wav2vec2-auto"
+        assert forced["capabilities"]["metadata"]["forced_alignment"] is True
         profiles = list_profiles(session)
         assert len(profiles) == 1
         assert set(profiles[0]["stages"]) == {stage.value for stage in ProviderStage}
@@ -272,7 +277,7 @@ def test_partial_default_profile_reuses_deployed_connections_and_fills_all_stage
         assert {item.stage for item in upgraded.stage_selections} == {
             stage.value for stage in ProviderStage
         }
-        assert session.query(ProviderConnection).count() == 4
+        assert session.query(ProviderConnection).count() == 5
         assert {item.connection.key for item in upgraded.stage_selections} == {
             "mlx-whisper",
             "pyannote",
