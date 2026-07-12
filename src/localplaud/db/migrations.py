@@ -648,6 +648,59 @@ def migrate_stage_run_snapshot_column(engine: Engine) -> bool:
     return "stage_runs" in migrate_profile_snapshot_columns(engine)
 
 
+def migrate_local_transcript_uniqueness(engine: Engine) -> list[str]:
+    """Keep one canonical local raw transcript while preserving cloud imports.
+
+    Early pipeline versions persisted both the pre-diarization and diarized local
+    transcript. Corrections are separate immutable revisions, so duplicate raw
+    rows are not history. Keep the newest row, detach revisions from discarded
+    raw IDs, and enforce the invariant with a partial SQLite index.
+    """
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "transcripts" not in inspector.get_table_names():
+        return []
+    index_name = "uq_transcripts_one_local_per_file"
+    indexes = {index["name"] for index in inspector.get_indexes("transcripts")}
+    if index_name in indexes:
+        return []
+
+    with engine.begin() as connection:
+        if "transcript_revisions" in inspector.get_table_names():
+            connection.execute(text("""
+                UPDATE transcript_revisions
+                SET base_transcript_id = NULL
+                WHERE base_transcript_id IN (
+                    SELECT old.id
+                    FROM transcripts AS old
+                    WHERE old.source = 'local'
+                      AND old.id != (
+                          SELECT MAX(newest.id)
+                          FROM transcripts AS newest
+                          WHERE newest.file_id = old.file_id
+                            AND newest.source = 'local'
+                      )
+                )
+            """))
+        connection.execute(text("""
+            DELETE FROM transcripts
+            WHERE source = 'local'
+              AND id != (
+                  SELECT MAX(newest.id)
+                  FROM transcripts AS newest
+                  WHERE newest.file_id = transcripts.file_id
+                    AND newest.source = 'local'
+              )
+        """))
+        connection.execute(text(f"""
+            CREATE UNIQUE INDEX {index_name}
+            ON transcripts (file_id)
+            WHERE source = 'local'
+        """))
+    return ["transcripts.local"]
+
+
 def _legacy_template(template: str, used: set[str], row_id: int) -> str:
     """Return a unique <=64-char template name for preserved legacy notes."""
     prefix = "legacy-cloud-"

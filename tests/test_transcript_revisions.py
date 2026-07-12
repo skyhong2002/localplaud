@@ -6,7 +6,51 @@ from __future__ import annotations
 
 import time
 
-from sqlalchemy import select
+from sqlalchemy import create_engine, inspect, select, text
+
+
+def test_local_transcript_uniqueness_migration_preserves_cloud_and_revision(tmp_path):
+    from localplaud.db.migrations import migrate_local_transcript_uniqueness
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE transcripts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id VARCHAR(64) NOT NULL,
+                source VARCHAR(16) NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            CREATE TABLE transcript_revisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                base_transcript_id INTEGER
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO transcripts (id, file_id, source) VALUES
+                (1, 'recording', 'local'),
+                (2, 'recording', 'local'),
+                (3, 'recording', 'cloud'),
+                (4, 'recording', 'cloud')
+        """))
+        connection.execute(
+            text("INSERT INTO transcript_revisions (base_transcript_id) VALUES (1), (2)")
+        )
+
+    assert migrate_local_transcript_uniqueness(engine) == ["transcripts.local"]
+    assert migrate_local_transcript_uniqueness(engine) == []
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT id, source FROM transcripts ORDER BY id")
+        ).all()
+        revision_bases = connection.execute(
+            text("SELECT base_transcript_id FROM transcript_revisions ORDER BY id")
+        ).scalars().all()
+    assert rows == [(2, "local"), (3, "cloud"), (4, "cloud")]
+    assert revision_bases == [None, 2]
+    indexes = {item["name"] for item in inspect(engine).get_indexes("transcripts")}
+    assert "uq_transcripts_one_local_per_file" in indexes
 
 
 def _client(monkeypatch, tmp_path):
