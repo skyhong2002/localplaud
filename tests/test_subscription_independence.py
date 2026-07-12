@@ -185,6 +185,18 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     assert result.exit_code == 0
     assert json.loads(result.stdout)["passed"] is True
 
+    # Local provenance alone is not enough: a stale note from raw revision 0
+    # must not satisfy a gate whose canonical input is AI-polished revision 1.
+    with session_scope() as session:
+        row = session.get(PlaudFile, "clean")
+        note = next(item for item in row.summaries if item.template != "mind_map")
+        note.input_transcript_revision = 0
+    stale_report = subscription_independence_report("clean")
+    stale_checks = {item["name"]: item["passed"] for item in stale_report["checks"]}
+    assert stale_checks["local_notes"] is False
+    assert stale_checks["local_mind_map"] is True
+    assert stale_checks["ask_index"] is True
+
 
 def test_cloud_only_recording_fails_gate_with_actionable_checks(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)

@@ -48,6 +48,8 @@ def subscription_independence_report(file_id: str) -> dict:
         diarize_stage = next(
             (row for row in stage_runs if row.stage.value == "diarize"), None
         )
+        expected_transcript_id = transcript.id if transcript is not None else None
+        expected_revision = polished.revision if polished is not None else None
         checks = [
             _check(
                 "raw_audio_local",
@@ -117,20 +119,44 @@ def subscription_independence_report(file_id: str) -> dict:
             _check(
                 "local_notes",
                 bool(local_notes)
-                and all(row.input_transcript_source == "local" for row in local_notes),
-                f"{len(local_notes)} locally generated note output(s)",
+                and expected_transcript_id is not None
+                and expected_revision is not None
+                and all(
+                    row.input_transcript_source == "local"
+                    and row.input_transcript_id == expected_transcript_id
+                    and row.input_transcript_revision == expected_revision
+                    for row in local_notes
+                ),
+                f"{len(local_notes)} local note output(s) from transcript "
+                f"{expected_transcript_id} revision {expected_revision}",
             ),
             _check(
                 "local_mind_map",
                 bool(mind_maps)
-                and all(row.input_transcript_source == "local" for row in mind_maps),
-                f"{len(mind_maps)} locally generated mind map(s)",
+                and expected_transcript_id is not None
+                and expected_revision is not None
+                and all(
+                    row.input_transcript_source == "local"
+                    and row.input_transcript_id == expected_transcript_id
+                    and row.input_transcript_revision == expected_revision
+                    for row in mind_maps
+                ),
+                f"{len(mind_maps)} local mind map(s) from transcript "
+                f"{expected_transcript_id} revision {expected_revision}",
             ),
             _check(
                 "ask_index",
                 bool(chunks)
-                and all(row.input_transcript_source == "local" for row in chunks),
-                f"{len(chunks)} grounded retrieval chunk(s)",
+                and expected_transcript_id is not None
+                and expected_revision is not None
+                and all(
+                    row.input_transcript_source == "local"
+                    and row.input_transcript_id == expected_transcript_id
+                    and row.input_transcript_revision == expected_revision
+                    for row in chunks
+                ),
+                f"{len(chunks)} grounded chunk(s) from transcript "
+                f"{expected_transcript_id} revision {expected_revision}",
             ),
             _check(
                 "durable_stages",
@@ -153,8 +179,11 @@ def subscription_independence_report(file_id: str) -> dict:
     checks.append(
         _check(
             "required_exports",
-            not export_errors and provenance.get("transcript_source") == "local",
-            "TXT/SRT/VTT render from the local canonical transcript"
+            not export_errors
+            and provenance.get("transcript_source") == "local"
+            and provenance.get("transcript_id") == expected_transcript_id
+            and provenance.get("transcript_revision") == expected_revision,
+            "TXT/SRT/VTT render from the local AI-polished canonical revision"
             if not export_errors
             else "; ".join(export_errors),
         )
