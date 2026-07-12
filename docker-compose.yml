@@ -23,6 +23,8 @@
 
 x-localplaud: &localplaud
   env_file: .env
+  environment:
+    HF_TOKEN: ${LOCALPLAUD_DIARIZE__HF_TOKEN:-}
   volumes:
     - ./data:/app/data
     - ./config.toml:/app/config.toml:ro
