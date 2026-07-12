@@ -157,6 +157,11 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         assert "button.textContent=tr('Uploading…')" in settings.text
         assert "out.textContent=tr('Authorizing…')" in settings.text
         assert "confirm(tr('Revoke this backup destination? Upload history is preserved.'))" in settings.text
+        assert "out.textContent=tr('Creating a verified profile…')" in settings.text
+        assert "out.textContent=tr('Created. Reloading…')" in settings.text
+        assert "out.textContent=tr('Registered. Reloading…')" in settings.text
+        assert "out.textContent=tr('Authorized. Reloading…')" in settings.text
+        assert "out.textContent=tr(data.status||'error')" in settings.text
 
         from localplaud.i18n import catalog
 
