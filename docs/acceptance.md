@@ -18,7 +18,7 @@ The gate requires all of the following evidence:
 - grounded retrieval chunks consume a local transcript, making single-file and
   library Ask retrieval-ready;
 - durable stage rows have immutable resolved-profile snapshots and no failed stage;
-- TXT, SRT, and VTT render successfully from the local canonical transcript.
+- TXT, SRT, VTT, DOCX, and PDF render successfully from the local canonical transcript.
 
 Run the human-readable report:
 
@@ -35,5 +35,5 @@ localplaud acceptance-check RECORDING_ID --json
 The automated acceptance test starts from a clean, user-owned raw-audio row with no
 Plaud transcript or summary. Network-free test providers execute ASR, notes, mind
 map, embeddings, and grounded Ask; the test then runs the same audit and verifies
-playable Ask citations plus TXT/SRT/VTT. Hardware/model quality review remains an
+playable Ask citations plus TXT/SRT/VTT/DOCX/PDF. Hardware/model quality review remains an
 engineering concern rather than a user-facing product feature.

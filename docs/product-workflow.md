@@ -207,7 +207,7 @@ editable, and retain per-recording history. Notification-enabled runs create dur
 deduplicated local inbox items only after core actions commit; unread state, dismissal,
 preserved provenance, and delivery-only retry are available without rerunning ASR or
 rolling back successful actions. Additional external integration action types remain
-future work. AutoFlow transcript export is implemented for the required
+future work. AutoFlow transcript export is implemented for its automation-safe
 TXT/SRT/VTT formats: each run/format records canonical transcript lineage, checksum,
 size, status, error, and an independently retryable local file without rolling back
 the matched rule's core actions.
@@ -371,11 +371,12 @@ diarization/alignment stages, not by Whisper itself.
 
 | Content | Formats |
 | --- | --- |
-| Transcript | TXT, SRT, VTT |
+| Transcript | TXT, SRT, VTT, DOCX, PDF |
 
-The recording workspace now provides transcript TXT/SRT/VTT exports with timestamp
-and speaker-label controls. Existing notes, audio, archive, and mind-map exports are
-conveniences rather than release requirements.
+The recording workspace provides transcript TXT/SRT/VTT/DOCX/PDF exports with
+timestamp and speaker-label controls. DOCX uses a compact long-form transcript
+layout; PDF embeds Noto Sans TC so mixed Taiwan Mandarin/English remains portable.
+Existing notes, audio, archive, and mind-map exports remain complementary formats.
 
 Transcript export must allow timestamps and speaker names to be toggled.
 
@@ -489,7 +490,8 @@ deterministic subscription-independence gate in the daily Web App and CLI.
 The deterministic subscription-independence gate is available as
 `localplaud acceptance-check RECORDING_ID` (or `--json` for automation). It audits
 the raw-audio boundary, local provenance, timestamped speakers, notes, mind map, Ask
-index, durable stage/profile state, and required transcript exports. The automated
+index, durable stage/profile state, and required TXT/SRT/VTT/DOCX/PDF transcript
+exports. The automated
 harness additionally exercises grounded single-file Ask with a playable citation;
 see [`acceptance.md`](acceptance.md).
 Each recording workspace renders this gate as an expandable checklist and exposes

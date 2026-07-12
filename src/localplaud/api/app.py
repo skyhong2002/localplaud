@@ -2218,7 +2218,7 @@ def export_transcript_format(
     """Export the canonical transcript with explicit label options."""
     from ..export_formats import render_transcript
 
-    if fmt not in {"txt", "srt", "vtt"}:
+    if fmt not in {"txt", "srt", "vtt", "docx", "pdf"}:
         raise HTTPException(status_code=404, detail="unsupported transcript format")
     try:
         content, media_type = render_transcript(

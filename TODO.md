@@ -87,7 +87,8 @@ migration/debug-only.
   retries, exhaustion is visible, and manual Resume immediately resets the budget.
 - ✅ Added a read-only `localplaud acceptance-check RECORDING_ID` product gate. It
   verifies local audio/transcript provenance, timestamped speaker output, local notes
-  and mind map, Ask-ready local chunks, durable profile snapshots, and TXT/SRT/VTT.
+  and mind map, Ask-ready local chunks, durable profile snapshots, and
+  TXT/SRT/VTT/DOCX/PDF.
   The network-free acceptance harness starts with raw audio and no Plaud Intelligence
   artifacts, executes the whole pipeline plus grounded single-file Ask, and verifies
   a playable source citation. The recording Web workspace now shows the same twelve
@@ -390,9 +391,11 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Added local deterministic Auto template selection with title/transcript/duration
   signals in English and Chinese, an explainable preview, confidence/reasons, and
   durable stage provenance for the actual selected template and engine version.
-- ✅ Consolidated recording exports in one modal: canonical transcript TXT/SRT/VTT
-  with timestamp and speaker-label toggles. Existing notes, archive, and original
-  audio exports remain conveniences; no additional formats are required.
+- ✅ Consolidated recording exports in one modal: canonical transcript TXT/SRT/VTT,
+  DOCX, and PDF with timestamp and speaker-label toggles. DOCX uses an explicit
+  compact-reference Word layout; PDF embeds the OFL-licensed Noto Sans TC font for
+  portable Taiwan Mandarin/English output. Existing notes, archive, mind-map image,
+  and original-audio exports remain available alongside the transcript formats.
 - ✅ Generated notes now create one provenance-linked editable copy instead of
   mutating AI output. The recording workspace opens that user-owned note tab and
   edits title/Markdown inline; the original generated content, template/model, and
@@ -404,8 +407,8 @@ embedding raw provider credentials or model settings in each rule.
   secrets masked and make the actual selected provider visible during processing.
 - Add original localplaud visual design with Plaud-like interaction density and
   information architecture; do not copy Plaud assets.
-- Transcript TXT/SRT/VTT is the completed required export scope. Existing notes,
-  original-audio, archive, and mind-map exports may remain as conveniences.
+- Transcript TXT/SRT/VTT/DOCX/PDF is the completed required export scope. Existing
+  notes, original-audio, archive, and mind-map exports remain complementary formats.
 
 ### P1 — Multi-host deployment
 

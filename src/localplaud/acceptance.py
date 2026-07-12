@@ -168,7 +168,7 @@ def subscription_independence_report(file_id: str) -> dict:
         ]
 
     export_errors: list[str] = []
-    for fmt in ("txt", "srt", "vtt"):
+    for fmt in ("txt", "srt", "vtt", "docx", "pdf"):
         try:
             payload, _media_type = render_transcript(file_id, fmt)
             if not payload:
@@ -183,7 +183,7 @@ def subscription_independence_report(file_id: str) -> dict:
             and provenance.get("transcript_source") == "local"
             and provenance.get("transcript_id") == expected_transcript_id
             and provenance.get("transcript_revision") == expected_revision,
-            "TXT/SRT/VTT render from the local AI-polished canonical revision"
+            "TXT/SRT/VTT/DOCX/PDF render from the local AI-polished canonical revision"
             if not export_errors
             else "; ".join(export_errors),
         )

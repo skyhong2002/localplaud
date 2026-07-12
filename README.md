@@ -55,9 +55,10 @@ single-file Ask with playable citations, richer library filters, and Plaud-style
 Add audio / Import from Plaud flows are implemented. A Plaud import refreshes the
 entire metadata catalog plus any existing Plaud transcript/summary while leaving raw
 audio remote until the user requests one recording. The recording export dialog
-produces the required transcript TXT/SRT/VTT formats with timestamp/speaker
-controls. Existing notes, original-audio, and Markdown archive exports remain
-available as conveniences. Durable provider/model/execution profiles, explicit
+produces transcript TXT/SRT/VTT/DOCX/PDF formats with timestamp/speaker controls.
+PDF embeds a portable Traditional Chinese font. Existing notes, original-audio,
+mind-map image, and Markdown archive exports remain available. Durable
+provider/model/execution profiles, explicit
 stage fallbacks, remote workers, local AutoFlow rules, inbox notifications,
 TXT/SRT/VTT AutoFlow exports, scoped authorized webhooks, and authorized SMTP email
 delivery are also implemented.

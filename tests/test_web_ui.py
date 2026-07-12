@@ -348,12 +348,19 @@ def test_export_menu_and_format_endpoints(monkeypatch, tmp_path):
     page = c.get("/file/r1")
     assert "Export recording" in page.text
     assert "Speaker labels" in page.text and "Original audio" in page.text
+    assert 'data-fmt="docx"' in page.text and 'data-fmt="pdf"' in page.text
     txt = c.get("/file/r1/export/transcript.txt?timestamps=false&speakers=false")
     assert txt.status_code == 200 and "hello team" in txt.text
     assert "SPEAKER_00" not in txt.text and "[00:01]" not in txt.text
     assert c.get("/file/r1/export/transcript.srt").status_code == 200
     vtt = c.get("/file/r1/export/transcript.vtt")
     assert vtt.status_code == 200 and vtt.text.startswith("WEBVTT")
+    docx = c.get("/file/r1/export/transcript.docx")
+    assert docx.status_code == 200 and docx.content.startswith(b"PK")
+    assert "wordprocessingml.document" in docx.headers["content-type"]
+    pdf = c.get("/file/r1/export/transcript.pdf")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF-")
+    assert pdf.headers["content-type"].startswith("application/pdf")
     assert c.get("/file/r1/export/transcript.json").status_code == 404
     assert c.get("/file/r1/export/notes.txt").status_code == 200
     assert c.get("/file/r1/export/audio").content == b"audio"

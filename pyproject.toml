@@ -25,6 +25,8 @@ dependencies = [
     "tenacity>=8.4",
     "apscheduler>=3.10",
     "pillow>=11.0",
+    "python-docx>=1.1",
+    "reportlab>=4.2",
 ]
 
 [project.optional-dependencies]
@@ -46,7 +48,7 @@ vad = ["silero-vad>=5.1", "torch>=2.8"]
 local-llm = ["sentence-transformers>=3.0"]
 # Cloud ASR / LLM SDKs (optional; only if you use those providers).
 cloud = ["openai>=1.35", "deepgram-sdk>=3.2", "assemblyai>=0.28", "anthropic>=0.30"]
-dev = ["pytest>=8.2", "ruff>=0.5", "mypy>=1.10", "respx>=0.21"]
+dev = ["pytest>=8.2", "ruff>=0.5", "mypy>=1.10", "respx>=0.21", "pypdf>=5.0"]
 
 [project.scripts]
 localplaud = "localplaud.cli:app"

@@ -344,7 +344,7 @@
           <label><input id="export-speakers" type="checkbox" checked> {{ t('Speaker labels') }}</label>
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap" data-export-group="transcript">
-          {% for fmt in ['txt','srt','vtt'] %}<a class="btn sec" data-fmt="{{ fmt }}" href="#" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
+          {% for fmt in ['txt','srt','vtt','docx','pdf'] %}<a class="btn sec" data-fmt="{{ fmt }}" href="#" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
         </div>
       </section>
       {% endif %}

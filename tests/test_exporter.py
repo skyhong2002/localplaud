@@ -1,6 +1,10 @@
 """Markdown export against a seeded temporary SQLite database."""
 
+from io import BytesIO
+
 import pytest
+from docx import Document
+from pypdf import PdfReader
 
 import localplaud.config as config
 import localplaud.db.session as db_session
@@ -40,6 +44,7 @@ def seeded_db(monkeypatch, tmp_path):
             segments=[
                 {"text": "hello there", "start": 0.0, "end": 1.5, "speaker": "SPEAKER_00"},
                 {"text": "general kenobi", "start": 65.2, "end": 67.0, "speaker": "SPEAKER_01"},
+                {"text": "繁體中文與 English <test> & symbols", "start": 70.0, "end": 73.0, "speaker": "SPEAKER_00"},
             ],
         )
         f.summaries = [
@@ -108,6 +113,26 @@ def test_transcript_portable_formats_and_options(seeded_db):
     assert b"SPEAKER_00: hello there" in srt
     vtt, _ = render_transcript(FILE_ID, "vtt")
     assert vtt.startswith(b"WEBVTT\n") and b"00:01:05.200" in vtt
+
+
+def test_transcript_document_formats_and_options(seeded_db):
+    docx_bytes, docx_media = render_transcript(
+        FILE_ID, "docx", timestamps=False, speakers=False
+    )
+    assert docx_media.endswith("wordprocessingml.document")
+    document = Document(BytesIO(docx_bytes))
+    docx_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "繁體中文與 English <test> & symbols" in docx_text
+    assert "SPEAKER_00" not in docx_text and "[00:00]" not in docx_text
+    assert document.sections[0].top_margin.inches == pytest.approx(1.0)
+
+    pdf_bytes, pdf_media = render_transcript(FILE_ID, "pdf")
+    assert pdf_media == "application/pdf" and pdf_bytes.startswith(b"%PDF-")
+    reader = PdfReader(BytesIO(pdf_bytes))
+    assert len(reader.pages) >= 1
+    pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "SPEAKER_00" in pdf_text and "00:00" in pdf_text
+    assert "繁體中文" in pdf_text
 
 
 def test_notes_portable_formats(seeded_db):
