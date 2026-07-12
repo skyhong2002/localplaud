@@ -474,8 +474,10 @@ embedding raw provider credentials or model settings in each rule.
   profiles/templates, local-data controls, Ask, organization, export, and dynamic
   processing-stage/status/fallback/usage diagnostics. Settings
   section navigation and primary account, backup, provider/profile, integration, and
-  support controls are translated. Remaining locale work is dynamic helper, health,
-  error, and action messages. Access &
+  support controls are translated. Template-owned dynamic helper, health-state,
+  error-fallback, confirmation, and action messages now use the centralized catalog,
+  with a test that rejects direct English literals in JavaScript UI sinks. Arbitrary
+  provider/runtime detail strings remain verbatim for diagnostic accuracy. Access &
   security now reports the built-in Web login, durable hashed browser sessions,
   current-session state, immediate revocation, and the separate API-token/reverse-
   proxy boundary. The pre-authentication `/login` page follows the durable workspace

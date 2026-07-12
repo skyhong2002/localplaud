@@ -245,9 +245,11 @@ Templates, Discover, Notifications, and Status pages. The recording workspace co
 transcript editing/search, playback, profiles/templates, local-data controls, Ask,
 organization, and export. Settings now covers its section navigation and primary
 account, security, backup, processing, vocabulary, template, provider/model/profile,
-worker, webhook, email, and support controls. Remaining dynamic helper, health,
-error, and action messages are tracked as translation coverage work rather than
-being represented by a non-functional control.
+worker, webhook, email, and support controls. Template-owned dynamic helper,
+health-state, error-fallback, confirmation, and action messages use the same catalog;
+a template-contract test rejects new user-visible JavaScript literals that bypass the
+translation helper. Provider/runtime diagnostic detail remains verbatim rather than
+being mistranslated or hidden.
 
 Workspace display preferences are durable local data rather than browser-only state:
 the chosen workspace name, system/light/dark theme, comfortable/compact density,
