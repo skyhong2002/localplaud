@@ -147,6 +147,10 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         assert 'const tr=window.localplaudT' in settings.text
         assert 'window.localplaudT = message => ({' in settings.text
         assert "建立含資訊清單與 SHA-256 的一致性 SQLite 快照" in settings.text
+        assert "目前沒有工作區備份" in settings.text
+        assert "已授權的備份目的地" in settings.text
+        assert "尚未授權遠端備份目的地" in settings.text
+        assert "明確允許私人／區網目的地與 HTTP" in settings.text
 
         from localplaud.i18n import catalog
 
