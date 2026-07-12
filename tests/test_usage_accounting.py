@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, inspect, select, text
 
 
 def _reset(monkeypatch, tmp_path):
@@ -188,6 +188,54 @@ def test_stage_attempt_migration_is_idempotent(tmp_path):
         connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
     assert migrate_stage_attempt_schema(engine) == ["stage_attempts"]
     assert migrate_stage_attempt_schema(engine) == []
+
+
+def test_stage_attempt_migration_rebuilds_legacy_deployed_schema(tmp_path):
+    from localplaud.db.migrations import migrate_stage_attempt_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
+        connection.execute(text("INSERT INTO plaud_files (id) VALUES ('recording')"))
+        connection.execute(text("""
+            CREATE TABLE stage_attempts (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                file_id VARCHAR(64) NOT NULL,
+                stage VARCHAR(32) NOT NULL,
+                attempt INTEGER NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                provider VARCHAR(64), model VARCHAR(128),
+                artifact_source VARCHAR(32),
+                profile_snapshot JSON NOT NULL,
+                detail JSON NOT NULL,
+                error TEXT, started_at DATETIME NOT NULL,
+                completed_at DATETIME, latency_ms BIGINT,
+                usage JSON NOT NULL, estimated_cost FLOAT, actual_cost FLOAT
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO stage_attempts (
+                file_id, stage, attempt, status, profile_snapshot, detail,
+                started_at, usage, estimated_cost
+            ) VALUES (
+                'recording', 'transcribe', 1, 'completed', '{"version": 1}', '{}',
+                CURRENT_TIMESTAMP, '{"audio_seconds": 12}', 0.25
+            )
+        """))
+
+    assert migrate_stage_attempt_schema(engine) == ["stage_attempts"]
+    assert migrate_stage_attempt_schema(engine) == []
+    columns = {column["name"] for column in inspect(engine).get_columns("stage_attempts")}
+    assert "resolved_profile_snapshot" in columns
+    assert "profile_snapshot" not in columns
+    with engine.connect() as connection:
+        row = connection.execute(text("""
+            SELECT resolved_profile_snapshot, usage, estimated_cost_usd
+            FROM stage_attempts
+        """)).one()
+    assert '"version": 1' in row.resolved_profile_snapshot
+    assert '"audio_seconds": 12' in row.usage
+    assert row.estimated_cost_usd == 0.25
 
 
 def test_external_cost_ceiling_requires_pricing_and_reserves_budget(tmp_path):

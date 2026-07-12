@@ -410,8 +410,71 @@ def migrate_stage_attempt_schema(engine: Engine) -> list[str]:
     """Create the append-only stage usage ledger for an existing library."""
     if engine.dialect.name != "sqlite":
         return []
-    if "stage_attempts" in inspect(engine).get_table_names():
-        return []
+    inspector = inspect(engine)
+    if "stage_attempts" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("stage_attempts")}
+        expected = {"resolved_profile_snapshot", "estimated_cost_usd"}
+        if expected <= columns:
+            return []
+
+        # The first deployed ledger used different names and retained required
+        # detail/profile columns. Rebuild it because merely adding the new columns
+        # would leave current ORM inserts failing those legacy NOT NULL constraints.
+        def legacy(column: str, default: str = "NULL") -> str:
+            return column if column in columns else default
+
+        raw = engine.raw_connection()
+        try:
+            cursor = raw.cursor()
+            cursor.execute("PRAGMA foreign_keys=OFF")
+            cursor.executescript(f"""
+                BEGIN;
+                CREATE TABLE stage_attempts_new (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    file_id VARCHAR(64) NOT NULL REFERENCES plaud_files(id) ON DELETE CASCADE,
+                    stage VARCHAR(32) NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    provider VARCHAR(64),
+                    model VARCHAR(128),
+                    resolved_profile_snapshot JSON,
+                    usage JSON NOT NULL DEFAULT '{{}}',
+                    estimated_cost_usd FLOAT NOT NULL DEFAULT 0,
+                    latency_ms BIGINT,
+                    error TEXT,
+                    started_at DATETIME NOT NULL,
+                    completed_at DATETIME,
+                    CONSTRAINT uq_stage_attempt_number UNIQUE (file_id, stage, attempt)
+                );
+                INSERT INTO stage_attempts_new (
+                    id, file_id, stage, attempt, status, provider, model,
+                    resolved_profile_snapshot, usage, estimated_cost_usd,
+                    latency_ms, error, started_at, completed_at
+                )
+                SELECT
+                    id, file_id, stage, attempt, status, provider, model,
+                    COALESCE({legacy('resolved_profile_snapshot')}, {legacy('profile_snapshot')}),
+                    COALESCE({legacy('usage', "'{}'")}, '{{}}'),
+                    COALESCE({legacy('estimated_cost_usd')}, {legacy('estimated_cost', '0')}, 0),
+                    {legacy('latency_ms')}, {legacy('error')}, started_at, {legacy('completed_at')}
+                FROM stage_attempts;
+                DROP TABLE stage_attempts;
+                ALTER TABLE stage_attempts_new RENAME TO stage_attempts;
+                CREATE INDEX ix_stage_attempts_file_id ON stage_attempts (file_id);
+            """)
+            violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise RuntimeError(
+                    f"legacy stage-attempt migration broke foreign keys: {violations}"
+                )
+            raw.commit()
+            cursor.execute("PRAGMA foreign_keys=ON")
+        except Exception:
+            raw.rollback()
+            raise
+        finally:
+            raw.close()
+        return ["stage_attempts"]
     with engine.begin() as connection:
         connection.execute(text("""
             CREATE TABLE stage_attempts (
