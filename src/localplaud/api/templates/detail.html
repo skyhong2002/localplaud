@@ -238,15 +238,26 @@
 
     {% for s in notes %}
     <div class="tabpanel" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %}>
-      <div class="sub" style="font-size:11.5px;margin:8px 0">Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0">
+        <div class="sub" style="font-size:11.5px">Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}</div>
+        <button class="btn sec" type="button" data-summary-copy="{{ s.id }}" style="padding:6px 9px">{{ t('Edit a copy') }}</button>
+      </div>
       <div class="md" data-md>{{ s.content_md }}</div>
     </div>
     {% endfor %}
 
     {% for note in f.user_notes %}
     <div class="tabpanel" data-panel="saved-{{ note.id }}" hidden>
-      <div class="sub" style="font-size:12px;margin-bottom:8px">Saved from {{ note.source_type }} · <a href="/notes#note-{{ note.id }}">Edit in Saved notes</a></div>
-      <div class="md" data-md>{{ note.content_md }}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
+        <div class="sub" style="font-size:12px">{{ t('Editable note') }} · {{ note.source_type }}</div>
+        <button class="btn sec" type="button" data-note-edit="{{ note.id }}" style="padding:6px 9px">{{ t('Edit here') }}</button>
+      </div>
+      <div class="md" data-md data-workspace-note-body>{{ note.content_md }}</div>
+      <form data-workspace-note-form="{{ note.id }}" hidden style="display:grid;gap:8px;margin-top:10px">
+        <input class="search-input" name="title" value="{{ note.title }}" maxlength="200" required>
+        <textarea class="search-input" name="content_md" rows="12" maxlength="200000" required style="width:100%;resize:vertical">{{ note.content_md }}</textarea>
+        <div><button class="btn" type="submit">{{ t('Save') }}</button> <button class="btn sec" type="button" data-note-cancel="{{ note.id }}">{{ t('Cancel') }}</button> <span class="sub" data-note-status></span></div>
+      </form>
       {% if note.citations %}<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px">{% for citation in note.citations %}<a class="chip" href="/file/{{ citation.file_id }}{% if citation.start is not none %}?t={{ citation.start }}{% endif %}">{{ citation.start | mmss }}</a>{% endfor %}</div>{% endif %}
     </div>
     {% endfor %}
@@ -466,6 +477,12 @@
     document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
     panels.forEach(p => p.hidden = p.dataset.panel !== b.dataset.panel);
   });
+  const selectedNoteId={{ f.selected_note_id|tojson }};
+  if(selectedNoteId)document.querySelector(`.tabs button[data-panel="saved-${selectedNoteId}"]`)?.click();
+  document.querySelectorAll('[data-summary-copy]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;button.textContent={{ t('Creating editable copy…')|tojson }};const response=await fetch(`/api/files/{{ f.id }}/summaries/${button.dataset.summaryCopy}/editable-copy`,{method:'POST'}),data=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?note_id=${data.id}`;return;}button.disabled=false;button.textContent=data.detail||{{ t('Could not create editable copy')|tojson }};}));
+  document.querySelectorAll('[data-note-edit]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.tabpanel');panel.querySelector('[data-workspace-note-body]').hidden=true;panel.querySelector('[data-workspace-note-form]').hidden=false;button.hidden=true;}));
+  document.querySelectorAll('[data-note-cancel]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.tabpanel');panel.querySelector('[data-workspace-note-body]').hidden=false;panel.querySelector('[data-workspace-note-form]').hidden=true;panel.querySelector('[data-note-edit]').hidden=false;}));
+  document.querySelectorAll('[data-workspace-note-form]').forEach(form=>form.addEventListener('submit',async event=>{event.preventDefault();const id=form.dataset.workspaceNoteForm,data=new FormData(form),status=form.querySelector('[data-note-status]');status.textContent={{ t('Saving…')|tojson }};const response=await fetch(`/api/notes/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:data.get('title'),content_md:data.get('content_md')})}),result=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?note_id=${id}`;return;}status.textContent=result.detail||{{ t('Could not save')|tojson }};}));
   // speaker colors — segments first (keeps first-appearance ordering), then
   // the server-rendered legend swatches share the same mapping
   const vars=['--sp0','--sp1','--sp2','--sp3','--sp4','--sp5','--sp6','--sp7'];

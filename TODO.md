@@ -380,6 +380,10 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Consolidated recording exports in one modal: canonical transcript TXT/SRT/VTT
   with timestamp and speaker-label toggles. Existing notes, archive, and original
   audio exports remain conveniences; no additional formats are required.
+- ✅ Generated notes now create one provenance-linked editable copy instead of
+  mutating AI output. The recording workspace opens that user-owned note tab and
+  edits title/Markdown inline; the original generated content, template/model, and
+  transcript lineage remain immutable and independently inspectable.
 - Treat the Web App as the product, not a status viewer. CLI remains setup/ops tooling.
 - Add provider/model/profile management to Settings: connection setup, capability
   and model health, recommended local profiles, cost/privacy policy, remote workers,

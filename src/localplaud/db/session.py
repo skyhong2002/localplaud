@@ -44,6 +44,7 @@ def init_db() -> dict[str, int] | None:
         migrate_artifact_lineage_columns,
         migrate_ask_provenance_schema,
         migrate_automation_ownership_schema,
+        migrate_editable_note_source_schema,
         migrate_import_schema,
         migrate_legacy_note_template_schema,
         migrate_legacy_provider_profile_schema,
@@ -74,6 +75,7 @@ def init_db() -> dict[str, int] | None:
     migrate_note_template_schema(engine)
     migrate_artifact_lineage_columns(engine)
     migrate_ask_provenance_schema(engine)
+    migrate_editable_note_source_schema(engine)
     migrate_speaker_timeline_schema(engine)
     migrate_import_schema(engine)
     migrate_vocabulary_schema(engine)

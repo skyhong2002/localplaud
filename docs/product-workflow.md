@@ -456,6 +456,9 @@ between diarization and derived knowledge. A production recording has completed 
 path end to end: the immutable `ai_polish` revision became the canonical input for
 notes, mind map, and embedding chunks while raw ASR remained directly inspectable.
 Saved Ask answers are editable note bodies with durable follow-up threads.
+Generated notes can be promoted idempotently to a provenance-linked editable copy
+inside the same recording workspace. User edits affect only that copy; the original
+AI artifact and its model/template/transcript lineage remain immutable.
 The Templates workspace now separates My Space and Explore, with server-side search,
 scenario/category browsing, provenance, descriptions, authorship/popularity signals,
 prompt preview, immutable version editing, and copy-to-workspace. Other major gaps

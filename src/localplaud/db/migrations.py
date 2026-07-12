@@ -646,6 +646,28 @@ def migrate_ask_provenance_schema(engine: Engine) -> list[str]:
     return migrated
 
 
+def migrate_editable_note_source_schema(engine: Engine) -> list[str]:
+    """Link editable copies back to their immutable generated summary."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "user_notes" not in set(inspector.get_table_names()):
+        return []
+    columns = {item["name"] for item in inspector.get_columns("user_notes")}
+    if "source_summary_id" in columns:
+        return []
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE user_notes ADD COLUMN source_summary_id INTEGER")
+        )
+        connection.execute(text("""
+            CREATE UNIQUE INDEX uq_user_notes_source_summary_id
+            ON user_notes (source_summary_id)
+            WHERE source_summary_id IS NOT NULL
+        """))
+    return ["user_notes.source_summary_id"]
+
+
 def migrate_speaker_timeline_schema(engine: Engine) -> list[str]:
     """Add durable diarization evidence for stable speaker reconciliation."""
     if engine.dialect.name != "sqlite":

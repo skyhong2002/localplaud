@@ -72,6 +72,20 @@ def test_ask_skill_provenance_migration_is_idempotent(tmp_path):
     assert "retrieval_scope" in thread_columns
 
 
+def test_editable_note_source_migration_is_idempotent(tmp_path):
+    from localplaud.db.migrations import migrate_editable_note_source_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-notes.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE user_notes (id INTEGER PRIMARY KEY)"))
+    assert migrate_editable_note_source_schema(engine) == [
+        "user_notes.source_summary_id"
+    ]
+    assert migrate_editable_note_source_schema(engine) == []
+    columns = {item["name"] for item in inspect(engine).get_columns("user_notes")}
+    assert "source_summary_id" in columns
+
+
 def test_single_recording_followup_persists_history_and_sources(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed()
@@ -179,6 +193,48 @@ def test_save_answer_is_idempotent_editable_and_visible(monkeypatch, tmp_path):
     assert "- Weekly Sync @ 00:12" in exported.text
     assert client.delete(f"/api/notes/{note_id}").status_code == 204
     assert client.get("/api/notes").json()["notes"] == []
+
+
+def test_generated_summary_becomes_editable_copy_without_mutating_source(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import Summary
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        summary = Summary(
+            file_id="r1",
+            template="meeting",
+            title="Weekly notes",
+            content_md="# Generated\n\nOriginal AI output.",
+            source="local",
+        )
+        session.add(summary)
+        session.flush()
+        summary_id = summary.id
+
+    first = client.post(f"/api/files/r1/summaries/{summary_id}/editable-copy")
+    second = client.post(f"/api/files/r1/summaries/{summary_id}/editable-copy")
+    assert first.status_code == 201
+    assert second.json()["id"] == first.json()["id"]
+    note_id = first.json()["id"]
+    assert first.json()["source_type"] == "generated_summary"
+    assert first.json()["source_summary_id"] == summary_id
+
+    changed = client.put(
+        f"/api/notes/{note_id}",
+        json={"title": "Edited notes", "content_md": "User-owned correction."},
+    )
+    assert changed.status_code == 200
+    with session_scope() as session:
+        assert session.get(Summary, summary_id).content_md == "# Generated\n\nOriginal AI output."
+
+    detail = client.get(f"/file/r1?note_id={note_id}")
+    assert 'data-summary-copy="' in detail.text
+    assert f'data-workspace-note-form="{note_id}"' in detail.text
+    assert f"const selectedNoteId={note_id}" in detail.text
 
 
 def test_library_answer_with_multiple_recordings_saves_as_library_note(monkeypatch, tmp_path):

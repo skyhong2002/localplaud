@@ -146,6 +146,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'id="persistent-player"' in r.text and 'id="waveform"' in r.text
     assert 'id="subscription-independence"' in r.text
     assert "Subscription independence" in r.text
+    assert 'data-summary-copy=' in r.text
     assert 'id="benchmark-backdrop"' not in r.text
     assert 'id="open-benchmark"' not in r.text
     evidence = c.get("/api/files/r1/acceptance")

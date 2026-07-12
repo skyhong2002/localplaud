@@ -474,6 +474,9 @@ class UserNote(Base):
     ask_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("ask_messages.id", ondelete="SET NULL"), unique=True, default=None
     )
+    source_summary_id: Mapped[int | None] = mapped_column(
+        ForeignKey("summaries.id", ondelete="SET NULL"), unique=True, default=None
+    )
     citations: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(

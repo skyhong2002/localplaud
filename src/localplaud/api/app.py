@@ -1152,6 +1152,7 @@ def file_detail(
     view: str | None = None,
     ask_thread: str | None = None,
     revision: int | None = None,
+    note_id: int | None = None,
 ):
     settings = get_settings()
     with session_scope() as session:
@@ -1163,6 +1164,7 @@ def file_detail(
         summaries = sorted(
             [
                 {
+                    "id": s.id,
                     "title": s.title,
                     "content_md": s.content_md,
                     "template": s.template,
@@ -1322,10 +1324,14 @@ def file_detail(
                     "title": note.title,
                     "content_md": note.content_md,
                     "source_type": note.source_type,
+                    "source_summary_id": note.source_summary_id,
                     "citations": note.citations or [],
                 }
                 for note in r.user_notes
             ],
+            "selected_note_id": (
+                note_id if any(note.id == note_id for note in r.user_notes) else None
+            ),
             "note_template_key": r.note_template_key or settings.pipeline.summary_template,
             "stages": [
                 {

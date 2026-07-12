@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from ..ask_threads import note_to_dict, save_answer_as_note
-from ..db.models import UserNote
+from ..db.models import Summary, UserNote
 from ..db.session import session_scope
 
 router = APIRouter(prefix="/api", tags=["notes"])
@@ -54,6 +54,33 @@ def save_answer(message_id: int, body: SaveAnswerBody) -> dict:
         return save_answer_as_note(message_id, body.title)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/files/{file_id}/summaries/{summary_id}/editable-copy", status_code=201)
+def copy_generated_summary(file_id: str, summary_id: int) -> dict:
+    """Create one editable note without mutating the generated artifact."""
+    with session_scope() as session:
+        summary = session.get(Summary, summary_id)
+        if summary is None or summary.file_id != file_id:
+            raise HTTPException(status_code=404, detail="generated note not found")
+        if summary.template == "mind_map":
+            raise HTTPException(status_code=409, detail="mind maps are not editable notes")
+        existing = session.scalar(
+            select(UserNote).where(UserNote.source_summary_id == summary.id)
+        )
+        if existing is not None:
+            return note_to_dict(existing)
+        note = UserNote(
+            file_id=file_id,
+            title=(summary.title or summary.template.replace("-", " ").title())[:200],
+            content_md=summary.content_md,
+            source_type="generated_summary",
+            source_summary_id=summary.id,
+            citations=[],
+        )
+        session.add(note)
+        session.flush()
+        return note_to_dict(note)
 
 
 @router.put("/notes/{note_id}")
