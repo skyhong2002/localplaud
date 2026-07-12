@@ -145,6 +145,8 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'id="persistent-player"' in r.text and 'id="waveform"' in r.text
     assert 'id="subscription-independence"' in r.text
     assert "Subscription independence" in r.text
+    assert 'id="benchmark-backdrop" hidden' in r.text
+    assert 'id="open-benchmark"' in r.text
     evidence = c.get("/api/files/r1/acceptance")
     assert evidence.status_code == 200
     assert evidence.json()["schema"] == "localplaud-subscription-independence/v1"
@@ -185,6 +187,9 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         "訂閱獨立性",
         "尚未通過",
         "JSON 證據",
+        "執行品質評測",
+        "錄音品質評測",
+        "Reference 僅在本次請求中讀入記憶體",
     ):
         assert text in page.text
 

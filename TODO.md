@@ -256,7 +256,9 @@ embedding raw provider credentials or model settings in each rule.
   provider/model latency, and real-time factor. Reports exclude transcript text and
   reference paths. Peak memory remains honestly unavailable until stage telemetry
   captures it; overlapping-speech DER, annotated hallucination rate, and the actual
-  multi-recording Taiwan Mandarin/code-switch benchmark set remain open.
+  multi-recording Taiwan Mandarin/code-switch benchmark set remain open. Recording
+  Detail now runs the same evaluator from a bounded, memory-only reference upload and
+  renders six headline metrics without requiring CLI access.
 
 ### P0 — Full-transcript notes and usable knowledge
 

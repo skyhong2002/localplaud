@@ -243,6 +243,8 @@ Compare ASR/speaker profiles on consented Taiwan Mandarin and code-switch record
 with `localplaud benchmark-recording RECORDING_ID --reference PRIVATE.json --json`.
 Reports contain metrics and execution provenance, not transcript text. See
 [`docs/benchmarking.md`](docs/benchmarking.md).
+Recording Detail can run the same benchmark from an in-memory private JSON upload;
+the reference is never stored.
 
 ## Security
 

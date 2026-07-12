@@ -460,6 +460,8 @@ database/repository, while the report retains CER/WER, speaker error components,
 timestamp quality, execution provenance, latency, and real-time factor without
 transcript content. See [`benchmarking.md`](benchmarking.md). Actual multi-recording
 Apple/NVIDIA/CPU measurements remain required before changing defaults.
+The recording workspace runs this comparison from a private reference JSON without
+persisting it; a bounded upload API returns the identical report used by the CLI.
 
 The deterministic subscription-independence gate is available as
 `localplaud acceptance-check RECORDING_ID` (or `--json` for automation). It audits

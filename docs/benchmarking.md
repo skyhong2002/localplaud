@@ -8,6 +8,12 @@ localplaud benchmark-recording RECORDING_ID \
   --reference /private/path/reference.json --json
 ```
 
+The recording workspace exposes the same evaluator through **Run quality benchmark**.
+The browser sends the selected reference as a bounded multipart request to
+`POST /api/files/{recording-id}/benchmark` and renders CER/WER/DER, boundary MAE,
+real-time factor, and peak-memory availability. The server reads at most 5 MB into
+memory, closes the upload, and does not persist its filename or content.
+
 The reference stays outside the repository and database. The versioned report does
 not contain transcript text, recording title, or the reference path, so reports can
 be aggregated without copying private content. Review them before sharing: the

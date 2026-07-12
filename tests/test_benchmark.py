@@ -115,3 +115,25 @@ def test_benchmark_cli_json_and_reference_validation(monkeypatch, tmp_path):
     reference_path.write_text(json.dumps({"schema": "wrong", "segments": []}), encoding="utf-8")
     with pytest.raises(ValueError, match="reference schema"):
         load_reference(reference_path)
+
+
+def test_benchmark_upload_api_is_bounded_and_does_not_persist_reference(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    from fastapi.testclient import TestClient
+
+    from localplaud.api.app import app
+
+    private_content = json.dumps(_reference()).encode()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/files/bench/benchmark",
+            files={"reference": ("consented-private.json", private_content, "application/json")},
+        )
+        invalid = client.post(
+            "/api/files/bench/benchmark",
+            files={"reference": ("invalid.json", b"not-json", "application/json")},
+        )
+    assert response.status_code == 200
+    assert response.json()["schema"] == "localplaud-benchmark-report/v1"
+    assert invalid.status_code == 422
+    assert not list(tmp_path.rglob("consented-private.json"))

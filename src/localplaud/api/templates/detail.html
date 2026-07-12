@@ -60,7 +60,7 @@
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:7px">
         {% for item in acceptance.checks %}<div class="tile" style="padding:9px 11px"><div style="display:flex;justify-content:space-between;gap:8px"><strong style="font-size:12px">{{ t(item.name) }}</strong><span style="color:{{ 'var(--ok)' if item.passed else 'var(--red)' }};font-weight:750">{{ '✓' if item.passed else '✗' }}</span></div><div class="sub" style="font-size:10.5px;margin-top:3px">{{ item.detail }}</div></div>{% endfor %}
       </div>
-      <div style="margin-top:9px"><a class="sub" style="font-size:11.5px;color:var(--blue)" href="/api/files/{{ f.id }}/acceptance">{{ t('JSON evidence') }} ↗</a></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:9px"><a class="sub" style="font-size:11.5px;color:var(--blue)" href="/api/files/{{ f.id }}/acceptance">{{ t('JSON evidence') }} ↗</a>{% if f.transcript %}<button class="btn sec" id="open-benchmark" type="button" style="padding:6px 9px">{{ t('Run quality benchmark') }}</button>{% endif %}</div>
     </details>
 
     {% if f.profiles %}
@@ -305,6 +305,20 @@
     {% endif %}
   </div></section>
 </div>
+{% if f.transcript %}
+<div class="import-backdrop" id="benchmark-backdrop" hidden>
+  <section class="import-modal" style="min-height:0;width:min(600px,100%)" role="dialog" aria-modal="true" aria-labelledby="benchmark-title">
+    <div class="import-head"><span id="benchmark-title">{{ t('Recording quality benchmark') }}</span><button class="import-close" id="benchmark-close" type="button" aria-label="{{ t('Close') }}">×</button></div>
+    <form id="benchmark-form" class="import-body" style="gap:13px">
+      <p class="sub" style="margin:0">{{ t('Compare the local canonical transcript with a private, consented reference JSON.') }}</p>
+      <label><strong>{{ t('Reference JSON') }}</strong><input class="search-input" id="benchmark-reference" name="reference" type="file" accept="application/json,.json" required style="width:100%;margin-top:6px"></label>
+      <p class="sub" style="font-size:11.5px;margin:0">{{ t('The reference is read in memory for this request and is not stored in the database or filesystem.') }}</p>
+      <div><button class="btn" id="benchmark-submit" type="submit">{{ t('Evaluate') }}</button></div>
+      <div id="benchmark-result" class="sub" role="status"></div>
+    </form>
+  </section>
+</div>
+{% endif %}
 <div class="import-backdrop" id="metadata-backdrop" hidden>
   <section class="import-modal" style="width:min(520px,100%);min-height:0" role="dialog" aria-modal="true" aria-labelledby="metadata-title">
     <div class="import-head"><span id="metadata-title">{{ t('Folder and tags') }}</span><button class="import-close" id="metadata-close" type="button">×</button></div>
@@ -358,6 +372,11 @@
 
 {% block scripts %}
 <script>
+  const benchmarkBackdrop=document.getElementById('benchmark-backdrop'),benchmarkResult=document.getElementById('benchmark-result');
+  document.getElementById('open-benchmark')?.addEventListener('click',()=>{benchmarkBackdrop.hidden=false;});
+  document.getElementById('benchmark-close')?.addEventListener('click',()=>{benchmarkBackdrop.hidden=true;});
+  benchmarkBackdrop?.addEventListener('click',event=>{if(event.target===benchmarkBackdrop)benchmarkBackdrop.hidden=true;});
+  document.getElementById('benchmark-form')?.addEventListener('submit',async event=>{event.preventDefault();const file=document.getElementById('benchmark-reference').files[0],button=document.getElementById('benchmark-submit');if(!file){benchmarkResult.textContent={{ t('Choose a reference JSON file.')|tojson }};return;}button.disabled=true;benchmarkResult.textContent={{ t('Evaluating…')|tojson }};const body=new FormData();body.set('reference',file);const response=await fetch('/api/files/{{ f.id }}/benchmark',{method:'POST',body}),data=await response.json();if(!response.ok){benchmarkResult.textContent=data.detail||'Benchmark failed';button.disabled=false;return;}const value=number=>number==null?{{ t('not recorded')|tojson }}:Number(number).toFixed(4);benchmarkResult.innerHTML='';const rows=[['CER',data.accuracy.cer],['WER',data.accuracy.wer],['DER',data.speakers.der],[{{ t('Boundary MAE')|tojson }},data.timestamps.boundary_mae_seconds],[{{ t('Real-time factor')|tojson }},data.execution.real_time_factor],[{{ t('Peak memory')|tojson }},data.execution.peak_memory_mb]];const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px';for(const [label,metric] of rows){const item=document.createElement('div');item.className='tile';const name=document.createElement('div');name.className='k';name.textContent=label;const result=document.createElement('strong');result.style.cssText='display:block;font-size:20px;margin-top:3px';result.textContent=value(metric);item.append(name,result);grid.append(item);}benchmarkResult.append(grid);button.disabled=false;});
   async function deleteLocalData(kind,message){if(!confirm(message))return;const output=document.getElementById('local-data-result');output.textContent='Removing local data…';const response=await fetch(`/api/files/{{ f.id }}/${kind}`,{method:'DELETE'}),data=await response.json();if(response.ok){output.textContent='Removed. Reloading…';location.reload();}else output.textContent=data.detail||'Could not remove local data';}
   document.getElementById('delete-local-processing')?.addEventListener('click',()=>deleteLocalData('local-processing','Delete local transcript, corrections, generated notes, mind map, search index, and processing history? Saved notes and Plaud imports will remain.'));
   document.getElementById('delete-local-audio')?.addEventListener('click',()=>deleteLocalData('local-audio','Remove this downloaded audio and waveform from this host? It can be imported again from Plaud later.'));

@@ -378,6 +378,18 @@ _ZH_HANT_TW = {
     "durable_stages": "可續跑處理階段",
     "required_exports": "必要逐字稿匯出",
     "JSON evidence": "JSON 證據",
+    "Run quality benchmark": "執行品質評測",
+    "Recording quality benchmark": "錄音品質評測",
+    "Compare the local canonical transcript with a private, consented reference JSON.": "將本機標準逐字稿與經同意的私人 reference JSON 比較。",
+    "Reference JSON": "Reference JSON",
+    "Evaluate": "開始評測",
+    "The reference is read in memory for this request and is not stored in the database or filesystem.": "Reference 僅在本次請求中讀入記憶體，不會儲存至資料庫或檔案系統。",
+    "Choose a reference JSON file.": "請選擇 reference JSON 檔案。",
+    "Evaluating…": "評測中…",
+    "Boundary MAE": "邊界 MAE",
+    "Real-time factor": "Real-time factor",
+    "Peak memory": "峰值記憶體",
+    "not recorded": "未記錄",
 }
 
 CATALOGS = {"zh-Hant-TW": _ZH_HANT_TW}

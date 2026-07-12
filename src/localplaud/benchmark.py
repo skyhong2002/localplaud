@@ -113,7 +113,12 @@ def _timestamp_metrics(reference: list[dict], hypothesis: list[dict]) -> dict:
 
 
 def load_reference(path: str | Path) -> dict:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return validate_reference(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def validate_reference(data: object) -> dict:
+    if not isinstance(data, dict):
+        raise ValueError("reference must be a JSON object")
     if data.get("schema") != REFERENCE_SCHEMA:
         raise ValueError(f"reference schema must be {REFERENCE_SCHEMA}")
     segments = data.get("segments")
