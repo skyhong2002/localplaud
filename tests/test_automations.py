@@ -163,6 +163,98 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert 'name="webhook_integration_id"' in page.text
 
 
+def test_external_rules_are_idempotent_executable_and_read_only(monkeypatch, tmp_path):
+    client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
+    body = {
+        "owner_key": "notion-sync",
+        "owner_label": "Notion Sync",
+        "external_id": "rule-42",
+        "management_hint": "Edit this rule in Notion Sync.",
+        "name": "External meeting filing",
+        "enabled": True,
+        "priority": 30,
+        "trigger": {"origin": "plaud", "title_contains": "sync"},
+        "actions": {"folder_id": folder_id},
+        "notify": False,
+    }
+    created = client.put("/api/automations/external-rules", json=body)
+    assert created.status_code == 200
+    assert created.json()["created"] is True
+    rule = created.json()["rule"]
+    assert rule["editable"] is False
+    assert rule["owner_type"] == "external"
+    assert rule["owner_label"] == "Notion Sync"
+    assert rule["version"] == 1
+
+    unchanged = client.put("/api/automations/external-rules", json=body).json()
+    assert unchanged["created"] is False
+    assert unchanged["rule"]["version"] == 1
+    body["name"] = "External meeting archive"
+    changed = client.put("/api/automations/external-rules", json=body).json()["rule"]
+    assert changed["version"] == 2
+
+    local_body = {
+        "name": "Take over",
+        "enabled": True,
+        "priority": 1,
+        "trigger": {},
+        "actions": {"folder_id": folder_id},
+    }
+    for response in (
+        client.put(f"/api/automations/rules/{rule['id']}", json=local_body),
+        client.post(f"/api/automations/rules/{rule['id']}/toggle"),
+        client.delete(f"/api/automations/rules/{rule['id']}"),
+    ):
+        assert response.status_code == 409
+        assert "managed by Notion Sync" in response.json()["detail"]
+    assert client.post(f"/api/automations/rules/{rule['id']}/dry-run").status_code == 200
+
+    page = client.get("/discover")
+    assert page.status_code == 200
+    assert "Applications &amp; integrations" in page.text
+    assert "External rule owners" in page.text
+    assert "Notion Sync · read-only" in page.text
+    assert "Edit this rule in Notion Sync." in page.text
+    assert f'class="btn sec rule-edit" data-id="{rule["id"]}"' not in page.text
+    assert 'title="Managed by Notion Sync">Read-only</span>' in page.text
+
+    assert client.post("/api/automations/run").json()["recordings_changed"] == 1
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        assert session.get(PlaudFile, "match").folder_id == folder_id
+
+
+def test_automation_ownership_migration_is_idempotent(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+
+    from localplaud.db.migrations import migrate_automation_ownership_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-auto.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE automation_rules ("
+                "id INTEGER PRIMARY KEY, name VARCHAR(120) NOT NULL, "
+                "enabled BOOLEAN NOT NULL, priority INTEGER NOT NULL, version INTEGER NOT NULL, "
+                "trigger JSON NOT NULL, actions JSON NOT NULL, notify BOOLEAN NOT NULL, "
+                "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)"
+            )
+        )
+    migrated = migrate_automation_ownership_schema(engine)
+    assert set(migrated) == {
+        "automation_rules.owner_type",
+        "automation_rules.owner_key",
+        "automation_rules.owner_label",
+        "automation_rules.external_id",
+        "automation_rules.owner_detail",
+    }
+    assert migrate_automation_ownership_schema(engine) == []
+    columns = {column["name"] for column in inspect(engine).get_columns("automation_rules")}
+    assert {"owner_type", "owner_key", "owner_label", "external_id", "owner_detail"} <= columns
+
+
 def test_notification_inbox_read_dismiss_and_rule_deletion(monkeypatch, tmp_path):
     client, _folder_id, tag_id = _seed(monkeypatch, tmp_path)
     rule_id = client.post(

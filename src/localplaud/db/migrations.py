@@ -14,6 +14,43 @@ INDEPENDENT_MIGRATION_KEY = "migration.independent-artifacts.v1"
 _PLAUD_SOURCES = {"cloud", "plaud"}
 
 
+def migrate_automation_ownership_schema(engine: Engine) -> list[str]:
+    """Add explicit local/external ownership to existing AutoFlow rules."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "automation_rules" not in set(inspector.get_table_names()):
+        return []
+    columns = {column["name"] for column in inspector.get_columns("automation_rules")}
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for column, ddl in (
+            ("owner_type", "VARCHAR(16) NOT NULL DEFAULT 'local'"),
+            ("owner_key", "VARCHAR(64)"),
+            ("owner_label", "VARCHAR(120)"),
+            ("external_id", "VARCHAR(128)"),
+            ("owner_detail", "JSON NOT NULL DEFAULT '{}'"),
+        ):
+            if column not in columns:
+                connection.execute(
+                    text(f"ALTER TABLE automation_rules ADD COLUMN {column} {ddl}")
+                )
+                migrated.append(f"automation_rules.{column}")
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_automation_rules_owner_type "
+                "ON automation_rules (owner_type)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_rule_owner_external "
+                "ON automation_rules (owner_key, external_id)"
+            )
+        )
+    return migrated
+
+
 def migrate_organization_schema(engine: Engine) -> list[str]:
     """Add local folder/tag metadata to an existing SQLite library."""
     if engine.dialect.name != "sqlite":

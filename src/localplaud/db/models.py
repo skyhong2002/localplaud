@@ -493,7 +493,7 @@ class ImportRun(Base):
 
 
 class AutomationRule(Base):
-    """Locally owned AutoFlow rule with explicit trigger/action JSON."""
+    """AutoFlow rule with explicit trigger/action JSON and edit ownership."""
 
     __tablename__ = "automation_rules"
 
@@ -505,9 +505,17 @@ class AutomationRule(Base):
     trigger: Mapped[dict] = mapped_column(JSON, default=dict)
     actions: Mapped[dict] = mapped_column(JSON, default=dict)
     notify: Mapped[bool] = mapped_column(default=False)
+    owner_type: Mapped[str] = mapped_column(String(16), default="local", index=True)
+    owner_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    owner_label: Mapped[str | None] = mapped_column(String(120), default=None)
+    external_id: Mapped[str | None] = mapped_column(String(128), default=None)
+    owner_detail: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    __table_args__ = (
+        UniqueConstraint("owner_key", "external_id", name="uq_automation_rule_owner_external"),
     )
 
 

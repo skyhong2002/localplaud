@@ -978,17 +978,48 @@ def discover_automations(request: Request):
                 .order_by(NoteTemplate.name)
             )
         ]
+        webhook_integrations = [
+            item for item in list_webhook_integrations(session) if item["enabled"]
+        ]
+        email_integrations = [
+            item for item in list_email_integrations(session) if item["enabled"]
+        ]
+    automation_rules = list_rules()["rules"]
     ctx = _base_ctx(request, "discover") | {
-        "automation_rules": list_rules()["rules"],
+        "automation_rules": automation_rules,
         "automation_runs": list_runs(limit=50)["runs"],
         "organization": organization,
         "profiles": profiles,
         "note_templates": note_templates,
-        "webhook_integrations": [
-            item for item in list_webhook_integrations(session) if item["enabled"]
-        ],
-        "email_integrations": [
-            item for item in list_email_integrations(session) if item["enabled"]
+        "webhook_integrations": webhook_integrations,
+        "email_integrations": email_integrations,
+        "application_catalog": [
+            {
+                "name": "Local AutoFlow",
+                "detail": "Rules created and fully editable in this Web App.",
+                "count": sum(1 for rule in automation_rules if rule["editable"]),
+                "status": "available",
+            },
+            {
+                "name": "External rule owners",
+                "detail": "Mirrored rules stay visible but can only be edited by their owner.",
+                "count": sum(1 for rule in automation_rules if not rule["editable"]),
+                "status": "connected" if any(not rule["editable"] for rule in automation_rules) else "idle",
+            },
+            {
+                "name": "Authorized webhooks",
+                "detail": "Scoped HTTPS or explicitly allowed private destinations.",
+                "count": len(webhook_integrations),
+                "status": "configured" if webhook_integrations else "setup",
+                "href": "/settings#webhook-integrations",
+            },
+            {
+                "name": "Authorized email",
+                "detail": "Scoped SMTP destinations with environment-only passwords.",
+                "count": len(email_integrations),
+                "status": "configured" if email_integrations else "setup",
+                "href": "/settings#email-integrations",
+            },
         ],
     }
     return templates.TemplateResponse(request=request, name="discover.html", context=ctx)

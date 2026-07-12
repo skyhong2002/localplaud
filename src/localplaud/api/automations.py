@@ -97,6 +97,13 @@ class RuleBody(BaseModel):
     notify: bool = False
 
 
+class ExternalRuleBody(RuleBody):
+    owner_key: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    owner_label: str = Field(min_length=1, max_length=120)
+    external_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+    management_hint: str | None = Field(default=None, max_length=300)
+
+
 def _serialize_rule(row: AutomationRule, run_count: int = 0, last_run=None) -> dict:
     return {
         "id": row.id,
@@ -107,6 +114,12 @@ def _serialize_rule(row: AutomationRule, run_count: int = 0, last_run=None) -> d
         "trigger": row.trigger or {},
         "actions": row.actions or {},
         "notify": row.notify,
+        "owner_type": row.owner_type or "local",
+        "owner_key": row.owner_key,
+        "owner_label": row.owner_label or "Local workspace",
+        "external_id": row.external_id,
+        "owner_detail": row.owner_detail or {},
+        "editable": (row.owner_type or "local") == "local",
         "sentence": rule_sentence(row),
         "run_count": run_count,
         "last_run": last_run,
@@ -157,11 +170,69 @@ def create_rule(body: RuleBody) -> dict:
     with session_scope() as session:
         row = AutomationRule(
             name=body.name.strip(), enabled=body.enabled, priority=body.priority,
-            trigger=trigger, actions=actions, notify=body.notify,
+            trigger=trigger, actions=actions, notify=body.notify, owner_type="local",
         )
         session.add(row)
         session.flush()
         return _serialize_rule(row)
+
+
+@router.put("/external-rules")
+def upsert_external_rule(body: ExternalRuleBody) -> dict:
+    """Mirror a rule owned by another application without granting local edit controls."""
+    trigger = body.trigger.model_dump(exclude_none=True)
+    actions = body.actions.model_dump(exclude_none=True)
+    try:
+        validate_rule_references(trigger, actions)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    with session_scope() as session:
+        row = session.scalar(
+            select(AutomationRule).where(
+                AutomationRule.owner_key == body.owner_key,
+                AutomationRule.external_id == body.external_id,
+            )
+        )
+        created = row is None
+        if row is None:
+            row = AutomationRule(
+                owner_type="external",
+                owner_key=body.owner_key,
+                external_id=body.external_id,
+            )
+            session.add(row)
+        elif (row.owner_type or "local") != "external":
+            raise HTTPException(status_code=409, detail="ownership identity belongs to a local rule")
+        changed = any(
+            (
+                row.name != body.name.strip(),
+                row.enabled != body.enabled,
+                row.priority != body.priority,
+                (row.trigger or {}) != trigger,
+                (row.actions or {}) != actions,
+                row.notify != body.notify,
+                row.owner_label != body.owner_label.strip(),
+                (row.owner_detail or {}).get("management_hint") != body.management_hint,
+            )
+        )
+        if not created and changed:
+            row.version += 1
+        row.name = body.name.strip()
+        row.enabled = body.enabled
+        row.priority = body.priority
+        row.trigger = trigger
+        row.actions = actions
+        row.notify = body.notify
+        row.owner_label = body.owner_label.strip()
+        row.owner_detail = {"management_hint": body.management_hint} if body.management_hint else {}
+        session.flush()
+        return {"created": created, "rule": _serialize_rule(row)}
+
+
+def _require_local_owner(row: AutomationRule) -> None:
+    if (row.owner_type or "local") != "local":
+        label = row.owner_label or row.owner_key or "another application"
+        raise HTTPException(status_code=409, detail=f"rule is read-only and managed by {label}")
 
 
 @router.put("/rules/{rule_id}")
@@ -175,6 +246,7 @@ def update_rule(rule_id: int, body: RuleBody) -> dict:
         row = session.get(AutomationRule, rule_id)
         if row is None:
             raise HTTPException(status_code=404, detail="rule not found")
+        _require_local_owner(row)
         row.name, row.enabled, row.priority = body.name.strip(), body.enabled, body.priority
         row.trigger, row.actions, row.notify = trigger, actions, body.notify
         row.version += 1
@@ -188,6 +260,7 @@ def toggle_rule(rule_id: int) -> dict:
         row = session.get(AutomationRule, rule_id)
         if row is None:
             raise HTTPException(status_code=404, detail="rule not found")
+        _require_local_owner(row)
         row.enabled = not row.enabled
         return {"id": row.id, "enabled": row.enabled}
 
@@ -198,6 +271,7 @@ def delete_rule(rule_id: int) -> dict:
         row = session.get(AutomationRule, rule_id)
         if row is None:
             raise HTTPException(status_code=404, detail="rule not found")
+        _require_local_owner(row)
         run_ids = select(AutomationRun.id).where(AutomationRun.rule_id == rule_id)
         session.execute(
             update(AutomationExport)

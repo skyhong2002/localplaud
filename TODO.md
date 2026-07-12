@@ -397,8 +397,11 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Added a Discover hub for locally owned/editable AutoFlow rules, create/edit/
   delete controls, Run now, history, and notification policy, plus a responsive
   notification inbox with an unread badge. Settings now includes authorized webhook
-  and SMTP email catalogs. Remaining: broader local applications catalog and externally
-  owned read-only rules.
+  and SMTP email catalogs. Discover now also has an Applications & Integrations
+  catalog and explicit external-rule ownership: owner applications idempotently sync
+  versioned rules, while local edit/toggle/delete APIs reject them and the Web App
+  presents the owner and management hint as read-only. Remaining: additional concrete
+  application adapters beyond the generic external-owner contract.
 - ✅ Settings now has a responsive, navigable information architecture for Plaud
   account state, processing recommendations, vocabulary, templates, provider/model/
   profile setup, remote workers, authorized webhooks/email, and system health. The

@@ -43,6 +43,7 @@ def init_db() -> dict[str, int] | None:
     from .migrations import (
         migrate_artifact_lineage_columns,
         migrate_ask_provenance_schema,
+        migrate_automation_ownership_schema,
         migrate_import_schema,
         migrate_note_template_schema,
         migrate_organization_schema,
@@ -54,6 +55,7 @@ def init_db() -> dict[str, int] | None:
     )
 
     migrate_profile_snapshot_columns(engine)
+    migrate_automation_ownership_schema(engine)
     migrate_stage_attempt_schema(engine)
     migrate_organization_schema(engine)
     migrate_pipeline_retry_schema(engine)

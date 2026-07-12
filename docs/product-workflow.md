@@ -209,6 +209,14 @@ bounded JSON payload with a stable idempotency key. Response status/excerpt, pay
 hash, attempts, health, last use, and failures are retained; delivery-only retry does
 not rerun processing or organization actions. See [`webhooks.md`](webhooks.md).
 
+AutoFlow ownership is explicit. Rules created in localplaud are locally editable;
+another application can mirror a rule through a stable owner/external identifier and
+update it idempotently. Mirrored rules execute through the same validated local
+actions and retain versioned history, but local update, toggle, and delete endpoints
+reject them. Discover labels the owner and management hint, offers read-only dry-run,
+and catalogs local rules, external owners, authorized webhooks, and authorized email
+without pretending generic integrations are installed applications.
+
 Authorized SMTP destinations use the same durable downstream boundary. Settings stores
 only an environment password reference and explicit From/To addresses, TLS mode,
 private/LAN allowance, subject prefix, and metadata/transcript/notes scopes. Test sends
