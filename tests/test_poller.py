@@ -15,7 +15,14 @@ def _reset_db(monkeypatch, tmp_path):
 
 def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
-    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        StageAttempt,
+        StageName,
+        StageRun,
+        StageStatus,
+    )
     from localplaud.db.session import init_db, session_scope
     from localplaud.poller.poll import reset_inflight
 
@@ -24,6 +31,22 @@ def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
         s.add(PlaudFile(id="dl", status=FileStatus.downloading))
         s.add(PlaudFile(id="pr", status=FileStatus.processing, audio_path="/x"))
         s.add(PlaudFile(id="ok", status=FileStatus.done))
+        s.add(
+            StageRun(
+                file_id="pr",
+                stage=StageName.transcribe,
+                status=StageStatus.running,
+                attempts=1,
+            )
+        )
+        s.add(
+            StageAttempt(
+                file_id="pr",
+                stage=StageName.transcribe,
+                attempt=1,
+                status=StageStatus.running,
+            )
+        )
 
     n = reset_inflight()
     assert n == 2
@@ -31,6 +54,14 @@ def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
         assert s.get(PlaudFile, "dl").status == FileStatus.discovered
         assert s.get(PlaudFile, "pr").status == FileStatus.downloaded
         assert s.get(PlaudFile, "ok").status == FileStatus.done  # untouched
+        run = s.query(StageRun).one()
+        attempt = s.query(StageAttempt).one()
+        assert run.status == StageStatus.failed
+        assert attempt.status == StageStatus.failed
+        assert run.completed_at is not None
+        assert attempt.completed_at is not None
+        assert "application restart" in run.error
+        assert "application restart" in attempt.error
 
 
 def test_reset_download_errors_retries_only_audioless_rows(monkeypatch, tmp_path):

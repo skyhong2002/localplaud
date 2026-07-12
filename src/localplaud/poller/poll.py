@@ -10,12 +10,12 @@ Two steps, both read-only against the cloud:
 from __future__ import annotations
 
 import logging
-from datetime import UTC
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 
 from ..config import Settings, get_settings
-from ..db.models import FileStatus, PlaudFile
+from ..db.models import FileStatus, PlaudFile, StageAttempt, StageRun, StageStatus
 from ..db.session import session_scope
 from ..plaud import make_plaud_client
 from ..plaud.models import PlaudFileDTO
@@ -73,11 +73,15 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
 
 def reset_inflight() -> int:
     """Recover files stranded mid-flight by a crash/kill: ``downloading`` →
-    ``discovered`` and ``processing`` → ``downloaded``. Safe to call at the
-    start of every cycle. Returns the number of rows reset."""
+    ``discovered`` and ``processing`` → ``downloaded``. Any running stage and
+    append-only attempt are closed as interrupted so history never remains
+    permanently in progress. Safe to call at the start of every cycle. Returns
+    the number of file rows reset."""
     from sqlalchemy import update
 
     reset = 0
+    now = datetime.now(UTC)
+    interruption = "Interrupted by application restart; queued for retry."
     with session_scope() as session:
         reset += session.execute(
             update(PlaudFile)
@@ -89,6 +93,25 @@ def reset_inflight() -> int:
             .where(PlaudFile.status == FileStatus.processing)
             .values(status=FileStatus.downloaded)
         ).rowcount
+        session.execute(
+            update(StageRun)
+            .where(StageRun.status == StageStatus.running)
+            .values(
+                status=StageStatus.failed,
+                error=interruption,
+                completed_at=now,
+                updated_at=now,
+            )
+        )
+        session.execute(
+            update(StageAttempt)
+            .where(StageAttempt.status == StageStatus.running)
+            .values(
+                status=StageStatus.failed,
+                error=interruption,
+                completed_at=now,
+            )
+        )
     if reset:
         log.info("Reset %d in-flight file(s) after restart", reset)
     return reset

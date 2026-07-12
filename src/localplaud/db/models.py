@@ -120,6 +120,10 @@ class StageName(enum.StrEnum):
     transcribe = "transcribe"
     align = "align"
     diarize = "diarize"
+    # Retained for history written by the original explicit correction stage.
+    # Correction now runs as transcript revision work, but deployed ledgers must
+    # remain readable for acceptance reports and usage diagnostics.
+    correct = "correct"
     summarize = "summarize"
     mind_map = "mind_map"
     index = "index"

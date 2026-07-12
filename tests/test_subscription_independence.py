@@ -69,7 +69,13 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     _setup(monkeypatch, tmp_path)
     from localplaud.acceptance import subscription_independence_report
     from localplaud.cli import app
-    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        StageName,
+        StageRun,
+        StageStatus,
+    )
     from localplaud.db.session import init_db, session_scope
     from localplaud.worker.pipeline import process_file
 
@@ -87,6 +93,16 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         )
     _providers(monkeypatch)
     process_file("clean")
+    with session_scope() as session:
+        session.add(
+            StageRun(
+                file_id="clean",
+                stage=StageName.correct,
+                status=StageStatus.completed,
+                attempts=1,
+                resolved_profile_snapshot={"version": 1},
+            )
+        )
 
     report = subscription_independence_report("clean")
     assert report["schema"] == "localplaud-subscription-independence/v1"
