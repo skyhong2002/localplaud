@@ -21,26 +21,42 @@ def _normalize(text: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
 
 
-def _edit_distance(left: list[str], right: list[str]) -> int:
-    previous = list(range(len(right) + 1))
-    for index, token in enumerate(left, 1):
-        current = [index]
-        for offset, other in enumerate(right, 1):
-            current.append(
-                min(
-                    current[-1] + 1,
-                    previous[offset] + 1,
-                    previous[offset - 1] + (token != other),
-                )
+def _edit_breakdown(reference: list[str], hypothesis: list[str]) -> dict:
+    """Return deterministic Levenshtein counts with linear working memory."""
+    # Each cell is cost, substitutions, deletions, insertions. Ties prefer a
+    # substitution, then deletion, then insertion, matching the old backtrace.
+    previous = [(offset, 0, 0, offset) for offset in range(len(hypothesis) + 1)]
+    for index, expected in enumerate(reference, 1):
+        current = [(index, 0, index, 0)]
+        for offset, actual in enumerate(hypothesis, 1):
+            if expected == actual:
+                current.append(previous[offset - 1])
+                continue
+            diagonal = previous[offset - 1]
+            above = previous[offset]
+            left = current[offset - 1]
+            candidates = (
+                ((diagonal[0] + 1, diagonal[1] + 1, diagonal[2], diagonal[3]), 0),
+                ((above[0] + 1, above[1], above[2] + 1, above[3]), 1),
+                ((left[0] + 1, left[1], left[2], left[3] + 1), 2),
             )
+            current.append(min(candidates, key=lambda candidate: (candidate[0][0], candidate[1]))[0])
         previous = current
-    return previous[-1]
-
-
-def _error_rate(reference: list[str], hypothesis: list[str]) -> float | None:
-    if not reference:
-        return None
-    return _edit_distance(reference, hypothesis) / len(reference)
+    errors, substitutions, deletions, insertions = previous[-1]
+    return {
+        "substitutions": substitutions,
+        "deletions": deletions,
+        "insertions": insertions,
+        "errors": errors,
+        "reference_units": len(reference),
+        "hypothesis_units": len(hypothesis),
+        "error_rate": (
+            errors / len(reference)
+            if reference
+            else None
+        ),
+        "insertion_rate": insertions / len(reference) if reference else None,
+    }
 
 
 def _active_speakers(segments: list[dict], moment: float) -> set[str]:
@@ -211,6 +227,23 @@ def _hallucination_metrics(reference: dict, hypothesis: list[dict]) -> dict:
     }
 
 
+def _reference_insertion_metrics(
+    expected_chars: list[str],
+    actual_chars: list[str],
+    expected_words: list[str],
+    actual_words: list[str],
+) -> dict:
+    characters = _edit_breakdown(expected_chars, actual_chars)
+    words = _edit_breakdown(expected_words, actual_words)
+    return {
+        "speech_character_insertions": characters["insertions"],
+        "speech_character_insertion_rate": characters["insertion_rate"],
+        "speech_word_insertions": words["insertions"],
+        "speech_word_insertion_rate": words["insertion_rate"],
+        "interpretation": "reference_aligned_asr_insertions_not_semantic_judgment",
+    }
+
+
 def load_reference(path: str | Path) -> dict:
     return validate_reference(json.loads(Path(path).read_text(encoding="utf-8")))
 
@@ -244,6 +277,8 @@ def benchmark_recording(file_id: str, reference: dict) -> dict:
     actual_chars = list(actual_text.replace(" ", ""))
     expected_words = expected_text.split()
     actual_words = actual_text.split()
+    character_errors = _edit_breakdown(expected_chars, actual_chars)
+    word_errors = _edit_breakdown(expected_words, actual_words)
 
     with session_scope() as session:
         file = session.get(PlaudFile, file_id)
@@ -286,13 +321,18 @@ def benchmark_recording(file_id: str, reference: dict) -> dict:
             "coverage": reference.get("coverage"),
         },
         "accuracy": {
-            "cer": _error_rate(expected_chars, actual_chars),
-            "wer": _error_rate(expected_words, actual_words),
+            "cer": character_errors["error_rate"],
+            "wer": word_errors["error_rate"],
             "reference_characters": len(expected_chars),
             "reference_words": len(expected_words),
+            "character_errors": character_errors,
+            "word_errors": word_errors,
         },
         "speakers": _speaker_metrics(expected, segments),
         "timestamps": _timestamp_metrics(expected, segments),
-        "hallucination": _hallucination_metrics(reference, segments),
+        "hallucination": _hallucination_metrics(reference, segments)
+        | _reference_insertion_metrics(
+            expected_chars, actual_chars, expected_words, actual_words
+        ),
         "execution": execution,
     }

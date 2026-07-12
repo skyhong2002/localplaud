@@ -259,9 +259,10 @@ embedding raw provider credentials or model settings in each rule.
   memory. Full-audio references now produce a time-overlap-weighted non-speech
   hallucination character rate and mostly-non-speech segment count; partial references
   honestly return unavailable. DER now accounts for overlapping voices using
-  speaker-time and globally maximized one-to-one label assignment. Semantic
-  hallucinations and the actual multi-recording Taiwan Mandarin/code-switch benchmark
-  set remain open. Recording
+  speaker-time and globally maximized one-to-one label assignment. Deterministic
+  character/word insertion rates now flag extra ASR content inside annotated speech
+  without overclaiming semantic judgment. Full semantic review and the actual
+  multi-recording Taiwan Mandarin/code-switch benchmark set remain open. Recording
   Detail now runs the same evaluator from a bounded, memory-only reference upload and
   renders six headline metrics without requiring CLI access.
 

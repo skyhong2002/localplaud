@@ -456,7 +456,8 @@ The remaining real-hardware acceptance matrix is open.
 
 Reference-based quality reports use `localplaud benchmark-recording` and the
 `localplaud-benchmark-report/v1` schema. Private reference text stays outside the
-database/repository, while the report retains CER/WER, speaker error components,
+database/repository, while the report retains CER/WER error decompositions, reference-
+aligned character/word insertion rates, speaker error components,
 timestamp quality, execution provenance, latency, and real-time factor without
 transcript content. Completed stage attempts also retain the worker process RSS
 high-water mark; this is explicitly process-level memory evidence. See

@@ -389,6 +389,8 @@ _ZH_HANT_TW = {
     "Boundary MAE": "邊界 MAE",
     "Real-time factor": "Real-time factor",
     "Peak memory": "峰值記憶體",
+    "Speech character insertion": "語音字元插入率",
+    "Speech word insertion": "語音詞彙插入率",
     "Non-speech hallucination": "非語音幻覺率",
     "not recorded": "未記錄",
 }

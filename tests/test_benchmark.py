@@ -105,6 +105,23 @@ def test_speaker_metrics_count_overlapping_speaker_time():
     assert metrics["overlap_aware"] is True
 
 
+def test_edit_breakdown_reports_reference_aligned_insertions_without_tokens():
+    from localplaud.benchmark import _edit_breakdown
+
+    metrics = _edit_breakdown(["a", "b", "c"], ["a", "x", "b", "d"])
+    assert metrics == {
+        "substitutions": 1,
+        "deletions": 0,
+        "insertions": 1,
+        "errors": 2,
+        "reference_units": 3,
+        "hypothesis_units": 4,
+        "error_rate": pytest.approx(2 / 3),
+        "insertion_rate": pytest.approx(1 / 3),
+    }
+    assert not any(isinstance(value, list) for value in metrics.values())
+
+
 def test_benchmark_reports_accuracy_speakers_timestamps_and_rtf(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     from localplaud.benchmark import benchmark_recording
@@ -118,6 +135,10 @@ def test_benchmark_reports_accuracy_speakers_timestamps_and_rtf(monkeypatch, tmp
     assert report["timestamps"] == {"boundary_mae_seconds": 0.1, "paired_segments": 2}
     assert report["hallucination"]["non_speech_character_rate"] == pytest.approx(0.034615)
     assert report["hallucination"]["majority_non_speech_segments"] == 0
+    assert report["hallucination"]["speech_character_insertions"] == 1
+    assert report["hallucination"]["speech_word_insertions"] == 0
+    assert report["accuracy"]["word_errors"]["substitutions"] == 1
+    assert report["accuracy"]["word_errors"]["deletions"] == 0
     assert report["execution"]["real_time_factor"] == 0.5
     assert report["execution"]["peak_memory_mb"] == 321.25
     assert report["execution"]["memory_scope"] == "worker_process_high_water_rss"

@@ -43,7 +43,8 @@ has been annotated. Omit it or use another label for partial references.
 
 - **CER**: Unicode-NFKC, case-folded character edit distance with whitespace removed.
 - **WER**: whitespace-token edit distance. CER is the primary Taiwan Mandarin metric;
-  WER remains useful for English/code-switch spans.
+  WER remains useful for English/code-switch spans. Both expose deterministic
+  substitution, deletion, and insertion counts without retaining aligned tokens.
 - **DER**: zero-collar, time-weighted miss + false alarm + speaker confusion divided
   by reference speaker time. Overlapping speakers are counted independently, so two
   simultaneous reference voices contribute two speaker-seconds per elapsed second.
@@ -58,6 +59,11 @@ has been annotated. Omit it or use another label for partial references.
   falls outside all annotated speech intervals. The report also counts segments that
   are mostly outside speech. This detects invented text during annotated silence; it
   does not claim to detect semantic hallucinations inside real speech.
+- **Speech insertion rates**: character and whitespace-token insertions from the
+  reference alignment, divided by reference units. These quantify extra ASR content
+  during real speech and remain available for partial references. They are a
+  reproducible hallucination signal, not a semantic truth judgment; substitutions
+  can still change meaning without increasing this metric.
 - **Real-time factor**: latest completed transcribe attempt latency divided by audio
   duration. Provider/model and raw latency are included.
 - **Peak memory**: the Python worker process RSS high-water mark observed when the

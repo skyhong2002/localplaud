@@ -126,6 +126,8 @@ def benchmark_recording_command(
         ("CER", report["accuracy"]["cer"]),
         ("WER", report["accuracy"]["wer"]),
         ("DER", report["speakers"]["der"]),
+        ("Speech character insertion", report["hallucination"]["speech_character_insertion_rate"]),
+        ("Speech word insertion", report["hallucination"]["speech_word_insertion_rate"]),
         ("Non-speech hallucination", report["hallucination"]["non_speech_character_rate"]),
         ("Boundary MAE (s)", report["timestamps"]["boundary_mae_seconds"]),
         ("Real-time factor", report["execution"]["real_time_factor"]),
