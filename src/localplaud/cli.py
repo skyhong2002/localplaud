@@ -100,6 +100,42 @@ def acceptance_check(
         raise typer.Exit(1)
 
 
+@app.command("benchmark-recording")
+def benchmark_recording_command(
+    file_id: str = typer.Argument(help="Recording ID with a local canonical transcript."),
+    reference: str = typer.Option(..., "--reference", help="Private reference JSON path."),
+    json_output: bool = typer.Option(False, "--json", help="Print machine-readable JSON."),
+):
+    """Measure transcript, speaker, timestamp, and execution quality."""
+    from .benchmark import benchmark_recording, load_reference
+    from .db.session import init_db
+
+    init_db()
+    try:
+        report = benchmark_recording(file_id, load_reference(reference))
+    except (LookupError, OSError, ValueError) as exc:
+        console.print(f"[red]✗ Benchmark failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    if json_output:
+        console.print_json(json.dumps(report, ensure_ascii=False))
+        return
+    table = Table(title=f"Recording benchmark · {file_id}")
+    table.add_column("Metric")
+    table.add_column("Value")
+    for name, value in (
+        ("CER", report["accuracy"]["cer"]),
+        ("WER", report["accuracy"]["wer"]),
+        ("DER", report["speakers"]["der"]),
+        ("Boundary MAE (s)", report["timestamps"]["boundary_mae_seconds"]),
+        ("Real-time factor", report["execution"]["real_time_factor"]),
+        ("Peak memory (MB)", report["execution"]["peak_memory_mb"]),
+    ):
+        table.add_row(name, "not recorded" if value is None else f"{value:.4f}")
+    console.print(table)
+    if report["execution"]["peak_memory_mb"] is None:
+        console.print("[yellow]Peak memory is not recorded by current stage telemetry.[/]")
+
+
 @auth_app.command("check")
 def auth_check():
     """Verify your Plaud session works (whoami against the configured provider)."""

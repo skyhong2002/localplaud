@@ -454,6 +454,13 @@ health checks for remote workers use the authenticated protocol-v1 capability
 handshake; a healthy worker does not imply that an unadvertised model is available.
 The remaining real-hardware acceptance matrix is open.
 
+Reference-based quality reports use `localplaud benchmark-recording` and the
+`localplaud-benchmark-report/v1` schema. Private reference text stays outside the
+database/repository, while the report retains CER/WER, speaker error components,
+timestamp quality, execution provenance, latency, and real-time factor without
+transcript content. See [`benchmarking.md`](benchmarking.md). Actual multi-recording
+Apple/NVIDIA/CPU measurements remain required before changing defaults.
+
 The deterministic subscription-independence gate is available as
 `localplaud acceptance-check RECORDING_ID` (or `--json` for automation). It audits
 the raw-audio boundary, local provenance, timestamped speakers, notes, mind map, Ask

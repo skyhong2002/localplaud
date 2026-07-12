@@ -239,6 +239,11 @@ gate with `localplaud acceptance-check RECORDING_ID`; use `--json` in automation
 The recording workspace shows the same expandable evidence without CLI access. See
 [`docs/acceptance.md`](docs/acceptance.md).
 
+Compare ASR/speaker profiles on consented Taiwan Mandarin and code-switch recordings
+with `localplaud benchmark-recording RECORDING_ID --reference PRIVATE.json --json`.
+Reports contain metrics and execution provenance, not transcript text. See
+[`docs/benchmarking.md`](docs/benchmarking.md).
+
 ## Security
 
 - Secrets (Plaud session, API keys, HF token) go in `.env` or environment

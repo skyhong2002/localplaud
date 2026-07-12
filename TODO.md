@@ -250,8 +250,13 @@ embedding raw provider credentials or model settings in each rule.
   case scope, longest non-overlapping matching, Settings CRUD, and explicit library
   application. New local ASR applies rules automatically as an immutable revision;
   raw provider output stays untouched and dependent artifacts become visibly stale.
-- Establish a benchmark set from consented user-owned recordings: WER/CER, diarization
-  error, timestamp quality, hallucination rate, runtime, and memory.
+- ✅ Added a private-reference `benchmark-recording` evaluator and versioned report
+  for consented user-owned recordings: Unicode-normalized CER/WER, zero-collar
+  time-weighted speaker miss/false-alarm/confusion and DER, timestamp boundary MAE,
+  provider/model latency, and real-time factor. Reports exclude transcript text and
+  reference paths. Peak memory remains honestly unavailable until stage telemetry
+  captures it; overlapping-speech DER, annotated hallucination rate, and the actual
+  multi-recording Taiwan Mandarin/code-switch benchmark set remain open.
 
 ### P0 — Full-transcript notes and usable knowledge
 
