@@ -254,8 +254,9 @@ embedding raw provider credentials or model settings in each rule.
   for consented user-owned recordings: Unicode-normalized CER/WER, zero-collar
   time-weighted speaker miss/false-alarm/confusion and DER, timestamp boundary MAE,
   provider/model latency, and real-time factor. Reports exclude transcript text and
-  reference paths. Peak memory remains honestly unavailable until stage telemetry
-  captures it; overlapping-speech DER, annotated hallucination rate, and the actual
+  reference paths. Stage attempts now retain the worker process RSS high-water mark,
+  and benchmark reports label it as process-level rather than model-exclusive peak
+  memory. Overlapping-speech DER, annotated hallucination rate, and the actual
   multi-recording Taiwan Mandarin/code-switch benchmark set remain open. Recording
   Detail now runs the same evaluator from a bounded, memory-only reference upload and
   renders six headline metrics without requiring CLI access.

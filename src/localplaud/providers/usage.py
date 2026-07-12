@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import sys
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +13,22 @@ from ..db.models import ModelCatalogEntry, ProviderConnection, StageAttempt
 
 class CostPolicyError(RuntimeError):
     """Raised before egress when a profile cost boundary cannot be satisfied."""
+
+
+def process_peak_memory_mb() -> float | None:
+    """Return this worker process's RSS high-water mark, when the OS exposes it.
+
+    macOS reports bytes while Linux/BSD report KiB. This is deliberately process-level
+    telemetry, not a claim about memory exclusively owned by one model or stage.
+    """
+    try:
+        import resource
+
+        raw = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    except (ImportError, OSError, ValueError):
+        return None
+    divisor = 1024 * 1024 if sys.platform == "darwin" else 1024
+    return round(raw / divisor, 3) if raw >= 0 else None
 
 
 def normalize_usage(usage: dict | None) -> dict:

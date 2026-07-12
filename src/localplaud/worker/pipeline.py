@@ -46,6 +46,7 @@ from ..providers.usage import (
     estimate_cost,
     normalize_usage,
     pricing_for_stage,
+    process_peak_memory_mb,
 )
 from ..remote.client import RemoteWorkerClient
 from ..remote.protocol import InputReference, JobStage, JobSubmitRequest
@@ -265,6 +266,8 @@ def _set_stage(
                     started = started.replace(tzinfo=UTC)
                 latency_ms = max(0, int((now - started).total_seconds() * 1000))
                 normalized = normalize_usage(usage)
+                if (peak_memory := process_peak_memory_mb()) is not None:
+                    normalized["process_peak_memory_mb"] = peak_memory
                 pricing = pricing_for_stage(session, snapshot, profile_stage)
                 cost = estimate_cost(normalized, pricing)
                 attempt.status = status

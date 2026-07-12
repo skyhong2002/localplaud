@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy import create_engine, select, text
 
@@ -42,6 +44,28 @@ def test_usage_normalization_and_catalog_pricing():
         },
     )
     assert cost == pytest.approx(0.033)
+
+
+def test_process_peak_memory_normalizes_macos_and_linux_units(monkeypatch):
+    import resource
+
+    import localplaud.providers.usage as usage_module
+
+    monkeypatch.setattr(
+        resource,
+        "getrusage",
+        lambda _scope: SimpleNamespace(ru_maxrss=100 * 1024 * 1024),
+    )
+    monkeypatch.setattr(usage_module.sys, "platform", "darwin")
+    assert usage_module.process_peak_memory_mb() == 100.0
+
+    monkeypatch.setattr(
+        resource,
+        "getrusage",
+        lambda _scope: SimpleNamespace(ru_maxrss=100 * 1024),
+    )
+    monkeypatch.setattr(usage_module.sys, "platform", "linux")
+    assert usage_module.process_peak_memory_mb() == 100.0
 
 
 def test_pipeline_persists_priced_attempt_and_usage_api(monkeypatch, tmp_path):
@@ -94,6 +118,7 @@ def test_pipeline_persists_priced_attempt_and_usage_api(monkeypatch, tmp_path):
             model=settings.asr.faster_whisper.model,
         ),
     )
+    monkeypatch.setattr(pipeline, "process_peak_memory_mb", lambda: 256.5)
     pipeline.process_file("priced", settings)
     with session_scope() as session:
         attempt = session.scalar(
@@ -104,6 +129,7 @@ def test_pipeline_persists_priced_attempt_and_usage_api(monkeypatch, tmp_path):
         assert attempt.status == "completed"
         assert attempt.usage["audio_seconds"] == 60
         assert attempt.usage["output_tokens"] > 0
+        assert attempt.usage["process_peak_memory_mb"] == 256.5
         assert attempt.estimated_cost_usd == pytest.approx(0.006)
         assert attempt.latency_ms is not None and attempt.latency_ms >= 0
         assert attempt.resolved_profile_snapshot["stages"]["transcribe"]["model"]

@@ -50,7 +50,9 @@ stable within this reference; they do not have to match localplaud labels.
   alignment.
 - **Real-time factor**: latest completed transcribe attempt latency divided by audio
   duration. Provider/model and raw latency are included.
-- **Peak memory**: currently `null` because stage telemetry does not yet capture it.
+- **Peak memory**: the Python worker process RSS high-water mark observed when the
+  transcribe attempt completes. This is cross-platform process telemetry, not a claim
+  about memory exclusively owned by the ASR model. Older attempts remain `null`.
 
 The output schema is `localplaud-benchmark-report/v1`. Keep the raw reports for each
 profile/model/version; compare equivalent recordings and reference revisions. Do not

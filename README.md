@@ -244,7 +244,8 @@ with `localplaud benchmark-recording RECORDING_ID --reference PRIVATE.json --jso
 Reports contain metrics and execution provenance, not transcript text. See
 [`docs/benchmarking.md`](docs/benchmarking.md).
 Recording Detail can run the same benchmark from an in-memory private JSON upload;
-the reference is never stored.
+the reference is never stored. New stage attempts also report the worker process RSS
+high-water mark as an honest process-level peak-memory metric.
 
 ## Security
 

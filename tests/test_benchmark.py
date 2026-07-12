@@ -66,6 +66,7 @@ def _setup(monkeypatch, tmp_path):
                 provider="fake",
                 model="turbo",
                 latency_ms=2000,
+                usage={"process_peak_memory_mb": 321.25},
             )
         )
 
@@ -94,7 +95,8 @@ def test_benchmark_reports_accuracy_speakers_timestamps_and_rtf(monkeypatch, tmp
     assert report["speakers"]["speaker_mapping"] == {"HYP_A": "REF_1", "HYP_B": "REF_2"}
     assert report["timestamps"] == {"boundary_mae_seconds": 0.1, "paired_segments": 2}
     assert report["execution"]["real_time_factor"] == 0.5
-    assert report["execution"]["peak_memory_mb"] is None
+    assert report["execution"]["peak_memory_mb"] == 321.25
+    assert report["execution"]["memory_scope"] == "worker_process_high_water_rss"
     assert "text" not in report["reference"]
 
 

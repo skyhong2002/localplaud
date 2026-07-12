@@ -171,7 +171,10 @@ def benchmark_recording(file_id: str, reference: dict) -> dict:
                 if latency_seconds is not None and audio_seconds
                 else None
             ),
-            "peak_memory_mb": None,
+            "peak_memory_mb": (
+                (attempt.usage or {}).get("process_peak_memory_mb") if attempt else None
+            ),
+            "memory_scope": "worker_process_high_water_rss",
         }
 
     return {
