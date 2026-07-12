@@ -97,6 +97,18 @@ def reset_inflight() -> int:
                 processing_lease_until=None,
             )
         ).rowcount
+        # Older workers could persist error/partial before their claim-finally
+        # path ran, leaving a future lease that made an otherwise due retry
+        # unclaimable for up to 24 hours. A live claim always has status
+        # ``processing``; any token on another state is therefore orphaned.
+        reset += session.execute(
+            update(PlaudFile)
+            .where(
+                PlaudFile.status != FileStatus.processing,
+                PlaudFile.processing_token.is_not(None),
+            )
+            .values(processing_token=None, processing_lease_until=None)
+        ).rowcount
         session.execute(
             update(StageRun)
             .where(StageRun.status == StageStatus.running)

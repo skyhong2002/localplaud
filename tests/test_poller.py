@@ -42,6 +42,24 @@ def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
         )
         s.add(PlaudFile(id="ok", status=FileStatus.done))
         s.add(
+            PlaudFile(
+                id="partial-claim",
+                status=FileStatus.partial,
+                audio_path="/x",
+                processing_token="orphan-partial",
+                processing_lease_until=datetime.now(UTC) + timedelta(hours=12),
+            )
+        )
+        s.add(
+            PlaudFile(
+                id="error-claim",
+                status=FileStatus.error,
+                audio_path="/x",
+                processing_token="orphan-error",
+                processing_lease_until=datetime.now(UTC) + timedelta(hours=12),
+            )
+        )
+        s.add(
             StageRun(
                 file_id="pr",
                 stage=StageName.transcribe,
@@ -59,13 +77,17 @@ def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
         )
 
     n = reset_inflight()
-    assert n == 2
+    assert n == 4
     with session_scope() as s:
         assert s.get(PlaudFile, "dl").status == FileStatus.discovered
         assert s.get(PlaudFile, "pr").status == FileStatus.downloaded
         assert s.get(PlaudFile, "pr").processing_token is None
         assert s.get(PlaudFile, "pr").processing_lease_until is None
         assert s.get(PlaudFile, "ok").status == FileStatus.done  # untouched
+        for file_id in ("partial-claim", "error-claim"):
+            row = s.get(PlaudFile, file_id)
+            assert row.processing_token is None
+            assert row.processing_lease_until is None
         run = s.query(StageRun).one()
         attempt = s.query(StageAttempt).one()
         assert run.status == StageStatus.failed
