@@ -106,18 +106,18 @@
         {% for stage in f.stages %}
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div>
-            <strong>{{ stage.name }}</strong>
+            <strong>{{ t(stage.name) }}</strong>
             {% if stage.provider %}<span class="sub"> · {{ stage.provider }}{% if stage.model %}:{{ stage.model }}{% endif %}</span>{% endif %}
-            {% if stage.detail.transcript %}<div class="sub" style="font-size:11.5px;margin-top:2px">Input: {% if stage.detail.transcript.input_transcript_revision %}transcript rev {{ stage.detail.transcript.input_transcript_revision }}{% else %}raw ASR{% endif %} · {{ stage.detail.transcript.input_transcript_source }}</div>{% endif %}
-            {% if stage.detail.auto_template %}<div class="sub" style="font-size:11.5px;margin-top:2px">Auto selected {{ stage.detail.auto_template.key }} · {{ stage.detail.auto_template.confidence }} confidence</div>{% endif %}
-            {% if stage.detail.fallback and not stage.detail.fallback.primary %}<div class="sub" style="font-size:11.5px;margin-top:2px">Used fallback #{{ stage.detail.fallback.index }} after {{ stage.detail.fallback_failures|length }} retryable failure(s)</div>{% endif %}
+            {% if stage.detail.transcript %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ t('Input') }}: {% if stage.detail.transcript.input_transcript_revision %}{{ t('transcript rev') }} {{ stage.detail.transcript.input_transcript_revision }}{% else %}{{ t('raw ASR') }}{% endif %} · {{ stage.detail.transcript.input_transcript_source }}</div>{% endif %}
+            {% if stage.detail.auto_template %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ t('Auto selected') }} {{ stage.detail.auto_template.key }} · {{ stage.detail.auto_template.confidence }} {{ t('confidence') }}</div>{% endif %}
+            {% if stage.detail.fallback and not stage.detail.fallback.primary %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ t('Used fallback') }} #{{ stage.detail.fallback.index }}，{{ t('after') }} {{ stage.detail.fallback_failures|length }} {{ t('retryable failures') }}</div>{% endif %}
             {% if stage.error %}<div style="color:var(--red);font-size:12px;margin-top:2px">{{ stage.error }}</div>{% endif %}
           </div>
-          <span class="st {{ stage.status }}">{{ stage.status }}</span>
+          <span class="st {{ stage.status }}">{{ t(stage.status) }}</span>
         </div>
         {% endfor %}
       </div>
-      {% if f.usage.attempts %}<details style="margin-top:12px;border-top:1px solid var(--border);padding-top:9px"><summary class="sub" style="cursor:pointer">Attempt usage ledger</summary><div style="display:grid;gap:7px;margin-top:8px">{% for attempt in f.usage.attempts[:12] %}<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px"><span>{{ attempt.stage }} #{{ attempt.attempt }} · {{ attempt.provider or 'local' }}{% if attempt.model %}:{{ attempt.model }}{% endif %}{% if attempt.fallback and not attempt.fallback.primary %} · fallback {{ attempt.fallback.index }}{% endif %}</span><span class="sub">{{ ((attempt.latency_ms or 0) / 1000)|round(2) }}s{% if attempt.usage.audio_seconds %} · {{ attempt.usage.audio_seconds|round(1) }} audio s{% endif %}{% if attempt.usage.input_tokens %} · {{ attempt.usage.input_tokens }} in{% endif %}{% if attempt.usage.output_tokens %} / {{ attempt.usage.output_tokens }} out{% endif %}{% if attempt.estimated_cost_usd %} · ~$ {{ attempt.estimated_cost_usd }}{% endif %}</span></div>{% endfor %}</div></details>{% endif %}
+      {% if f.usage.attempts %}<details style="margin-top:12px;border-top:1px solid var(--border);padding-top:9px"><summary class="sub" style="cursor:pointer">{{ t('Attempt usage ledger') }}</summary><div style="display:grid;gap:7px;margin-top:8px">{% for attempt in f.usage.attempts[:12] %}<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px"><span>{{ t(attempt.stage) }} #{{ attempt.attempt }} · {{ attempt.provider or 'local' }}{% if attempt.model %}:{{ attempt.model }}{% endif %}{% if attempt.fallback and not attempt.fallback.primary %} · {{ t('fallback') }} {{ attempt.fallback.index }}{% endif %}</span><span class="sub">{{ ((attempt.latency_ms or 0) / 1000)|round(2) }}s{% if attempt.usage.audio_seconds %} · {{ attempt.usage.audio_seconds|round(1) }} {{ t('audio seconds') }}{% endif %}{% if attempt.usage.input_tokens %} · {{ attempt.usage.input_tokens }} {{ t('input tokens') }}{% endif %}{% if attempt.usage.output_tokens %} / {{ attempt.usage.output_tokens }} {{ t('output tokens') }}{% endif %}{% if attempt.estimated_cost_usd %} · ~$ {{ attempt.estimated_cost_usd }}{% endif %}</span></div>{% endfor %}</div></details>{% endif %}
     </details>
     {% endif %}
 

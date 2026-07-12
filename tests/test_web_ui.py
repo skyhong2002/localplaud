@@ -182,6 +182,8 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         "執行設定檔",
         "筆記範本",
         "處理詳情",
+        "建立索引",
+        "失敗",
         "逐字稿",
         "在逐字稿中尋找",
         "匯出錄音",

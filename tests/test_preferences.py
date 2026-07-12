@@ -152,3 +152,5 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         messages = catalog("zh-Hant-TW")
         assert messages["Saving…"] == "儲存中…"
         assert messages["healthy"] == "正常"
+        assert messages["align"] == "時間對齊"
+        assert "Speech character insertion" not in messages
