@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 
 from ..config import Settings, get_settings
 from ..db.models import FileStatus, PlaudFile, StageAttempt, StageRun, StageStatus
@@ -71,26 +71,37 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
     return new_count, changed_count
 
 
-def reset_inflight() -> int:
+def reset_inflight(*, force: bool = False) -> int:
     """Recover files stranded mid-flight by a crash/kill: ``downloading`` →
-    ``discovered`` and ``processing`` → ``downloaded``. Any running stage and
-    append-only attempt are closed as interrupted so history never remains
-    permanently in progress. Safe to call at the start of every cycle. Returns
-    the number of file rows reset."""
+    ``discovered`` and expired ``processing`` → ``downloaded``. A daemon startup
+    may force recovery of all in-flight rows from its previous process. Periodic
+    polls preserve live leases owned by CLI or other workers. Any affected running
+    stage and append-only attempt are closed as interrupted. Returns the number of
+    file rows reset."""
     from sqlalchemy import update
 
     reset = 0
     now = datetime.now(UTC)
     interruption = "Interrupted by application restart; queued for retry."
     with session_scope() as session:
+        if force:
+            reset += session.execute(
+                update(PlaudFile)
+                .where(PlaudFile.status == FileStatus.downloading)
+                .values(status=FileStatus.discovered)
+            ).rowcount
+        processing_condition = PlaudFile.status == FileStatus.processing
+        if not force:
+            processing_condition &= or_(
+                PlaudFile.processing_lease_until.is_(None),
+                PlaudFile.processing_lease_until <= now,
+            )
+        processing_ids = list(
+            session.scalars(select(PlaudFile.id).where(processing_condition))
+        )
         reset += session.execute(
             update(PlaudFile)
-            .where(PlaudFile.status == FileStatus.downloading)
-            .values(status=FileStatus.discovered)
-        ).rowcount
-        reset += session.execute(
-            update(PlaudFile)
-            .where(PlaudFile.status == FileStatus.processing)
+            .where(PlaudFile.id.in_(processing_ids))
             .values(
                 status=FileStatus.downloaded,
                 processing_token=None,
@@ -111,7 +122,10 @@ def reset_inflight() -> int:
         ).rowcount
         session.execute(
             update(StageRun)
-            .where(StageRun.status == StageStatus.running)
+            .where(
+                StageRun.file_id.in_(processing_ids),
+                StageRun.status == StageStatus.running,
+            )
             .values(
                 status=StageStatus.failed,
                 error=interruption,
@@ -121,7 +135,10 @@ def reset_inflight() -> int:
         )
         session.execute(
             update(StageAttempt)
-            .where(StageAttempt.status == StageStatus.running)
+            .where(
+                StageAttempt.file_id.in_(processing_ids),
+                StageAttempt.status == StageStatus.running,
+            )
             .values(
                 status=StageStatus.failed,
                 error=interruption,

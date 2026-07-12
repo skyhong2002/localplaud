@@ -76,7 +76,7 @@ def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
             )
         )
 
-    n = reset_inflight()
+    n = reset_inflight(force=True)
     assert n == 4
     with session_scope() as s:
         assert s.get(PlaudFile, "dl").status == FileStatus.discovered
@@ -96,6 +96,56 @@ def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
         assert attempt.completed_at is not None
         assert "application restart" in run.error
         assert "application restart" in attempt.error
+
+
+def test_periodic_recovery_preserves_live_processing_lease(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        StageAttempt,
+        StageName,
+        StageRun,
+        StageStatus,
+    )
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import reset_inflight
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="live-worker",
+                status=FileStatus.processing,
+                audio_path="/x",
+                processing_token="live-token",
+                processing_lease_until=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+        session.add(
+            StageRun(
+                file_id="live-worker",
+                stage=StageName.correct,
+                status=StageStatus.running,
+                attempts=1,
+            )
+        )
+        session.add(
+            StageAttempt(
+                file_id="live-worker",
+                stage=StageName.correct,
+                attempt=1,
+                status=StageStatus.running,
+            )
+        )
+
+    assert reset_inflight() == 0
+    with session_scope() as session:
+        row = session.get(PlaudFile, "live-worker")
+        assert row.status == FileStatus.processing
+        assert row.processing_token == "live-token"
+        assert session.query(StageRun).one().status == StageStatus.running
+        assert session.query(StageAttempt).one().status == StageStatus.running
 
 
 def test_reset_download_errors_retries_only_audioless_rows(monkeypatch, tmp_path):

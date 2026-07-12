@@ -223,11 +223,12 @@ def run():
     from apscheduler.schedulers.background import BackgroundScheduler
 
     from .db.session import init_db
-    from .poller.poll import poll_once
+    from .poller.poll import poll_once, reset_inflight
     from .worker.pipeline import process_pending
 
     settings = get_settings()
     init_db()
+    reset_inflight(force=True)
 
     # A non-blocking lock guarantees cycles never overlap even if one runs
     # longer than the interval (ASR can take minutes) — a second firing simply
