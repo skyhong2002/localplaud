@@ -99,6 +99,7 @@ class PipelineConfig(BaseModel):
     convert: bool = True  # opus -> 16kHz mono wav for ASR
     transcribe: bool = True
     diarize: bool = True
+    polish: bool = True  # AI correction after speakers, before notes/index
     summarize: bool = True
     mind_map: bool = True  # nested Markdown outline rendered as a tree
     index: bool = True  # embeddings for Q&A / semantic search
@@ -115,6 +116,7 @@ class PipelineConfig(BaseModel):
     # Character budget per LLM call. Longer transcripts are covered through
     # hierarchical map/reduce notes instead of being truncated.
     summary_chunk_chars: int = 12_000
+    polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
     # Which summary template to use (default | meeting | call | lecture |
     # personal — see worker/summary_templates.py).
     summary_template: str = "default"
@@ -243,11 +245,21 @@ class AnthropicLlmConfig(BaseModel):
     model: str = "claude-haiku-4-5"
 
 
+class OpenCodeGoLlmConfig(BaseModel):
+    """Supported OpenCode CLI boundary; credentials remain owned by OpenCode."""
+
+    executable: str = "opencode"
+    model: str = "qwen3.7-plus"
+    agent: str = "transcript-polish"
+    timeout_seconds: int = Field(default=240, ge=10, le=1800)
+
+
 class LlmConfig(BaseModel):
-    provider: Literal["ollama", "openai", "anthropic"] = "ollama"
+    provider: Literal["ollama", "openai", "anthropic", "opencode-go"] = "ollama"
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     openai: OpenAILlmConfig = Field(default_factory=OpenAILlmConfig)
     anthropic: AnthropicLlmConfig = Field(default_factory=AnthropicLlmConfig)
+    opencode_go: OpenCodeGoLlmConfig = Field(default_factory=OpenCodeGoLlmConfig)
 
 
 # ---- Embeddings (Q&A / search) ------------------------------------------- #

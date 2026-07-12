@@ -11,6 +11,7 @@ def _reset(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__TRANSCRIBE", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__DIARIZE", "false")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__POLISH", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__MIND_MAP", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__INDEX", "false")
     monkeypatch.setattr(db_session, "_engine", None)

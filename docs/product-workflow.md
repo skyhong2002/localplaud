@@ -379,7 +379,9 @@ Transcript export must allow timestamps and speaker names to be toggled.
 1. A recording uploaded on a Plaud free account with no generated transcript is
    downloaded and becomes ready automatically.
 2. Mandarin/English code-switching is transcribed with Whisper large-v3-turbo and
-   distinct speakers are consistently labelled.
+   distinct speakers are consistently labelled. A separate contextual AI correction
+   then removes ASR stutters/repetition and fixes recognition errors without changing
+   timestamps, speaker ownership, or facts; raw ASR remains directly inspectable.
 3. The user corrects a name once, renames a speaker, regenerates notes, and sees the
    corrected values in notes, search, and Ask.
 4. A long recording is summarized using its complete transcript.

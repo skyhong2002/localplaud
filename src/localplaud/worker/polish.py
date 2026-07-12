@@ -1,0 +1,147 @@
+"""Context-aware transcript correction that preserves timing and speakers."""
+
+from __future__ import annotations
+
+import copy
+import json
+import re
+from dataclasses import asdict
+
+from ..asr.base import Segment, Transcript, Word
+from ..config import Settings
+from ..llm.base import LLMError, build_llm
+
+PROMPT_VERSION = "transcript-polish/v1"
+SYSTEM_PROMPT = """You polish ASR transcript segments for downstream notes.
+Correct recognition errors using dialogue context and speaker continuity. Remove
+stutters, accidental repetitions, and non-semantic filler while preserving meaning,
+uncertainty, tone, names, numbers, dates, decisions, negation, language switching,
+segment IDs, and speaker ownership. Use Traditional Chinese (Taiwan) where Chinese
+is present. Never summarize, invent, merge, split, or add commentary. Return only
+JSON: {\"segments\":[{\"id\":integer,\"text\":string}, ...]} with exactly one
+entry for every target segment and no context segments."""
+
+
+def _chunks(segments: list[dict], limit: int) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    size = 0
+    for index, segment in enumerate(segments):
+        cost = len(str(segment.get("text") or "")) + 80
+        if index > start and size + cost > limit:
+            ranges.append((start, index))
+            start = index
+            size = 0
+        size += cost
+    if start < len(segments):
+        ranges.append((start, len(segments)))
+    return ranges
+
+
+def _json_completion(value: str) -> dict:
+    cleaned = value.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", cleaned, flags=re.DOTALL)
+    if fenced:
+        cleaned = fenced.group(1)
+    try:
+        result = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise LLMError(f"transcript polish returned invalid JSON: {exc}") from exc
+    if not isinstance(result, dict):
+        raise LLMError("transcript polish response must be a JSON object")
+    return result
+
+
+def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
+    """Return a corrected copy with identical segment/timestamp/speaker structure."""
+    provider = build_llm(settings.llm)
+    if not provider.available():
+        raise LLMError(f"transcript polish provider unavailable: {provider.name}")
+    source = [asdict(segment) for segment in transcript.segments]
+    polished = copy.deepcopy(source)
+    calls = 0
+    output_chars = 0
+    for start, end in _chunks(source, settings.pipeline.polish_chunk_chars):
+        targets = [
+            {
+                "id": index,
+                "speaker": source[index].get("speaker"),
+                "text": source[index].get("text", ""),
+            }
+            for index in range(start, end)
+        ]
+        request = {
+            "language": transcript.language,
+            "context_before": [
+                {
+                    "speaker": item.get("speaker"),
+                    "text": item.get("text", ""),
+                }
+                for item in source[max(0, start - 2) : start]
+            ],
+            "target_segments": targets,
+            "context_after": [
+                {
+                    "speaker": item.get("speaker"),
+                    "text": item.get("text", ""),
+                }
+                for item in source[end : min(len(source), end + 2)]
+            ],
+        }
+        response = _json_completion(
+            provider.complete(
+                json.dumps(request, ensure_ascii=False, separators=(",", ":")),
+                system=SYSTEM_PROMPT,
+                temperature=0.1,
+                max_tokens=max(2048, len(targets) * 80),
+            )
+        )
+        returned = response.get("segments")
+        if not isinstance(returned, list):
+            raise LLMError("transcript polish response has no segments array")
+        by_id: dict[int, str] = {}
+        for item in returned:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), int):
+                raise LLMError("transcript polish returned an invalid segment entry")
+            if not isinstance(item.get("text"), str):
+                raise LLMError("transcript polish segment text must be a string")
+            by_id[item["id"]] = item["text"].strip()
+        expected = set(range(start, end))
+        if set(by_id) != expected:
+            raise LLMError("transcript polish changed or omitted segment IDs")
+        for index in range(start, end):
+            polished[index]["text"] = by_id[index]
+            output_chars += len(by_id[index])
+        calls += 1
+
+    result = Transcript(
+        segments=[],
+        language=transcript.language,
+        duration=transcript.duration,
+        provider=provider.name,
+        model=getattr(provider, "model", None),
+        has_speakers=transcript.has_speakers,
+    )
+    result.segments = [
+        Segment(
+            text=item.get("text", ""),
+            start=item.get("start", 0.0),
+            end=item.get("end", 0.0),
+            speaker=item.get("speaker"),
+            words=[Word(**word) for word in item.get("words", [])],
+        )
+        for item in polished
+    ]
+    return {
+        "transcript": result,
+        "provider": provider.name,
+        "model": getattr(provider, "model", None),
+        "prompt_version": PROMPT_VERSION,
+        "detail": {
+            "strategy": "contextual-segment-map",
+            "chunks": calls,
+            "segments": len(source),
+            "input_chars": len(transcript.text),
+            "output_chars": output_chars,
+        },
+    }

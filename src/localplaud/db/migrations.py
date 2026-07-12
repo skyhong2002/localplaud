@@ -729,6 +729,33 @@ def migrate_local_transcript_uniqueness(engine: Engine) -> list[str]:
     return ["transcripts.local"]
 
 
+def migrate_transcript_revision_provenance(engine: Engine) -> list[str]:
+    """Add AI/deterministic correction provenance to legacy revision rows."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "transcript_revisions" not in inspector.get_table_names():
+        return []
+    columns = {
+        column["name"] for column in inspector.get_columns("transcript_revisions")
+    }
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for column, ddl in (
+            ("kind", "VARCHAR(32) NOT NULL DEFAULT 'user_edit'"),
+            ("provider", "VARCHAR(64)"),
+            ("model", "VARCHAR(128)"),
+            ("prompt_version", "VARCHAR(64)"),
+            ("resolved_profile_snapshot", "JSON"),
+        ):
+            if column not in columns:
+                connection.execute(
+                    text(f"ALTER TABLE transcript_revisions ADD COLUMN {column} {ddl}")
+                )
+                migrated.append(f"transcript_revisions.{column}")
+    return migrated
+
+
 def _legacy_template(template: str, used: set[str], row_id: int) -> str:
     """Return a unique <=64-char template name for preserved legacy notes."""
     prefix = "legacy-cloud-"

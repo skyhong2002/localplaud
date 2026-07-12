@@ -63,6 +63,21 @@ def _providers(monkeypatch):
         "localplaud.worker.pipeline.index.embed_chunks",
         lambda chunks, settings: ([b"\x00\x00\x80?" for _ in chunks], "local-test", 1),
     )
+    monkeypatch.setattr(
+        "localplaud.worker.pipeline.polish.polish_transcript",
+        lambda transcript, _settings: {
+            "transcript": transcript,
+            "provider": "opencode-go",
+            "model": "qwen3.7-plus",
+            "prompt_version": "transcript-polish/v1",
+            "detail": {
+                "chunks": 1,
+                "segments": len(transcript.segments),
+                "input_chars": len(transcript.text),
+                "output_chars": len(transcript.text),
+            },
+        },
+    )
 
 
 def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_path):
@@ -72,9 +87,6 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     from localplaud.db.models import (
         FileStatus,
         PlaudFile,
-        StageName,
-        StageRun,
-        StageStatus,
     )
     from localplaud.db.session import init_db, session_scope
     from localplaud.worker.pipeline import process_file
@@ -94,15 +106,19 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     _providers(monkeypatch)
     process_file("clean")
     with session_scope() as session:
-        session.add(
-            StageRun(
-                file_id="clean",
-                stage=StageName.correct,
-                status=StageStatus.completed,
-                attempts=1,
-                resolved_profile_snapshot={"version": 1},
-            )
+        row = session.get(PlaudFile, "clean")
+        polished = row.corrected_transcript
+        assert polished.kind == "ai_polish"
+        assert polished.provider == "opencode-go"
+        assert polished.model == "qwen3.7-plus"
+        assert polished.prompt_version == "transcript-polish/v1"
+        assert polished.resolved_profile_snapshot["stages"]["correct"]["connection"].endswith(
+            "opencode-go"
         )
+        assert all(summary.input_transcript_revision == 1 for summary in row.summaries)
+        correct = next(stage for stage in row.stage_runs if stage.stage.value == "correct")
+        assert correct.status.value == "completed"
+        assert correct.provider == "opencode-go"
 
     report = subscription_independence_report("clean")
     assert report["schema"] == "localplaud-subscription-independence/v1"
@@ -179,3 +195,40 @@ def test_cloud_only_recording_fails_gate_with_actionable_checks(monkeypatch, tmp
     failed = {item["name"] for item in report["checks"] if not item["passed"]}
     assert report["passed"] is False
     assert {"raw_audio_local", "local_transcript", "required_exports"} <= failed
+
+
+def test_polish_failure_blocks_notes_and_index_but_keeps_raw_transcript(
+    monkeypatch, tmp_path
+):
+    _setup(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import process_file
+
+    init_db()
+    audio = tmp_path / "polish-failure.wav"
+    audio.write_bytes(b"RIFF-local-user-owned-audio")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="polish-failure",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+            )
+        )
+    _providers(monkeypatch)
+    monkeypatch.setattr(
+        "localplaud.worker.pipeline.polish.polish_transcript",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("provider down")),
+    )
+
+    process_file("polish-failure")
+    with session_scope() as session:
+        row = session.get(PlaudFile, "polish-failure")
+        assert row.status == FileStatus.partial
+        assert row.local_transcript is not None
+        assert row.corrected_transcript is None
+        assert row.summaries == [] and row.chunks == []
+        correct = next(stage for stage in row.stage_runs if stage.stage == StageName.correct)
+        assert correct.status == StageStatus.failed
+        assert "provider down" in correct.error

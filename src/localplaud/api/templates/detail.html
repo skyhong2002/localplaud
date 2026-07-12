@@ -142,7 +142,8 @@
         · <a href="/file/{{ f.id }}?view=corrected">Current revision {{ f.corrected_revision }}</a>
         · <a href="/file/{{ f.id }}?view=raw">Raw ASR</a>
         {% elif f.transcript.kind == 'corrected' %}
-        <strong>Corrected (rev {{ f.transcript.revision }})</strong>
+        <strong>{{ 'AI polished' if f.transcript.revision_kind == 'ai_polish' else 'Corrected' }} (rev {{ f.transcript.revision }})</strong>
+        {% if f.transcript.revision_kind == 'ai_polish' %}<span class="chip on">{{ f.transcript.provider }}{% if f.transcript.model %} · {{ f.transcript.model }}{% endif %}</span>{% endif %}
         · <a href="/file/{{ f.id }}?view=raw">Raw ASR</a>
         {% else %}
         <a href="/file/{{ f.id }}?view=corrected">Corrected (rev {{ f.corrected_revision }})</a>
@@ -156,7 +157,7 @@
         <div style="display:flex;flex-direction:column;gap:7px;margin-top:9px">
           {% for revision in f.revisions %}
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px solid var(--border)">
-            <div><a href="/file/{{ f.id }}?view=corrected&revision={{ revision.revision }}"><strong>Revision {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">Current</span>{% endif %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ revision.note }} · {{ revision.created_at }}</div></div>
+            <div><a href="/file/{{ f.id }}?view=corrected&revision={{ revision.revision }}"><strong>Revision {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">Current</span>{% endif %}{% if revision.kind == 'ai_polish' %} <span class="chip">AI polished</span>{% endif %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ revision.note }}{% if revision.prompt_version %} · {{ revision.prompt_version }}{% endif %} · {{ revision.created_at }}</div></div>
             {% if not revision.current %}<form method="post" action="/file/{{ f.id }}/transcript/revisions/{{ revision.revision }}/restore" onsubmit="return confirm('Restore revision {{ revision.revision }} as a new revision? Current history will be preserved.')"><input type="hidden" name="base_revision" value="{{ f.corrected_revision }}"><button class="btn sec" type="submit" style="padding:6px 9px">Restore</button></form>{% endif %}
           </div>
           {% endfor %}

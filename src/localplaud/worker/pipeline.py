@@ -58,7 +58,7 @@ from ..store.speakers import (
     speaker_keys_from_segments,
     sync_speakers,
 )
-from . import convert, index, mindmap, summarize, summary_templates, transcribe
+from . import convert, index, mindmap, polish, summarize, summary_templates, transcribe
 from .diarize import DiarizationUnavailable, diarize
 
 log = logging.getLogger(__name__)
@@ -397,8 +397,8 @@ def _rehydrate_revision(rev: TranscriptRevision, base: TranscriptRow | None) -> 
     return Transcript(
         segments=_rehydrate_segments(rev.segments),
         language=base.language if base is not None else None,
-        provider=base.provider if base is not None else "local-edit",
-        model=base.model if base is not None else None,
+        provider=rev.provider or (base.provider if base is not None else "local-edit"),
+        model=rev.model or (base.model if base is not None else None),
         has_speakers=rev.has_speakers,
     )
 
@@ -753,6 +753,77 @@ def _process_file_claimed(
                 if run is not None:
                     run.detail = dict(run.detail or {}) | {"vocabulary": vocabulary_result}
 
+        # Plaud-style contextual cleanup: raw ASR remains immutable while the
+        # polished text becomes the canonical revision consumed by notes/index.
+        polish_failed = False
+        polish_input = _load_transcript(file_id, settings)
+        current_kind = None
+        if polish_input is not None:
+            transcript, transcript_source = polish_input
+            with session_scope() as session:
+                polish_row = session.get(PlaudFile, file_id)
+                raw = _select_raw_transcript(polish_row, settings) if polish_row else None
+                current = (
+                    polish_row.corrected_transcript_for_source(raw.source)
+                    if polish_row is not None and raw is not None
+                    else None
+                )
+                current_kind = current.kind if current is not None else None
+        if transcript is None:
+            _skip_stage(file_id, StageName.correct, "no transcript")
+        elif not pcfg.polish:
+            _skip_stage(file_id, StageName.correct, "disabled")
+        elif transcript_source != "local":
+            _skip_stage(file_id, StageName.correct, "imported migration artifact")
+        elif current_kind in {"user_edit", "restore"}:
+            _skip_stage(file_id, StageName.correct, "preserved user correction")
+        elif current_kind == "ai_polish" and not force:
+            _finish_stage(
+                file_id,
+                StageName.correct,
+                provider=transcript.provider,
+                model=transcript.model,
+                artifact_source="local",
+                detail={"reused": True, "revision_kind": "ai_polish"},
+            )
+        else:
+            try:
+
+                def run_polish(candidate):
+                    candidate_settings = _settings_for_stage(settings, candidate, "correct")
+                    projected_usage = {
+                        "input_chars": len(transcript.text),
+                        "output_chars": len(transcript.text),
+                        "projection": True,
+                    }
+                    cost_budget = _cost_guard(file_id, "correct", candidate, projected_usage)
+                    result = polish.polish_transcript(transcript, candidate_settings)
+                    revision = _persist_polished_revision(file_id, result, settings)
+                    detail = dict(result.get("detail") or {}) | {
+                        "revision": revision,
+                        "prompt_version": result["prompt_version"],
+                        "cost_budget": cost_budget,
+                    }
+                    return {
+                        "value": result["transcript"],
+                        "provider": result["provider"],
+                        "model": result.get("model"),
+                        "detail": detail,
+                        "usage": {
+                            "input_chars": detail.get("input_chars", len(transcript.text)),
+                            "output_chars": detail.get("output_chars", 0),
+                            "requests": detail.get("chunks", 1),
+                        },
+                    }
+
+                transcript, _selected_snapshot = _run_fallback_stage(
+                    file_id, "correct", StageName.correct, snapshot, run_polish
+                )
+            except Exception as exc:  # noqa: BLE001 - raw transcript remains usable
+                log.exception("Transcript polish failed for %s", file_id)
+                partial_errors.append(f"correct: {exc}")
+                polish_failed = True
+
         # A force rebuild may replace the raw row while preserving user edits.
         # Reload the configured canonical lane before all derived stages so notes,
         # mind maps and the search index never drift from corrected transcript UI.
@@ -760,6 +831,8 @@ def _process_file_claimed(
         transcript_lineage = _transcript_lineage(file_id, settings)
         if canonical is not None:
             transcript, transcript_source = canonical
+        if polish_failed:
+            transcript = None
         auto_recommendation = None
         if requested_template_key == "auto":
             from ..template_auto import recommend_template
@@ -1147,6 +1220,41 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> dict[str, str]:
         # Register stable speaker identities; existing display names are kept.
         sync_speakers(session, file_id, speaker_keys_from_segments(segments))
     return speaker_mapping
+
+
+def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -> int:
+    from ..vocabulary import _mark_derived_stale
+
+    transcript: Transcript = result["transcript"]
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            raise ValueError("recording not found")
+        raw = _select_raw_transcript(row, settings)
+        if raw is None or raw.source != "local":
+            raise ValueError("AI polish requires a local raw transcript")
+        next_revision = max(
+            (item.revision for item in row.transcript_revisions), default=0
+        ) + 1
+        session.add(
+            TranscriptRevision(
+                file_id=file_id,
+                base_transcript_id=raw.id,
+                revision=next_revision,
+                source="local",
+                segments=[asdict(segment) for segment in transcript.segments],
+                text=transcript.text,
+                has_speakers=transcript.has_speakers,
+                note=f"AI polished with {result['provider']}/{result.get('model') or 'default'}",
+                kind="ai_polish",
+                provider=result["provider"],
+                model=result.get("model"),
+                prompt_version=result["prompt_version"],
+                resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
+            )
+        )
+        _mark_derived_stale(session, file_id, reason="ai_polish")
+    return next_revision
 
 
 def _persist_summary(file_id: str, result: dict, lineage: dict | None = None) -> None:

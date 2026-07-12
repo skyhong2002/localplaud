@@ -88,8 +88,8 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
         second = bootstrap_default_profile(session, Settings())
         session.commit()
         assert second.id == first_id
-        assert len(list_connections(session)) == 4
-        assert len(list_models(session)) == 4
+        assert len(list_connections(session)) == 5
+        assert len(list_models(session)) == 5
         profiles = list_profiles(session)
         assert len(profiles) == 1
         assert set(profiles[0]["stages"]) == {stage.value for stage in ProviderStage}
@@ -186,7 +186,12 @@ def test_legacy_provider_profile_schema_rebuild_preserves_ids_and_config(tmp_pat
         profile = session.get(ExecutionProfile, 3)
         assert profile.key == "legacy-settings-default" and profile.version == 2
         assert profile.cost_ceiling == 2.5
-        assert bootstrap_default_profile(session, Settings()).id == 3
+        upgraded = bootstrap_default_profile(session, Settings())
+        assert upgraded.id == 4
+        assert upgraded.version == 3 and upgraded.is_system_default is True
+        assert upgraded.no_egress is False
+        correct = next(item for item in upgraded.stage_selections if item.stage == "correct")
+        assert session.get(ProviderConnection, correct.connection_id).provider_type == "opencode-go"
         selection = session.get(ProfileStageSelection, 19)
         assert (selection.profile_id, selection.connection_id, selection.model_id) == (3, 7, 11)
 

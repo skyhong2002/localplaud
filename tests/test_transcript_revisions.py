@@ -53,6 +53,38 @@ def test_local_transcript_uniqueness_migration_preserves_cloud_and_revision(tmp_
     assert "uq_transcripts_one_local_per_file" in indexes
 
 
+def test_revision_provenance_migration_is_idempotent(tmp_path):
+    from localplaud.db.migrations import migrate_transcript_revision_provenance
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-revisions.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE transcript_revisions (
+                id INTEGER PRIMARY KEY,
+                file_id VARCHAR(64),
+                revision INTEGER,
+                note VARCHAR(256)
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO transcript_revisions (id, file_id, revision, note)
+            VALUES (1, 'recording', 1, 'manual correction')
+        """))
+    assert set(migrate_transcript_revision_provenance(engine)) == {
+        "transcript_revisions.kind",
+        "transcript_revisions.provider",
+        "transcript_revisions.model",
+        "transcript_revisions.prompt_version",
+        "transcript_revisions.resolved_profile_snapshot",
+    }
+    assert migrate_transcript_revision_provenance(engine) == []
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT kind, provider FROM transcript_revisions WHERE id=1")
+        ).one()
+    assert row.kind == "user_edit" and row.provider is None
+
+
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
 

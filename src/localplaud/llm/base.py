@@ -68,4 +68,8 @@ def build_llm(cfg: LlmConfig) -> LLMProvider:
         from .anthropic_llm import AnthropicLLM
 
         return AnthropicLLM(cfg.anthropic)
+    if cfg.provider == "opencode-go":
+        from .opencode_go import OpenCodeGoLLM
+
+        return OpenCodeGoLLM(cfg.opencode_go)
     raise LLMUnavailable(f"unknown LLM provider: {cfg.provider!r}")

@@ -13,6 +13,7 @@ def _reset_db(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'p.db'}")
     monkeypatch.setenv("LOCALPLAUD_ASR__PROVIDER", "faster-whisper")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")  # skip ffmpeg
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__POLISH", "false")
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
     get_settings(reload=True)

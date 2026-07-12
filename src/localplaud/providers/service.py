@@ -25,7 +25,7 @@ DEFAULT_PROFILE_KEY = "legacy-settings-default"
 
 
 def _is_cloud(name: str) -> bool:
-    return name in {"openai", "deepgram", "assemblyai", "anthropic"}
+    return name in {"openai", "deepgram", "assemblyai", "anthropic", "opencode-go"}
 
 
 def _model_for(settings: Settings, family: str, provider: str) -> str:
@@ -59,15 +59,24 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
         .options(selectinload(ExecutionProfile.stage_selections))
     )
     if existing is not None:
-        return existing
+        correct = next(
+            (selection for selection in existing.stage_selections if selection.stage == "correct"),
+            None,
+        )
+        connection = session.get(ProviderConnection, correct.connection_id) if correct else None
+        if connection is not None and connection.provider_type == "opencode-go":
+            return existing
+        return _upgrade_default_polish_profile(session, existing, settings)
 
     specs = [
         ("asr", settings.asr.provider, _model_for(settings, "asr", settings.asr.provider),
          [ProviderStage.transcribe, ProviderStage.align]),
         ("diarize", settings.diarize.provider, settings.diarize.model,
          [ProviderStage.diarize]),
+        ("correct", "opencode-go", settings.llm.opencode_go.model,
+         [ProviderStage.correct]),
         ("llm", settings.llm.provider, _model_for(settings, "llm", settings.llm.provider),
-         [ProviderStage.correct, ProviderStage.summarize, ProviderStage.mind_map, ProviderStage.ask]),
+         [ProviderStage.summarize, ProviderStage.mind_map, ProviderStage.ask]),
         ("embeddings", settings.embeddings.provider,
          _model_for(settings, "embeddings", settings.embeddings.provider), [ProviderStage.embed]),
     ]
@@ -98,7 +107,7 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
     session.add(profile)
     session.flush()
     stage_family = {
-        "transcribe": "asr", "align": "asr", "diarize": "diarize", "correct": "llm",
+        "transcribe": "asr", "align": "asr", "diarize": "diarize", "correct": "correct",
         "summarize": "llm", "mind_map": "llm", "embed": "embeddings", "ask": "llm",
     }
     for stage, family in stage_family.items():
@@ -108,6 +117,83 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
         ))
     session.flush()
     return profile
+
+
+def _upgrade_default_polish_profile(
+    session: Session, previous: ExecutionProfile, settings: Settings
+) -> ExecutionProfile:
+    """Create one immutable default version with OpenCode Go correction."""
+    connection = session.scalar(
+        select(ProviderConnection).where(ProviderConnection.key == "correct:opencode-go")
+    )
+    if connection is None:
+        connection = ProviderConnection(
+            key="correct:opencode-go",
+            name="OpenCode Go (transcript polish)",
+            provider_type="opencode-go",
+            execution_target="cloud",
+            data_egress=True,
+            secret_ref=None,
+            config={
+                "agent": settings.llm.opencode_go.agent,
+                "executable": settings.llm.opencode_go.executable,
+            },
+        )
+        session.add(connection)
+        session.flush()
+    model = session.scalar(
+        select(ModelCatalogEntry).where(
+            ModelCatalogEntry.connection_id == connection.id,
+            ModelCatalogEntry.model_key == settings.llm.opencode_go.model,
+        )
+    )
+    if model is None:
+        model = ModelCatalogEntry(
+            connection_id=connection.id,
+            model_key=settings.llm.opencode_go.model,
+            display_name=settings.llm.opencode_go.model,
+            capabilities=_capability([ProviderStage.correct], cloud=True),
+        )
+        session.add(model)
+        session.flush()
+
+    for row in session.scalars(
+        select(ExecutionProfile).where(ExecutionProfile.is_system_default.is_(True))
+    ):
+        row.is_system_default = False
+    upgraded = ExecutionProfile(
+        key=previous.key,
+        name="Current Settings + OpenCode Go polish",
+        version=previous.version + 1,
+        is_system_default=True,
+        privacy_policy="allow-egress",
+        no_egress=False,
+        cost_ceiling=previous.cost_ceiling,
+        fallback_policy=previous.fallback_policy,
+    )
+    session.add(upgraded)
+    session.flush()
+    for selection in previous.stage_selections:
+        if selection.stage == "correct":
+            continue
+        upgraded.stage_selections.append(
+            ProfileStageSelection(
+                stage=selection.stage,
+                connection_id=selection.connection_id,
+                model_id=selection.model_id,
+                options=selection.options,
+            )
+        )
+    upgraded.stage_selections.append(
+        ProfileStageSelection(
+            stage="correct",
+            connection_id=connection.id,
+            model_id=model.id,
+            options={"agent": settings.llm.opencode_go.agent},
+        )
+    )
+    session.flush()
+    return upgraded
 
 
 def list_connections(session: Session) -> list[dict[str, Any]]:
@@ -302,7 +388,7 @@ def _probe_connection(row: ProviderConnection, model_key: str | None = None) -> 
         if secret and hasattr(cfg, "api_key"):
             cfg.api_key = secret
         provider = build_provider(row.provider_type, settings.asr)
-    elif family == "llm":
+    elif family in {"llm", "correct"}:
         from ..llm.base import build_llm
 
         settings.llm.provider = row.provider_type

@@ -278,6 +278,14 @@ embedding raw provider credentials or model settings in each rule.
 
 ### P0 — Full-transcript notes and usable knowledge
 
+- ✅ Added a Plaud-style contextual transcript polish stage after diarization and
+  before notes/index. The default system profile uses the authenticated OpenCode Go
+  provider (`qwen3.7-plus`) through a dedicated no-tools OpenCode agent. Chunked
+  segment JSON preserves IDs, timestamps, speakers, words, meaning, names, numbers,
+  negation, and raw ASR while correcting recognition errors, stutters, filler, and
+  accidental repetition. The polished output is an immutable canonical revision
+  with provider/model/prompt/profile provenance; Web users can switch back to raw
+  ASR and inspect revision history. User edits always remain authoritative.
 - ✅ Replaced the 24,000-character truncation with bounded hierarchical
   map/reduce summarization. Every transcript chunk contributes coverage notes before
   the selected template produces final Markdown; stage provenance records strategy,

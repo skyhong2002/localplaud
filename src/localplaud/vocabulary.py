@@ -86,7 +86,7 @@ def correct_segments(
     return corrected, count, sorted(used)
 
 
-def _mark_derived_stale(session, file_id: str) -> None:
+def _mark_derived_stale(session, file_id: str, *, reason: str = "vocabulary") -> None:
     session.execute(delete(Chunk).where(Chunk.file_id == file_id))
     for stage in (StageName.summarize, StageName.mind_map, StageName.index):
         run = session.scalar(
@@ -98,7 +98,7 @@ def _mark_derived_stale(session, file_id: str) -> None:
         run.status = StageStatus.pending
         run.error = None
         run.completed_at = None
-        run.detail = dict(run.detail or {}) | {"stale": True, "reason": "vocabulary"}
+        run.detail = dict(run.detail or {}) | {"stale": True, "reason": reason}
 
 
 def apply_vocabulary(
@@ -158,6 +158,9 @@ def apply_vocabulary(
                 text=text,
                 has_speakers=current.has_speakers if current is not None else raw.has_speakers,
                 note=f"vocabulary:{mode} rules={','.join(map(str, rule_ids))}",
+                kind="vocabulary",
+                provider="local-vocabulary",
+                prompt_version="vocabulary/v1",
             )
         )
         _mark_derived_stale(session, file_id)

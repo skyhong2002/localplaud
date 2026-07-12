@@ -225,6 +225,7 @@ def test_pipeline_automatically_applies_vocabulary_after_asr(monkeypatch, tmp_pa
     ).status_code == 201
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__DIARIZE", "false")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__POLISH", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__SUMMARIZE", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__MIND_MAP", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__INDEX", "false")

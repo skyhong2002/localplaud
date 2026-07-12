@@ -1251,11 +1251,14 @@ def file_detail(
                 else raw_row
             )
             transcript = {
-                "provider": base.provider if base is not None else "local-edit",
+                "provider": shown_revision.provider
+                or (base.provider if base is not None else "local-edit"),
+                "model": shown_revision.model,
                 "language": base.language if base is not None else None,
                 "source": "local",
                 "segments": shown_revision.segments,
                 "kind": "history" if preview_revision is not None else "corrected",
+                "revision_kind": shown_revision.kind,
                 "revision": shown_revision.revision,
             }
         elif raw_row is not None:
@@ -1297,6 +1300,10 @@ def file_detail(
                 {
                     "revision": row.revision,
                     "note": row.note or "Transcript correction",
+                    "kind": row.kind,
+                    "provider": row.provider,
+                    "model": row.model,
+                    "prompt_version": row.prompt_version,
                     "created_at": row.created_at.strftime("%b %d, %Y · %H:%M"),
                     "current": corrected is not None and row.id == corrected.id,
                 }

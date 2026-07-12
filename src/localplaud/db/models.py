@@ -327,7 +327,7 @@ class Speaker(Base):
 
 
 class TranscriptRevision(Base):
-    """A user correction of the transcript — never destroys the raw ASR row.
+    """A non-destructive corrected transcript revision over immutable raw ASR.
 
     Each edit produces the next ``revision`` for the file; the latest revision
     is the corrected canonical transcript. ``base_transcript_id`` points at the
@@ -351,6 +351,11 @@ class TranscriptRevision(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     has_speakers: Mapped[bool] = mapped_column(default=False)
     note: Mapped[str | None] = mapped_column(String(256), default=None)
+    kind: Mapped[str] = mapped_column(String(32), default="user_edit")
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

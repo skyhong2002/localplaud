@@ -508,6 +508,15 @@ def doctor():
     except Exception as exc:  # noqa: BLE001
         row(f"llm:{settings.llm.provider}", False, str(exc)[:60])
 
+    if settings.pipeline.polish:
+        try:
+            from .llm.opencode_go import OpenCodeGoLLM
+
+            ok, detail = OpenCodeGoLLM(settings.llm.opencode_go).health()
+            row("correct:opencode-go", ok, detail)
+        except Exception as exc:  # noqa: BLE001
+            row("correct:opencode-go", False, str(exc)[:60])
+
     try:
         from .embeddings.base import build_embedder
 

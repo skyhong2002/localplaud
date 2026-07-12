@@ -43,6 +43,7 @@ database_url = "sqlite:///./data/localplaud.db"
 convert = true                   # opus -> 16kHz mono wav (needs ffmpeg)
 transcribe = true
 diarize = true
+polish = true                    # contextual AI cleanup; raw ASR stays immutable
 summarize = true
 mind_map = true                  # nested Markdown outline rendered as a tree in the Web App
 index = true                     # build embeddings for Q&A / search
@@ -52,6 +53,7 @@ retry_max_attempts = 5           # consecutive failed cycles before manual Resum
 retry_base_seconds = 300         # exponential delay: 5m, 10m, 20m, …
 retry_max_seconds = 21600        # cap automatic retry delay at 6h
 summary_chunk_chars = 12000      # full transcript is hierarchically summarized above this size
+polish_chunk_chars = 12000       # contiguous segment context sent per correction call
 summary_template = "default"     # default | meeting | call | lecture | personal
 # "independent" (default) accepts only raw audio + metadata from Plaud and
 # requires a local transcript. "migration" permits explicitly imported Plaud
@@ -122,10 +124,11 @@ model = "pyannote/speaker-diarization-community-1"
 # num_speakers = 2               # optional hint; omit to auto-detect
 
 # --------------------------------------------------------------------------- #
-# LLM — used for summaries / structured notes and Q&A answers.
+# LLM — used for summaries / structured notes and Q&A answers. The default
+# execution profile uses OpenCode Go separately for transcript correction.
 # --------------------------------------------------------------------------- #
 [llm]
-provider = "ollama"              # ollama | openai | anthropic
+provider = "ollama"              # ollama | openai | anthropic | opencode-go
 
   [llm.ollama]                   # local, no API key
   host = "http://localhost:11434"
@@ -138,6 +141,12 @@ provider = "ollama"              # ollama | openai | anthropic
   [llm.anthropic]
   # api_key via LOCALPLAUD_LLM__ANTHROPIC__API_KEY
   model = "claude-haiku-4-5"
+
+  [llm.opencode_go]              # credentials remain in OpenCode, never localplaud
+  executable = "opencode"
+  model = "qwen3.7-plus"
+  agent = "transcript-polish"    # project agent denies every tool
+  timeout_seconds = 240
 
 # --------------------------------------------------------------------------- #
 # Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.

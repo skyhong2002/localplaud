@@ -49,7 +49,8 @@ preserves them as visibly labelled imports, and safely requeues legacy cloud-der
 rows for local ASR. Durable stage records preserve attempts, provider/model
 provenance, timing, and actionable failures; optional-stage failures retain usable
 transcripts and notes for targeted resume. Full-transcript hierarchical notes,
-resumable mind maps, transcript revisions, editable per-recording speaker names,
+resumable mind maps, OpenCode Go contextual transcript polishing, transcript
+revisions, editable per-recording speaker names,
 single-file Ask with playable citations, richer library filters, and Plaud-style
 Add audio / Import from Plaud flows are implemented. A Plaud import refreshes the
 entire metadata catalog plus any existing Plaud transcript/summary while leaving raw
@@ -172,6 +173,13 @@ provenance and never silently replace a later local transcript.
 For Ollama-backed LLMs or embeddings, `localplaud doctor` validates the configured
 model as well as the daemon. A missing model is reported with the exact `ollama pull`
 command; embedding uses Ollama's batch `/api/embed` endpoint when available.
+
+The default execution profile assigns only the `correct` stage to **OpenCode Go**
+(`qwen3.7-plus`). Run `opencode providers list` to confirm its API credential. The
+tracked `transcript-polish` agent denies every tool, receives transcript content on
+stdin rather than command arguments, and returns bounded segment JSON. OpenCode owns
+its credential; localplaud never copies or scrapes it. This stage intentionally sends
+transcript text to OpenCode Go and therefore makes the default profile egress-visible.
 
 ## ASR providers
 
