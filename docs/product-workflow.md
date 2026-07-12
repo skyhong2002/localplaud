@@ -429,7 +429,8 @@ is absent — but it still needs a real Taiwan Mandarin / code-switch benchmark 
 being enabled by default. Word-level forced alignment is still not implemented:
 Whisper's own word timestamps remain the alignment source, and a whisperX-style
 wav2vec2 aligner needs per-language models and a real-recording accuracy evaluation
-first. Authenticated real-audio diarization verification also remains. Single-file
+first. Authenticated real-audio diarization is verified on SkyLabMac, including
+durable speaker output and resume behavior. Single-file
 Ask now answers grounded only in one recording and renders each citation as a
 playable timestamp that seeks the player, and whole-library Ask citations deep-link
 to the cited moment (`/file/{id}?t=`). Long transcripts are summarized with full
@@ -450,6 +451,10 @@ view switch. Plaud-derived edits remain excluded from independent mode. Transcri
 find/replace, historical previews, and non-destructive restore-as-new-revision are
 implemented. Summaries, mind maps, embedding chunks, and stage runs persist their
 exact input transcript lineage; notes and processing details expose it in the Web UI.
+The default system profile now runs a no-tools OpenCode Go `qwen3.7-plus` correction
+between diarization and derived knowledge. A production recording has completed this
+path end to end: the immutable `ai_polish` revision became the canonical input for
+notes, mind map, and embedding chunks while raw ASR remained directly inspectable.
 Saved Ask answers are editable note bodies with durable follow-up threads.
 The Templates workspace now separates My Space and Explore, with server-side search,
 scenario/category browsing, provenance, descriptions, authorship/popularity signals,

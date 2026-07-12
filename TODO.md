@@ -6,7 +6,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-12)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (332 tests passing locally).
+  Active development is merged directly to `main` (346 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -20,7 +20,10 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
   mind maps are resumable, and a real failed mind-map stage was retried successfully
   after fixing thinking-only Ollama completions. Pyannote Community-1, its accepted
   model terms, and the Hugging Face token are now live: production has completed
-  diarization for real recordings. Speaker assignment now closes Whisper/pyannote
+  diarization for real recordings. The contextual AI-polish stage is also live with
+  OpenCode Go `qwen3.7-plus`: a real production recording completed correction,
+  full-coverage notes, mind map, index, and the nine-part subscription-independence
+  gate using the polished transcript revision. Speaker assignment now closes Whisper/pyannote
   VAD boundary gaps with the nearest detected turn instead of claiming completion
   while leaving segments unassigned; backlog reprocessing remains in progress.
 - Dev env on SkyLabMac: `~/Projects/localplaud` (venv, ffmpeg static, config.toml, `.env`). Claude Code CLI installed (`~/.local/bin/claude`).
@@ -228,9 +231,9 @@ embedding raw provider credentials or model settings in each rule.
   CUDA/CPU still needs the equivalent turbo deployment verified on its target host.
 - ✅ Updated the diarization integration from legacy pyannote 3.1 to the current
   open-source `speaker-diarization-community-1` API, including word/segment speaker
-  assignment, model provenance, and actionable health checks. SkyLabMac still needs
-  the optional dependency plus acceptance of the gated model terms and a Hugging
-  Face token before real-audio verification. VAD and word-level alignment remain.
+  assignment, model provenance, and actionable health checks. SkyLabMac has the
+  dependency, accepted model terms, Hugging Face credential, and repeated real-audio
+  completion evidence. VAD benchmarking and word-level forced alignment remain.
 - ✅ Added optional VAD groundwork behind a **default-off** `asr.vad.enabled` flag
   (`asr/vad.py`): provider-agnostic silero-vad detection + region merge/pad/split
   planning, ffmpeg region slicing, and honest `health()`. The mlx path transcribes
