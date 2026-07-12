@@ -77,7 +77,10 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   and mind map, Ask-ready local chunks, durable profile snapshots, and TXT/SRT/VTT.
   The network-free acceptance harness starts with raw audio and no Plaud Intelligence
   artifacts, executes the whole pipeline plus grounded single-file Ask, and verifies
-  a playable source citation. Real-hardware quality benchmarking remains separate.
+  a playable source citation. The recording Web workspace now shows the same nine
+  checks, overall pass/not-ready state, actionable evidence, and versioned JSON API;
+  CLI access is no longer required to inspect readiness. Real-hardware quality
+  benchmarking remains separate.
 
 ### P0 PRIMARY — Provider, model, and execution profiles
 

@@ -1081,6 +1081,16 @@ def audio_waveform(file_id: str, buckets: int = 180):
     return {"file_id": file_id, "buckets": len(peaks), "peaks": peaks}
 
 
+@app.get("/api/files/{file_id}/acceptance")
+def recording_acceptance(file_id: str) -> dict:
+    from ..acceptance import subscription_independence_report
+
+    try:
+        return subscription_independence_report(file_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 def _canonical_raw_row(r: PlaudFile, settings) -> Transcript | None:
     """The raw transcript selected by configured provenance rules."""
     if settings.pipeline.artifact_mode == "independent":
@@ -1402,11 +1412,15 @@ def file_detail(
             )
         ]
         organization = _organization_summary(session)
+    from ..acceptance import subscription_independence_report
+
+    acceptance = subscription_independence_report(file_id)
     ctx = _base_ctx(request, "recordings") | {
         "f": f,
         "files": files,
         "q": "",
         "organization": organization,
+        "acceptance": acceptance,
     }
     return templates.TemplateResponse(request=request, name="detail.html", context=ctx)
 

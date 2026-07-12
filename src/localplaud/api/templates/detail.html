@@ -51,6 +51,18 @@
       <div id="local-data-result" class="sub" style="font-size:12px;margin-top:6px"></div>
     </details>
 
+    <details class="panel" style="margin-top:10px;padding:10px 12px" id="subscription-independence">
+      <summary style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <strong>{{ t('Subscription independence') }}</strong>
+        <span class="st {{ 'done' if acceptance.passed else 'partial' }}">{{ t('Passed') if acceptance.passed else t('Not ready') }}</span>
+      </summary>
+      <p class="sub" style="font-size:12px;margin:9px 0">{{ t('This recording is fully usable from raw audio without Plaud Intelligence artifacts.') if acceptance.passed else t('Complete the failed or missing local stages below; Plaud-generated transcript or summary never satisfies this gate.') }}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:7px">
+        {% for item in acceptance.checks %}<div class="tile" style="padding:9px 11px"><div style="display:flex;justify-content:space-between;gap:8px"><strong style="font-size:12px">{{ t(item.name) }}</strong><span style="color:{{ 'var(--ok)' if item.passed else 'var(--red)' }};font-weight:750">{{ '✓' if item.passed else '✗' }}</span></div><div class="sub" style="font-size:10.5px;margin-top:3px">{{ item.detail }}</div></div>{% endfor %}
+      </div>
+      <div style="margin-top:9px"><a class="sub" style="font-size:11.5px;color:var(--blue)" href="/api/files/{{ f.id }}/acceptance">{{ t('JSON evidence') }} ↗</a></div>
+    </details>
+
     {% if f.profiles %}
     <form method="post" action="/file/{{ f.id }}/profile" class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
       <label for="profile-select" style="font-weight:650">{{ t('Execution profile') }}</label>

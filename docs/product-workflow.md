@@ -460,6 +460,9 @@ the raw-audio boundary, local provenance, timestamped speakers, notes, mind map,
 index, durable stage/profile state, and required transcript exports. The automated
 harness additionally exercises grounded single-file Ask with a playable citation;
 see [`acceptance.md`](acceptance.md).
+Each recording workspace renders this gate as an expandable checklist and exposes
+the identical versioned JSON report through the API, so readiness does not require
+CLI access.
 Each concrete pipeline attempt is now retained in an append-only usage ledger with
 profile snapshot, provider/model, outcome, latency, normalized audio/text/token usage,
 and catalog-driven estimated cost. Recording and Status surfaces expose both attempts

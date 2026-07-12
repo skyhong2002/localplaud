@@ -236,7 +236,8 @@ ruff check . && pytest
 
 Audit a processed recording against the subscription-independent raw-audio product
 gate with `localplaud acceptance-check RECORDING_ID`; use `--json` in automation.
-See [`docs/acceptance.md`](docs/acceptance.md).
+The recording workspace shows the same expandable evidence without CLI access. See
+[`docs/acceptance.md`](docs/acceptance.md).
 
 ## Security
 

@@ -363,6 +363,21 @@ _ZH_HANT_TW = {
     "Not tracked": "未追蹤",
     "Password ref, e.g. env:SMTP_PASSWORD": "密碼參照，例如 env:SMTP_PASSWORD",
     "Explicitly allow private/LAN host and plain SMTP": "明確允許私人／區網主機與明文 SMTP",
+    "Subscription independence": "訂閱獨立性",
+    "Passed": "已通過",
+    "Not ready": "尚未通過",
+    "This recording is fully usable from raw audio without Plaud Intelligence artifacts.": "這份錄音已能從原始音訊完整使用，不依賴 Plaud Intelligence 產出。",
+    "Complete the failed or missing local stages below; Plaud-generated transcript or summary never satisfies this gate.": "請完成下列失敗或缺少的本機階段；Plaud 生成的逐字稿或摘要不會使此驗收通過。",
+    "raw_audio_local": "本機原始音訊",
+    "local_transcript": "本機標準逐字稿",
+    "timestamped_segments": "時間戳記段落",
+    "speaker_assignment": "語者指派",
+    "local_notes": "本機生成筆記",
+    "local_mind_map": "本機心智圖",
+    "ask_index": "Ask 檢索索引",
+    "durable_stages": "可續跑處理階段",
+    "required_exports": "必要逐字稿匯出",
+    "JSON evidence": "JSON 證據",
 }
 
 CATALOGS = {"zh-Hant-TW": _ZH_HANT_TW}

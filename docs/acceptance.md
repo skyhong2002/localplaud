@@ -4,6 +4,11 @@
 the product's raw-audio boundary. It is read-only: it does not generate Plaud AI
 artifacts, rerun processing, or call an external provider.
 
+The same report is available in the recording workspace under **Subscription
+independence**, with per-check pass/fail evidence and a link to
+`GET /api/files/{recording-id}/acceptance`. This keeps the product gate usable from
+the Web App after setup; the CLI is an ops/automation convenience, not a requirement.
+
 The gate requires all of the following evidence:
 
 - the original or cached audio exists locally;

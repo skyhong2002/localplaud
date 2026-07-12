@@ -143,6 +143,17 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "Execution profile" in r.text and "Current Settings" in r.text
     assert "Find in transcript" in r.text and "Replace all" in r.text
     assert 'id="persistent-player"' in r.text and 'id="waveform"' in r.text
+    assert 'id="subscription-independence"' in r.text
+    assert "Subscription independence" in r.text
+    evidence = c.get("/api/files/r1/acceptance")
+    assert evidence.status_code == 200
+    assert evidence.json()["schema"] == "localplaud-subscription-independence/v1"
+    assert {item["name"] for item in evidence.json()["checks"]} >= {
+        "local_transcript",
+        "local_notes",
+        "ask_index",
+        "required_exports",
+    }
 
 
 def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path):
@@ -171,6 +182,9 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         "在逐字稿中尋找",
         "匯出錄音",
         "時間戳記",
+        "訂閱獨立性",
+        "尚未通過",
+        "JSON 證據",
     ):
         assert text in page.text
 
