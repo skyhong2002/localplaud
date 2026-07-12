@@ -113,6 +113,28 @@
     </div>
 
     <div class="sub" style="margin:2px 0 8px;font-size:13px">{{ t('Ask across your library. Answers stay grounded in indexed recordings and cite their sources.') }}</div>
+    <fieldset id="library-ask-scope" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:0 0 10px">
+      <legend class="sub" style="font-size:11px;font-weight:700;padding:0 5px">{{ t('ANSWER SCOPE') }}</legend>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px">
+        <label class="sub" style="font-size:11px">{{ t('Folder') }}
+          <select class="search-input" name="ask_folder_id" style="width:100%;margin-top:3px;padding:7px 9px">
+            <option value="">{{ t('Any folder') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="sub" style="font-size:11px">{{ t('Tag') }}
+          <select class="search-input" name="ask_tag_id" style="width:100%;margin-top:3px;padding:7px 9px">
+            <option value="">{{ t('Any tag') }}</option>{% for tag in organization.tags %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="sub" style="font-size:11px">{{ t('Source') }}
+          <select class="search-input" name="ask_origin" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any source') }}</option><option value="plaud">Plaud</option><option value="local">{{ t('Local') }}</option></select>
+        </label>
+        <label class="sub" style="font-size:11px">{{ t('From') }}<input class="search-input" type="date" name="ask_date_from" style="width:100%;margin-top:3px;padding:7px 9px"></label>
+        <label class="sub" style="font-size:11px">{{ t('To') }}<input class="search-input" type="date" name="ask_date_to" style="width:100%;margin-top:3px;padding:7px 9px"></label>
+      </div>
+      <label class="sub" style="display:flex;align-items:center;gap:7px;font-size:11px;margin-top:8px"><input id="ask-use-selected" type="checkbox" disabled> {{ t('Only selected recordings') }} · <span id="ask-selected-count">0</span></label>
+      <div id="ask-selected-inputs"></div>
+    </fieldset>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
       {% for chip in ["What decisions were made recently?", "Show action items across recordings", "What themes keep recurring?"] %}
       <button type="button" class="btn sec library-ask-chip" data-q="{{ t(chip) }}" style="padding:5px 11px;font-size:12px">{{ t(chip) }}</button>
@@ -121,13 +143,13 @@
     <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:6px">{{ t('QUICK ACTIONS · LIBRARY GROUNDED · READ ONLY') }}</div>
     <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">
       {% for skill in ask_skills %}
-      <form hx-post="/ask/skill" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin">
+      <form hx-post="/ask/skill" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" hx-include="#library-ask-scope">
         <input type="hidden" name="skill_key" value="{{ skill.key }}">
         <button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px">{{ skill.name }}</button>
       </form>
       {% endfor %}
     </div>
-    <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin">
+    <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" hx-include="#library-ask-scope">
       <input id="library-ask-q" name="q" placeholder="{{ t('Ask Plaud anything about your recordings…') }}" autocomplete="off" required>
       <button class="btn" type="submit">{{ t('Ask') }}</button>
     </form>
@@ -281,6 +303,9 @@
   const apply = document.getElementById('bulk-apply');
   const clear = document.getElementById('bulk-clear');
   const message = document.getElementById('bulk-message');
+  const askUseSelected = document.getElementById('ask-use-selected');
+  const askSelectedCount = document.getElementById('ask-selected-count');
+  const askSelectedInputs = document.getElementById('ask-selected-inputs');
 
   document.querySelectorAll('.library-ask-chip').forEach(chip => chip.addEventListener('click', () => {
     const input = document.getElementById('library-ask-q');
@@ -288,11 +313,26 @@
   }));
 
   function selected() { return checks.filter(c => c.checked).map(c => c.value); }
+  function syncAskSelection() {
+    const ids = selected();
+    if (askSelectedCount) askSelectedCount.textContent = String(ids.length);
+    if (askUseSelected) {
+      askUseSelected.disabled = ids.length === 0;
+      if (!ids.length) askUseSelected.checked = false;
+    }
+    if (askSelectedInputs) {
+      askSelectedInputs.replaceChildren();
+      if (askUseSelected?.checked) ids.forEach(id => {
+        const input = document.createElement('input'); input.type='hidden'; input.name='ask_file_ids'; input.value=id; askSelectedInputs.appendChild(input);
+      });
+    }
+  }
   function sync() {
     const n = selected().length;
     if (count) count.textContent = n;
     if (bar) bar.classList.toggle('on', n > 0);
     if (all) { all.checked = n > 0 && n === checks.length; all.indeterminate = n > 0 && n < checks.length; }
+    syncAskSelection();
   }
   function targets() {
     if (!target || !action) return;
@@ -313,8 +353,10 @@
   checks.forEach(c => c.addEventListener('change', sync));
   all?.addEventListener('change', () => { checks.forEach(c => c.checked = all.checked); sync(); });
   clear?.addEventListener('click', () => { checks.forEach(c => c.checked = false); sync(); });
+  askUseSelected?.addEventListener('change', syncAskSelection);
   action?.addEventListener('change', targets);
   targets();
+  sync();
 
   apply?.addEventListener('click', async () => {
     const fileIds = selected();

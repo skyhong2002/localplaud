@@ -1699,22 +1699,82 @@ def _health_checks(settings) -> list[dict]:
     return checks
 
 
+def _library_ask_scope(
+    folder_id: str | None,
+    tag_id: str | None,
+    origin: str | None,
+    date_from: str | None,
+    date_to: str | None,
+    file_ids: list[str] | None = None,
+) -> dict | None:
+    values = {
+        "folder_id": folder_id,
+        "tag_id": tag_id,
+        "origin": origin,
+        "date_from": date_from,
+        "date_to": date_to,
+        "file_ids": file_ids or [],
+    }
+    has_scope = any(
+        values[key] not in (None, "")
+        for key in ("folder_id", "tag_id", "origin", "date_from", "date_to")
+    ) or bool(file_ids)
+    return values if has_scope else None
+
+
+def _ask_fragment_context(
+    request: Request, thread: dict, file_id: str | None, target: str
+) -> dict:
+    context = _base_ctx(request, "recordings")
+    with session_scope() as session:
+        context["organization"] = _organization_summary(session)
+    return context | {"thread": thread, "file_id": file_id, "target": target}
+
+
 @app.post("/ask", response_class=HTMLResponse)
-def ask(request: Request, q: str = Form(...), thread_id: str | None = Form(None)):
+def ask(
+    request: Request,
+    q: str = Form(...),
+    thread_id: str | None = Form(None),
+    ask_folder_id: str | None = Form(None),
+    ask_tag_id: str | None = Form(None),
+    ask_origin: str | None = Form(None),
+    ask_date_from: str | None = Form(None),
+    ask_date_to: str | None = Form(None),
+    ask_file_ids: Annotated[list[str] | None, Form()] = None,
+):
     from ..ask_threads import ask_in_thread
 
+    retrieval_scope = _library_ask_scope(
+        ask_folder_id,
+        ask_tag_id,
+        ask_origin,
+        ask_date_from,
+        ask_date_to,
+        ask_file_ids,
+    )
     try:
-        thread = ask_in_thread(q, thread_id=thread_id)
+        thread = ask_in_thread(
+            q,
+            thread_id=thread_id,
+            retrieval_scope=retrieval_scope,
+        )
     except LookupError as exc:
         return HTMLResponse(str(exc), status_code=404)
     except ValueError as exc:
         return HTMLResponse(str(exc), status_code=409)
     except Exception:  # noqa: BLE001 - provider may be unavailable
-        thread = _unavailable_ask_thread(q, thread_id)
+        from ..worker.qa import normalize_library_scope
+
+        thread = _unavailable_ask_thread(
+            q,
+            thread_id,
+            retrieval_scope=normalize_library_scope(retrieval_scope),
+        )
     return templates.TemplateResponse(
         request=request,
         name="_ask_thread.html",
-        context={"thread": thread, "file_id": None, "target": "answer"},
+        context=_ask_fragment_context(request, thread, None, "answer"),
     )
 
 
@@ -1745,7 +1805,7 @@ def file_ask(
     return templates.TemplateResponse(
         request=request,
         name="_ask_thread.html",
-        context={"thread": thread, "file_id": file_id, "target": "file-answer"},
+        context=_ask_fragment_context(request, thread, file_id, "file-answer"),
     )
 
 
@@ -1756,7 +1816,16 @@ def ask_skills_catalog(scope: Literal["recording", "library"] = "recording"):
 
 
 @app.post("/ask/skill", response_class=HTMLResponse)
-def library_ask_skill(request: Request, skill_key: str = Form(...)):
+def library_ask_skill(
+    request: Request,
+    skill_key: str = Form(...),
+    ask_folder_id: str | None = Form(None),
+    ask_tag_id: str | None = Form(None),
+    ask_origin: str | None = Form(None),
+    ask_date_from: str | None = Form(None),
+    ask_date_to: str | None = Form(None),
+    ask_file_ids: Annotated[list[str] | None, Form()] = None,
+):
     """Run a read-only skill through whole-library grounded Ask."""
     try:
         skill = get_ask_skill(skill_key, "library")
@@ -1764,19 +1833,36 @@ def library_ask_skill(request: Request, skill_key: str = Form(...)):
         return HTMLResponse(str(exc), status_code=404)
     from ..ask_threads import ask_in_thread
 
+    retrieval_scope = _library_ask_scope(
+        ask_folder_id,
+        ask_tag_id,
+        ask_origin,
+        ask_date_from,
+        ask_date_to,
+        ask_file_ids,
+    )
     try:
         thread = ask_in_thread(
             skill["retrieval_query"],
             display_query=skill["name"],
             instruction=skill["instruction"],
             skill_snapshot=skill,
+            retrieval_scope=retrieval_scope,
         )
+    except ValueError as exc:
+        return HTMLResponse(str(exc), status_code=409)
     except Exception:  # noqa: BLE001 - embeddings/LLM provider may be unavailable
-        thread = _unavailable_ask_thread(skill["name"], None)
+        from ..worker.qa import normalize_library_scope
+
+        thread = _unavailable_ask_thread(
+            skill["name"],
+            None,
+            retrieval_scope=normalize_library_scope(retrieval_scope),
+        )
     return templates.TemplateResponse(
         request=request,
         name="_ask_thread.html",
-        context={"thread": thread, "file_id": None, "target": "answer"},
+        context=_ask_fragment_context(request, thread, None, "answer"),
     )
 
 
@@ -1805,17 +1891,22 @@ def file_ask_skill(request: Request, file_id: str, skill_key: str = Form(...)):
     return templates.TemplateResponse(
         request=request,
         name="_ask_thread.html",
-        context={"thread": thread, "file_id": file_id, "target": "file-answer"},
+        context=_ask_fragment_context(request, thread, file_id, "file-answer"),
     )
 
 
 def _unavailable_ask_thread(
-    query: str, thread_id: str | None, *, file_id: str | None = None
+    query: str,
+    thread_id: str | None,
+    *,
+    file_id: str | None = None,
+    retrieval_scope: dict | None = None,
 ) -> dict:
     return {
         "thread_id": thread_id,
         "file_id": file_id,
         "title": query,
+        "retrieval_scope": retrieval_scope or {},
         "messages": [
             {"id": None, "role": "user", "content": query, "sources": []},
             {

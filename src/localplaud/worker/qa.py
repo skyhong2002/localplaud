@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import copy
 import logging
+from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 from sqlalchemy import select
 
 from ..config import Settings, get_settings
-from ..db.models import Chunk, PlaudFile
+from ..db.models import Chunk, PlaudFile, Tag
 from ..db.session import session_scope
 from ..embeddings.base import build_embedder
 from ..llm.base import build_llm
@@ -26,8 +27,70 @@ from .pipeline import _settings_for_stage
 log = logging.getLogger(__name__)
 
 
+def normalize_library_scope(value: dict | None) -> dict:
+    """Validate and canonicalize a durable whole-library retrieval boundary."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("library Ask scope must be an object")
+    unknown = sorted(
+        set(value) - {"folder_id", "tag_id", "origin", "date_from", "date_to", "file_ids"}
+    )
+    if unknown:
+        raise ValueError(f"unknown library Ask scope fields: {', '.join(unknown)}")
+    scope: dict = {}
+    for key in ("folder_id", "tag_id"):
+        raw = value.get(key)
+        if raw not in (None, ""):
+            try:
+                parsed = int(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{key} must be a positive integer") from exc
+            if parsed <= 0:
+                raise ValueError(f"{key} must be a positive integer")
+            scope[key] = parsed
+    origin = value.get("origin")
+    if origin not in (None, ""):
+        if origin not in {"plaud", "local"}:
+            raise ValueError("origin must be plaud or local")
+        scope["origin"] = origin
+    parsed_dates = {}
+    for key in ("date_from", "date_to"):
+        raw = value.get(key)
+        if raw not in (None, ""):
+            try:
+                parsed_dates[key] = date.fromisoformat(str(raw))
+            except ValueError as exc:
+                raise ValueError(f"{key} must use YYYY-MM-DD") from exc
+            scope[key] = parsed_dates[key].isoformat()
+    if parsed_dates.get("date_from") and parsed_dates.get("date_to"):
+        if parsed_dates["date_from"] > parsed_dates["date_to"]:
+            raise ValueError("date_from must not follow date_to")
+    file_ids = value.get("file_ids")
+    if file_ids not in (None, []):
+        if not isinstance(file_ids, list) or not all(
+            isinstance(item, str) and item.strip() for item in file_ids
+        ):
+            raise ValueError("file_ids must be a list of recording IDs")
+        unique = list(dict.fromkeys(item.strip() for item in file_ids))
+        if len(unique) > 100:
+            raise ValueError("file_ids cannot contain more than 100 recordings")
+        scope["file_ids"] = unique
+    return scope
+
+
+def _date_ms(value: str, *, exclusive_end: bool = False) -> int:
+    parsed = datetime.combine(date.fromisoformat(value), datetime.min.time(), tzinfo=UTC)
+    if exclusive_end:
+        parsed += timedelta(days=1)
+    return int(parsed.timestamp() * 1000)
+
+
 def _load_matrix(
-    session, dim: int, file_id: str | None = None
+    session,
+    dim: int,
+    file_id: str | None = None,
+    retrieval_scope: dict | None = None,
 ) -> tuple[list[Chunk], np.ndarray]:
     # Only chunks embedded at the query's dimension are comparable; mixing dims
     # (e.g. after switching embeddings.provider) would crash np.stack / the dot
@@ -36,6 +99,25 @@ def _load_matrix(
     stmt = select(Chunk).where(Chunk.embedding.is_not(None), Chunk.dim == dim)
     if file_id is not None:
         stmt = stmt.where(Chunk.file_id == file_id)
+    scope = normalize_library_scope(retrieval_scope)
+    if file_id is not None and scope:
+        raise ValueError("single-recording Ask cannot use a library scope")
+    if scope:
+        stmt = stmt.join(PlaudFile, PlaudFile.id == Chunk.file_id)
+        if scope.get("folder_id"):
+            stmt = stmt.where(PlaudFile.folder_id == scope["folder_id"])
+        if scope.get("tag_id"):
+            stmt = stmt.where(PlaudFile.tags.any(Tag.id == scope["tag_id"]))
+        if scope.get("origin"):
+            stmt = stmt.where(PlaudFile.origin == scope["origin"])
+        if scope.get("date_from"):
+            stmt = stmt.where(PlaudFile.start_time_ms >= _date_ms(scope["date_from"]))
+        if scope.get("date_to"):
+            stmt = stmt.where(
+                PlaudFile.start_time_ms < _date_ms(scope["date_to"], exclusive_end=True)
+            )
+        if scope.get("file_ids"):
+            stmt = stmt.where(PlaudFile.id.in_(scope["file_ids"]))
     chunks = list(session.scalars(stmt))
     if not chunks:
         return [], np.zeros((0, 0), dtype=np.float32)
@@ -48,6 +130,7 @@ def retrieve(
     top_k: int = 6,
     settings: Settings | None = None,
     file_id: str | None = None,
+    retrieval_scope: dict | None = None,
 ) -> list[dict]:
     """Return the top_k most relevant chunks as dicts with score + source.
 
@@ -60,7 +143,9 @@ def retrieve(
 
     results: list[dict] = []
     with session_scope() as session:
-        chunks, mat = _load_matrix(session, dim=len(qv), file_id=file_id)
+        chunks, mat = _load_matrix(
+            session, dim=len(qv), file_id=file_id, retrieval_scope=retrieval_scope
+        )
         if not chunks:
             return []
         norms = mat / (np.linalg.norm(mat, axis=1, keepdims=True) + 1e-8)
@@ -143,6 +228,7 @@ def _retrieve_with_profile(
     file_id: str | None,
     snapshot: dict,
     spent_cost_usd: float,
+    retrieval_scope: dict | None,
 ) -> tuple[list[dict], dict, dict, float]:
     failures: list[dict] = []
     for index, candidate in enumerate(candidate_snapshots(snapshot, "embed")):
@@ -157,6 +243,7 @@ def _retrieve_with_profile(
                 top_k=top_k,
                 settings=candidate_settings,
                 file_id=file_id,
+                retrieval_scope=retrieval_scope,
             )
             actual_cost = estimate_cost(usage, pricing)
             return hits, candidate, usage, actual_cost
@@ -185,6 +272,7 @@ def answer(
     history: list[dict] | None = None,
     spent_cost_usd: float = 0.0,
     instruction: str | None = None,
+    retrieval_scope: dict | None = None,
 ) -> dict:
     """Retrieve + answer. Returns {answer, sources}.
 
@@ -192,9 +280,12 @@ def answer(
     single recording, and the model is asked to reference moments by timestamp.
     """
     settings = settings or get_settings()
+    scope = normalize_library_scope(retrieval_scope)
+    if file_id is not None and scope:
+        raise ValueError("single-recording Ask cannot use a library scope")
     snapshot = _resolved_snapshot(file_id)
     hits, embed_snapshot, embed_usage, embed_cost = _retrieve_with_profile(
-        query, top_k, settings, file_id, snapshot, spent_cost_usd
+        query, top_k, settings, file_id, snapshot, spent_cost_usd, scope
     )
     if not hits:
         if file_id is not None:
@@ -222,8 +313,10 @@ def answer(
             for item in bounded
         )
         prior = f"Conversation so far:\n---\n{turns}\n---\n\n"
+    scope_note = f"Library retrieval scope: {scope}. Do not answer beyond it.\n" if scope else ""
     prompt = (
         f"{prior}Current question: {query}\n"
+        f"{scope_note}"
         f"{f'Output instruction: {instruction}' if instruction else ''}\n\n"
         f"Excerpts:\n---\n{_format_context(hits)}\n---\n\n"
         "Answer the question grounded in the excerpts above."

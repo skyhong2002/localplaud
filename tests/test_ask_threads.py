@@ -55,12 +55,21 @@ def test_ask_skill_provenance_migration_is_idempotent(tmp_path):
                 "thread_id VARCHAR(36), role VARCHAR(16), content TEXT, sources JSON)"
             )
         )
+        connection.execute(
+            text(
+                "CREATE TABLE ask_threads (id VARCHAR(36) PRIMARY KEY, "
+                "file_id VARCHAR(64), title VARCHAR(200))"
+            )
+        )
     first = migrate_ask_provenance_schema(engine)
     assert "ask_messages.skill_key" in first
     assert "ask_messages.skill_snapshot" in first
+    assert "ask_threads.retrieval_scope" in first
     assert migrate_ask_provenance_schema(engine) == []
     columns = {item["name"] for item in inspect(engine).get_columns("ask_messages")}
     assert {"skill_key", "skill_snapshot"} <= columns
+    thread_columns = {item["name"] for item in inspect(engine).get_columns("ask_threads")}
+    assert "retrieval_scope" in thread_columns
 
 
 def test_single_recording_followup_persists_history_and_sources(monkeypatch, tmp_path):
@@ -304,3 +313,67 @@ def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, 
         assert list(session.scalars(select(AutomationRun))) == []
 
     assert client.post("/ask/skill", data={"skill_key": "missing"}).status_code == 404
+
+
+def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import AskThread, Folder, PlaudFile, Tag
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        folder = Folder(name="Research")
+        tag = Tag(name="Priority")
+        session.add_all([folder, tag])
+        session.flush()
+        recording = session.get(PlaudFile, "r1")
+        recording.folder_id = folder.id
+        recording.tags.append(tag)
+        folder_id, tag_id = folder.id, tag.id
+
+    scopes = []
+
+    def fake_answer(query, **kwargs):
+        scopes.append(kwargs.get("retrieval_scope"))
+        return {"answer": f"Scoped: {query}", "sources": []}
+
+    monkeypatch.setattr("localplaud.worker.qa.answer", fake_answer)
+    page = client.get("/")
+    assert 'id="library-ask-scope"' in page.text
+    assert 'hx-include="#library-ask-scope"' in page.text
+    first = client.post(
+        "/ask",
+        data={
+            "q": "What changed?",
+            "ask_folder_id": str(folder_id),
+            "ask_tag_id": str(tag_id),
+            "ask_origin": "plaud",
+            "ask_date_from": "2026-07-01",
+            "ask_date_to": "2026-07-31",
+            "ask_file_ids": "r1",
+        },
+    )
+    assert first.status_code == 200
+    assert "Follow-ups keep this scope." in first.text
+    assert "Folder · Research" in first.text and "Tag · Priority" in first.text
+    thread_id = _thread_id(first.text)
+    expected = {
+        "folder_id": folder_id,
+        "tag_id": tag_id,
+        "origin": "plaud",
+        "date_from": "2026-07-01",
+        "date_to": "2026-07-31",
+        "file_ids": ["r1"],
+    }
+    assert scopes == [expected]
+
+    followup = client.post("/ask", data={"q": "And next?", "thread_id": thread_id})
+    assert followup.status_code == 200
+    assert scopes == [expected, expected]
+    changed = client.post(
+        "/ask",
+        data={"q": "Change scope", "thread_id": thread_id, "ask_origin": "local"},
+    )
+    assert changed.status_code == 409
+    with session_scope() as session:
+        assert session.get(AskThread, thread_id).retrieval_scope == expected

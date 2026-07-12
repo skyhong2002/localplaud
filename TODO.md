@@ -363,6 +363,12 @@ embedding raw provider credentials or model settings in each rule.
   provider profile, citations, durable follow-ups, and save-to-note path; running one
   is read-only and never silently creates notes, tasks, automation runs, or external
   work.
+- ✅ Whole-library Ask now has an explicit folder, tag, capture-source, and inclusive
+  date scope in the Web App, plus a bounded selected-recording scope at the retrieval
+  API layer. Filtering happens before vector ranking; the normalized scope is durable
+  on the thread, visible with human-readable folder/tag labels, and immutable across
+  follow-ups. Speaker-scoped library Ask remains open because speaker identity is
+  intentionally recording-local.
 - ✅ Built dedicated Templates My Space and Explore surfaces with search,
   categories/scenarios, first-party/personal provenance, authorship, descriptions,
   popularity signals, prompt preview, immutable new-version editing, and

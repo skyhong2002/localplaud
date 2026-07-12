@@ -8,7 +8,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 
 from .config import Settings, get_settings
-from .db.models import AskMessage, AskThread, PlaudFile, StageAttempt, UserNote
+from .db.models import AskMessage, AskThread, Folder, PlaudFile, StageAttempt, Tag, UserNote
 from .db.session import session_scope
 from .worker import qa
 
@@ -35,6 +35,7 @@ def thread_to_dict(row: AskThread) -> dict:
         "thread_id": row.id,
         "file_id": row.file_id,
         "title": row.title,
+        "retrieval_scope": row.retrieval_scope or {},
         "messages": [_message(message) for message in row.messages],
     }
 
@@ -48,11 +49,17 @@ def ask_in_thread(
     display_query: str | None = None,
     instruction: str | None = None,
     skill_snapshot: dict | None = None,
+    retrieval_scope: dict | None = None,
 ) -> dict:
     query = query.strip()
     if not query:
         raise ValueError("question must not be empty")
     settings = settings or get_settings()
+    requested_scope = (
+        qa.normalize_library_scope(retrieval_scope) if retrieval_scope is not None else None
+    )
+    if file_id is not None and requested_scope:
+        raise ValueError("single-recording Ask cannot use a library scope")
     with session_scope() as session:
         if file_id is not None and session.get(PlaudFile, file_id) is None:
             raise LookupError("recording not found")
@@ -61,6 +68,24 @@ def ask_in_thread(
             raise LookupError("thread not found")
         if thread is not None and thread.file_id != file_id:
             raise ValueError("thread scope does not match this Ask surface")
+        stored_scope = (thread.retrieval_scope or {}) if thread is not None else {}
+        if thread is not None and requested_scope is not None and requested_scope != stored_scope:
+            raise ValueError("thread retrieval scope cannot change during follow-up")
+        effective_scope = stored_scope if thread is not None else (requested_scope or {})
+        if effective_scope.get("folder_id") and session.get(
+            Folder, effective_scope["folder_id"]
+        ) is None:
+            raise ValueError("library Ask folder does not exist")
+        if effective_scope.get("tag_id") and session.get(Tag, effective_scope["tag_id"]) is None:
+            raise ValueError("library Ask tag does not exist")
+        if effective_scope.get("file_ids"):
+            known = set(
+                session.scalars(
+                    select(PlaudFile.id).where(PlaudFile.id.in_(effective_scope["file_ids"]))
+                )
+            )
+            if known != set(effective_scope["file_ids"]):
+                raise ValueError("library Ask contains an unknown recording")
         history = [_message(row) for row in thread.messages] if thread is not None else []
         ask_spent = sum(item.get("estimated_cost_usd", 0) for item in history)
         pipeline_spent = (
@@ -76,14 +101,16 @@ def ask_in_thread(
             else 0.0
         )
 
-    result = qa.answer(
-        query,
-        settings=settings,
-        file_id=file_id,
-        history=history,
-        spent_cost_usd=ask_spent + pipeline_spent,
-        instruction=instruction,
-    )
+    answer_kwargs = {
+        "settings": settings,
+        "file_id": file_id,
+        "history": history,
+        "spent_cost_usd": ask_spent + pipeline_spent,
+        "instruction": instruction,
+    }
+    if effective_scope:
+        answer_kwargs["retrieval_scope"] = effective_scope
+    result = qa.answer(query, **answer_kwargs)
     with session_scope() as session:
         thread = session.get(AskThread, thread_id) if thread_id else None
         if thread_id and thread is None:
@@ -93,6 +120,7 @@ def ask_in_thread(
                 id=str(uuid4()),
                 file_id=file_id,
                 title=(display_query or query)[:200],
+                retrieval_scope=effective_scope,
             )
             session.add(thread)
             session.flush()

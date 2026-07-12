@@ -1,4 +1,16 @@
 <div class="ask-thread" data-thread-id="{{ thread.thread_id or '' }}" style="display:flex;flex-direction:column;gap:10px;margin:8px 0 14px">
+  {% if not file_id and thread.retrieval_scope %}
+  <div class="sub" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:11px">
+    <strong>{{ t('ANSWER SCOPE') }}</strong>
+    {% if thread.retrieval_scope.folder_id %}<span class="chip">{{ t('Folder') }} · {% for item in organization.folders if item.id == thread.retrieval_scope.folder_id %}{{ item.name }}{% else %}#{{ thread.retrieval_scope.folder_id }}{% endfor %}</span>{% endif %}
+    {% if thread.retrieval_scope.tag_id %}<span class="chip">{{ t('Tag') }} · {% for item in organization.tags if item.id == thread.retrieval_scope.tag_id %}{{ item.name }}{% else %}#{{ thread.retrieval_scope.tag_id }}{% endfor %}</span>{% endif %}
+    {% if thread.retrieval_scope.origin %}<span class="chip">{{ t('Source') }} · {{ thread.retrieval_scope.origin }}</span>{% endif %}
+    {% if thread.retrieval_scope.date_from %}<span class="chip">{{ t('From') }} · {{ thread.retrieval_scope.date_from }}</span>{% endif %}
+    {% if thread.retrieval_scope.date_to %}<span class="chip">{{ t('To') }} · {{ thread.retrieval_scope.date_to }}</span>{% endif %}
+    {% if thread.retrieval_scope.file_ids %}<span class="chip">{{ thread.retrieval_scope.file_ids|length }} {{ t('recordings') }}</span>{% endif %}
+    <span>{{ t('Follow-ups keep this scope.') }}</span>
+  </div>
+  {% endif %}
   {% for message in thread.messages %}
     {% if message.role == 'user' %}
     <div style="align-self:flex-end;max-width:85%;background:var(--blue);color:white;border-radius:14px 14px 4px 14px;padding:8px 12px">{{ message.content }}{% if message.skill_key %}<span style="display:block;font-size:10px;opacity:.8;margin-top:3px">quick action · v{{ message.skill_snapshot.version }}</span>{% endif %}</div>

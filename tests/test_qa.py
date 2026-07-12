@@ -4,6 +4,7 @@ POST /file/{id}/ask web fragment with playable timestamp citations."""
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 
 def _fresh_db(monkeypatch, tmp_path, name="qa.db"):
@@ -74,6 +75,45 @@ def test_retrieve_scopes_to_file(monkeypatch, tmp_path):
     assert scoped
     assert all(h["file_id"] == "r1" for h in scoped)
     assert scoped[0]["text"] == "r1 relevant"
+
+
+def test_retrieve_applies_combined_library_scope(monkeypatch, tmp_path):
+    _fresh_db(monkeypatch, tmp_path)
+    _seed_two_files()
+    monkeypatch.setattr("localplaud.worker.qa.build_embedder", lambda cfg: _FakeEmbedder())
+    from localplaud.db.models import Folder, PlaudFile, Tag
+    from localplaud.db.session import session_scope
+    from localplaud.worker.qa import normalize_library_scope, retrieve
+
+    with session_scope() as session:
+        folder = Folder(name="Research")
+        tag = Tag(name="Priority")
+        session.add_all([folder, tag])
+        session.flush()
+        first = session.get(PlaudFile, "r1")
+        first.folder_id = folder.id
+        first.tags.append(tag)
+        first.origin = "plaud"
+        first.start_time_ms = 1_767_225_600_000  # 2026-01-01 UTC
+        second = session.get(PlaudFile, "r2")
+        second.origin = "local"
+        second.start_time_ms = 1_735_689_600_000  # 2025-01-01 UTC
+        folder_id, tag_id = folder.id, tag.id
+
+    scope = {
+        "folder_id": folder_id,
+        "tag_id": tag_id,
+        "origin": "plaud",
+        "date_from": "2026-01-01",
+        "date_to": "2026-12-31",
+    }
+    hits = retrieve("q", top_k=6, retrieval_scope=scope)
+    assert hits and {item["file_id"] for item in hits} == {"r1"}
+    assert normalize_library_scope(scope) == scope
+    with pytest.raises(ValueError, match="origin"):
+        normalize_library_scope({"origin": "external"})
+    with pytest.raises(ValueError, match="date_from"):
+        normalize_library_scope({"date_from": "2026-12-31", "date_to": "2026-01-01"})
 
 
 def test_answer_source_shape_and_scope(monkeypatch, tmp_path):

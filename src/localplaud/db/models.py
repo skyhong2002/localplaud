@@ -415,6 +415,7 @@ class AskThread(Base):
         ForeignKey("plaud_files.id", ondelete="CASCADE"), default=None, index=True
     )
     title: Mapped[str] = mapped_column(String(200))
+    retrieval_scope: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
