@@ -126,8 +126,9 @@ device = "auto"                  # auto | cpu | cuda (auto uses CUDA when availa
 # num_speakers = 2               # optional hint; omit to auto-detect
 
 # --------------------------------------------------------------------------- #
-# LLM — used for summaries / structured notes and Q&A answers. The default
-# execution profile uses OpenCode Go separately for transcript correction.
+# LLM — used by the initial execution profile for transcript correction,
+# summaries / structured notes, and Q&A answers. Later profile versions may
+# choose a different capable provider independently for each stage.
 # --------------------------------------------------------------------------- #
 [llm]
 provider = "ollama"              # ollama | openai | anthropic | opencode-go

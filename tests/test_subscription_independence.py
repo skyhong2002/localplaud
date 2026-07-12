@@ -73,10 +73,12 @@ def _providers(monkeypatch):
     )
     monkeypatch.setattr(
         "localplaud.worker.pipeline.polish.polish_transcript",
-        lambda transcript, _settings: {
+        lambda transcript, settings: {
             "transcript": transcript,
-            "provider": "opencode-go",
-            "model": "qwen3.7-plus",
+            "provider": settings.llm.provider,
+            "model": getattr(
+                settings.llm, settings.llm.provider.replace("-", "_")
+            ).model,
             "prompt_version": "transcript-polish/v1",
             "detail": {
                 "chunks": 1,
@@ -119,12 +121,10 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         row = session.get(PlaudFile, "clean")
         polished = row.corrected_transcript
         assert polished.kind == "ai_polish"
-        assert polished.provider == "opencode-go"
-        assert polished.model == "qwen3.7-plus"
+        assert polished.provider == "ollama"
+        assert polished.model == polished.resolved_profile_snapshot["stages"]["correct"]["model"]
         assert polished.prompt_version == "transcript-polish/v1"
-        assert polished.resolved_profile_snapshot["stages"]["correct"]["connection"].endswith(
-            "opencode-go"
-        )
+        assert polished.resolved_profile_snapshot["stages"]["correct"]["provider_type"] == "ollama"
         assert all(summary.input_transcript_revision == 1 for summary in row.summaries)
         alignment = next(stage for stage in row.stage_runs if stage.stage == StageName.align)
         assert alignment.status == StageStatus.completed
@@ -132,7 +132,7 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         assert alignment.detail["forced_alignment"] is False
         correct = next(stage for stage in row.stage_runs if stage.stage.value == "correct")
         assert correct.status.value == "completed"
-        assert correct.provider == "opencode-go"
+        assert correct.provider == "ollama"
 
     report = subscription_independence_report("clean")
     assert report["schema"] == "localplaud-subscription-independence/v1"

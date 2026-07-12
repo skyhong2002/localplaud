@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import uuid
 from contextvars import ContextVar
 from dataclasses import asdict
@@ -142,9 +143,17 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
         return resolved
 
     family_config = getattr(resolved, family)
-    provider = str(selected["connection"]).split(":", 1)[-1]
+    provider = selected.get("provider_type") or str(selected["connection"]).split(":", 1)[-1]
     family_config.provider = provider
     provider_config = getattr(family_config, provider.replace("-", "_"), None)
+    for key, value in selected.get("configuration", {}).items():
+        target = (
+            provider_config
+            if provider_config is not None and hasattr(provider_config, key)
+            else family_config
+        )
+        if hasattr(target, key):
+            setattr(target, key, value)
     if provider_config is not None and hasattr(provider_config, "model"):
         provider_config.model = selected.get("model")
     elif hasattr(family_config, "model"):
@@ -158,6 +167,16 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
         )
         if hasattr(target, key):
             setattr(target, key, value)
+
+    secret_ref = selected.get("secret_ref")
+    if secret_ref:
+        if not str(secret_ref).startswith("env:"):
+            raise ValueError("unsupported secret reference; expected env:VARIABLE")
+        secret = os.environ.get(str(secret_ref).removeprefix("env:"))
+        if not secret:
+            raise ValueError(f"provider secret is unavailable: {secret_ref}")
+        if provider_config is not None and hasattr(provider_config, "api_key"):
+            provider_config.api_key = secret
 
     if stage == "transcribe":
         # Provider-name fallback is intentionally disabled. Only the validated,

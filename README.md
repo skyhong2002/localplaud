@@ -176,12 +176,14 @@ For Ollama-backed LLMs or embeddings, `localplaud doctor` validates the configur
 model as well as the daemon. A missing model is reported with the exact `ollama pull`
 command; embedding uses Ollama's batch `/api/embed` endpoint when available.
 
-The default execution profile assigns only the `correct` stage to **OpenCode Go**
-(`qwen3.7-plus`). Run `opencode providers list` to confirm its API credential. The
-tracked `transcript-polish` agent denies every tool, receives transcript content on
-stdin rather than command arguments, and returns bounded segment JSON. OpenCode owns
-its credential; localplaud never copies or scrapes it. This stage intentionally sends
-transcript text to OpenCode Go and therefore makes the default profile egress-visible.
+Transcript correction is an explicit stage-scoped LLM selection. The initial profile
+uses the configured `[llm]` provider, while later profile versions may select any
+catalog model that advertises the `correct` capability, including Ollama, OpenAI,
+Anthropic, or OpenCode Go. The resolved connection, model, non-secret configuration,
+privacy boundary, and secret reference are persisted before dispatch; unavailable
+providers fail visibly unless the profile declares an allowed fallback. For OpenCode
+Go, the tracked `transcript-polish` agent denies every tool and OpenCode continues to
+own its credential.
 
 ## ASR providers
 

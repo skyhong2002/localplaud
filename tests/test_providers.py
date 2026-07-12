@@ -32,7 +32,9 @@ from localplaud.providers.service import (
     list_connections,
     list_models,
     list_profiles,
+    preview_resolution,
     resolve_recording_profile,
+    save_connection,
     select_recording_override,
 )
 from localplaud.worker.pipeline import _settings_for_stage
@@ -95,6 +97,8 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
         profiles = list_profiles(session)
         assert len(profiles) == 1
         assert set(profiles[0]["stages"]) == {stage.value for stage in ProviderStage}
+        assert profiles[0]["stages"]["correct"]["connection"] == "correct:ollama"
+        assert profiles[0]["stages"]["correct"]["model"] == Settings().llm.ollama.model
         assert all(connection["secret_ref"] is None for connection in list_connections(session))
         session.add(PlaudFile(id="recording", filename="test"))
         session.flush()
@@ -196,7 +200,7 @@ def test_legacy_provider_profile_schema_rebuild_preserves_ids_and_config(tmp_pat
             stage.value for stage in ProviderStage
         }
         correct = next(item for item in upgraded.stage_selections if item.stage == "correct")
-        assert session.get(ProviderConnection, correct.connection_id).provider_type == "opencode-go"
+        assert session.get(ProviderConnection, correct.connection_id).provider_type == "ollama"
         assert bootstrap_default_profile(session, Settings()).id == upgraded.id
         selection = session.get(ProfileStageSelection, 19)
         assert (selection.profile_id, selection.connection_id, selection.model_id) == (3, 7, 11)
@@ -273,7 +277,6 @@ def test_partial_default_profile_reuses_deployed_connections_and_fills_all_stage
             "mlx-whisper",
             "pyannote",
             "ollama",
-            "correct:opencode-go",
         }
         assert bootstrap_default_profile(session, Settings(asr={"provider": "mlx-whisper"})).id == upgraded.id
 
@@ -308,6 +311,98 @@ def test_no_egress_profile_disables_legacy_asr_fallback():
     assert resolved.asr.provider == "faster-whisper"
     assert resolved.asr.fallback == []
     assert settings.asr.fallback == ["openai"]
+
+
+def test_correct_dispatch_uses_durable_connection_identity_config_and_secret(monkeypatch):
+    settings = Settings()
+    original_api_key = settings.llm.openai.api_key
+    monkeypatch.setenv("CORRECTION_OPENAI_KEY", "stage-key")
+    snapshot = {
+        "policy": {"no_egress": False},
+        "stages": {
+            "correct": {
+                "connection": "correction:primary",
+                "provider_type": "openai",
+                "model": "gpt-correction",
+                "configuration": {"base_url": "https://llm.example.test/v1"},
+                "secret_ref": "env:CORRECTION_OPENAI_KEY",
+                "options": {},
+            }
+        },
+    }
+
+    resolved = _settings_for_stage(settings, snapshot, "correct")
+
+    assert resolved.llm.provider == "openai"
+    assert resolved.llm.openai.model == "gpt-correction"
+    assert resolved.llm.openai.base_url == "https://llm.example.test/v1"
+    assert resolved.llm.openai.api_key == "stage-key"
+    assert settings.llm.provider == "ollama"
+    assert settings.llm.openai.api_key == original_api_key
+
+
+def test_resolved_correct_snapshot_preserves_connection_dispatch_data(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'correct-profile.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        bootstrap_default_profile(
+            session,
+            Settings(
+                llm={
+                    "provider": "openai",
+                    "openai": {
+                        "model": "gpt-correction",
+                        "base_url": "https://llm.example.test/v1",
+                    },
+                }
+            ),
+        )
+        session.commit()
+
+        resolved = preview_resolution(session).to_dict()["stages"]["correct"]
+
+        assert resolved == {
+            "connection": "correct:openai",
+            "model": "gpt-correction",
+            "options": {},
+            "provider_type": "openai",
+            "configuration": {"base_url": "https://llm.example.test/v1"},
+            "secret_ref": None,
+            "execution_target": "cloud",
+            "data_egress": True,
+        }
+
+
+def test_connection_config_rejects_nested_credentials_and_filters_legacy_rows(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'provider-secrets.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        with pytest.raises(ValueError, match="config.headers.Authorization"):
+            save_connection(
+                session,
+                {
+                    "key": "correct:unsafe",
+                    "name": "Unsafe",
+                    "provider_type": "openai",
+                    "config": {"headers": {"Authorization": "Bearer raw-secret"}},
+                },
+            )
+
+        profile = bootstrap_default_profile(session, Settings())
+        correct = next(item for item in profile.stage_selections if item.stage == "correct")
+        connection = session.get(ProviderConnection, correct.connection_id)
+        connection.config = {
+            "host": "http://localhost:11434",
+            "nested": {"access_token": "legacy-secret", "timeout": 30},
+        }
+        session.commit()
+
+        snapshot = preview_resolution(session).to_dict()["stages"]["correct"]
+        assert snapshot["configuration"] == {
+            "host": "http://localhost:11434",
+            "nested": {"timeout": 30},
+        }
+        assert connection.config["nested"]["access_token"] == "legacy-secret"
 
 
 def test_legacy_sqlite_column_migration_is_idempotent(tmp_path):

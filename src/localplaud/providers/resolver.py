@@ -55,6 +55,7 @@ class ResolvedProfile:
 def resolve_profile(
     layers: Sequence[Mapping[str, Any] | None],
     capabilities: Mapping[tuple[str, str], Capability | Mapping[str, Any]],
+    connection_details: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ResolvedProfile:
     """Merge system -> rule/folder -> template -> recording layers."""
     merged: dict[str, Any] = {"policy": {}, "stages": {}}
@@ -79,6 +80,9 @@ def resolve_profile(
             raise ResolutionError(f"model {key[1]} does not support stage {stage.value}")
         if no_egress and capability.data_egress:
             raise ResolutionError(f"no-egress profile cannot use {key[0]}/{key[1]}")
+        details = (connection_details or {}).get(key[0])
+        if details:
+            selection.update(details)
         selection["execution_target"] = capability.execution_target
         selection["data_egress"] = capability.data_egress
 

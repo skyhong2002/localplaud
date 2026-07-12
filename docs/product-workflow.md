@@ -463,10 +463,14 @@ view switch. Plaud-derived edits remain excluded from independent mode. Transcri
 find/replace, historical previews, and non-destructive restore-as-new-revision are
 implemented. Summaries, mind maps, embedding chunks, and stage runs persist their
 exact input transcript lineage; notes and processing details expose it in the Web UI.
-The default system profile now runs a no-tools OpenCode Go `qwen3.7-plus` correction
-between diarization and derived knowledge. A production recording has completed this
-path end to end: the immutable `ai_polish` revision became the canonical input for
-notes, mind map, and embedding chunks while raw ASR remained directly inspectable.
+Transcript correction now dispatches through the durable stage-scoped profile rather
+than being tied to one provider. Ollama, OpenAI, Anthropic, and the no-tools OpenCode
+Go integration can be selected when their catalog model advertises `correct`;
+provider/model/configuration provenance and no-egress policy are resolved before
+execution, and unavailable providers never trigger an implicit fallback. A production
+recording has completed the OpenCode Go path end to end: the immutable `ai_polish`
+revision became the canonical input for notes, mind map, and embedding chunks while
+raw ASR remained directly inspectable.
 Saved Ask answers are editable note bodies with durable follow-up threads.
 Generated notes can be promoted idempotently to a provenance-linked editable copy
 inside the same recording workspace. User edits affect only that copy; the original

@@ -32,10 +32,54 @@ _STAGE_FAMILY = {
     "embed": "embeddings",
     "ask": "llm",
 }
+_CREDENTIAL_CONFIG_KEYS = {
+    "api_key",
+    "authorization",
+    "bearer",
+    "cookie",
+    "credential",
+    "hf_token",
+    "password",
+    "secret",
+    "token",
+}
 
 
 def _is_cloud(name: str) -> bool:
     return name in {"openai", "deepgram", "assemblyai", "anthropic", "opencode-go"}
+
+
+def _credential_config_key(key: object) -> bool:
+    normalized = str(key).strip().lower().replace("-", "_")
+    return normalized in _CREDENTIAL_CONFIG_KEYS or normalized.endswith(
+        ("_api_key", "_password", "_secret", "_token")
+    )
+
+
+def _validate_connection_config(value: Any, path: str = "config") -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if _credential_config_key(key):
+                raise ValueError(
+                    f"raw credentials are not accepted in {path}.{key}; use secret_ref"
+                )
+            _validate_connection_config(item, f"{path}.{key}")
+    elif isinstance(value, list | tuple):
+        for index, item in enumerate(value):
+            _validate_connection_config(item, f"{path}[{index}]")
+
+
+def _snapshot_connection_config(value: Any) -> Any:
+    """Exclude credential-shaped legacy fields without mutating deployed rows."""
+    if isinstance(value, dict):
+        return {
+            key: _snapshot_connection_config(item)
+            for key, item in value.items()
+            if not _credential_config_key(key)
+        }
+    if isinstance(value, list):
+        return [_snapshot_connection_config(item) for item in value]
+    return value
 
 
 def _model_for(settings: Settings, family: str, provider: str) -> str:
@@ -66,7 +110,8 @@ def _settings_specs(settings: Settings):
          [ProviderStage.transcribe, ProviderStage.align]),
         ("diarize", settings.diarize.provider, settings.diarize.model,
          [ProviderStage.diarize]),
-        ("correct", "opencode-go", settings.llm.opencode_go.model,
+        ("correct", settings.llm.provider,
+         _model_for(settings, "llm", settings.llm.provider),
          [ProviderStage.correct]),
         ("llm", settings.llm.provider, _model_for(settings, "llm", settings.llm.provider),
          [ProviderStage.summarize, ProviderStage.mind_map, ProviderStage.ask]),
@@ -74,6 +119,37 @@ def _settings_specs(settings: Settings):
          _model_for(settings, "embeddings", settings.embeddings.provider),
          [ProviderStage.embed]),
     ]
+
+
+def _settings_connection_config(settings: Settings, family: str, provider: str) -> dict:
+    """Snapshot non-secret Settings fields needed to dispatch this connection."""
+    config_family = "llm" if family == "correct" else family
+    provider_config = getattr(
+        getattr(settings, config_family), provider.replace("-", "_"), None
+    )
+    if provider_config is None:
+        return {}
+    values = provider_config.model_dump(mode="json", exclude={"api_key", "hf_token"})
+    values.pop("model", None)
+    return values
+
+
+def _with_required_capabilities(
+    raw: dict, stages: list[ProviderStage], *, cloud: bool
+) -> dict:
+    """Repair old Settings catalog rows while preserving valid custom metadata."""
+    try:
+        capability = Capability.model_validate(raw)
+    except ValueError:
+        return _capability(stages, cloud=cloud)
+    existing = {item.stage for item in capability.stages}
+    missing = [stage for stage in stages if stage not in existing]
+    if not missing:
+        return raw
+    generated = Capability.model_validate(_capability(missing, cloud=cloud))
+    return capability.model_copy(
+        update={"stages": capability.stages + generated.stages}
+    ).model_dump(mode="json")
 
 
 def _ensure_settings_entries(
@@ -100,23 +176,12 @@ def _ensure_settings_entries(
         if connection is None:
             connection = ProviderConnection(
                 key=f"{family}:{provider}",
-                name=(
-                    "OpenCode Go (transcript polish)"
-                    if family == "correct"
-                    else f"{provider} ({family})"
-                ),
+                name=f"{provider} ({family})",
                 provider_type=provider,
                 execution_target="cloud" if _is_cloud(provider) else "local",
                 data_egress=_is_cloud(provider),
                 secret_ref=None,
-                config=(
-                    {
-                        "agent": settings.llm.opencode_go.agent,
-                        "executable": settings.llm.opencode_go.executable,
-                    }
-                    if family == "correct"
-                    else {}
-                ),
+                config=_settings_connection_config(settings, family, provider),
             )
             session.add(connection)
             session.flush()
@@ -135,6 +200,10 @@ def _ensure_settings_entries(
             )
             session.add(entry)
             session.flush()
+        else:
+            entry.capabilities = _with_required_capabilities(
+                entry.capabilities, stages, cloud=_is_cloud(provider)
+            )
         entries[family] = (connection, entry)
     return entries
 
@@ -147,9 +216,14 @@ def _profile_is_complete(session: Session, profile: ExecutionProfile) -> bool:
         model = session.get(ModelCatalogEntry, selection.model_id)
         if model is None or model.connection_id != selection.connection_id:
             return False
-    correct = by_stage["correct"]
-    connection = session.get(ProviderConnection, correct.connection_id)
-    return connection is not None and connection.provider_type == "opencode-go"
+    correct = session.get(ModelCatalogEntry, by_stage["correct"].model_id)
+    try:
+        capability = Capability.model_validate(correct.capabilities)
+    except ValueError:
+        return False
+    if capability.for_stage(ProviderStage.correct) is None:
+        return False
+    return True
 
 
 def bootstrap_default_profile(session: Session, settings: Settings) -> ExecutionProfile:
@@ -196,11 +270,11 @@ def _upgrade_default_profile(
         row.is_system_default = False
     upgraded = ExecutionProfile(
         key=previous.key,
-        name="Current Settings + OpenCode Go polish",
+        name="Current Settings",
         version=previous.version + 1,
         is_system_default=True,
-        privacy_policy="allow-egress",
-        no_egress=False,
+        privacy_policy=previous.privacy_policy,
+        no_egress=previous.no_egress,
         cost_ceiling=previous.cost_ceiling,
         fallback_policy=previous.fallback_policy,
     )
@@ -219,11 +293,7 @@ def _upgrade_default_profile(
                 stage=stage,
                 connection_id=connection.id,
                 model_id=model.id,
-                options=(
-                    {"agent": settings.llm.opencode_go.agent}
-                    if stage == "correct"
-                    else {}
-                ),
+                options={},
             )
         else:
             selection = ProfileStageSelection(
@@ -283,6 +353,18 @@ def _capability_catalog(session: Session) -> dict[tuple[str, str], dict]:
     return catalog
 
 
+def _connection_catalog(session: Session) -> dict[str, dict[str, Any]]:
+    """Runtime connection identity persisted into each resolved snapshot."""
+    return {
+        connection.key: {
+            "provider_type": connection.provider_type,
+            "configuration": _snapshot_connection_config(connection.config or {}),
+            "secret_ref": connection.secret_ref,
+        }
+        for connection in session.scalars(select(ProviderConnection))
+    }
+
+
 def list_profiles(session: Session) -> list[dict[str, Any]]:
     rows = session.scalars(_profile_query().order_by(ExecutionProfile.id))
     return [{"id": row.id, "name": row.name, "version": row.version,
@@ -297,7 +379,11 @@ def preview_resolution(session: Session, *partial_layers: dict | None) -> Resolv
     )
     if profile is None:
         raise ValueError("no system default execution profile")
-    return resolve_profile([_profile_layer(profile), *partial_layers], _capability_catalog(session))
+    return resolve_profile(
+        [_profile_layer(profile), *partial_layers],
+        _capability_catalog(session),
+        _connection_catalog(session),
+    )
 
 
 def resolve_recording_profile(session: Session, file_id: str) -> ResolvedProfile:
@@ -326,7 +412,9 @@ def resolve_recording_profile(session: Session, file_id: str) -> ResolvedProfile
                 "policy": override.policy_overrides,
             }
         )
-    return resolve_profile(layers, _capability_catalog(session))
+    return resolve_profile(
+        layers, _capability_catalog(session), _connection_catalog(session)
+    )
 
 
 def select_recording_override(session: Session, file_id: str, profile_id: int,
@@ -349,6 +437,7 @@ def save_connection(session: Session, data: dict, connection_id: int | None = No
     """Create or update a provider connection without accepting raw credentials."""
     if any(key in data for key in ("api_key", "token", "password", "secret")):
         raise ValueError("raw credentials are not accepted; use secret_ref")
+    _validate_connection_config(data.get("config", {}))
     row = session.get(ProviderConnection, connection_id) if connection_id else None
     if connection_id and row is None:
         raise LookupError("provider connection not found")
@@ -593,7 +682,9 @@ def create_profile_version(session: Session, data: dict) -> dict:
         )
     session.flush()
     # Reuse the resolver as the write-time policy/capability gate.
-    resolve_profile([_profile_layer(row)], _capability_catalog(session))
+    resolve_profile(
+        [_profile_layer(row)], _capability_catalog(session), _connection_catalog(session)
+    )
     return next(item for item in list_profiles(session) if item["id"] == row.id)
 
 
