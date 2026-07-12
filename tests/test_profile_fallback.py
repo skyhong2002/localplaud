@@ -236,7 +236,7 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
     client = TestClient(app)
     page = client.get("/file/fallback")
     assert page.status_code == 200
-    assert "Used fallback #1" in page.text
+    assert "Used fallback #1 · after" in page.text
     assert "fallback 1" in page.text
     usage = client.get("/api/files/fallback/usage").json()
     assert any(

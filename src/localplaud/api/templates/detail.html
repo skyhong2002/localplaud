@@ -110,7 +110,7 @@
             {% if stage.provider %}<span class="sub"> · {{ stage.provider }}{% if stage.model %}:{{ stage.model }}{% endif %}</span>{% endif %}
             {% if stage.detail.transcript %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ t('Input') }}: {% if stage.detail.transcript.input_transcript_revision %}{{ t('transcript rev') }} {{ stage.detail.transcript.input_transcript_revision }}{% else %}{{ t('raw ASR') }}{% endif %} · {{ stage.detail.transcript.input_transcript_source }}</div>{% endif %}
             {% if stage.detail.auto_template %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ t('Auto selected') }} {{ stage.detail.auto_template.key }} · {{ stage.detail.auto_template.confidence }} {{ t('confidence') }}</div>{% endif %}
-            {% if stage.detail.fallback and not stage.detail.fallback.primary %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ t('Used fallback') }} #{{ stage.detail.fallback.index }}，{{ t('after') }} {{ stage.detail.fallback_failures|length }} {{ t('retryable failures') }}</div>{% endif %}
+            {% if stage.detail.fallback and not stage.detail.fallback.primary %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ t('Used fallback') }} #{{ stage.detail.fallback.index }} · {{ t('after') }} {{ stage.detail.fallback_failures|length }} {{ t('retryable failures') }}</div>{% endif %}
             {% if stage.error %}<div style="color:var(--red);font-size:12px;margin-top:2px">{{ stage.error }}</div>{% endif %}
           </div>
           <span class="st {{ stage.status }}">{{ t(stage.status) }}</span>
