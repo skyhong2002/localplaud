@@ -477,6 +477,11 @@ class OrganizeFilesBody(BaseModel):
     remove_tag_ids: list[int] = Field(default_factory=list)
 
 
+class BulkFilesBody(BaseModel):
+    file_ids: list[str] = Field(min_length=1, max_length=200)
+    action: Literal["resume", "delete_local_processing"]
+
+
 class RecordingTitleBody(BaseModel):
     title: str | None = Field(default=None, max_length=512)
 
@@ -688,6 +693,44 @@ def delete_recording_local_processing(file_id: str) -> dict:
         return delete_local_processing(file_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/files/bulk")
+def bulk_files(body: BulkFilesBody) -> dict:
+    from ..worker.pipeline import processing_claim_active, reset_pipeline_retry
+
+    file_ids = list(dict.fromkeys(body.file_ids))
+    if body.action == "delete_local_processing":
+        from ..local_cleanup import delete_local_processing_many
+
+        try:
+            result = delete_local_processing_many(file_ids)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"action": body.action, "updated": len(file_ids), **result}
+
+    from datetime import datetime
+
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        rows = list(session.scalars(select(PlaudFile).where(PlaudFile.id.in_(file_ids))))
+        if {row.id for row in rows} != set(file_ids):
+            raise HTTPException(status_code=404, detail="recording not found")
+        if any(not row.audio_path for row in rows):
+            raise HTTPException(status_code=409, detail="a selected recording has no local audio")
+        if any(processing_claim_active(row) for row in rows):
+            raise HTTPException(status_code=409, detail="a selected recording is processing")
+        for row in rows:
+            reset_pipeline_retry(row)
+            row.status = FileStatus.partial if row.local_transcript else FileStatus.error
+            row.error = "Queued by bulk Resume."
+            row.pipeline_last_failure_at = now
+            row.pipeline_next_retry_at = now
+    return {"action": body.action, "updated": len(file_ids), "queued": file_ids}
 
 
 # --------------------------------------------------------------------------- #

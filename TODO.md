@@ -332,6 +332,11 @@ embedding raw provider credentials or model settings in each rule.
   API, folder/tag pills on library and detail views, and atomic multi-recording bulk
   move/add/remove controls. The recording workspace now edits or clears folder/tags
   through the same atomic API. Organization never mutates Plaud cloud or trash state.
+- ✅ Library selection also supports bulk Resume and bulk deletion of local
+  processing artifacts. Resume queues every validated recording through the durable
+  worker rather than spawning unbounded threads. Cleanup rejects active claims,
+  commits database deletion atomically, removes stage-attempt history, and preserves
+  original audio, Plaud imports, organization, Ask history, and editable notes.
 - ✅ Added a Plaud-style Add audio surface with local upload and a durable,
   background Import from Plaud job. It refreshes the full metadata catalog and any
   paid Plaud transcript/summary, never downloads audio during catalog import, and

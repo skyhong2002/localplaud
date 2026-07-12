@@ -151,6 +151,8 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert "Interview" in page.text
     assert "Uncategorized" in page.text
     assert 'id="bulkbar"' in page.text
+    assert '<option value="resume">' in page.text
+    assert '<option value="delete-local-processing">' in page.text
     assert 'value="a"' in page.text
 
     detail = client.get("/file/a")

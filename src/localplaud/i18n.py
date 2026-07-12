@@ -205,6 +205,7 @@ _ZH_HANT_TW = {
     "generated notes": "份生成筆記",
     "search chunks": "個搜尋區塊",
     "Delete local processing": "刪除本機處理結果",
+    "Resume processing": "繼續處理",
     "Remove local audio": "移除本機音訊",
     "Plaud metadata and imported Plaud transcript/summary are preserved. Saved notes and Ask history are never removed here.": "Plaud 中繼資料及匯入的逐字稿／摘要會保留；已儲存筆記與詢問紀錄不會在此移除。",
     "Execution profile": "執行設定檔",

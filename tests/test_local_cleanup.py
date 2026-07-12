@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -85,6 +87,7 @@ def test_delete_processing_preserves_cloud_and_user_data(monkeypatch, tmp_path):
         "notes": 1,
         "chunks": 1,
         "stages": 1,
+        "attempts": 0,
     }
     assert audio.exists() and not wav.exists()
     from localplaud.db.models import FileStatus, PlaudFile
@@ -97,6 +100,70 @@ def test_delete_processing_preserves_cloud_and_user_data(monkeypatch, tmp_path):
         assert [item.source for item in row.transcript_revisions] == ["cloud"]
         assert [item.source for item in row.summaries] == ["cloud"]
         assert len(row.user_notes) == 1 and row.user_notes[0].title == "Keep me"
+
+
+def test_cleanup_preserves_editable_copy_and_rejects_active_claim(monkeypatch, tmp_path):
+    client, _audio, _wav, _waveform = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, Summary, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        summary = session.query(Summary).filter_by(file_id="clean", source="local").one()
+        note = session.query(UserNote).filter_by(file_id="clean").one()
+        note.source_summary_id = summary.id
+        row = session.get(PlaudFile, "clean")
+        row.status = FileStatus.processing
+        row.processing_token = "active"
+        row.processing_lease_until = datetime.now(UTC) + timedelta(hours=1)
+    assert client.delete("/api/files/clean/local-processing").status_code == 409
+
+    with session_scope() as session:
+        row = session.get(PlaudFile, "clean")
+        row.status = FileStatus.done
+        row.processing_token = None
+        row.processing_lease_until = None
+    assert client.delete("/api/files/clean/local-processing").status_code == 200
+    with session_scope() as session:
+        note = session.query(UserNote).filter_by(file_id="clean").one()
+        assert note.title == "Keep me" and note.source_summary_id is None
+
+
+def test_bulk_resume_is_atomic_and_due_immediately(monkeypatch, tmp_path):
+    client, audio, _wav, _waveform = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="retry-two",
+                filename="Retry two",
+                status=FileStatus.error,
+                audio_path=str(audio),
+            )
+        )
+    missing = client.post(
+        "/api/files/bulk",
+        json={"file_ids": ["clean", "missing"], "action": "resume"},
+    )
+    assert missing.status_code == 404
+    with session_scope() as session:
+        assert session.get(PlaudFile, "clean").status == FileStatus.done
+
+    response = client.post(
+        "/api/files/bulk",
+        json={"file_ids": ["clean", "retry-two"], "action": "resume"},
+    )
+    assert response.status_code == 200 and response.json()["updated"] == 2
+    with session_scope() as session:
+        for file_id in ("clean", "retry-two"):
+            row = session.get(PlaudFile, file_id)
+            assert row.pipeline_retry_count == 0
+            assert row.pipeline_next_retry_at is not None
+            retry_at = row.pipeline_next_retry_at
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=UTC)
+            assert retry_at <= datetime.now(UTC)
 
 
 def test_remove_plaud_audio_returns_to_metadata_only(monkeypatch, tmp_path):

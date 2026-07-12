@@ -250,6 +250,8 @@
         <option value="folder">{{ t('Move to folder') }}</option>
         <option value="add-tag">{{ t('Add tag') }}</option>
         <option value="remove-tag">{{ t('Remove tag') }}</option>
+        <option value="resume">{{ t('Resume processing') }}</option>
+        <option value="delete-local-processing">{{ t('Delete local processing') }}</option>
       </select>
       <select id="bulk-target" aria-label="Folder or tag"></select>
       <button type="button" id="bulk-apply">{{ t('Apply') }}</button>
@@ -339,6 +341,9 @@
   }
   function targets() {
     if (!target || !action) return;
+    const lifecycle = action.value === 'resume' || action.value === 'delete-local-processing';
+    target.hidden = lifecycle;
+    if (lifecycle) { target.disabled = true; if (apply) apply.disabled = false; return; }
     const isFolder = action.value === 'folder';
     const items = isFolder ? folders : tags;
     target.innerHTML = '';
@@ -364,19 +369,22 @@
   apply?.addEventListener('click', async () => {
     const fileIds = selected();
     if (!fileIds.length) return;
+    const lifecycle = action.value === 'resume' || action.value === 'delete-local-processing';
+    if(action.value === 'delete-local-processing' && !confirm('Delete local transcripts, corrections, generated notes, indexes, and processing history for the selected recordings? Original audio, Plaud data, organization, Ask history, and editable notes remain.'))return;
     const body = {file_ids: fileIds};
+    if(lifecycle)body.action=action.value === 'resume'?'resume':'delete_local_processing';
     if (action.value === 'folder') body.folder_id = target.value ? Number(target.value) : null;
     if (action.value === 'add-tag') body.add_tag_ids = [Number(target.value)];
     if (action.value === 'remove-tag') body.remove_tag_ids = [Number(target.value)];
     apply.disabled = true;
     show('Saving organization…');
     try {
-      const response = await fetch('/api/files/organize', {
+      const response = await fetch(lifecycle?'/api/files/bulk':'/api/files/organize', {
         method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Could not organize recordings');
-      show(`${data.updated} recording${data.updated === 1 ? '' : 's'} updated.`);
+      show(`${data.updated} recording${data.updated === 1 ? '' : 's'} ${action.value === 'resume' ? 'queued' : 'updated'}.`);
       window.setTimeout(() => window.location.reload(), 350);
     } catch (error) {
       show(error.message, true);

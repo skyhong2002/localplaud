@@ -415,6 +415,9 @@ name/duration/recorded columns, processing-state and capture-source filters, per
 processing state with error/partial attention indicators, and a read-only trash
 mirror view. Local folders/tags, uncategorized organization, counts/filters, and
 atomic bulk organization are implemented without modifying Plaud cloud state.
+Selected recordings can also be queued for durable Resume or have only their local
+processing artifacts removed in one validated operation. Active claims are rejected;
+original audio, Plaud data, organization, Ask history, and editable notes remain.
 Search now works without an embedding provider across local titles, the
 provenance-correct canonical transcript, generated notes, and saved notes. Folder,
 tag, source, and recording-date filters apply consistently; timestamped transcript
