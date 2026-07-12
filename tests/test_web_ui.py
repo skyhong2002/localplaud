@@ -57,6 +57,23 @@ def _seed(audio_path: str | None = None):
         s.add(
             StageRun(
                 file_id="r1",
+                stage=StageName.correct,
+                status=StageStatus.completed,
+                attempts=1,
+                provider="opencode-go",
+                model="qwen3.7-plus",
+                detail={
+                    "strategy": "contextual-segment-map",
+                    "revision": 2,
+                    "segments": 107,
+                    "chunks": 3,
+                    "prompt_version": "transcript-polish/v1",
+                },
+            )
+        )
+        s.add(
+            StageRun(
+                file_id="r1",
                 stage=StageName.align,
                 status=StageStatus.completed,
                 attempts=1,
@@ -156,6 +173,10 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "Provider word timestamps validated" in r.text
     assert "42 timed words" in r.text
     assert "Forced alignment was not used" in r.text
+    assert "AI-polished transcript" in r.text
+    assert "revision 2" in r.text
+    assert "107 segments / 3 chunks" in r.text
+    assert "prompt transcript-polish/v1" in r.text
     assert "embedding model unavailable" in r.text
     assert "Resume" in r.text and "Rebuild all" in r.text
     assert "Execution profile" in r.text and "Current Settings" in r.text
@@ -211,6 +232,10 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         "已驗證供應商提供的逐字時間戳記",
         "42 個具時間戳記的詞",
         "未使用 forced alignment",
+        "AI 潤飾逐字稿",
+        "修訂 2",
+        "107 個段落 / 3 個區塊",
+        "提示詞 transcript-polish/v1",
         "失敗",
         "逐字稿",
         "在逐字稿中尋找",
