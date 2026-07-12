@@ -6,6 +6,9 @@ import sqlite3
 import zipfile
 from io import BytesIO
 
+import httpx
+import respx
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -95,3 +98,112 @@ def test_database_and_media_backups_are_consistent_private_and_downloadable(
         removed = client.delete(f"/api/backups/{first['name']}")
         assert removed.status_code == 200 and removed.json() == {"deleted": True}
         assert client.get(f"/api/backups/{first['name']}/download").status_code == 404
+
+
+def test_authorized_backup_sync_is_durable_idempotent_and_revocable(monkeypatch, tmp_path):
+    client, _database, _media = _client(monkeypatch, tmp_path)
+    monkeypatch.setenv("BACKUP_SYNC_TOKEN", "remote-backup-secret")
+    with client:
+        backup = client.post("/api/backups").json()
+        base_url = "http://127.0.0.1:9988/webdav/localplaud"
+        body = {
+            "name": "Private NAS",
+            "url": base_url,
+            "secret_ref": "env:BACKUP_SYNC_TOKEN",
+            "enabled": True,
+            "allow_private_network": True,
+        }
+        denied = client.post(
+            "/api/backups/destinations",
+            json=body | {"allow_private_network": False},
+        )
+        assert denied.status_code == 422
+        assert "require HTTPS" in denied.json()["detail"]
+        assert client.post(
+            "/api/backups/destinations",
+            json=body | {"url": "http://user:password@127.0.0.1/private"},
+        ).status_code == 422
+        assert client.post(
+            "/api/backups/destinations",
+            json=body | {"url": "http://127.0.0.1/private?token=inline"},
+        ).status_code == 422
+
+        created = client.post("/api/backups/destinations", json=body)
+        assert created.status_code == 201
+        destination = created.json()
+        assert destination["secret_ref"] == "env:BACKUP_SYNC_TOKEN"
+        upload_url = f"{base_url}/{backup['name']}"
+        with respx.mock(assert_all_called=False) as mock:
+            options = mock.options(base_url).mock(return_value=httpx.Response(204))
+            put = mock.put(upload_url).mock(
+                side_effect=[
+                    httpx.Response(503, text="storage unavailable"),
+                    httpx.Response(201, text="stored"),
+                ]
+            )
+            health = client.post(
+                f"/api/backups/destinations/{destination['id']}/test"
+            )
+            assert health.status_code == 200
+            assert health.json()["status"] == "healthy"
+            assert options.calls[0].request.content == b""
+
+            failed = client.post(
+                f"/api/backups/{backup['name']}/sync/{destination['id']}"
+            )
+            assert failed.status_code == 502
+            deliveries = client.get("/api/backups/sync-deliveries").json()["deliveries"]
+            assert len(deliveries) == 1
+            delivery = deliveries[0]
+            assert delivery["status"] == "failed"
+            assert delivery["attempt_count"] == 1
+            assert delivery["response_status"] == 503
+            assert "HTTP 503" in delivery["error"]
+
+            retried = client.post(
+                f"/api/backups/sync-deliveries/{delivery['id']}/retry"
+            )
+            assert retried.status_code == 200
+            assert retried.json()["status"] == "completed"
+            assert retried.json()["attempt_count"] == 2
+            first_request, second_request = put.calls[0].request, put.calls[1].request
+            assert first_request.headers["authorization"] == "Bearer remote-backup-secret"
+            assert first_request.headers["x-localplaud-backup-sha256"] == backup["sha256"]
+            assert first_request.headers["x-localplaud-delivery-id"] == second_request.headers[
+                "x-localplaud-delivery-id"
+            ]
+            assert first_request.content == second_request.content
+            assert hashlib.sha256(first_request.content).hexdigest() == backup["sha256"]
+
+            completed_again = client.post(
+                f"/api/backups/{backup['name']}/sync/{destination['id']}"
+            )
+            assert completed_again.status_code == 200
+            assert put.call_count == 2
+
+        from localplaud.db.models import BackupSyncDelivery
+        from localplaud.db.session import session_scope
+
+        with session_scope() as session:
+            row = session.query(BackupSyncDelivery).one()
+            assert row.attempt_count == 2
+            assert "remote-backup-secret" not in str(row.destination_snapshot)
+            assert "remote-backup-secret" not in str(row.__dict__)
+
+        settings_page = client.get("/settings")
+        assert "Authorized backup destinations" in settings_page.text
+        assert "Private NAS" in settings_page.text
+        assert "Upload" in settings_page.text
+        assert "Sync history" in settings_page.text
+        assert "remote-backup-secret" not in settings_page.text
+
+        assert client.delete(
+            f"/api/backups/destinations/{destination['id']}"
+        ).status_code == 204
+        with session_scope() as session:
+            assert session.query(BackupSyncDelivery).one().destination_id is None
+        revoked_retry = client.post(
+            f"/api/backups/sync-deliveries/{delivery['id']}/retry"
+        )
+        assert revoked_retry.status_code == 422
+        assert "revoked" in revoked_retry.json()["detail"]

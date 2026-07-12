@@ -707,6 +707,50 @@ class AutomationEmailDelivery(Base):
     )
 
 
+class BackupDestination(Base):
+    """Explicitly authorized remote destination for encrypted-transport backup PUTs."""
+
+    __tablename__ = "backup_destinations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120))
+    url: Mapped[str] = mapped_column(String(2048))
+    secret_ref: Mapped[str | None] = mapped_column(String(256), default=None)
+    enabled: Mapped[bool] = mapped_column(default=True, index=True)
+    allow_private_network: Mapped[bool] = mapped_column(default=False)
+    health: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class BackupSyncDelivery(Base):
+    """Durable, independently retryable upload of one backup archive."""
+
+    __tablename__ = "backup_sync_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    destination_id: Mapped[int | None] = mapped_column(
+        ForeignKey("backup_destinations.id", ondelete="SET NULL"), index=True
+    )
+    backup_name: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    idempotency_key: Mapped[str] = mapped_column(String(160), unique=True)
+    destination_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    backup_sha256: Mapped[str | None] = mapped_column(String(64), default=None)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    response_status: Mapped[int | None] = mapped_column(Integer, default=None)
+    response_excerpt: Mapped[str | None] = mapped_column(Text, default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
 class Chunk(Base):
     """A retrievable text chunk with its embedding, for Q&A / semantic search."""
 

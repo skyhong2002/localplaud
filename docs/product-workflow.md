@@ -227,8 +227,8 @@ rerunning processing or local rule actions. See [`email-integrations.md`](email-
 Settings now groups its implemented account, processing, vocabulary, template,
 provider/profile, remote-worker, and authorized-integration controls behind a
 responsive section navigator with a direct system-health destination. Translated-
-interface locale and private cross-host sync remain explicitly unfinished rather
-than being represented by non-functional controls.
+interface locale remains explicitly unfinished rather than being represented by a
+non-functional control.
 
 Workspace display preferences are durable local data rather than browser-only state:
 the chosen workspace name, system/light/dark theme, comfortable/compact density,
@@ -243,6 +243,11 @@ the configured media root. Every archive carries a versioned manifest and SHA-25
 environment/config secrets, Plaud tokens, reverse-proxy credentials, and symlinks are
 excluded. Restore remains an explicit offline operation documented in
 [`backups.md`](backups.md), so an active Web request can never replace the live database.
+Completed archives can also be sent by HTTP PUT to an explicitly authorized HTTPS or
+private/LAN destination. Credentials remain environment references; URL validation,
+no-redirect delivery, a stable delivery ID, archive checksum, durable attempt state,
+idempotent completion, independent retry, and authorization revocation keep this
+transport separate from backup creation and restore.
 
 Access & Security reports whether the stateless application token is configured and
 that reverse-proxy authentication is external. Because neither mechanism creates

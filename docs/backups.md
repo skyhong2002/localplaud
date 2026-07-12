@@ -18,6 +18,34 @@ secret values. Database rows may contain opaque references such as
 `env:OPENAI_API_KEY`, but not the referenced value. Transcripts and notes are
 sensitive user data, so the resulting ZIP must still be stored privately.
 
+## Authorized cross-host upload
+
+Settings can upload a completed archive to an explicitly authorized private host.
+Each destination stores a display name, base URL, optional `env:VARIABLE` bearer-token
+reference, enabled state, and whether private/LAN addressing is allowed. The secret
+value stays in the process environment and is never copied into the database,
+archive, UI, or delivery history.
+
+Public destinations require HTTPS. HTTP and private, loopback, link-local, or other
+non-routable addresses are accepted only when **Allow private/LAN addresses** is
+selected. URLs containing inline credentials, query parameters, or fragments are
+rejected. Redirects are not followed, so a configured host cannot redirect an
+archive to an unapproved destination.
+
+**Test** sends an authenticated `OPTIONS` request without recording or archive data.
+**Upload** sends the ZIP with HTTP `PUT` to:
+
+```text
+<destination base URL>/<percent-encoded archive filename>
+```
+
+The request includes `Content-Type: application/zip`, the exact content length,
+`X-Localplaud-Backup-Sha256`, and a stable `X-Localplaud-Delivery-Id`. A configured
+token is sent as `Authorization: Bearer …`. The receiver must return a 2xx status.
+Failures are durable and independently retryable; retrying uses the same delivery ID
+and archive bytes. A completed archive/destination pair is idempotent and is not sent
+again. Revoking a destination preserves non-secret history but prevents future retry.
+
 ## Verify a download
 
 Compare the downloaded file's SHA-256 with the full digest shown in Settings or

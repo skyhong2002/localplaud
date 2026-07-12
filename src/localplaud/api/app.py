@@ -1479,6 +1479,7 @@ def status_page(request: Request):
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
+    from ..backup_sync import list_deliveries, list_destinations
     from ..backups import list_workspace_backups
     from ..email_integrations import list_email_integrations
     from ..integrations import list_webhook_integrations
@@ -1505,6 +1506,7 @@ def settings_page(request: Request):
         backup_error = str(exc)
 
     with session_scope() as session:
+        backup_destinations = list_destinations(session)
         ctx = _base_ctx(request, "settings") | {
             "connections": list_connections(session),
             "models": list_models(session),
@@ -1547,6 +1549,11 @@ def settings_page(request: Request):
             "plaud_auth": plaud_auth,
             "workspace_backups": workspace_backups,
             "backup_error": backup_error,
+            "backup_destinations": backup_destinations,
+            "enabled_backup_destinations": [
+                item for item in backup_destinations if item["enabled"]
+            ],
+            "backup_sync_deliveries": list_deliveries(session, 30),
             "about": about_info(settings),
         }
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)

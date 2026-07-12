@@ -246,8 +246,10 @@ variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
   `api.auth_token` (or `LOCALPLAUD_API__AUTH_TOKEN`) and/or put auth in front
   (Caddy `basic_auth`). See [ADR 0006](docs/adr/0006-security-posture.md).
 - Settings can create private, checksummed workspace backups from a consistent
-  SQLite snapshot, optionally including local media. Secrets, configuration, and
-  Plaud OAuth tokens are excluded; verify and restore using
+  SQLite snapshot, optionally including local media, then upload them to an
+  explicitly authorized HTTPS or private/LAN destination with durable, idempotent
+  retries. Secrets, configuration, and Plaud OAuth tokens are excluded; configure,
+  verify, and restore using
   [`docs/backups.md`](docs/backups.md).
 - Settings reports the real stateless-token/reverse-proxy access boundary and can
   download aggregate, redacted diagnostics for support. See

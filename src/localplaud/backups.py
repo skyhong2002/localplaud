@@ -48,7 +48,7 @@ def _package_version() -> str:
         return "development"
 
 
-def _file_sha256(path: Path) -> str:
+def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -99,7 +99,7 @@ def create_workspace_backup(*, include_media: bool = False) -> dict:
                 "database": {
                     "archive_path": "database/localplaud.db",
                     "bytes": snapshot.stat().st_size,
-                    "sha256": _file_sha256(snapshot),
+                    "sha256": file_sha256(snapshot),
                 },
                 "media": {
                     "included": include_media,
@@ -132,7 +132,7 @@ def create_workspace_backup(*, include_media: bool = False) -> dict:
                     )
                     archive.write(path, Path("media") / relative, compression)
             temporary.replace(destination)
-            checksum = _file_sha256(destination)
+            checksum = file_sha256(destination)
             destination.with_suffix(".zip.sha256").write_text(
                 f"{checksum}  {destination.name}\n", encoding="ascii"
             )

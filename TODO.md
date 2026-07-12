@@ -411,8 +411,12 @@ embedding raw provider credentials or model settings in each rule.
   timezone, and 12/24-hour clock across browsers. Private workspace backup now uses
   SQLite's online backup API and produces a manifest plus SHA-256, with an explicit
   optional media scope; secrets/config/OAuth tokens and media symlinks are excluded,
-  downloads are cataloged, and offline restore is documented. Remaining product
-  sections are translated interface locale and private cross-host sync. Access &
+  downloads are cataloged, and offline restore is documented. Authorized private
+  cross-host upload now supports HTTPS or explicit LAN destinations, environment-only
+  bearer references, health checks that send no archive data, checksummed PUT,
+  stable delivery IDs, durable retries, idempotent completion, and revocation that
+  preserves non-secret history. The remaining product section is translated
+  interface locale. Access &
   security now truthfully reports the stateless token/reverse-proxy boundary and
   explains why app-managed active sessions do not exist; Support & About shows
   runtime/build identity and downloads a tested redacted diagnostics bundle with no
