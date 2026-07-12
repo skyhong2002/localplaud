@@ -254,6 +254,9 @@ variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
 - Settings reports the real stateless-token/reverse-proxy access boundary and can
   download aggregate, redacted diagnostics for support. See
   [`docs/support.md`](docs/support.md).
+- Workspace preferences can persist English or Traditional Chinese (Taiwan) for the
+  shared shell and primary product pages, with matching document language and local
+  date formatting. Secondary-page translation coverage is still expanding.
 
 ## License
 

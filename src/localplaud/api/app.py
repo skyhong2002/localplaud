@@ -44,6 +44,7 @@ from ..db.models import (
     recording_tags,
 )
 from ..db.session import init_db, session_scope
+from ..i18n import SUPPORTED_LOCALES, translator
 from ..preferences import (
     get_workspace_preferences,
     save_workspace_preferences,
@@ -126,7 +127,11 @@ def _fmt_dt(context, ms: int | None) -> str:
     preferences = context.get("workspace_preferences") or {}
     timezone = ZoneInfo(preferences.get("timezone", "UTC"))
     hour_cycle = preferences.get("hour_cycle", "24")
-    pattern = "%b %d, %Y · %I:%M %p" if hour_cycle == "12" else "%b %d, %Y · %H:%M"
+    locale = preferences.get("locale", "en")
+    if locale == "zh-Hant-TW":
+        pattern = "%Y年%m月%d日 · %I:%M %p" if hour_cycle == "12" else "%Y年%m月%d日 · %H:%M"
+    else:
+        pattern = "%b %d, %Y · %I:%M %p" if hour_cycle == "12" else "%b %d, %Y · %H:%M"
     return datetime.fromtimestamp(ms / 1000, tz=UTC).astimezone(timezone).strftime(pattern)
 
 
@@ -209,6 +214,8 @@ def _base_ctx(request: Request, active: str) -> dict:
         "public_url": get_settings().api.public_url,
         "unread_notifications": unread_notifications,
         "workspace_preferences": workspace_preferences,
+        "supported_locales": SUPPORTED_LOCALES,
+        "t": translator(workspace_preferences["locale"]),
     }
 
 
@@ -348,6 +355,7 @@ class WorkspacePreferencesBody(BaseModel):
     density: Literal["comfortable", "compact"] = "comfortable"
     timezone: str = Field(min_length=1, max_length=64)
     hour_cycle: Literal["12", "24"] = "24"
+    locale: Literal["en", "zh-Hant-TW"] = "en"
 
     @field_validator("workspace_name")
     @classmethod

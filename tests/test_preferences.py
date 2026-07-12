@@ -30,6 +30,7 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
             "density": "comfortable",
             "timezone": "Asia/Taipei",
             "hour_cycle": "24",
+            "locale": "en",
         }
 
         invalid = client.put(
@@ -47,6 +48,7 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
                 "density": "compact",
                 "timezone": "UTC",
                 "hour_cycle": "12",
+                "locale": "zh-Hant-TW",
             },
         )
         assert updated.status_code == 200
@@ -54,12 +56,14 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
 
         page = client.get("/settings")
         assert page.status_code == 200
-        assert '<html lang="en" data-density="compact" data-theme="dark">' in page.text
-        assert "Sky Lab · self-hosted" in page.text
+        assert '<html lang="zh-Hant-TW" data-density="compact" data-theme="dark">' in page.text
+        assert "Sky Lab · 自架服務" in page.text
         assert 'id="workspace-preferences"' in page.text
         assert 'href="#workspace-preferences"' in page.text
         assert 'value="UTC"' in page.text
         assert '<option value="12" selected>12-hour</option>' in page.text
+        assert '<option value="zh-Hant-TW" selected>繁體中文（台灣）</option>' in page.text
+        assert "工作區偏好設定" in page.text
         assert "#workspace-preferences-form{grid-template-columns:1fr!important}" in page.text
 
 
@@ -89,3 +93,29 @@ def test_workspace_timezone_and_clock_apply_to_recorded_dates(monkeypatch, tmp_p
         assert page.status_code == 200
         assert "Dated recording" in page.text
         assert "AM" in page.text or "PM" in page.text
+
+
+def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    with client:
+        defaults = client.get("/api/preferences/workspace").json()
+        invalid = client.put(
+            "/api/preferences/workspace", json=defaults | {"locale": "not-a-locale"}
+        )
+        assert invalid.status_code == 422
+
+        updated = client.put(
+            "/api/preferences/workspace", json=defaults | {"locale": "zh-Hant-TW"}
+        )
+        assert updated.status_code == 200
+        for path, text in (
+            ("/home", "歡迎回來"),
+            ("/templates", "結構化筆記"),
+            ("/discover", "本機自動化"),
+            ("/notifications", "目前沒有通知"),
+        ):
+            page = client.get(path)
+            assert page.status_code == 200
+            assert '<html lang="zh-Hant-TW"' in page.text
+            assert "所有檔案" in page.text
+            assert text in page.text

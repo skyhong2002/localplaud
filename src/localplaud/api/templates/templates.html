@@ -3,20 +3,20 @@
 {% block body %}
 <main class="main"><div class="content" style="max-width:1120px">
   <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
-    <div><h1 class="page">Templates</h1><p class="sub" style="margin:5px 0 0">Structured notes with immutable versions and reproducible prompts.</p></div>
-    <button class="btn" id="new-template" type="button">＋ New template</button>
+    <div><h1 class="page">{{ t('Templates') }}</h1><p class="sub" style="margin:5px 0 0">{{ t('Structured notes with immutable versions and reproducible prompts.') }}</p></div>
+    <button class="btn" id="new-template" type="button">＋ {{ t('New template') }}</button>
   </div>
   <div class="tabs" style="margin-top:22px">
-    <a href="/templates?tab=my" class="{% if tab=='my' %}on{% endif %}" style="text-decoration:none;padding:10px 13px">My Space</a>
-    <a href="/templates?tab=explore" class="{% if tab=='explore' %}on{% endif %}" style="text-decoration:none;padding:10px 13px">Explore</a>
+    <a href="/templates?tab=my" class="{% if tab=='my' %}on{% endif %}" style="text-decoration:none;padding:10px 13px">{{ t('My Space') }}</a>
+    <a href="/templates?tab=explore" class="{% if tab=='explore' %}on{% endif %}" style="text-decoration:none;padding:10px 13px">{{ t('Explore') }}</a>
   </div>
   <form method="get" action="/templates" style="display:flex;gap:8px;margin:14px 0;flex-wrap:wrap">
     <input type="hidden" name="tab" value="{{ tab }}">
-    <input class="search-input" name="q" value="{{ q }}" placeholder="Search templates, scenarios, or categories" style="flex:1;min-width:260px">
-    <button class="btn sec" type="submit">Search</button>
+    <input class="search-input" name="q" value="{{ q }}" placeholder="{{ t('Search templates, scenarios, or categories') }}" style="flex:1;min-width:260px">
+    <button class="btn sec" type="submit">{{ t('Search') }}</button>
   </form>
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
-    <a class="chip {% if not category %}on{% endif %}" href="/templates?tab={{ tab }}{% if q %}&q={{ q }}{% endif %}">All</a>
+    <a class="chip {% if not category %}on{% endif %}" href="/templates?tab={{ tab }}{% if q %}&q={{ q }}{% endif %}">{{ t('All') }}</a>
     {% for item in categories %}<a class="chip {% if category==item %}on{% endif %}" href="/templates?tab={{ tab }}&category={{ item }}{% if q %}&q={{ q }}{% endif %}">{{ item }}</a>{% endfor %}
   </div>
   {% if template_items %}
@@ -31,13 +31,13 @@
       <p class="sub" style="font-size:13px;line-height:1.5;margin:0">{{ template.description }}</p>
       <div class="sub" style="font-size:11.5px;margin-top:10px">by {{ template.author }}{% if template.popularity %} · {{ template.popularity }}% popular{% endif %}</div>
       <div style="display:flex;gap:7px;margin-top:auto;padding-top:15px">
-        <button class="btn sec template-view" type="button" data-key="{{ template.key }}" style="padding:7px 10px">View</button>
-        {% if template.is_builtin %}<button class="btn template-copy" type="button" data-key="{{ template.key }}" style="padding:7px 10px">Copy to My Space</button>{% else %}<button class="btn template-edit" type="button" data-key="{{ template.key }}" style="padding:7px 10px">New version</button>{% endif %}
+        <button class="btn sec template-view" type="button" data-key="{{ template.key }}" style="padding:7px 10px">{{ t('View') }}</button>
+        {% if template.is_builtin %}<button class="btn template-copy" type="button" data-key="{{ template.key }}" style="padding:7px 10px">{{ t('Copy to My Space') }}</button>{% else %}<button class="btn template-edit" type="button" data-key="{{ template.key }}" style="padding:7px 10px">New version</button>{% endif %}
       </div>
     </article>
     {% endfor %}
   </div>
-  {% else %}<div class="empty"><div class="big">▦</div>No templates match this view.</div>{% endif %}
+  {% else %}<div class="empty"><div class="big">▦</div>{{ t('No templates match this view.') }}</div>{% endif %}
 </div></main>
 
 <div class="import-backdrop" id="template-backdrop" hidden>

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-density="{{ workspace_preferences.density }}"{% if workspace_preferences.theme != 'system' %} data-theme="{{ workspace_preferences.theme }}"{% endif %}>
+<html lang="{{ workspace_preferences.locale }}" data-density="{{ workspace_preferences.density }}"{% if workspace_preferences.theme != 'system' %} data-theme="{{ workspace_preferences.theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -212,40 +212,40 @@
       <span class="wm lbl"><span class="a">local</span><span class="b">plaud</span></span>
     </div>
     <div class="add-wrap">
-      <button class="add-audio" id="add-audio-button" type="button"><span>＋</span><span class="add-label">Add audio</span></button>
+      <button class="add-audio" id="add-audio-button" type="button"><span>＋</span><span class="add-label">{{ t('Add audio') }}</span></button>
       <div class="add-menu" id="add-audio-menu" hidden>
-        <button type="button" data-import-mode="device"><span>⬆</span><span><strong>Import audio</strong><br><small class="sub">From this device</small></span></button>
-        <button type="button" data-import-mode="plaud"><span>☁</span><span><strong>Import from Plaud</strong><br><small class="sub">Metadata first · audio on demand</small></span></button>
+        <button type="button" data-import-mode="device"><span>⬆</span><span><strong>{{ t('Import audio') }}</strong><br><small class="sub">{{ t('From this device') }}</small></span></button>
+        <button type="button" data-import-mode="plaud"><span>☁</span><span><strong>{{ t('Import from Plaud') }}</strong><br><small class="sub">{{ t('Metadata first · audio on demand') }}</small></span></button>
       </div>
     </div>
-    <a class="navi {% if active=='home' %}on{% endif %}" href="/home"><span class="ic">⌂</span><span class="lbl">Home</span></a>
-    <a class="navi {% if active=='recordings' %}on{% endif %}" href="/"><span class="ic">🎙️</span><span class="lbl">All files</span></a>
-    <a class="navi {% if active=='search' %}on{% endif %}" href="/search"><span class="ic">🔍</span><span class="lbl">Ask &amp; Search</span></a>
-    <a class="navi {% if active=='notes' %}on{% endif %}" href="/notes"><span class="ic">📝</span><span class="lbl">Saved notes</span></a>
-    <a class="navi {% if active=='templates' %}on{% endif %}" href="/templates"><span class="ic">▦</span><span class="lbl">Templates</span></a>
-    <a class="navi {% if active=='discover' %}on{% endif %}" href="/discover"><span class="ic">⚡</span><span class="lbl">Discover</span></a>
-    <a class="navi {% if active=='notifications' %}on{% endif %}" href="/notifications"><span class="ic">🔔</span><span class="lbl">Notifications</span>{% if unread_notifications %}<span class="nav-badge">{{ unread_notifications if unread_notifications < 100 else '99+' }}</span>{% endif %}</a>
+    <a class="navi {% if active=='home' %}on{% endif %}" href="/home"><span class="ic">⌂</span><span class="lbl">{{ t('Home') }}</span></a>
+    <a class="navi {% if active=='recordings' %}on{% endif %}" href="/"><span class="ic">🎙️</span><span class="lbl">{{ t('All files') }}</span></a>
+    <a class="navi {% if active=='search' %}on{% endif %}" href="/search"><span class="ic">🔍</span><span class="lbl">{{ t('Ask & Search') }}</span></a>
+    <a class="navi {% if active=='notes' %}on{% endif %}" href="/notes"><span class="ic">📝</span><span class="lbl">{{ t('Saved notes') }}</span></a>
+    <a class="navi {% if active=='templates' %}on{% endif %}" href="/templates"><span class="ic">▦</span><span class="lbl">{{ t('Templates') }}</span></a>
+    <a class="navi {% if active=='discover' %}on{% endif %}" href="/discover"><span class="ic">⚡</span><span class="lbl">{{ t('Discover') }}</span></a>
+    <a class="navi {% if active=='notifications' %}on{% endif %}" href="/notifications"><span class="ic">🔔</span><span class="lbl">{{ t('Notifications') }}</span>{% if unread_notifications %}<span class="nav-badge">{{ unread_notifications if unread_notifications < 100 else '99+' }}</span>{% endif %}</a>
     <div class="grow"></div>
-    <a class="navi {% if active=='settings' %}on{% endif %}" href="/settings"><span class="ic">⚙️</span><span class="lbl">Settings</span></a>
-    <a class="navi {% if active=='status' %}on{% endif %}" href="/status"><span class="ic">🩺</span><span class="lbl">Status</span></a>
-    <div class="foot lbl">{{ workspace_preferences.workspace_name }} · self-hosted</div>
+    <a class="navi {% if active=='settings' %}on{% endif %}" href="/settings"><span class="ic">⚙️</span><span class="lbl">{{ t('Settings') }}</span></a>
+    <a class="navi {% if active=='status' %}on{% endif %}" href="/status"><span class="ic">🩺</span><span class="lbl">{{ t('Status') }}</span></a>
+    <div class="foot lbl">{{ workspace_preferences.workspace_name }} · {{ t('self-hosted') }}</div>
   </aside>
   {% block body %}{% endblock %}
   <div class="import-backdrop" id="import-backdrop" hidden>
     <section class="import-modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
-      <div class="import-head"><span id="import-title">Import audio</span><button class="import-close" id="import-close" type="button" aria-label="Close">×</button></div>
+      <div class="import-head"><span id="import-title">{{ t('Import audio') }}</span><button class="import-close" id="import-close" type="button" aria-label="{{ t('Close') }}">×</button></div>
       <div class="import-body">
-        <div class="import-tabs"><button type="button" data-import-tab="device">From this device</button><button type="button" data-import-tab="plaud">From Plaud</button></div>
+        <div class="import-tabs"><button type="button" data-import-tab="device">{{ t('From this device') }}</button><button type="button" data-import-tab="plaud">{{ t('Import from Plaud') }}</button></div>
         <div id="device-import-panel">
           <label class="drop-zone" id="audio-drop-zone">
-            <span class="import-icon">⇧</span><strong>Click or drag an audio file to import</strong>
+            <span class="import-icon">⇧</span><strong>{{ t('Click or drag an audio file to import') }}</strong>
             <span class="sub" style="margin-top:7px">MP3, MP4, M4A, WAV, OGG, Opus, WebM, FLAC or AAC · up to 2 GB</span>
             <input id="audio-file-input" type="file" accept="audio/*,video/mp4,video/webm,.opus,.m4a,.flac,.aac" hidden>
           </label>
           <div class="sub" id="local-import-status" style="text-align:center;margin-top:10px"></div>
         </div>
         <div class="plaud-import-card" id="plaud-import-panel" hidden>
-          <span class="import-icon">☁</span><strong>Mirror your Plaud library</strong>
+          <span class="import-icon">☁</span><strong>{{ t('Mirror your Plaud library') }}</strong>
           <p class="sub" style="max-width:440px;margin:8px 0 0">Imports the latest recording metadata and any existing Plaud transcript or summary. Audio stays in Plaud until you request it from a recording.</p>
           <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">Import metadata from Plaud</button>
           <div id="plaud-import-progress" hidden style="width:100%;max-width:440px">
