@@ -32,7 +32,7 @@
       <div class="tile"><div class="k">{{ t('Login method') }}</div><div style="margin-top:4px">{{ t('Official Plaud MCP OAuth') if plaud_provider == 'mcp' else 'Native S256 PKCE · no Node.js' }}</div></div>
       <div class="tile"><div class="k">{{ t('Token storage') }}</div><div style="margin-top:4px;overflow-wrap:anywhere"><code>{{ plaud_auth.tokens_path }}</code></div></div>
     </div>
-    {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">{% if plaud_provider == 'mcp' %}{{ t('Run the official Plaud MCP installer on this machine to sign in.') }} <code>npx -y @plaud-ai/mcp@latest install</code>{% else %}On the machine running localplaud, run <code>localplaud auth login</code>. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.{% endif %}</div>{% endif %}
+    {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">{% if plaud_provider == 'mcp' %}{{ t('Run the official Plaud MCP installer on this machine to sign in.') }} <code>npx -y @plaud-ai/mcp@latest install</code>{% else %}{{ t('On the machine running localplaud, run the following command. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.') }} <code>localplaud auth login</code>{% endif %}</div>{% endif %}
   </div>
 
   <div class="panel" style="margin-top:16px" id="access-security">
@@ -86,7 +86,7 @@
 
   <div class="panel" style="margin-top:18px" id="hardware-profiles">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-      <div><strong>{{ t('Recommended for this host') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">Evidence-based local ASR profiles; no accelerator is claimed unless detected.</div></div>
+      <div><strong>{{ t('Recommended for this host') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Evidence-based local ASR profiles; no accelerator is claimed unless detected.') }}</div></div>
       <span class="chip">{{ hardware_recommendations.host.system }} · {{ hardware_recommendations.host.machine }}{% if hardware_recommendations.host.memory_gb %} · {{ hardware_recommendations.host.memory_gb }} GB{% endif %}</span>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:12px">
@@ -97,7 +97,7 @@
         <div class="sub" style="font-size:11px">{{ recommendation.hardware }}</div>
         <div><code>{{ recommendation.model }}</code></div>
         <div class="sub" style="font-size:11.5px;flex:1">{{ recommendation.reason }}</div>
-        {% if ('recommended-' ~ recommendation.key) in profile_keys %}<span class="chip on">Profile created</span>{% elif recommendation.ready %}<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="false" style="padding:6px 9px">Create profile</button><button class="btn hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="true" style="padding:6px 9px">Create &amp; use</button></div>{% else %}<button class="btn sec" type="button" disabled style="padding:6px 9px">Install requirements first</button>{% endif %}
+        {% if ('recommended-' ~ recommendation.key) in profile_keys %}<span class="chip on">{{ t('Profile created') }}</span>{% elif recommendation.ready %}<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="false" style="padding:6px 9px">{{ t('Create profile') }}</button><button class="btn hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="true" style="padding:6px 9px">{{ t('Create & use') }}</button></div>{% else %}<button class="btn sec" type="button" disabled style="padding:6px 9px">{{ t('Install requirements first') }}</button>{% endif %}
       </div>
       {% endfor %}
     </div>
@@ -107,7 +107,7 @@
   <div class="panel" style="margin-top:16px" id="connections">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
       <strong>{{ t('Connections') }}</strong>
-      <span class="sub">Secrets are stored as references, never copied into profiles.</span>
+      <span class="sub">{{ t('Secrets are stored as references, never copied into profiles.') }}</span>
     </div>
     <div style="display:grid;gap:10px;margin-top:12px">
       {% for c in connections %}
@@ -117,10 +117,10 @@
           <div class="sub" style="font-size:12px">{{ c.execution_target }} · {% if c.data_egress %}data egress allowed{% else %}no data egress{% endif %}{% if c.secret_ref %} · secret configured{% endif %}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}" title="{{ c.health.detail or '' }}">{{ c.health.status or 'unknown' }}</span>
-          <button class="btn sec" style="padding:7px 10px" onclick="testHealth({{ c.id }})">Test</button>
-          <button class="btn sec" style="padding:7px 10px" onclick="editConnection({{ c.id }})">Edit</button>
-          <button class="btn sec" style="padding:7px 10px;color:var(--red)" onclick="removeItem('connections',{{ c.id }})">Delete</button>
+          <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}" title="{{ c.health.detail or '' }}">{{ t(c.health.status or 'unknown') }}</span>
+          <button class="btn sec" style="padding:7px 10px" onclick="testHealth({{ c.id }})">{{ t('Test') }}</button>
+          <button class="btn sec" style="padding:7px 10px" onclick="editConnection({{ c.id }})">{{ t('Edit') }}</button>
+          <button class="btn sec" style="padding:7px 10px;color:var(--red)" onclick="removeItem('connections',{{ c.id }})">{{ t('Delete') }}</button>
         </div>
       </div>
       {% endfor %}
@@ -129,16 +129,16 @@
 
   <div class="panel" style="margin-top:16px" id="vocabulary">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-      <div><strong>{{ t('Custom vocabulary') }}</strong><div class="sub" style="font-size:12px">Correct names and specialist terms without changing raw ASR output.</div></div>
+      <div><strong>{{ t('Custom vocabulary') }}</strong><div class="sub" style="font-size:12px">{{ t('Correct names and specialist terms without changing raw ASR output.') }}</div></div>
       <button class="btn sec" id="apply-vocabulary" type="button" style="padding:7px 10px">{{ t('Apply to library') }}</button>
     </div>
     <div style="display:grid;gap:8px;margin-top:12px">
       {% for term in vocabulary_terms %}
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px;{% if not term.enabled %}opacity:.55{% endif %}">
-        <div><strong>{{ term.source_text }}</strong> → <strong>{{ term.replacement_text }}</strong><div class="sub" style="font-size:11px">{{ term.language or 'All languages' }} · {{ 'case-sensitive' if term.case_sensitive else 'ignore case' }}{% if not term.enabled %} · disabled{% endif %}</div></div>
-        <div><button class="btn sec" type="button" style="padding:6px 9px" onclick="editVocabulary({{ term.id }})">Edit</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteVocabulary({{ term.id }})">Delete</button></div>
+        <div><strong>{{ term.source_text }}</strong> → <strong>{{ term.replacement_text }}</strong><div class="sub" style="font-size:11px">{{ term.language or t('All languages') }} · {{ t('case-sensitive') if term.case_sensitive else t('ignore case') }}{% if not term.enabled %} · {{ t('disabled') }}{% endif %}</div></div>
+        <div><button class="btn sec" type="button" style="padding:6px 9px" onclick="editVocabulary({{ term.id }})">{{ t('Edit') }}</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteVocabulary({{ term.id }})">{{ t('Delete') }}</button></div>
       </div>
-      {% else %}<div class="sub">No correction rules yet.</div>{% endfor %}
+      {% else %}<div class="sub">{{ t('No correction rules yet.') }}</div>{% endfor %}
     </div>
     <form id="vocabulary-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
       <input class="search-input" name="source_text" maxlength="300" placeholder="{{ t('ASR writes…') }}" required>
@@ -154,10 +154,10 @@
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px">
       {% for m in models %}
       <div class="tile">
-        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ m.display_name }}</strong><span><button class="btn sec" style="padding:5px 8px" onclick="testModel({{ m.id }})">Test</button> <button class="btn sec" style="padding:5px 8px" onclick="editModel({{ m.id }})">Edit</button> <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="removeItem('models',{{ m.id }})">Delete</button></span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ m.display_name }}</strong><span><button class="btn sec" style="padding:5px 8px" onclick="testModel({{ m.id }})">{{ t('Test') }}</button> <button class="btn sec" style="padding:5px 8px" onclick="editModel({{ m.id }})">{{ t('Edit') }}</button> <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="removeItem('models',{{ m.id }})">{{ t('Delete') }}</button></span></div>
         <div class="sub" style="font-size:11px;margin-top:3px">{{ m.connection_key }} · <code>{{ m.model_key }}</code></div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">{% for capability in m.capabilities.stages or [] %}<span class="chip">{{ capability.stage }}</span>{% endfor %}</div>
-        {% set pricing=(m.capabilities.metadata or {}).pricing or {} %}{% if pricing %}<div class="sub" style="font-size:10.5px;margin-top:6px">Pricing · {% if pricing.free %}explicitly free{% else %}input {{ pricing.input_per_million_tokens_usd or 0 }}/M · output {{ pricing.output_per_million_tokens_usd or 0 }}/M · audio {{ pricing.audio_per_minute_usd or 0 }}/min{% endif %}</div>{% endif %}
+        {% set pricing=(m.capabilities.metadata or {}).pricing or {} %}{% if pricing %}<div class="sub" style="font-size:10.5px;margin-top:6px">{{ t('Pricing') }} · {% if pricing.free %}{{ t('explicitly free') }}{% else %}{{ t('input') }} {{ pricing.input_per_million_tokens_usd or 0 }}/M · {{ t('output') }} {{ pricing.output_per_million_tokens_usd or 0 }}/M · {{ t('audio') }} {{ pricing.audio_per_minute_usd or 0 }}/min{% endif %}</div>{% endif %}
         <div id="model-health-{{ m.id }}" class="sub" style="font-size:11px;margin-top:7px">{{ (m.capabilities.health or {}).status or 'not tested' }}</div>
       </div>
       {% endfor %}
@@ -171,14 +171,14 @@
       <details {% if p.is_system_default %}open{% endif %} style="border-top:1px solid var(--border);padding-top:11px">
         <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:12px;list-style:none">
           <span><strong>{{ p.name }}</strong> <code>{{ p.key }}@{{ p.version }}</code></span>
-          <span>{% if p.is_system_default %}<span class="chip on">Default</span>{% endif %} <span class="chip">{% if p.policy.no_egress %}Local only{% else %}Egress allowed{% endif %}</span> <button class="btn sec" style="padding:5px 8px" onclick="event.preventDefault();newProfileVersion({{ p.id }})">New version</button>{% if not p.is_system_default %} <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="event.preventDefault();removeItem('profiles',{{ p.id }})">Delete</button>{% endif %}</span>
+          <span>{% if p.is_system_default %}<span class="chip on">{{ t('Default') }}</span>{% endif %} <span class="chip">{{ t('Local only') if p.policy.no_egress else t('Egress allowed') }}</span> <button class="btn sec" style="padding:5px 8px" onclick="event.preventDefault();newProfileVersion({{ p.id }})">{{ t('New version') }}</button>{% if not p.is_system_default %} <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="event.preventDefault();removeItem('profiles',{{ p.id }})">{{ t('Delete') }}</button>{% endif %}</span>
         </summary>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px">
           {% for stage, selection in p.stages.items() %}
           <div class="tile"><div class="k">{{ stage }}</div><div style="font-weight:600;margin-top:3px">{{ selection.model }}</div><div class="sub" style="font-size:11px">{{ selection.connection }} · {{ selection.execution_target }}</div></div>
           {% endfor %}
         </div>
-        {% set fallbacks=(p.policy.fallback_policy or {}).stages or {} %}{% if fallbacks %}<div class="sub" style="font-size:11.5px;margin-top:10px"><strong>Fallback order</strong>{% for stage, candidates in fallbacks.items() %}{% if candidates %}<div style="margin-top:3px">{{ stage }} · {% for candidate in candidates %}{{ loop.index }}. {{ candidate.connection }}:{{ candidate.model }}{% if not loop.last %} → {% endif %}{% endfor %}</div>{% endif %}{% endfor %}</div>{% endif %}
+        {% set fallbacks=(p.policy.fallback_policy or {}).stages or {} %}{% if fallbacks %}<div class="sub" style="font-size:11.5px;margin-top:10px"><strong>{{ t('Fallback order') }}</strong>{% for stage, candidates in fallbacks.items() %}{% if candidates %}<div style="margin-top:3px">{{ stage }} · {% for candidate in candidates %}{{ loop.index }}. {{ candidate.connection }}:{{ candidate.model }}{% if not loop.last %} → {% endif %}{% endfor %}</div>{% endif %}{% endfor %}</div>{% endif %}
       </details>
       {% endfor %}
     </div>
@@ -186,24 +186,24 @@
 
   <div class="panel" style="margin-top:16px" id="note-templates">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-      <div><strong>{{ t('Note templates') }}</strong><div class="sub" style="font-size:12px">Editable, versioned prompts for structured notes. Existing notes keep their exact template snapshot.</div></div>
+      <div><strong>{{ t('Note templates') }}</strong><div class="sub" style="font-size:12px">{{ t('Editable, versioned prompts for structured notes. Existing notes keep their exact template snapshot.') }}</div></div>
     </div>
     <div style="display:grid;gap:9px;margin-top:12px">
       {% for template in note_templates %}
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px">
-        <div><strong>{{ template.name }}</strong> <code>{{ template.key }}@{{ template.version }}</code>{% if template.is_builtin %} <span class="chip">Built-in</span>{% endif %}</div>
-        <div><button class="btn sec" style="padding:6px 9px" onclick="editNoteTemplate('{{ template.key }}')">New version</button>{% if template.key != 'default' %} <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="archiveNoteTemplate('{{ template.key }}')">Archive</button>{% endif %}</div>
+        <div><strong>{{ template.name }}</strong> <code>{{ template.key }}@{{ template.version }}</code>{% if template.is_builtin %} <span class="chip">{{ t('Built-in') }}</span>{% endif %}</div>
+        <div><button class="btn sec" style="padding:6px 9px" onclick="editNoteTemplate('{{ template.key }}')">{{ t('New version') }}</button>{% if template.key != 'default' %} <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="archiveNoteTemplate('{{ template.key }}')">{{ t('Archive') }}</button>{% endif %}</div>
       </div>
       {% endfor %}
     </div>
     <form id="note-template-form" style="display:grid;gap:9px;margin-top:14px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
         <input class="search-input" name="name" maxlength="80" placeholder="{{ t('Template name') }}" required>
-        <input class="search-input" name="key" maxlength="64" pattern="[a-z0-9][a-z0-9-]*" placeholder="Stable key, e.g. research-interview" required>
+        <input class="search-input" name="key" maxlength="64" pattern="[a-z0-9][a-z0-9-]*" placeholder="{{ t('Stable key, e.g. research-interview') }}" required>
       </div>
-      <label class="sub">System prompt<textarea class="search-input" name="system_prompt" rows="4" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical"></textarea></label>
-      <label class="sub">Markdown structure and instructions<textarea class="search-input" name="instructions" rows="9" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></label>
-      <div style="display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Create template</button><button class="btn sec" id="cancel-template-edit" type="button" hidden>Cancel edit</button><span id="note-template-result" class="sub"></span></div>
+      <label class="sub">{{ t('System prompt') }}<textarea class="search-input" name="system_prompt" rows="4" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical"></textarea></label>
+      <label class="sub">{{ t('Markdown structure and instructions') }}<textarea class="search-input" name="instructions" rows="9" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></label>
+      <div style="display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create template') }}</button><button class="btn sec" id="cancel-template-edit" type="button" hidden>{{ t('Cancel edit') }}</button><span id="note-template-result" class="sub"></span></div>
     </form>
   </div>
 
@@ -211,7 +211,7 @@
     <strong>{{ t('Create provider connection') }}</strong>
     <form id="connection-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
       <input class="search-input" name="name" placeholder="{{ t('Display name') }}" required>
-      <input class="search-input" name="key" placeholder="Unique key, e.g. llm:studio" required>
+      <input class="search-input" name="key" placeholder="{{ t('Unique key, e.g. llm:studio') }}" required>
       <input class="search-input" name="provider_type" placeholder="{{ t('Provider type') }}" required>
       <select class="search-input" name="execution_target"><option value="local">{{ t('Local') }}</option><option value="cloud">{{ t('Cloud') }}</option><option value="remote_worker">{{ t('Remote worker') }}</option></select>
       <input class="search-input" name="secret_ref" placeholder="{{ t('Secret ref (optional)') }}">
@@ -227,9 +227,9 @@
       <input class="search-input" name="model_key" placeholder="{{ t('Model identifier') }}" required>
       <input class="search-input" name="display_name" placeholder="{{ t('Display name') }}" required>
       <div class="sub" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">{% for stage in provider_stages %}<label><input type="checkbox" name="capability" value="{{ stage }}"> {{ stage }}</label>{% endfor %}</div>
-      <input class="search-input" type="number" min="0" step="0.000001" name="input_price" placeholder="Input $ / 1M tokens (optional)">
-      <input class="search-input" type="number" min="0" step="0.000001" name="output_price" placeholder="Output $ / 1M tokens (optional)">
-      <input class="search-input" type="number" min="0" step="0.000001" name="audio_price" placeholder="Audio $ / minute (optional)">
+      <input class="search-input" type="number" min="0" step="0.000001" name="input_price" placeholder="{{ t('Input $ / 1M tokens (optional)') }}">
+      <input class="search-input" type="number" min="0" step="0.000001" name="output_price" placeholder="{{ t('Output $ / 1M tokens (optional)') }}">
+      <input class="search-input" type="number" min="0" step="0.000001" name="audio_price" placeholder="{{ t('Audio $ / minute (optional)') }}">
       <label class="sub" style="display:flex;align-items:center;gap:7px"><input type="checkbox" name="free_pricing"> {{ t('Explicitly free / no provider charge') }}</label>
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Add model') }}</button><span id="model-result" class="sub"></span></div>
     </form>
@@ -237,39 +237,39 @@
 
   <div class="panel" style="margin-top:16px" id="create-profile">
     <strong>{{ t('Create execution profile') }}</strong>
-    <p class="sub" style="margin:4px 0 12px">Each stage is explicit. Unsupported model/stage combinations are rejected before saving.</p>
+    <p class="sub" style="margin:4px 0 12px">{{ t('Each stage is explicit. Unsupported model/stage combinations are rejected before saving.') }}</p>
     <form id="profile-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <input class="search-input" name="name" placeholder="{{ t('Profile name') }}" required>
-      <input class="search-input" name="key" placeholder="Stable key, e.g. apple-local" required>
+      <input class="search-input" name="key" placeholder="{{ t('Stable key, e.g. apple-local') }}" required>
       {% for stage in provider_stages %}
-      <label class="sub">{{ stage }} · primary
-        <select class="search-input" name="stage-{{ stage }}" required style="margin-top:3px"><option value="">Choose model…</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
+      <label class="sub">{{ stage }} · {{ t('primary') }}
+        <select class="search-input" name="stage-{{ stage }}" required style="margin-top:3px"><option value="">{{ t('Choose model…') }}</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
       </label>
-      <label class="sub">{{ stage }} · first fallback
-        <select class="search-input" name="fallback-{{ stage }}" style="margin-top:3px"><option value="">No fallback</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
+      <label class="sub">{{ stage }} · {{ t('first fallback') }}
+        <select class="search-input" name="fallback-{{ stage }}" style="margin-top:3px"><option value="">{{ t('No fallback') }}</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
       </label>
       {% endfor %}
-      <label class="sub"><input type="checkbox" name="no_egress" checked> Local only / no egress</label>
-      <label class="sub"><input type="checkbox" name="is_system_default"> Make system default</label>
-      <label class="sub">Cost ceiling <input class="search-input" type="number" step="0.01" min="0" name="cost_ceiling" placeholder="Optional"></label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Create profile</button><span id="profile-result" class="sub"></span></div>
+      <label class="sub"><input type="checkbox" name="no_egress" checked> {{ t('Local only / no egress') }}</label>
+      <label class="sub"><input type="checkbox" name="is_system_default"> {{ t('Make system default') }}</label>
+      <label class="sub">{{ t('Cost ceiling') }} <input class="search-input" type="number" step="0.01" min="0" name="cost_ceiling" placeholder="{{ t('Optional') }}"></label>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create profile') }}</button><span id="profile-result" class="sub"></span></div>
     </form>
   </div>
 
   <div class="panel" style="margin-top:16px" id="remote-workers">
     <strong>{{ t('Remote workers') }}</strong>
-    <p class="sub" style="margin:4px 0 12px">Authenticated localplaud-worker v1 hosts. Tokens remain in environment variables.</p>
+    <p class="sub" style="margin:4px 0 12px">{{ t('Authenticated localplaud-worker v1 hosts. Tokens remain in environment variables.') }}</p>
     <div style="display:grid;gap:9px">
       {% for worker in workers %}
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:9px">
-        <div><strong>{{ worker.name }}</strong> <code>{{ worker.key }}</code><div class="sub" style="font-size:11px">{{ worker.base_url }} · protocol {{ worker.protocol_version or 'not checked' }} · {{ worker.token_env }}</div></div>
-        <div><span id="worker-health-{{ worker.id }}" class="st {{ worker.health.status or 'unknown' }}">{{ worker.health.status or 'unknown' }}</span> <button class="btn sec" style="padding:6px 9px" onclick="testWorker({{ worker.id }})">Test</button> <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="removeItem('workers',{{ worker.id }})">Delete</button></div>
+        <div><strong>{{ worker.name }}</strong> <code>{{ worker.key }}</code><div class="sub" style="font-size:11px">{{ t('protocol') }} {{ worker.protocol_version or t('not checked') }} · {{ worker.token_env }}</div></div>
+        <div><span id="worker-health-{{ worker.id }}" class="st {{ worker.health.status or 'unknown' }}">{{ t(worker.health.status or 'unknown') }}</span> <button class="btn sec" style="padding:6px 9px" onclick="testWorker({{ worker.id }})">{{ t('Test') }}</button> <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="removeItem('workers',{{ worker.id }})">{{ t('Delete') }}</button></div>
       </div>
       {% endfor %}
     </div>
     <form id="worker-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
       <input class="search-input" name="name" placeholder="{{ t('Worker name') }}" required>
-      <input class="search-input" name="key" placeholder="Stable key, e.g. cclab-gpu" required>
+      <input class="search-input" name="key" placeholder="{{ t('Stable key, e.g. cclab-gpu') }}" required>
       <input class="search-input" name="base_url" type="url" placeholder="https://worker.example/" required>
       <input class="search-input" name="token_env" value="LOCALPLAUD_WORKER_TOKEN" placeholder="{{ t('Token environment variable') }}" required>
       <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center"><button class="btn" type="submit">{{ t('Register worker') }}</button><span id="worker-result" class="sub"></span></div>
@@ -278,21 +278,21 @@
 
   <div class="panel" style="margin-top:16px" id="webhook-integrations">
     <strong>{{ t('Authorized webhooks') }}</strong>
-    <p class="sub" style="margin:4px 0 12px">Outbound data delivery is opt-in. Rules reference these destinations; bearer secrets stay in environment variables.</p>
+    <p class="sub" style="margin:4px 0 12px">{{ t('Outbound data delivery is opt-in. Rules reference these destinations; bearer secrets stay in environment variables.') }}</p>
     <div style="display:grid;gap:9px">
       {% for integration in webhook_integrations %}
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:9px;{% if not integration.enabled %}opacity:.55{% endif %}">
-        <div><strong>{{ integration.name }}</strong> <span class="chip">{{ integration.scopes|join(', ') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ integration.url }} · {{ 'private/LAN allowed' if integration.allow_private_network else 'public HTTPS only' }}{% if integration.last_used_at %} · used {{ integration.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div>
-        <div><span id="webhook-health-{{ integration.id }}" class="st {{ integration.health.status or 'unknown' }}" title="{{ integration.health.detail or '' }}">{{ integration.health.status or 'unknown' }}</span> <button class="btn sec" type="button" style="padding:6px 9px" onclick="testWebhook({{ integration.id }})">Test</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteWebhook({{ integration.id }})">Delete</button></div>
+        <div><strong>{{ integration.name }}</strong> <span class="chip">{{ integration.scopes|join(', ') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ integration.url }} · {{ t('private/LAN allowed') if integration.allow_private_network else t('public HTTPS only') }}{% if integration.last_used_at %} · {{ t('used') }} {{ integration.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div>
+        <div><span id="webhook-health-{{ integration.id }}" class="st {{ integration.health.status or 'unknown' }}" title="{{ integration.health.detail or '' }}">{{ t(integration.health.status or 'unknown') }}</span> <button class="btn sec" type="button" style="padding:6px 9px" onclick="testWebhook({{ integration.id }})">{{ t('Test') }}</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteWebhook({{ integration.id }})">{{ t('Delete') }}</button></div>
       </div>
-      {% else %}<div class="sub">No webhook destinations authorized.</div>{% endfor %}
+      {% else %}<div class="sub">{{ t('No webhook destinations authorized.') }}</div>{% endfor %}
     </div>
     <form id="webhook-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
       <input class="search-input" name="name" maxlength="120" placeholder="{{ t('Webhook name') }}" required>
       <input class="search-input" name="url" type="url" maxlength="2048" placeholder="https://example.com/webhook" required>
-      <input class="search-input" name="secret_ref" maxlength="256" placeholder="Bearer secret ref, e.g. env:WEBHOOK_TOKEN">
+      <input class="search-input" name="secret_ref" maxlength="256" placeholder="{{ t('Bearer secret ref, e.g. env:WEBHOOK_TOKEN') }}">
       <div class="sub" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><label><input type="checkbox" name="scope" value="metadata" checked> {{ t('Metadata') }}</label><label><input type="checkbox" name="scope" value="transcript"> {{ t('Transcript') }}</label><label><input type="checkbox" name="scope" value="notes"> {{ t('Notes') }}</label></div>
-      <label class="sub"><input type="checkbox" name="allow_private_network"> Explicitly allow private/LAN destination and HTTP</label>
+      <label class="sub"><input type="checkbox" name="allow_private_network"> {{ t('Explicitly allow private/LAN destination and HTTP') }}</label>
       <label class="sub"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label>
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize webhook') }}</button><span id="webhook-result" class="sub"></span></div>
     </form>
@@ -300,20 +300,20 @@
 
   <div class="panel" style="margin-top:16px" id="email-integrations">
     <strong>{{ t('Authorized email') }}</strong>
-    <p class="sub" style="margin:4px 0 12px">SMTP delivery is opt-in. Passwords stay in environment variables; Test sends no recording data.</p>
+    <p class="sub" style="margin:4px 0 12px">{{ t('SMTP delivery is opt-in. Passwords stay in environment variables; Test sends no recording data.') }}</p>
     <div style="display:grid;gap:9px">
       {% for integration in email_integrations %}
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:9px;{% if not integration.enabled %}opacity:.55{% endif %}">
-        <div><strong>{{ integration.name }}</strong> <span class="chip">{{ integration.scopes|join(', ') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ integration.smtp_host }}:{{ integration.smtp_port }} · {{ integration.security }} · to {{ integration.to_addresses|join(', ') }}{% if integration.last_used_at %} · used {{ integration.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div>
-        <div><span id="email-health-{{ integration.id }}" class="st {{ integration.health.status or 'unknown' }}" title="{{ integration.health.detail or '' }}">{{ integration.health.status or 'unknown' }}</span> <button class="btn sec" type="button" style="padding:6px 9px" onclick="testEmail({{ integration.id }})">Test</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteEmail({{ integration.id }})">Delete</button></div>
+        <div><strong>{{ integration.name }}</strong> <span class="chip">{{ integration.scopes|join(', ') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ integration.smtp_host }}:{{ integration.smtp_port }} · {{ integration.security }} · {{ t('to') }} {{ integration.to_addresses|join(', ') }}{% if integration.last_used_at %} · {{ t('used') }} {{ integration.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div>
+        <div><span id="email-health-{{ integration.id }}" class="st {{ integration.health.status or 'unknown' }}" title="{{ integration.health.detail or '' }}">{{ t(integration.health.status or 'unknown') }}</span> <button class="btn sec" type="button" style="padding:6px 9px" onclick="testEmail({{ integration.id }})">{{ t('Test') }}</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteEmail({{ integration.id }})">{{ t('Delete') }}</button></div>
       </div>
-      {% else %}<div class="sub">No email destinations authorized.</div>{% endfor %}
+      {% else %}<div class="sub">{{ t('No email destinations authorized.') }}</div>{% endfor %}
     </div>
     <form id="email-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
       <input class="search-input" name="name" maxlength="120" placeholder="{{ t('Email destination name') }}" required>
       <input class="search-input" name="smtp_host" maxlength="255" placeholder="{{ t('SMTP host') }}" required>
       <input class="search-input" name="smtp_port" type="number" min="1" max="65535" value="587" required>
-      <select class="search-input" name="security"><option value="starttls">STARTTLS</option><option value="tls">Implicit TLS</option><option value="plain">Plain SMTP</option></select>
+      <select class="search-input" name="security"><option value="starttls">STARTTLS</option><option value="tls">{{ t('Implicit TLS') }}</option><option value="plain">{{ t('Plain SMTP') }}</option></select>
       <input class="search-input" name="username" maxlength="320" placeholder="{{ t('SMTP username (optional)') }}">
       <input class="search-input" name="password_ref" maxlength="256" placeholder="{{ t('Password ref, e.g. env:SMTP_PASSWORD') }}">
       <input class="search-input" name="from_address" type="email" maxlength="320" placeholder="{{ t('From address') }}" required>
@@ -327,10 +327,10 @@
   </div>
 
   <div class="panel" style="margin-top:16px" id="support-about">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Support & about') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">Runtime identity and a deliberately redacted support bundle.</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Support & about') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Runtime identity and a deliberately redacted support bundle.') }}</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;margin-top:12px"><div class="tile"><div class="k">{{ t('Runtime') }}</div><div style="margin-top:4px">Python {{ about.python }}</div></div><div class="tile"><div class="k">{{ t('Host') }}</div><div style="margin-top:4px">{{ about.system }} · {{ about.machine }}</div></div><div class="tile"><div class="k">{{ t('License') }}</div><div style="margin-top:4px">{{ about.license }}</div></div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px"><a class="btn" href="/api/system/diagnostics.json">{{ t('Download safe diagnostics') }}</a><a class="btn sec" href="/status">{{ t('System health') }}</a><a class="btn sec" href="/api/docs">{{ t('API documentation') }}</a><a class="btn sec" href="{{ about.support.repository }}" target="_blank" rel="noopener">{{ t('GitHub repository') }} ↗</a></div>
-    <p class="sub" style="font-size:11.5px;margin:10px 0 0">Diagnostics contain aggregate counts and non-secret runtime switches only. Recording IDs, titles, content, paths, URLs, addresses, errors, environment variables, and credentials are excluded.</p>
+    <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t('Diagnostics contain aggregate counts and non-secret runtime switches only. Recording IDs, titles, content, paths, URLs, addresses, errors, environment variables, and credentials are excluded.') }}</p>
   </div>
     </div>
   </div>

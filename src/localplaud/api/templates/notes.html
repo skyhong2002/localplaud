@@ -28,10 +28,11 @@
 {% endblock %}
 {% block scripts %}
 <script>
+const tr=window.localplaudT;
 function editSavedNote(id){const card=document.getElementById(`note-${id}`);card.querySelector('[data-note-body]').hidden=true;card.querySelector('[data-note-form]').hidden=false;}
 function cancelSavedNote(id){const card=document.getElementById(`note-${id}`);card.querySelector('[data-note-body]').hidden=false;card.querySelector('[data-note-form]').hidden=true;}
-async function copySavedNote(id,button){const text=document.getElementById(`note-${id}`).querySelector('[data-note-body]').textContent.trim();await navigator.clipboard.writeText(text);const old=button.textContent;button.textContent='Copied';setTimeout(()=>button.textContent=old,1200);}
-async function deleteSavedNote(id){if(!confirm('Delete this saved note? The original Ask thread is preserved.'))return;const response=await fetch(`/api/notes/${id}`,{method:'DELETE'});if(response.ok)document.getElementById(`note-${id}`).remove();else alert('Could not delete note');}
-document.querySelectorAll('[data-note-form]').forEach(form=>form.addEventListener('submit',async event=>{event.preventDefault();const card=form.closest('article'),id=card.id.slice(5),data=new FormData(form),status=form.querySelector('[data-note-status]');status.textContent='Saving…';const response=await fetch(`/api/notes/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:data.get('title'),content_md:data.get('content_md')})});if(response.ok)location.reload();else{const result=await response.json();status.textContent=result.detail||'Could not save';}}));
+async function copySavedNote(id,button){const text=document.getElementById(`note-${id}`).querySelector('[data-note-body]').textContent.trim();await navigator.clipboard.writeText(text);const old=button.textContent;button.textContent=tr('Copied');setTimeout(()=>button.textContent=old,1200);}
+async function deleteSavedNote(id){if(!confirm(tr('Delete this saved note? The original Ask thread is preserved.')))return;const response=await fetch(`/api/notes/${id}`,{method:'DELETE'});if(response.ok)document.getElementById(`note-${id}`).remove();else alert(tr('Could not delete note'));}
+document.querySelectorAll('[data-note-form]').forEach(form=>form.addEventListener('submit',async event=>{event.preventDefault();const card=form.closest('article'),id=card.id.slice(5),data=new FormData(form),status=form.querySelector('[data-note-status]');status.textContent=tr('Saving…');const response=await fetch(`/api/notes/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:data.get('title'),content_md:data.get('content_md')})});if(response.ok)location.reload();else{const result=await response.json();status.textContent=tr(result.detail||'Could not save');}}));
 </script>
 {% endblock %}

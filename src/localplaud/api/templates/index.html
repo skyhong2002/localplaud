@@ -370,7 +370,7 @@
     const fileIds = selected();
     if (!fileIds.length) return;
     const lifecycle = action.value === 'resume' || action.value === 'delete-local-processing';
-    if(action.value === 'delete-local-processing' && !confirm('Delete local transcripts, corrections, generated notes, indexes, and processing history for the selected recordings? Original audio, Plaud data, organization, Ask history, and editable notes remain.'))return;
+    if(action.value === 'delete-local-processing' && !confirm(window.localplaudT('Delete local transcripts, corrections, generated notes, indexes, and processing history for the selected recordings? Original audio, Plaud data, organization, Ask history, and editable notes remain.')))return;
     const body = {file_ids: fileIds};
     if(lifecycle)body.action=action.value === 'resume'?'resume':'delete_local_processing';
     if (action.value === 'folder') body.folder_id = target.value ? Number(target.value) : null;

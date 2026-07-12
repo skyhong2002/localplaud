@@ -154,6 +154,13 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         assert "已授權的備份目的地" in settings.text
         assert "尚未授權遠端備份目的地" in settings.text
         assert "明確允許私人／區網目的地與 HTTP" in settings.text
+        assert "依實際證據推薦本機 ASR 設定" in settings.text
+        assert "密鑰只會以參照方式保存" in settings.text
+        assert "修正姓名與專業詞彙，不變更原始 ASR" in settings.text
+        assert "每個處理階段皆明確指定" in settings.text
+        assert "對外資料傳送須明確啟用" in settings.text
+        assert "SMTP 傳送須明確啟用" in settings.text
+        assert "診斷檔只包含彙總計數" in settings.text
         assert "從 Plaud 匯入中繼資料" in settings.text
         assert "localStatus.textContent=`${tr('Importing')}" in settings.text
         assert "label.textContent=`${tr('Complete')}" in settings.text
@@ -187,3 +194,22 @@ def test_traditional_chinese_catalog_covers_all_static_template_messages():
 
     missing = sorted(keys - catalog("zh-Hant-TW").keys())
     assert missing == []
+
+
+def test_dynamic_action_messages_use_translation_helper():
+    """User-visible JS actions must not bypass the centralized locale catalog."""
+    template_dir = Path(__file__).parents[1] / "src/localplaud/api/templates"
+    literal_patterns = (
+        r"(?:textContent\s*=|alert\(|confirm\(|prompt\()\s*'([^']*[A-Za-z][^']*)'",
+        r"(?:textContent\s*=|alert\(|confirm\(|prompt\()\s*`([^`]*[A-Za-z][^`]*)`",
+    )
+    violations: list[str] = []
+    technical_fragments = ("${position", "${matches.length}", "${stamp")
+    for template in template_dir.glob("*.html"):
+        source = template.read_text(encoding="utf-8")
+        for pattern in literal_patterns:
+            for message in re.findall(pattern, source):
+                if "tr(" in message or message.startswith(technical_fragments):
+                    continue
+                violations.append(f"{template.name}: {message}")
+    assert violations == []

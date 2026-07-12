@@ -59,10 +59,10 @@
 </div>
 <script>
 window.saveAskNote=async function(messageId,button){
-  const status=button.parentElement.querySelector('[data-save-status]');button.disabled=true;status.textContent='Saving…';
+  const tr=window.localplaudT,status=button.parentElement.querySelector('[data-save-status]');button.disabled=true;status.textContent=tr('Saving…');
   const response=await fetch(`/api/ask/messages/${messageId}/save-note`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
   const data=await response.json();
-  if(response.ok){status.textContent=`Saved to Notes · ${data.title}`;button.textContent='Saved';}
-  else{status.textContent=data.detail||'Could not save';button.disabled=false;}
+  if(response.ok){status.textContent=`${tr('Saved to Notes')} · ${data.title}`;button.textContent=tr('Saved');}
+  else{status.textContent=tr(data.detail||'Could not save');button.disabled=false;}
 };
 </script>
