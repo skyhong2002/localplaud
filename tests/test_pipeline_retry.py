@@ -325,3 +325,37 @@ def test_manual_resume_rejects_active_processing_claim(monkeypatch, tmp_path):
             assert row.pipeline_retry_count == 2
     finally:
         _release_processing("active", token)
+
+
+def test_setup_failure_releases_claim_and_schedules_retry(monkeypatch, tmp_path):
+    settings = _reset(monkeypatch, tmp_path)
+    import localplaud.worker.pipeline as pipeline
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    audio = tmp_path / "setup-failure.wav"
+    audio.write_bytes(b"RIFF")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="setup-failure",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+            )
+        )
+    monkeypatch.setattr(
+        pipeline,
+        "_process_file_claimed",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("profile invalid")),
+    )
+
+    with pytest.raises(RuntimeError, match="profile invalid"):
+        pipeline.process_file("setup-failure", settings=settings)
+    with session_scope() as session:
+        row = session.get(PlaudFile, "setup-failure")
+        assert row.status == FileStatus.error
+        assert row.error == "profile invalid"
+        assert row.pipeline_retry_count == 1
+        assert row.pipeline_next_retry_at is not None
+        assert row.processing_token is None
+        assert row.processing_lease_until is None

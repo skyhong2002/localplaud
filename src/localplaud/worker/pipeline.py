@@ -527,6 +527,16 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
     token = _claim_processing(file_id)
     try:
         _process_file_claimed(file_id, settings=settings, force=force)
+    except Exception as exc:
+        # The main pipeline records its own failures. This guard covers setup
+        # errors (for example profile resolution) that occur before its try block.
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            if row is not None and row.status == FileStatus.processing:
+                row.status = FileStatus.error
+                row.error = str(exc)[:2000]
+                _schedule_pipeline_retry(row, settings or get_settings())
+        raise
     finally:
         _release_processing(file_id, token)
 
