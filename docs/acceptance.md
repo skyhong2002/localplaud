@@ -35,5 +35,5 @@ localplaud acceptance-check RECORDING_ID --json
 The automated acceptance test starts from a clean, user-owned raw-audio row with no
 Plaud transcript or summary. Network-free test providers execute ASR, notes, mind
 map, embeddings, and grounded Ask; the test then runs the same audit and verifies
-playable Ask citations plus TXT/SRT/VTT. Separate real-hardware benchmarks remain
-required for accuracy, diarization error, runtime, and memory claims.
+playable Ask citations plus TXT/SRT/VTT. Hardware/model quality review remains an
+engineering concern rather than a user-facing product feature.

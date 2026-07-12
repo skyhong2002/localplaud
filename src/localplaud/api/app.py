@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -1113,26 +1113,6 @@ def recording_acceptance(file_id: str) -> dict:
         return subscription_independence_report(file_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@app.post("/api/files/{file_id}/benchmark")
-async def recording_benchmark(file_id: str, reference: Annotated[UploadFile, File()]) -> dict:
-    import json
-
-    from ..benchmark import benchmark_recording, validate_reference
-
-    content = await reference.read(5 * 1024 * 1024 + 1)
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="reference JSON exceeds 5 MB")
-    try:
-        data = json.loads(content.decode("utf-8"))
-        return benchmark_recording(file_id, validate_reference(data))
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    finally:
-        await reference.close()
 
 
 def _canonical_raw_row(r: PlaudFile, settings) -> Transcript | None:

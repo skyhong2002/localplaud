@@ -57,5 +57,5 @@ The protocol and same-process integration are covered by automated tests. The CU
 image has completed deployment acceptance on CCLabPC (RTX 5060): its pinned PyTorch
 2.8 / CUDA 12.8 / TorchCodec 0.7 / pyannote 4 stack imports cleanly, reports the GPU,
 and serves the authenticated capability handshake. Real-audio quality/runtime
-benchmarking and rentable-GPU deployment remain separate acceptance tasks; do not
+quality validation and rentable-GPU deployment remain separate engineering tasks; do not
 generalize the CCLabPC result to those untested paths.

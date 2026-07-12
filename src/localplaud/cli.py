@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -96,100 +95,6 @@ def acceptance_check(
             )
         console.print(table)
         console.print("[green]PASS[/]" if report["passed"] else "[red]FAIL[/]")
-    if not report["passed"]:
-        raise typer.Exit(1)
-
-
-@app.command("benchmark-recording")
-def benchmark_recording_command(
-    file_id: str = typer.Argument(help="Recording ID with a local canonical transcript."),
-    reference: str = typer.Option(..., "--reference", help="Private reference JSON path."),
-    json_output: bool = typer.Option(False, "--json", help="Print machine-readable JSON."),
-):
-    """Measure transcript, speaker, timestamp, and execution quality."""
-    from .benchmark import benchmark_recording, load_reference
-    from .db.session import init_db
-
-    init_db()
-    try:
-        report = benchmark_recording(file_id, load_reference(reference))
-    except (LookupError, OSError, ValueError) as exc:
-        console.print(f"[red]✗ Benchmark failed:[/] {exc}")
-        raise typer.Exit(1) from exc
-    if json_output:
-        console.print_json(json.dumps(report, ensure_ascii=False))
-        return
-    table = Table(title=f"Recording benchmark · {file_id}")
-    table.add_column("Metric")
-    table.add_column("Value")
-    for name, value in (
-        ("CER", report["accuracy"]["cer"]),
-        ("WER", report["accuracy"]["wer"]),
-        ("DER", report["speakers"]["der"]),
-        ("Speech character insertion", report["hallucination"]["speech_character_insertion_rate"]),
-        ("Speech word insertion", report["hallucination"]["speech_word_insertion_rate"]),
-        ("Non-speech hallucination", report["hallucination"]["non_speech_character_rate"]),
-        ("Boundary MAE (s)", report["timestamps"]["boundary_mae_seconds"]),
-        ("Real-time factor", report["execution"]["real_time_factor"]),
-        ("Peak memory (MB)", report["execution"]["peak_memory_mb"]),
-    ):
-        table.add_row(name, "not recorded" if value is None else f"{value:.4f}")
-    console.print(table)
-    if report["execution"]["peak_memory_mb"] is None:
-        console.print("[yellow]Peak memory is not recorded by current stage telemetry.[/]")
-
-
-@app.command("benchmark-suite")
-def benchmark_suite_command(
-    manifest: str = typer.Argument(help="Private benchmark suite manifest JSON path."),
-    json_output: bool = typer.Option(False, "--json", help="Print machine-readable JSON."),
-    output: str | None = typer.Option(None, "--output", "-o", help="Write sanitized report JSON."),
-):
-    """Run and gate a private multi-recording quality suite."""
-    from .benchmark import benchmark_suite, load_suite_manifest
-    from .db.session import init_db
-
-    init_db()
-    try:
-        suite, base_dir = load_suite_manifest(manifest)
-        report = benchmark_suite(suite, base_dir)
-    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        console.print(f"[red]✗ Benchmark suite failed:[/] {exc}")
-        raise typer.Exit(1) from exc
-    rendered = json.dumps(report, ensure_ascii=False, indent=2)
-    if output:
-        Path(output).write_text(rendered + "\n", encoding="utf-8")
-    if json_output:
-        console.print_json(rendered)
-    else:
-        table = Table(title=f"Benchmark suite · {report['suite']}")
-        table.add_column("Metric")
-        table.add_column("Aggregate")
-        table.add_column("Gate")
-        thresholds = {item["metric"]: item for item in report["thresholds"]}
-        for name in (
-            "cer",
-            "wer",
-            "der",
-            "speech_character_insertion_rate",
-            "speech_word_insertion_rate",
-            "non_speech_character_rate",
-            "boundary_mae_seconds",
-            "real_time_factor",
-            "peak_memory_mb",
-        ):
-            value = report["aggregates"][name]
-            gate = thresholds.get(name)
-            gate_text = "—"
-            if gate:
-                gate_text = f"{'PASS' if gate['passed'] else 'FAIL'} ≤ {gate['maximum']:.4f}"
-            table.add_row(name, "not recorded" if value is None else f"{value:.4f}", gate_text)
-        console.print(table)
-        counts = report["case_counts"]
-        console.print(
-            f"{counts['completed']}/{counts['total']} cases completed · "
-            + ("[green]PASS[/]" if report["passed"] else "[red]FAIL[/]")
-        )
     if not report["passed"]:
         raise typer.Exit(1)
 

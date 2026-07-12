@@ -470,25 +470,9 @@ cross-provider fallback is stage-scoped, capability/policy validated, limited to
 retryable failures, and recorded as separate attempts. Provider connection and model
 health checks for remote workers use the authenticated protocol-v1 capability
 handshake; a healthy worker does not imply that an unadvertised model is available.
-The remaining real-hardware acceptance matrix is open.
-
-Reference-based quality reports use `localplaud benchmark-recording` and the
-`localplaud-benchmark-report/v1` schema. Private reference text stays outside the
-database/repository, while the report retains CER/WER error decompositions, reference-
-aligned character/word insertion rates, speaker error components,
-timestamp quality, execution provenance, latency, and real-time factor without
-transcript content. Completed stage attempts also retain the worker process RSS
-high-water mark; this is explicitly process-level memory evidence. See
-[`benchmarking.md`](benchmarking.md). Actual multi-recording
-Apple/NVIDIA/CPU measurements remain required before changing defaults.
-References that explicitly cover the full audio also report hypothesis text falling
-outside all annotated speech intervals; partial references never imply a zero
-hallucination rate.
-The recording workspace runs this comparison from a private reference JSON without
-persisting it; a bounded upload API returns the identical report used by the CLI.
-`localplaud benchmark-suite` runs a private multi-recording manifest, continues after
-case-level failures, produces unit-weighted aggregate metrics, and applies explicit
-maximum gates without exposing reference paths or content in its versioned report.
+The remaining real-hardware acceptance matrix is an engineering/deployment task,
+not a user-facing benchmark feature. localplaud intentionally exposes only the
+deterministic subscription-independence gate in the daily Web App and CLI.
 
 The deterministic subscription-independence gate is available as
 `localplaud acceptance-check RECORDING_ID` (or `--json` for automation). It audits
