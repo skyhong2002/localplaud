@@ -453,6 +453,13 @@ retryable failures, and recorded as separate attempts. Provider connection and m
 health checks for remote workers use the authenticated protocol-v1 capability
 handshake; a healthy worker does not imply that an unadvertised model is available.
 The remaining real-hardware acceptance matrix is open.
+
+The deterministic subscription-independence gate is available as
+`localplaud acceptance-check RECORDING_ID` (or `--json` for automation). It audits
+the raw-audio boundary, local provenance, timestamped speakers, notes, mind map, Ask
+index, durable stage/profile state, and required transcript exports. The automated
+harness additionally exercises grounded single-file Ask with a playable citation;
+see [`acceptance.md`](acceptance.md).
 Each concrete pipeline attempt is now retained in an append-only usage ledger with
 profile snapshot, provider/model, outcome, latency, normalized audio/text/token usage,
 and catalog-driven estimated cost. Recording and Status surfaces expose both attempts

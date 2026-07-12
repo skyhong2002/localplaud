@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 
@@ -63,6 +64,40 @@ def prepare_independent(
         f"{counts['summaries']} legacy summaries relabelled, "
         f"{counts['chunks']} stale chunks removed."
     )
+
+
+@app.command("acceptance-check")
+def acceptance_check(
+    file_id: str = typer.Argument(help="Recording ID to audit."),
+    json_output: bool = typer.Option(False, "--json", help="Print machine-readable JSON."),
+):
+    """Audit one recording against the subscription-independence product gate."""
+    from .acceptance import subscription_independence_report
+    from .db.session import init_db
+
+    init_db()
+    try:
+        report = subscription_independence_report(file_id)
+    except LookupError as exc:
+        console.print(f"[red]✗[/] {exc}")
+        raise typer.Exit(1) from exc
+    if json_output:
+        console.print_json(json.dumps(report, ensure_ascii=False))
+    else:
+        table = Table(title=f"Subscription independence · {file_id}")
+        table.add_column("Check")
+        table.add_column("Result")
+        table.add_column("Evidence")
+        for item in report["checks"]:
+            table.add_row(
+                item["name"],
+                "[green]PASS[/]" if item["passed"] else "[red]FAIL[/]",
+                item["detail"],
+            )
+        console.print(table)
+        console.print("[green]PASS[/]" if report["passed"] else "[red]FAIL[/]")
+    if not report["passed"]:
+        raise typer.Exit(1)
 
 
 @auth_app.command("check")

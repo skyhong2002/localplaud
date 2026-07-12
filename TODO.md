@@ -72,6 +72,12 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   counts provide progress. Failed and usable-partial cycles now retry automatically
   with durable bounded exponential backoff; fresh downloads stay ahead of due
   retries, exhaustion is visible, and manual Resume immediately resets the budget.
+- ✅ Added a read-only `localplaud acceptance-check RECORDING_ID` product gate. It
+  verifies local audio/transcript provenance, timestamped speaker output, local notes
+  and mind map, Ask-ready local chunks, durable profile snapshots, and TXT/SRT/VTT.
+  The network-free acceptance harness starts with raw audio and no Plaud Intelligence
+  artifacts, executes the whole pipeline plus grounded single-file Ask, and verifies
+  a playable source citation. Real-hardware quality benchmarking remains separate.
 
 ### P0 PRIMARY — Provider, model, and execution profiles
 
