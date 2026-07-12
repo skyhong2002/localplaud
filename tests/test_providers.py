@@ -11,10 +11,18 @@ from localplaud.api.app import app
 from localplaud.config import Settings
 from localplaud.db.migrations import (
     migrate_artifact_lineage_columns,
+    migrate_legacy_provider_profile_schema,
     migrate_profile_snapshot_columns,
     migrate_stage_run_snapshot_column,
 )
-from localplaud.db.models import Base, ExecutionProfile, PlaudFile, StageRun
+from localplaud.db.models import (
+    Base,
+    ExecutionProfile,
+    PlaudFile,
+    ProfileStageSelection,
+    ProviderConnection,
+    StageRun,
+)
 from localplaud.providers.contracts import Capability, ProviderStage, StageCapabilities
 from localplaud.providers.resolver import ResolutionError, resolve_profile
 from localplaud.providers.service import (
@@ -94,6 +102,93 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
         resolved = resolve_recording_profile(session, "recording").to_dict()
         assert resolved["stages"]["ask"]["options"] == {"x": 1}
         assert resolved["layers"][-1] == "recording:recording"
+
+
+def test_legacy_provider_profile_schema_rebuild_preserves_ids_and_config(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-providers.db'}")
+    with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        connection.execute(text("""
+            CREATE TABLE provider_connections (
+                id INTEGER PRIMARY KEY, name VARCHAR(128) NOT NULL UNIQUE,
+                provider_type VARCHAR(64) NOT NULL, base_url VARCHAR(1024),
+                secret_ref VARCHAR(256), configuration JSON NOT NULL,
+                enabled BOOLEAN NOT NULL, version INTEGER NOT NULL,
+                created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            CREATE TABLE model_catalog_entries (
+                id INTEGER PRIMARY KEY, connection_id INTEGER NOT NULL,
+                model_key VARCHAR(256) NOT NULL, display_name VARCHAR(256) NOT NULL,
+                capabilities JSON NOT NULL, enabled BOOLEAN NOT NULL,
+                FOREIGN KEY(connection_id) REFERENCES provider_connections(id)
+            )
+        """))
+        connection.execute(text("""
+            CREATE TABLE execution_profiles (
+                id INTEGER PRIMARY KEY, name VARCHAR(128) NOT NULL UNIQUE,
+                description TEXT, stages JSON NOT NULL, policy JSON NOT NULL,
+                is_system_default BOOLEAN NOT NULL, enabled BOOLEAN NOT NULL,
+                version INTEGER NOT NULL, created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            CREATE TABLE profile_stage_selections (
+                id INTEGER PRIMARY KEY, profile_id INTEGER NOT NULL,
+                stage VARCHAR(32) NOT NULL, connection_id INTEGER NOT NULL,
+                model_id INTEGER NOT NULL, options JSON NOT NULL,
+                FOREIGN KEY(profile_id) REFERENCES execution_profiles(id),
+                FOREIGN KEY(connection_id) REFERENCES provider_connections(id),
+                FOREIGN KEY(model_id) REFERENCES model_catalog_entries(id)
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO provider_connections VALUES (
+                7, 'openai-cloud', 'openai', 'https://api.openai.com/v1',
+                'env:OPENAI_API_KEY', '{"timeout": 45}', 1, 2,
+                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO model_catalog_entries VALUES (
+                11, 7, 'gpt-test', 'GPT Test', '{}', 1
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO execution_profiles VALUES (
+                3, 'system-default', NULL, '{}',
+                '{"no_egress": false, "cost_ceiling": 2.5}',
+                1, 1, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO profile_stage_selections VALUES (19, 3, 'ask', 7, 11, '{}')
+        """))
+
+    assert migrate_legacy_provider_profile_schema(engine) == [
+        "provider_connections",
+        "execution_profiles",
+    ]
+    assert migrate_legacy_provider_profile_schema(engine) == []
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+    with Session(engine) as session:
+        provider = session.get(ProviderConnection, 7)
+        assert provider.key == "openai-cloud"
+        assert provider.execution_target == "cloud" and provider.data_egress is True
+        assert provider.secret_ref == "env:OPENAI_API_KEY"
+        assert provider.config == {
+            "timeout": 45,
+            "base_url": "https://api.openai.com/v1",
+        }
+        profile = session.get(ExecutionProfile, 3)
+        assert profile.key == "legacy-settings-default" and profile.version == 2
+        assert profile.cost_ceiling == 2.5
+        assert bootstrap_default_profile(session, Settings()).id == 3
+        selection = session.get(ProfileStageSelection, 19)
+        assert (selection.profile_id, selection.connection_id, selection.model_id) == (3, 7, 11)
 
 
 def test_profile_key_can_have_multiple_versions(tmp_path):

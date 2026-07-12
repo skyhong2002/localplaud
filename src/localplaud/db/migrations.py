@@ -14,6 +14,127 @@ INDEPENDENT_MIGRATION_KEY = "migration.independent-artifacts.v1"
 _PLAUD_SOURCES = {"cloud", "plaud"}
 
 
+def migrate_legacy_provider_profile_schema(engine: Engine) -> list[str]:
+    """Rebuild the pre-contract provider/profile tables without changing row IDs.
+
+    An early deployed schema stored connection configuration and whole-profile JSON
+    directly on these tables. SQLite cannot drop its legacy NOT NULL columns, so an
+    additive migration would still break future inserts from the current ORM.
+    """
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if not {"provider_connections", "execution_profiles"} <= tables:
+        return []
+    connection_columns = {
+        column["name"] for column in inspector.get_columns("provider_connections")
+    }
+    profile_columns = {
+        column["name"] for column in inspector.get_columns("execution_profiles")
+    }
+    if "configuration" not in connection_columns or "stages" not in profile_columns:
+        return []
+
+    raw = engine.raw_connection()
+    try:
+        cursor = raw.cursor()
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.executescript("""
+            BEGIN;
+            CREATE TABLE provider_connections_new (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                key VARCHAR(64) NOT NULL UNIQUE,
+                name VARCHAR(128) NOT NULL,
+                provider_type VARCHAR(64) NOT NULL,
+                execution_target VARCHAR(32) NOT NULL DEFAULT 'local',
+                data_egress BOOLEAN NOT NULL DEFAULT 0,
+                secret_ref VARCHAR(256),
+                config JSON NOT NULL DEFAULT '{}',
+                health JSON NOT NULL DEFAULT '{}',
+                created_at DATETIME NOT NULL
+            );
+            INSERT INTO provider_connections_new (
+                id, key, name, provider_type, execution_target, data_egress,
+                secret_ref, config, health, created_at
+            )
+            SELECT
+                id,
+                name,
+                name,
+                provider_type,
+                CASE
+                    WHEN provider_type = 'remote-worker' THEN 'remote_worker'
+                    WHEN provider_type IN ('openai', 'deepgram', 'assemblyai', 'anthropic')
+                        THEN 'cloud'
+                    ELSE 'local'
+                END,
+                CASE
+                    WHEN provider_type IN (
+                        'remote-worker', 'openai', 'deepgram', 'assemblyai', 'anthropic'
+                    ) THEN 1 ELSE 0
+                END,
+                secret_ref,
+                CASE
+                    WHEN base_url IS NOT NULL AND base_url != ''
+                        THEN json_set(COALESCE(configuration, '{}'), '$.base_url', base_url)
+                    ELSE COALESCE(configuration, '{}')
+                END,
+                '{}',
+                created_at
+            FROM provider_connections;
+            DROP TABLE provider_connections;
+            ALTER TABLE provider_connections_new RENAME TO provider_connections;
+
+            CREATE TABLE execution_profiles_new (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                key VARCHAR(64) NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                is_system_default BOOLEAN NOT NULL DEFAULT 0,
+                privacy_policy VARCHAR(32) NOT NULL DEFAULT 'allow-egress',
+                no_egress BOOLEAN NOT NULL DEFAULT 0,
+                cost_ceiling FLOAT,
+                fallback_policy JSON NOT NULL DEFAULT '{}',
+                created_at DATETIME NOT NULL,
+                CONSTRAINT uq_profile_key_version UNIQUE (key, version)
+            );
+            INSERT INTO execution_profiles_new (
+                id, key, name, version, is_system_default, privacy_policy,
+                no_egress, cost_ceiling, fallback_policy, created_at
+            )
+            SELECT
+                id,
+                CASE WHEN is_system_default = 1 THEN 'legacy-settings-default' ELSE name END,
+                name,
+                version,
+                is_system_default,
+                CASE
+                    WHEN COALESCE(json_extract(policy, '$.no_egress'), 0) = 1
+                        THEN 'local-only'
+                    ELSE 'allow-egress'
+                END,
+                COALESCE(json_extract(policy, '$.no_egress'), 0),
+                json_extract(policy, '$.cost_ceiling'),
+                COALESCE(json_extract(policy, '$.fallback_policy'), '{}'),
+                created_at
+            FROM execution_profiles;
+            DROP TABLE execution_profiles;
+            ALTER TABLE execution_profiles_new RENAME TO execution_profiles;
+        """)
+        violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeError(f"legacy profile migration broke foreign keys: {violations}")
+        raw.commit()
+        cursor.execute("PRAGMA foreign_keys=ON")
+    except Exception:
+        raw.rollback()
+        raise
+    finally:
+        raw.close()
+    return ["provider_connections", "execution_profiles"]
+
+
 def migrate_automation_ownership_schema(engine: Engine) -> list[str]:
     """Add explicit local/external ownership to existing AutoFlow rules."""
     if engine.dialect.name != "sqlite":

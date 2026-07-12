@@ -45,6 +45,7 @@ def init_db() -> dict[str, int] | None:
         migrate_ask_provenance_schema,
         migrate_automation_ownership_schema,
         migrate_import_schema,
+        migrate_legacy_provider_profile_schema,
         migrate_note_template_schema,
         migrate_organization_schema,
         migrate_pipeline_retry_schema,
@@ -54,6 +55,7 @@ def init_db() -> dict[str, int] | None:
         migrate_vocabulary_schema,
     )
 
+    migrate_legacy_provider_profile_schema(engine)
     migrate_profile_snapshot_columns(engine)
     migrate_automation_ownership_schema(engine)
     migrate_stage_attempt_schema(engine)

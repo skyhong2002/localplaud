@@ -54,7 +54,8 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
     """Create a Settings-equivalent profile once, without changing runtime dispatch."""
     existing = session.scalar(
         select(ExecutionProfile)
-        .where(ExecutionProfile.key == DEFAULT_PROFILE_KEY, ExecutionProfile.version == 1)
+        .where(ExecutionProfile.key == DEFAULT_PROFILE_KEY)
+        .order_by(ExecutionProfile.version.desc())
         .options(selectinload(ExecutionProfile.stage_selections))
     )
     if existing is not None:
