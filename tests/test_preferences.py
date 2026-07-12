@@ -154,6 +154,9 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         assert "已授權的備份目的地" in settings.text
         assert "尚未授權遠端備份目的地" in settings.text
         assert "明確允許私人／區網目的地與 HTTP" in settings.text
+        assert "從 Plaud 匯入中繼資料" in settings.text
+        assert "localStatus.textContent=`${tr('Importing')}" in settings.text
+        assert "label.textContent=`${tr('Complete')}" in settings.text
         assert "button.textContent=tr('Uploading…')" in settings.text
         assert "out.textContent=tr('Authorizing…')" in settings.text
         assert "confirm(tr('Revoke this backup destination? Upload history is preserved.'))" in settings.text

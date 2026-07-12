@@ -246,8 +246,8 @@
         </div>
         <div class="plaud-import-card" id="plaud-import-panel" hidden>
           <span class="import-icon">☁</span><strong>{{ t('Mirror your Plaud library') }}</strong>
-          <p class="sub" style="max-width:440px;margin:8px 0 0">Imports the latest recording metadata and any existing Plaud transcript or summary. Audio stays in Plaud until you request it from a recording.</p>
-          <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">Import metadata from Plaud</button>
+          <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Imports the latest recording metadata and any existing Plaud transcript or summary. Audio stays in Plaud until you request it from a recording.') }}</p>
+          <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">{{ t('Import metadata from Plaud') }}</button>
           <div id="plaud-import-progress" hidden style="width:100%;max-width:440px">
             <div class="import-progress"><span style="width:0%"></span></div>
             <div class="sub" data-progress-label></div>
@@ -261,12 +261,12 @@
     window.spkColor = (() => { const m={}, n=8; let i=0;
       return s => { if(!s) return null; if(!(s in m)) m[s]=i++%n; return m[s]; }; })();
     (()=>{
-      const button=document.getElementById('add-audio-button'),menu=document.getElementById('add-audio-menu'),backdrop=document.getElementById('import-backdrop');
+      const tr=window.localplaudT,button=document.getElementById('add-audio-button'),menu=document.getElementById('add-audio-menu'),backdrop=document.getElementById('import-backdrop');
       const devicePanel=document.getElementById('device-import-panel'),plaudPanel=document.getElementById('plaud-import-panel');let progressTimer=null;
       function choose(mode){
         backdrop.hidden=false;menu.hidden=true;devicePanel.hidden=mode!=='device';plaudPanel.hidden=mode!=='plaud';
         document.querySelectorAll('[data-import-tab]').forEach(tab=>tab.classList.toggle('on',tab.dataset.importTab===mode));
-        document.getElementById('import-title').textContent=mode==='plaud'?'Import from Plaud':'Import audio';
+        document.getElementById('import-title').textContent=tr(mode==='plaud'?'Import from Plaud':'Import audio');
         if(mode==='plaud')pollPlaudImport(false);
       }
       button.addEventListener('click',()=>menu.hidden=!menu.hidden);
@@ -280,10 +280,10 @@
       drop.addEventListener('drop',event=>{if(event.dataTransfer.files[0])uploadLocal(event.dataTransfer.files[0]);});
       input.addEventListener('change',()=>{if(input.files[0])uploadLocal(input.files[0]);});
       async function uploadLocal(file){
-        localStatus.textContent=`Importing ${file.name}…`;const body=new FormData();body.append('file',file);
+        localStatus.textContent=`${tr('Importing')} ${file.name}…`;const body=new FormData();body.append('file',file);
         const response=await fetch('/api/imports/local/audio',{method:'POST',body});const data=await response.json();
-        if(response.ok){localStatus.textContent='Imported. Opening recording…';location.href=`/file/${data.id}`;}
-        else localStatus.textContent=data.detail||'Import failed';
+        if(response.ok){localStatus.textContent=tr('Imported. Opening recording…');location.href=`/file/${data.id}`;}
+        else localStatus.textContent=data.detail||tr('Import failed');
       }
       document.getElementById('start-plaud-import').addEventListener('click',async()=>{
         const response=await fetch('/api/imports/plaud/metadata',{method:'POST'}),data=await response.json();
@@ -296,9 +296,9 @@
       function showProgress(data){
         const box=document.getElementById('plaud-import-progress'),label=box.querySelector('[data-progress-label]'),bar=box.querySelector('span');
         if(data.status==='idle'){box.hidden=true;return;}box.hidden=false;const pct=data.total?Math.round(data.processed/data.total*100):0;bar.style.width=`${pct}%`;
-        if(data.status==='completed')label.textContent=`Complete · ${data.processed} recordings · ${data.transcripts} transcripts · ${data.summaries} summaries`;
-        else if(data.status==='failed')label.textContent=`Import stopped · ${data.error||'Unknown error'}`;
-        else label.textContent=`${data.processed||0} of ${data.total||'…'} · metadata only, audio not downloaded`;
+        if(data.status==='completed')label.textContent=`${tr('Complete')} · ${data.processed} ${tr('recordings')} · ${data.transcripts} ${tr('transcripts')} · ${data.summaries} ${tr('summaries')}`;
+        else if(data.status==='failed')label.textContent=`${tr('Import stopped')} · ${data.error||tr('Unknown error')}`;
+        else label.textContent=`${data.processed||0} ${tr('of')} ${data.total||'…'} · ${tr('metadata only, audio not downloaded')}`;
       }
     })();
   </script>
