@@ -2,45 +2,45 @@
 {% block title %}Settings — localplaud{% endblock %}
 {% block body %}
 <div class="content"><div class="pane-inner settings-page">
-  <h1 class="page">Settings</h1>
-  <p class="sub">Account, processing, templates, integrations, and the execution boundary for this local workspace.</p>
+  <h1 class="page">{{ t('Settings') }}</h1>
+  <p class="sub">{{ t('Account, processing, templates, integrations, and the execution boundary for this local workspace.') }}</p>
   <div class="settings-layout">
     <nav class="settings-nav" aria-label="Settings sections">
-      <a href="#plaud-account">Account</a>
-      <a href="#access-security">Access &amp; security</a>
-      <a href="#workspace-preferences">Workspace</a>
-      <a href="#private-backup">Data &amp; backup</a>
-      <a href="#hardware-profiles">Processing</a>
-      <a href="#vocabulary">Vocabulary</a>
-      <a href="#note-templates">Templates</a>
-      <a href="#connections">Providers</a>
-      <a href="#remote-workers">Remote workers</a>
-      <a href="#webhook-integrations">Webhooks</a>
-      <a href="#email-integrations">Email</a>
-      <a href="#support-about">Support &amp; about</a>
-      <a href="/status">System health ↗</a>
+      <a href="#plaud-account">{{ t('Account') }}</a>
+      <a href="#access-security">{{ t('Access & security') }}</a>
+      <a href="#workspace-preferences">{{ t('Workspace') }}</a>
+      <a href="#private-backup">{{ t('Data & backup') }}</a>
+      <a href="#hardware-profiles">{{ t('Processing') }}</a>
+      <a href="#vocabulary">{{ t('Vocabulary') }}</a>
+      <a href="#note-templates">{{ t('Templates') }}</a>
+      <a href="#connections">{{ t('Providers') }}</a>
+      <a href="#remote-workers">{{ t('Remote workers') }}</a>
+      <a href="#webhook-integrations">{{ t('Webhooks') }}</a>
+      <a href="#email-integrations">{{ t('Email') }}</a>
+      <a href="#support-about">{{ t('Support & about') }}</a>
+      <a href="/status">{{ t('System health') }} ↗</a>
     </nav>
     <div class="settings-sections">
 
   <div class="panel" style="margin-top:18px" id="plaud-account">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
-      <div><strong>Plaud account</strong><div class="sub" style="font-size:12px;margin-top:3px">Read-only Open API connection used for metadata and raw audio.</div></div>
-      <span class="st {{ 'healthy' if plaud_auth.ok else 'failed' }}">{{ 'connected' if plaud_auth.ok else 'sign-in required' }}</span>
+      <div><strong>{{ t('Plaud account') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Read-only Open API connection used for metadata and raw audio.') }}</div></div>
+      <span class="st {{ 'healthy' if plaud_auth.ok else 'failed' }}">{{ t('connected') if plaud_auth.ok else t('sign-in required') }}</span>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;margin-top:12px">
-      <div class="tile"><div class="k">Session</div><div style="margin-top:4px">{{ plaud_auth.detail }}</div></div>
-      <div class="tile"><div class="k">Login method</div><div style="margin-top:4px">Native S256 PKCE · no Node.js</div></div>
-      <div class="tile"><div class="k">Token storage</div><div style="margin-top:4px;overflow-wrap:anywhere"><code>{{ plaud_auth.tokens_path }}</code></div></div>
+      <div class="tile"><div class="k">{{ t('Session') }}</div><div style="margin-top:4px">{{ plaud_auth.detail }}</div></div>
+      <div class="tile"><div class="k">{{ t('Login method') }}</div><div style="margin-top:4px">Native S256 PKCE · no Node.js</div></div>
+      <div class="tile"><div class="k">{{ t('Token storage') }}</div><div style="margin-top:4px;overflow-wrap:anywhere"><code>{{ plaud_auth.tokens_path }}</code></div></div>
     </div>
     {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">On the machine running localplaud, run <code>localplaud auth login</code>. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.</div>{% endif %}
   </div>
 
   <div class="panel" style="margin-top:16px" id="access-security">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>Access &amp; security</strong><div class="sub" style="font-size:12px;margin-top:3px">Truthful authentication boundaries for this deployment.</div></div><span class="st {{ 'done' if about.access.application_token_configured else 'degraded' }}">{{ 'app token configured' if about.access.application_token_configured else 'app token not configured' }}</span></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Access & security') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Truthful authentication boundaries for this deployment.') }}</div></div><span class="st {{ 'done' if about.access.application_token_configured else 'degraded' }}">{{ t('app token configured') if about.access.application_token_configured else t('app token not configured') }}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px;margin-top:12px">
-      <div class="tile"><div class="k">Application authentication</div><div style="margin-top:4px">{{ 'Stateless API token' if about.access.application_token_configured else 'No application token' }}</div></div>
-      <div class="tile"><div class="k">Reverse proxy</div><div style="margin-top:4px">External · not observable by localplaud</div></div>
-      <div class="tile"><div class="k">Active sessions</div><div style="margin-top:4px">Not tracked</div></div>
+      <div class="tile"><div class="k">{{ t('Application authentication') }}</div><div style="margin-top:4px">{{ t('Stateless API token') if about.access.application_token_configured else t('No application token') }}</div></div>
+      <div class="tile"><div class="k">{{ t('Reverse proxy') }}</div><div style="margin-top:4px">{{ t('External · not observable by localplaud') }}</div></div>
+      <div class="tile"><div class="k">{{ t('Active sessions') }}</div><div style="margin-top:4px">{{ t('Not tracked') }}</div></div>
     </div>
     <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ about.access.session_detail }}. Configure <code>api.auth_token</code> or authenticated HTTPS at the reverse proxy before remote exposure.</p>
   </div>
@@ -61,9 +61,9 @@
   </div>
 
   <div class="panel" style="margin-top:16px" id="private-backup">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><strong>Private workspace backup</strong><div class="sub" style="font-size:12px;margin-top:3px">Consistent SQLite snapshot with manifest and SHA-256. Secrets, config, and Plaud tokens are excluded.</div></div><a class="sub" href="/api/docs" style="font-size:12px">API docs ↗</a></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><strong>{{ t('Private workspace backup') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">Consistent SQLite snapshot with manifest and SHA-256. Secrets, config, and Plaud tokens are excluded.</div></div><a class="sub" href="/api/docs" style="font-size:12px">{{ t('API documentation') }} ↗</a></div>
     {% if backup_error %}<div class="sub" style="color:var(--red);margin-top:12px">{{ backup_error }}</div>{% else %}
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:13px"><button class="btn backup-create" data-media="false" type="button">Back up database</button><button class="btn sec backup-create" data-media="true" type="button">Back up database + media</button><span id="backup-result" class="sub"></span></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:13px"><button class="btn backup-create" data-media="false" type="button">{{ t('Back up database') }}</button><button class="btn sec backup-create" data-media="true" type="button">{{ t('Back up database + media') }}</button><span id="backup-result" class="sub"></span></div>
     <p class="sub" style="font-size:11.5px;margin:9px 0 0">Media archives may be very large. Keep every downloaded backup private: transcripts and notes can contain sensitive information.</p>
     <div style="display:grid;gap:8px;margin-top:13px" id="backup-list">
       {% for backup in workspace_backups %}<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px;flex-wrap:wrap"><div style="min-width:0;flex:1"><strong style="overflow-wrap:anywhere">{{ backup.name }}</strong>{% if backup.status=='ready' %}<div class="sub" style="font-size:11px">{{ backup.created_at[:16]|replace('T',' · ') }} · {{ (backup.size_bytes / 1048576)|round(1) }} MB · {{ 'database + ' ~ backup.media.files ~ ' media files' if backup.media.included else 'database only' }}</div><div class="sub" style="font-size:10px;overflow-wrap:anywhere">SHA-256 {{ backup.sha256 }}</div>{% else %}<div class="sub" style="font-size:11px;color:var(--red)">Invalid or incomplete archive</div>{% endif %}</div><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">{% if backup.status=='ready' %}{% if enabled_backup_destinations %}<select class="search-input backup-destination" aria-label="Sync destination for {{ backup.name }}" style="width:auto;padding:6px 8px">{% for destination in enabled_backup_destinations %}<option value="{{ destination.id }}">{{ destination.name }}</option>{% endfor %}</select><button class="btn sec backup-sync" data-name="{{ backup.name }}" type="button" style="padding:6px 9px">Upload</button>{% endif %}<a class="btn sec" href="/api/backups/{{ backup.name }}/download" style="padding:6px 9px">Download</a>{% endif %}<button class="btn sec backup-delete" data-name="{{ backup.name }}" type="button" style="padding:6px 9px;color:var(--red)">Delete</button></div></div>{% else %}<div class="sub">No workspace backups yet.</div>{% endfor %}
@@ -75,7 +75,7 @@
 
   <div class="panel" style="margin-top:18px" id="hardware-profiles">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-      <div><strong>Recommended for this host</strong><div class="sub" style="font-size:12px;margin-top:3px">Evidence-based local ASR profiles; no accelerator is claimed unless detected.</div></div>
+      <div><strong>{{ t('Recommended for this host') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">Evidence-based local ASR profiles; no accelerator is claimed unless detected.</div></div>
       <span class="chip">{{ hardware_recommendations.host.system }} · {{ hardware_recommendations.host.machine }}{% if hardware_recommendations.host.memory_gb %} · {{ hardware_recommendations.host.memory_gb }} GB{% endif %}</span>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:12px">
@@ -95,7 +95,7 @@
 
   <div class="panel" style="margin-top:16px" id="connections">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-      <strong>Connections</strong>
+      <strong>{{ t('Connections') }}</strong>
       <span class="sub">Secrets are stored as references, never copied into profiles.</span>
     </div>
     <div style="display:grid;gap:10px;margin-top:12px">
@@ -118,8 +118,8 @@
 
   <div class="panel" style="margin-top:16px" id="vocabulary">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-      <div><strong>Custom vocabulary</strong><div class="sub" style="font-size:12px">Correct names and specialist terms without changing raw ASR output.</div></div>
-      <button class="btn sec" id="apply-vocabulary" type="button" style="padding:7px 10px">Apply to library</button>
+      <div><strong>{{ t('Custom vocabulary') }}</strong><div class="sub" style="font-size:12px">Correct names and specialist terms without changing raw ASR output.</div></div>
+      <button class="btn sec" id="apply-vocabulary" type="button" style="padding:7px 10px">{{ t('Apply to library') }}</button>
     </div>
     <div style="display:grid;gap:8px;margin-top:12px">
       {% for term in vocabulary_terms %}
@@ -130,16 +130,16 @@
       {% else %}<div class="sub">No correction rules yet.</div>{% endfor %}
     </div>
     <form id="vocabulary-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
-      <input class="search-input" name="source_text" maxlength="300" placeholder="ASR writes…" required>
-      <input class="search-input" name="replacement_text" maxlength="300" placeholder="Correct to…" required>
-      <input class="search-input" name="language" maxlength="24" placeholder="Language (optional, e.g. zh)">
-      <div class="sub" style="display:flex;align-items:center;gap:14px"><label><input type="checkbox" name="case_sensitive"> Case-sensitive</label><label><input type="checkbox" name="enabled" checked> Enabled</label></div>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Add correction</button><button class="btn sec" id="cancel-vocabulary" type="button" hidden>Cancel edit</button><span id="vocabulary-result" class="sub"></span></div>
+      <input class="search-input" name="source_text" maxlength="300" placeholder="{{ t('ASR writes…') }}" required>
+      <input class="search-input" name="replacement_text" maxlength="300" placeholder="{{ t('Correct to…') }}" required>
+      <input class="search-input" name="language" maxlength="24" placeholder="{{ t('Language (optional, e.g. zh)') }}">
+      <div class="sub" style="display:flex;align-items:center;gap:14px"><label><input type="checkbox" name="case_sensitive"> {{ t('Case-sensitive') }}</label><label><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label></div>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Add correction') }}</button><button class="btn sec" id="cancel-vocabulary" type="button" hidden>{{ t('Cancel edit') }}</button><span id="vocabulary-result" class="sub"></span></div>
     </form>
   </div>
 
   <div class="panel" style="margin-top:16px" id="model-catalog">
-    <strong>Model catalog</strong>
+    <strong>{{ t('Model catalog') }}</strong>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px">
       {% for m in models %}
       <div class="tile">
@@ -154,7 +154,7 @@
   </div>
 
   <div class="panel" style="margin-top:16px" id="execution-profiles">
-    <strong>Execution profiles</strong>
+    <strong>{{ t('Execution profiles') }}</strong>
     <div style="display:grid;gap:12px;margin-top:12px">
       {% for p in profiles %}
       <details {% if p.is_system_default %}open{% endif %} style="border-top:1px solid var(--border);padding-top:11px">
@@ -175,7 +175,7 @@
 
   <div class="panel" style="margin-top:16px" id="note-templates">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-      <div><strong>Note templates</strong><div class="sub" style="font-size:12px">Editable, versioned prompts for structured notes. Existing notes keep their exact template snapshot.</div></div>
+      <div><strong>{{ t('Note templates') }}</strong><div class="sub" style="font-size:12px">Editable, versioned prompts for structured notes. Existing notes keep their exact template snapshot.</div></div>
     </div>
     <div style="display:grid;gap:9px;margin-top:12px">
       {% for template in note_templates %}
@@ -187,7 +187,7 @@
     </div>
     <form id="note-template-form" style="display:grid;gap:9px;margin-top:14px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
-        <input class="search-input" name="name" maxlength="80" placeholder="Template name" required>
+        <input class="search-input" name="name" maxlength="80" placeholder="{{ t('Template name') }}" required>
         <input class="search-input" name="key" maxlength="64" pattern="[a-z0-9][a-z0-9-]*" placeholder="Stable key, e.g. research-interview" required>
       </div>
       <label class="sub">System prompt<textarea class="search-input" name="system_prompt" rows="4" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical"></textarea></label>
@@ -197,38 +197,38 @@
   </div>
 
   <div class="panel" style="margin-top:16px" id="create-connection">
-    <strong>Create provider connection</strong>
+    <strong>{{ t('Create provider connection') }}</strong>
     <form id="connection-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
-      <input class="search-input" name="name" placeholder="Display name" required>
+      <input class="search-input" name="name" placeholder="{{ t('Display name') }}" required>
       <input class="search-input" name="key" placeholder="Unique key, e.g. llm:studio" required>
-      <input class="search-input" name="provider_type" placeholder="Provider type" required>
-      <select class="search-input" name="execution_target"><option value="local">Local</option><option value="cloud">Cloud</option><option value="remote_worker">Remote worker</option></select>
-      <input class="search-input" name="secret_ref" placeholder="Secret ref (optional)">
-      <label class="sub" style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="data_egress"> Data may leave this host</label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Create connection</button><span id="connection-result" class="sub"></span></div>
+      <input class="search-input" name="provider_type" placeholder="{{ t('Provider type') }}" required>
+      <select class="search-input" name="execution_target"><option value="local">{{ t('Local') }}</option><option value="cloud">{{ t('Cloud') }}</option><option value="remote_worker">{{ t('Remote worker') }}</option></select>
+      <input class="search-input" name="secret_ref" placeholder="{{ t('Secret ref (optional)') }}">
+      <label class="sub" style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="data_egress"> {{ t('Data may leave this host') }}</label>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create connection') }}</button><span id="connection-result" class="sub"></span></div>
     </form>
   </div>
 
   <div class="panel" style="margin-top:16px" id="create-model">
-    <strong>Add model</strong>
+    <strong>{{ t('Add model') }}</strong>
     <form id="model-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
       <select class="search-input" name="connection_id" required>{% for c in connections %}<option value="{{ c.id }}" data-target="{{ c.execution_target }}" data-egress="{{ 'true' if c.data_egress else 'false' }}">{{ c.name }}</option>{% endfor %}</select>
-      <input class="search-input" name="model_key" placeholder="Model identifier" required>
-      <input class="search-input" name="display_name" placeholder="Display name" required>
+      <input class="search-input" name="model_key" placeholder="{{ t('Model identifier') }}" required>
+      <input class="search-input" name="display_name" placeholder="{{ t('Display name') }}" required>
       <div class="sub" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">{% for stage in provider_stages %}<label><input type="checkbox" name="capability" value="{{ stage }}"> {{ stage }}</label>{% endfor %}</div>
       <input class="search-input" type="number" min="0" step="0.000001" name="input_price" placeholder="Input $ / 1M tokens (optional)">
       <input class="search-input" type="number" min="0" step="0.000001" name="output_price" placeholder="Output $ / 1M tokens (optional)">
       <input class="search-input" type="number" min="0" step="0.000001" name="audio_price" placeholder="Audio $ / minute (optional)">
-      <label class="sub" style="display:flex;align-items:center;gap:7px"><input type="checkbox" name="free_pricing"> Explicitly free / no provider charge</label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Add model</button><span id="model-result" class="sub"></span></div>
+      <label class="sub" style="display:flex;align-items:center;gap:7px"><input type="checkbox" name="free_pricing"> {{ t('Explicitly free / no provider charge') }}</label>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Add model') }}</button><span id="model-result" class="sub"></span></div>
     </form>
   </div>
 
   <div class="panel" style="margin-top:16px" id="create-profile">
-    <strong>Create execution profile</strong>
+    <strong>{{ t('Create execution profile') }}</strong>
     <p class="sub" style="margin:4px 0 12px">Each stage is explicit. Unsupported model/stage combinations are rejected before saving.</p>
     <form id="profile-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
-      <input class="search-input" name="name" placeholder="Profile name" required>
+      <input class="search-input" name="name" placeholder="{{ t('Profile name') }}" required>
       <input class="search-input" name="key" placeholder="Stable key, e.g. apple-local" required>
       {% for stage in provider_stages %}
       <label class="sub">{{ stage }} · primary
@@ -246,7 +246,7 @@
   </div>
 
   <div class="panel" style="margin-top:16px" id="remote-workers">
-    <strong>Remote workers</strong>
+    <strong>{{ t('Remote workers') }}</strong>
     <p class="sub" style="margin:4px 0 12px">Authenticated localplaud-worker v1 hosts. Tokens remain in environment variables.</p>
     <div style="display:grid;gap:9px">
       {% for worker in workers %}
@@ -257,16 +257,16 @@
       {% endfor %}
     </div>
     <form id="worker-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
-      <input class="search-input" name="name" placeholder="Worker name" required>
+      <input class="search-input" name="name" placeholder="{{ t('Worker name') }}" required>
       <input class="search-input" name="key" placeholder="Stable key, e.g. cclab-gpu" required>
       <input class="search-input" name="base_url" type="url" placeholder="https://worker.example/" required>
-      <input class="search-input" name="token_env" value="LOCALPLAUD_WORKER_TOKEN" placeholder="Token environment variable" required>
-      <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center"><button class="btn" type="submit">Register worker</button><span id="worker-result" class="sub"></span></div>
+      <input class="search-input" name="token_env" value="LOCALPLAUD_WORKER_TOKEN" placeholder="{{ t('Token environment variable') }}" required>
+      <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center"><button class="btn" type="submit">{{ t('Register worker') }}</button><span id="worker-result" class="sub"></span></div>
     </form>
   </div>
 
   <div class="panel" style="margin-top:16px" id="webhook-integrations">
-    <strong>Authorized webhooks</strong>
+    <strong>{{ t('Authorized webhooks') }}</strong>
     <p class="sub" style="margin:4px 0 12px">Outbound data delivery is opt-in. Rules reference these destinations; bearer secrets stay in environment variables.</p>
     <div style="display:grid;gap:9px">
       {% for integration in webhook_integrations %}
@@ -277,18 +277,18 @@
       {% else %}<div class="sub">No webhook destinations authorized.</div>{% endfor %}
     </div>
     <form id="webhook-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
-      <input class="search-input" name="name" maxlength="120" placeholder="Webhook name" required>
+      <input class="search-input" name="name" maxlength="120" placeholder="{{ t('Webhook name') }}" required>
       <input class="search-input" name="url" type="url" maxlength="2048" placeholder="https://example.com/webhook" required>
       <input class="search-input" name="secret_ref" maxlength="256" placeholder="Bearer secret ref, e.g. env:WEBHOOK_TOKEN">
-      <div class="sub" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><label><input type="checkbox" name="scope" value="metadata" checked> Metadata</label><label><input type="checkbox" name="scope" value="transcript"> Transcript</label><label><input type="checkbox" name="scope" value="notes"> Notes</label></div>
+      <div class="sub" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><label><input type="checkbox" name="scope" value="metadata" checked> {{ t('Metadata') }}</label><label><input type="checkbox" name="scope" value="transcript"> {{ t('Transcript') }}</label><label><input type="checkbox" name="scope" value="notes"> {{ t('Notes') }}</label></div>
       <label class="sub"><input type="checkbox" name="allow_private_network"> Explicitly allow private/LAN destination and HTTP</label>
-      <label class="sub"><input type="checkbox" name="enabled" checked> Enabled</label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Authorize webhook</button><span id="webhook-result" class="sub"></span></div>
+      <label class="sub"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize webhook') }}</button><span id="webhook-result" class="sub"></span></div>
     </form>
   </div>
 
   <div class="panel" style="margin-top:16px" id="email-integrations">
-    <strong>Authorized email</strong>
+    <strong>{{ t('Authorized email') }}</strong>
     <p class="sub" style="margin:4px 0 12px">SMTP delivery is opt-in. Passwords stay in environment variables; Test sends no recording data.</p>
     <div style="display:grid;gap:9px">
       {% for integration in email_integrations %}
@@ -299,26 +299,26 @@
       {% else %}<div class="sub">No email destinations authorized.</div>{% endfor %}
     </div>
     <form id="email-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
-      <input class="search-input" name="name" maxlength="120" placeholder="Email destination name" required>
-      <input class="search-input" name="smtp_host" maxlength="255" placeholder="SMTP host" required>
+      <input class="search-input" name="name" maxlength="120" placeholder="{{ t('Email destination name') }}" required>
+      <input class="search-input" name="smtp_host" maxlength="255" placeholder="{{ t('SMTP host') }}" required>
       <input class="search-input" name="smtp_port" type="number" min="1" max="65535" value="587" required>
       <select class="search-input" name="security"><option value="starttls">STARTTLS</option><option value="tls">Implicit TLS</option><option value="plain">Plain SMTP</option></select>
-      <input class="search-input" name="username" maxlength="320" placeholder="SMTP username (optional)">
-      <input class="search-input" name="password_ref" maxlength="256" placeholder="Password ref, e.g. env:SMTP_PASSWORD">
-      <input class="search-input" name="from_address" type="email" maxlength="320" placeholder="From address" required>
-      <input class="search-input" name="to_addresses" maxlength="2000" placeholder="Recipients, comma separated" required>
-      <input class="search-input" name="subject_prefix" maxlength="80" value="[localplaud]" placeholder="Subject prefix">
-      <div class="sub" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><label><input type="checkbox" name="scope" value="metadata" checked> Metadata</label><label><input type="checkbox" name="scope" value="transcript"> Transcript</label><label><input type="checkbox" name="scope" value="notes"> Notes</label></div>
-      <label class="sub"><input type="checkbox" name="allow_insecure_private"> Explicitly allow private/LAN host and plain SMTP</label>
-      <label class="sub"><input type="checkbox" name="enabled" checked> Enabled</label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Authorize email</button><span id="email-result" class="sub"></span></div>
+      <input class="search-input" name="username" maxlength="320" placeholder="{{ t('SMTP username (optional)') }}">
+      <input class="search-input" name="password_ref" maxlength="256" placeholder="{{ t('Password ref, e.g. env:SMTP_PASSWORD') }}">
+      <input class="search-input" name="from_address" type="email" maxlength="320" placeholder="{{ t('From address') }}" required>
+      <input class="search-input" name="to_addresses" maxlength="2000" placeholder="{{ t('Recipients, comma separated') }}" required>
+      <input class="search-input" name="subject_prefix" maxlength="80" value="[localplaud]" placeholder="{{ t('Subject prefix') }}">
+      <div class="sub" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><label><input type="checkbox" name="scope" value="metadata" checked> {{ t('Metadata') }}</label><label><input type="checkbox" name="scope" value="transcript"> {{ t('Transcript') }}</label><label><input type="checkbox" name="scope" value="notes"> {{ t('Notes') }}</label></div>
+      <label class="sub"><input type="checkbox" name="allow_insecure_private"> {{ t('Explicitly allow private/LAN host and plain SMTP') }}</label>
+      <label class="sub"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label>
+      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize email') }}</button><span id="email-result" class="sub"></span></div>
     </form>
   </div>
 
   <div class="panel" style="margin-top:16px" id="support-about">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>Support &amp; about</strong><div class="sub" style="font-size:12px;margin-top:3px">Runtime identity and a deliberately redacted support bundle.</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;margin-top:12px"><div class="tile"><div class="k">Runtime</div><div style="margin-top:4px">Python {{ about.python }}</div></div><div class="tile"><div class="k">Host</div><div style="margin-top:4px">{{ about.system }} · {{ about.machine }}</div></div><div class="tile"><div class="k">License</div><div style="margin-top:4px">{{ about.license }}</div></div></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px"><a class="btn" href="/api/system/diagnostics.json">Download safe diagnostics</a><a class="btn sec" href="/status">System health</a><a class="btn sec" href="/api/docs">API documentation</a><a class="btn sec" href="{{ about.support.repository }}" target="_blank" rel="noopener">GitHub repository ↗</a></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Support & about') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">Runtime identity and a deliberately redacted support bundle.</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;margin-top:12px"><div class="tile"><div class="k">{{ t('Runtime') }}</div><div style="margin-top:4px">Python {{ about.python }}</div></div><div class="tile"><div class="k">{{ t('Host') }}</div><div style="margin-top:4px">{{ about.system }} · {{ about.machine }}</div></div><div class="tile"><div class="k">{{ t('License') }}</div><div style="margin-top:4px">{{ about.license }}</div></div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px"><a class="btn" href="/api/system/diagnostics.json">{{ t('Download safe diagnostics') }}</a><a class="btn sec" href="/status">{{ t('System health') }}</a><a class="btn sec" href="/api/docs">{{ t('API documentation') }}</a><a class="btn sec" href="{{ about.support.repository }}" target="_blank" rel="noopener">{{ t('GitHub repository') }} ↗</a></div>
     <p class="sub" style="font-size:11.5px;margin:10px 0 0">Diagnostics contain aggregate counts and non-secret runtime switches only. Recording IDs, titles, content, paths, URLs, addresses, errors, environment variables, and credentials are excluded.</p>
   </div>
     </div>

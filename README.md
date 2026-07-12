@@ -257,8 +257,8 @@ variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
 - Workspace preferences can persist English or Traditional Chinese (Taiwan) for the
   shared shell and primary library, search, notes, automation, template, and status
   pages and the recording workspace, with matching document language and local date
-  formatting. Deep Settings and dynamic error/action translation coverage is still
-  expanding.
+  formatting. Settings navigation and primary configuration/integration controls are
+  also translated; dynamic helper, health, and error/action coverage is still expanding.
 
 ## License
 

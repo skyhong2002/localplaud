@@ -232,9 +232,11 @@ correct document language metadata, localized dates, and a centralized catalog u
 by the global shell and Home, Library, recording workspace, Search, Saved notes,
 Templates, Discover, Notifications, and Status pages. The recording workspace covers
 transcript editing/search, playback, profiles/templates, local-data controls, Ask,
-organization, and export. Remaining deep Settings and dynamic error/action strings
-are tracked as translation coverage work rather than being represented by a
-non-functional control.
+organization, and export. Settings now covers its section navigation and primary
+account, security, backup, processing, vocabulary, template, provider/model/profile,
+worker, webhook, email, and support controls. Remaining dynamic helper, health,
+error, and action messages are tracked as translation coverage work rather than
+being represented by a non-functional control.
 
 Workspace display preferences are durable local data rather than browser-only state:
 the chosen workspace name, system/light/dark theme, comfortable/compact density,

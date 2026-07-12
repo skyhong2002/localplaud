@@ -64,6 +64,25 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
         assert '<option value="12" selected>12-hour</option>' in page.text
         assert '<option value="zh-Hant-TW" selected>繁體中文（台灣）</option>' in page.text
         assert "工作區偏好設定" in page.text
+        for text in (
+            "帳號",
+            "存取與安全性",
+            "資料與備份",
+            "私人工作區備份",
+            "此主機的建議設定",
+            "連線",
+            "自訂詞彙表",
+            "模型目錄",
+            "執行設定檔",
+            "筆記範本",
+            "建立供應商連線",
+            "新增模型",
+            "遠端工作節點",
+            "已授權的 Webhook",
+            "已授權的電子郵件",
+            "支援與關於",
+        ):
+            assert text in page.text
         assert "#workspace-preferences-form{grid-template-columns:1fr!important}" in page.text
 
 
