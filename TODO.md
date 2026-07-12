@@ -239,7 +239,10 @@ embedding raw provider credentials or model settings in each rule.
   open-source `speaker-diarization-community-1` API, including word/segment speaker
   assignment, model provenance, and actionable health checks. SkyLabMac has the
   dependency, accepted model terms, Hugging Face credential, and repeated real-audio
-  completion evidence. VAD validation and word-level forced alignment remain.
+  completion evidence. Local pyannote device selection is explicit and durable:
+  `auto` uses CUDA only when PyTorch reports it available and otherwise uses CPU;
+  an explicitly unavailable CUDA target fails actionably instead of silently falling
+  back. MPS is not claimed. VAD validation and word-level forced alignment remain.
 - ✅ Activated the durable `align` stage between ASR and diarization. It validates
   finite, ordered word timestamps, records coverage/provider/model/profile evidence,
   reuses valid results on Resume, and reports a clear degraded state when a provider

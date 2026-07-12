@@ -24,6 +24,25 @@ class DiarizationUnavailable(DiarizationError):
     pass
 
 
+def _resolve_device(cfg: DiarizeConfig) -> tuple[object, str]:
+    try:
+        import torch
+    except Exception as exc:  # noqa: BLE001 - binary dependency imports can fail broadly
+        raise DiarizationUnavailable(f"PyTorch unavailable: {exc}") from exc
+
+    if cfg.device == "cpu":
+        return torch, "cpu"
+
+    cuda_available = bool(torch.cuda.is_available())
+    if cfg.device == "cuda" and not cuda_available:
+        raise DiarizationUnavailable(
+            "CUDA requested for diarization but torch.cuda.is_available() is false; "
+            "install a CUDA-enabled PyTorch runtime or set diarize.device = \"cpu\""
+        )
+    resolved = "cuda" if cuda_available else "cpu"
+    return torch, resolved
+
+
 def health(cfg: DiarizeConfig) -> tuple[bool, str]:
     if cfg.provider == "none":
         return False, "disabled; speaker labels will not be generated"
@@ -33,7 +52,12 @@ def health(cfg: DiarizeConfig) -> tuple[bool, str]:
         return False, f"pyannote.audio unavailable: {exc}"
     if not cfg.hf_token:
         return False, "Hugging Face token missing; accept the model terms and set hf_token"
-    return True, f"model {cfg.model} configured"
+    try:
+        _torch, device = _resolve_device(cfg)
+    except DiarizationUnavailable as exc:
+        return False, str(exc)
+    selection = "auto-selected" if cfg.device == "auto" else "configured"
+    return True, f"model {cfg.model} configured on {device} ({selection})"
 
 
 def _load_pipeline(cfg: DiarizeConfig):
@@ -45,13 +69,22 @@ def _load_pipeline(cfg: DiarizeConfig):
         raise DiarizationUnavailable(
             "diarize.hf_token not set (needed to download the pyannote pipeline)"
         )
+    torch, device = _resolve_device(cfg)
     try:
-        return Pipeline.from_pretrained(
+        pipeline = Pipeline.from_pretrained(
             cfg.model,
             token=cfg.hf_token,
         )
     except Exception as exc:  # noqa: BLE001
         raise DiarizationUnavailable(f"could not load pyannote pipeline: {exc}") from exc
+    try:
+        pipeline.to(torch.device(device))
+    except Exception as exc:  # noqa: BLE001 - device/runtime failures need actionable state
+        raise DiarizationUnavailable(
+            f"could not move pyannote pipeline to {device}: {exc}"
+        ) from exc
+    log.info("Loaded pyannote diarization pipeline %s on %s", cfg.model, device)
+    return pipeline
 
 
 def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig) -> Transcript:

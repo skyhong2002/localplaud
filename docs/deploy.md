@@ -66,7 +66,7 @@ Whisper must run on the host. Two options:
   uv sync --extra mlx --extra diarize --extra local-llm
   # config.toml: provider = "mlx-whisper"
   # model = "mlx-community/whisper-large-v3-turbo"
-  # [diarize] provider = "pyannote" (plus HF token/model acceptance)
+  # [diarize] provider = "pyannote", device = "cpu" (plus HF token/model acceptance)
   uv run localplaud run                        # host app on :8080
   docker compose --profile mac up -d caddy     # HTTPS only; Caddyfile → host.docker.internal:8080
   ```
@@ -83,7 +83,7 @@ docker compose --profile gpu up -d --build
 Uses `Dockerfile.cuda` (CUDA 12.8 + PyTorch/torchaudio 2.8 + faster-whisper on GPU + pyannote for
 diarization). Verify the GPU is visible: `docker compose exec localplaud-gpu nvidia-smi`.
 Set `[asr] provider = "faster-whisper"`, model `large-v3-turbo`, device `cuda`,
-and keep the diarization profile enabled.
+and keep the diarization profile enabled with `[diarize] device = "cuda"`.
 
 > **Running CUDA natively (no Docker)**: the NVIDIA driver alone isn't enough —
 > CTranslate2 needs cuBLAS and cuDNN 9. Install the `cuda` extra

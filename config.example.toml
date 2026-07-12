@@ -121,6 +121,7 @@ fallback = []                    # opt in explicitly; avoid surprise paid proces
 [diarize]
 provider = "pyannote"            # required for the default Plaud-like speaker workflow
 model = "pyannote/speaker-diarization-community-1"
+device = "auto"                  # auto | cpu | cuda (auto uses CUDA when available, else CPU)
 # hf_token via LOCALPLAUD_DIARIZE__HF_TOKEN (needed to download pyannote models)
 # num_speakers = 2               # optional hint; omit to auto-detect
 
