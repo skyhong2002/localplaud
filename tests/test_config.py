@@ -17,12 +17,12 @@ def _isolate(monkeypatch, tmp_path):
 def test_env_vars_override_defaults(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("LOCALPLAUD_ASR__PROVIDER", "deepgram")
-    monkeypatch.setenv("LOCALPLAUD_PLAUD__API_BASE", "https://x")
+    monkeypatch.setenv("LOCALPLAUD_PLAUD__OFFICIAL__API_BASE", "https://x")
 
     s = Settings()
 
     assert s.asr.provider == "deepgram"
-    assert s.plaud.api_base == "https://x"
+    assert s.plaud.official.api_base == "https://x"
 
     # Untouched nested defaults still exist alongside the overrides.
     assert s.asr.language == "auto"
@@ -48,7 +48,7 @@ def test_defaults_without_env(monkeypatch, tmp_path):
     s = Settings()
 
     assert s.asr.provider == "faster-whisper"
-    assert s.plaud.auth_mode == "cookie"
+    assert s.plaud.provider == "official"
     assert s.plaud.official.client_id.startswith("client_")
     assert s.plaud.official.redirect_uri == "http://localhost:8199/auth/callback"
     assert s.pipeline.transcribe is True

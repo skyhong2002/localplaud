@@ -14,7 +14,7 @@ import pytest
 import respx
 
 from localplaud.config import PlaudOfficialConfig
-from localplaud.plaud.client import PlaudAuthError
+from localplaud.plaud.common import PlaudAuthError
 from localplaud.plaud.oauth import (
     OAuthError,
     OfficialTokenStore,
@@ -300,10 +300,9 @@ def test_to_dto_maps_and_leaves_unknowns_unset():
     assert dto.duration == 2000
     assert dto.start_time == 1000
     assert dto.end_time == 3000
-    # Fields the Open API doesn't send must stay unset so the poller doesn't
-    # clobber apse1-enriched values with defaults.
-    for field in ("version", "file_md5", "is_trash", "is_trans", "is_summary"):
-        assert field not in dto.model_fields_set
+    assert dto.model_fields_set == {
+        "id", "filename", "duration", "start_time", "end_time", "serial_number"
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -490,20 +489,5 @@ def test_official_sync_keeps_enriched_fields_and_stays_quiet(monkeypatch, tmp_pa
         row = s.get(PlaudFile, "f1")
         assert row.status == FileStatus.done  # untouched
         assert row.filename == "new name"
-        # apse1-enriched fields survive the official pass.
+        # Existing locally retained fields survive the minimal official pass.
         assert (row.file_md5, row.version, row.cloud_is_trans) == ("MD5", 7, True)
-
-
-def test_enrich_from_apse1_requires_official_provider_and_creds(monkeypatch, tmp_path):
-    _reset_db(monkeypatch, tmp_path)
-    from localplaud.config import get_settings
-    from localplaud.poller.poll import enrich_from_apse1
-
-    settings = get_settings()
-    settings.plaud.provider = "official"
-    settings.plaud.token = None
-    settings.plaud.cookie = None
-    assert enrich_from_apse1(settings) == (0, 0)  # no creds -> quietly skipped
-    settings.plaud.provider = "apse1"
-    settings.plaud.token = "Bearer t"
-    assert enrich_from_apse1(settings) == (0, 0)  # apse1 is already primary

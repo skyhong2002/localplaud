@@ -9,7 +9,7 @@ Config is layered, later layers win:
    ``LOCALPLAUD_`` with ``__`` as the nesting separator
    (e.g. ``LOCALPLAUD_ASR__OPENAI__API_KEY``).
 
-Secrets (Plaud cookie, API keys, HF token) should come from the environment or
+Secrets (API keys and HF token) should come from the environment or
 ``.env`` and never be committed. The example config marks which fields those
 are.
 """
@@ -39,9 +39,7 @@ class PlaudOfficialConfig(BaseModel):
 
     api_base: str = "https://platform.plaud.ai/developer/api"
     authorization_url: str = "https://web.plaud.ai/platform/oauth"
-    token_url: str = (
-        "https://platform.plaud.ai/developer/api/oauth/third-party/access-token"
-    )
+    token_url: str = "https://platform.plaud.ai/developer/api/oauth/third-party/access-token"
     refresh_url: str = (
         "https://platform.plaud.ai/developer/api/oauth/third-party/access-token/refresh"
     )
@@ -70,49 +68,13 @@ class PlaudConfig(BaseModel):
     - ``official`` (default) — the sanctioned Open API with auto-refreshing
       OAuth (see ``official``). No more pasting browser sessions.
     - ``mcp`` — Plaud's official local MCP server and its separate OAuth cache.
-    - ``apse1`` — deprecated compatibility adapter for the reverse-engineered
-      web API. It is not a supported path for new deployments.
-
-    When the provider is ``official`` and legacy apse1 credentials are ALSO present,
-    the poller may use apse1 as an optional compatibility enrichment source for change-detection
-    fields the Open API lacks (``version``/``file_md5``/``edit_time``/
-    ``is_trash``) — disable with ``apse1_enrichment = false``.
-
-    ``api_base`` (apse1) is region-specific (the browser stores it in
-    localStorage as ``pld_plaud_user_api_domain``). Read it from your own
-    browser — do not assume the default matches your account.
+    The removed reverse-engineered browser-session adapter is not a valid
+    provider. Use one of the two sanctioned read-only transports above.
     """
 
-    provider: Literal["official", "mcp", "apse1"] = "official"
+    provider: Literal["official", "mcp"] = "official"
     official: PlaudOfficialConfig = Field(default_factory=PlaudOfficialConfig)
     mcp: PlaudMcpConfig = Field(default_factory=PlaudMcpConfig)
-    apse1_enrichment: bool = True
-
-    api_base: str = "https://api-apse1.plaud.ai"
-    # "cookie": paste a session cookie/token from the browser (most reliable).
-    # "login": programmatic email/password login (only if supported).
-    auth_mode: Literal["cookie", "login"] = "cookie"
-
-    # auth_mode = "cookie": full Cookie header value, or a bare bearer token.
-    # Prefer the env var LOCALPLAUD_PLAUD__COOKIE over writing it to disk.
-    cookie: str | None = None
-    # Some deployments use a bearer token instead of / in addition to a cookie.
-    token: str | None = None
-
-    # auth_mode = "login":
-    email: str | None = None
-    password: str | None = None
-
-    # Extra request headers if a particular account/region needs them.
-    extra_headers: dict[str, str] = Field(default_factory=dict)
-
-    # Network politeness. The Plaud edge rejects non-browser User-Agents with
-    # 403, so default to a browser UA (override via plaud.user_agent if needed).
-    request_timeout_seconds: float = 30.0
-    user_agent: str = (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-    )
 
 
 class PollerConfig(BaseModel):

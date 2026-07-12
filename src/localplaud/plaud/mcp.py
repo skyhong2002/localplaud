@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 
 from ..config import PlaudMcpConfig
-from .client import (
+from .common import (
     _MAX_AUDIO_BYTES,
     PlaudAuthError,
     PlaudError,

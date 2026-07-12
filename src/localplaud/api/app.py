@@ -36,6 +36,7 @@ from ..db.models import (
     StageName,
     StageRun,
     StageStatus,
+    Summary,
     Tag,
     Transcript,
     TranscriptRevision,
@@ -1729,8 +1730,20 @@ def _health_checks(settings) -> list[dict]:
                 add(label, provider.available())
         except Exception as exc:  # noqa: BLE001
             add(label, False, str(exc)[:50])
-    has_creds = bool(settings.plaud.token or settings.plaud.cookie)
-    add("plaud auth", has_creds, "configured" if has_creds else "run `auth import`")
+    if settings.plaud.provider == "mcp":
+        from ..plaud.mcp import PlaudMcpClient
+
+        auth = PlaudMcpClient.auth_status(settings.plaud.mcp)
+        add("plaud auth · mcp", auth["ok"], auth["detail"])
+    elif settings.plaud.provider == "official":
+        from ..plaud.oauth import OfficialTokenStore
+
+        auth = OfficialTokenStore(
+            settings.plaud.official.tokens_path,
+            settings.plaud.official.refresh_url,
+            settings.plaud.official.request_timeout_seconds,
+        ).status()
+        add("plaud auth · official", auth["ok"], auth["detail"])
     return checks
 
 
@@ -2031,6 +2044,38 @@ def export_notes_format(file_id: str, fmt: str):
         content,
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{file_id}-notes.{fmt}"'},
+    )
+
+
+@app.get("/file/{file_id}/export/mind-map.png")
+def export_mind_map_png(file_id: str):
+    """Export the latest locally generated mind map as a complete PNG tree."""
+    from ..mindmap_export import render_mind_map_png
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, file_id)
+        if recording is None:
+            raise HTTPException(status_code=404, detail="recording not found")
+        mind_map = session.scalar(
+            select(Summary)
+            .where(
+                Summary.file_id == file_id,
+                Summary.template == "mind_map",
+                Summary.source == "local",
+            )
+            .order_by(Summary.id.desc())
+        )
+        title = recording.display_title
+    if mind_map is None:
+        raise HTTPException(status_code=409, detail="local mind map is not ready")
+    try:
+        content = render_mind_map_png(mind_map.content_md, title=title)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(
+        content,
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{file_id}-mind-map.png"'},
     )
 
 

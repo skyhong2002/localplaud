@@ -36,7 +36,7 @@ interval_seconds = 60
     assert s.poller.interval_seconds == 60
     # ...and untouched sections keep their defaults.
     assert s.llm.provider == "ollama"
-    assert s.plaud.auth_mode == "cookie"
+    assert s.plaud.provider == "official"
 
 
 def test_env_var_overrides_toml(monkeypatch, tmp_path):

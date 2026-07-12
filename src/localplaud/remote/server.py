@@ -23,7 +23,7 @@ from ..asr.base import Segment, Transcript, Word
 from ..config import get_settings
 from ..db.models import RemoteJob
 from ..db.session import session_scope
-from ..plaud.client import _assert_safe_fetch_url
+from ..plaud.common import _assert_safe_fetch_url
 from .protocol import (
     ArtifactDescriptor,
     CancelResponse,

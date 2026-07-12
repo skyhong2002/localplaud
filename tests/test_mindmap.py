@@ -78,10 +78,12 @@ def test_long_transcript_outline_covers_every_chunk(monkeypatch):
 
     llm = _FakeLlm()
     monkeypatch.setattr("localplaud.worker.mindmap.build_llm", lambda cfg: llm)
-    transcript = _transcript(*(
-        Segment(text=f"segment-{idx}-" + chr(65 + idx) * 35, start=idx, end=idx + 1)
-        for idx in range(4)
-    ))
+    transcript = _transcript(
+        *(
+            Segment(text=f"segment-{idx}-" + chr(65 + idx) * 35, start=idx, end=idx + 1)
+            for idx in range(4)
+        )
+    )
     settings = Settings(pipeline={"summary_chunk_chars": 50})
     result = generate_mind_map(transcript, settings, None)
 
@@ -135,7 +137,7 @@ def _reset_db(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'mm.db'}")
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'mm.db'}")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")  # skip ffmpeg
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
@@ -147,20 +149,32 @@ def _install_fakes(monkeypatch, counters):
         counters["asr"] += 1
         return Transcript(
             segments=[Segment(text="hello world", start=0.0, end=1.0, speaker="SPEAKER_00")],
-            language="en", provider="fake", has_speakers=True,
+            language="en",
+            provider="fake",
+            has_speakers=True,
         )
 
     def fake_summary(transcript, settings):
         counters["sum"] += 1
-        return {"title": "T", "content_md": "# T\n\nbody", "provider": "fake",
-                "model": "m", "template": settings.pipeline.summary_template}
+        return {
+            "title": "T",
+            "content_md": "# T\n\nbody",
+            "provider": "fake",
+            "model": "m",
+            "template": settings.pipeline.summary_template,
+        }
 
     def fake_mindmap(transcript, settings, summary_md=None):
         counters["mm"] += 1
         counters["mm_summary_md"] = summary_md
-        return {"template": "mind_map", "title": None,
-                "content_md": "# Root\n- a\n  - b", "provider": "fake", "model": "mm-model",
-                "detail": {"strategy": "direct", "outline_nodes": 3}}
+        return {
+            "template": "mind_map",
+            "title": None,
+            "content_md": "# Root\n- a\n  - b",
+            "provider": "fake",
+            "model": "mm-model",
+            "detail": {"strategy": "direct", "outline_nodes": 3},
+        }
 
     def fake_embed(chunks, settings):
         counters["emb"] += 1
@@ -216,9 +230,7 @@ def test_pipeline_persists_mind_map_and_resumes(monkeypatch, tmp_path):
     process_file("mm1")
     assert counters["mm"] == 1
     with session_scope() as s:
-        run = next(
-            x for x in s.get(PlaudFile, "mm1").stage_runs if x.stage == StageName.mind_map
-        )
+        run = next(x for x in s.get(PlaudFile, "mm1").stage_runs if x.stage == StageName.mind_map)
         assert run.detail == {"reused": True}
 
     # Force: the mind map is rebuilt.
@@ -291,7 +303,7 @@ def _client(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'ui.db'}")
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'ui.db'}")
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
     get_settings(reload=True)
@@ -308,16 +320,38 @@ def _seed_ui():
     from localplaud.db.session import session_scope
 
     with session_scope() as s:
-        s.add(PlaudFile(id="r1", filename="Weekly Sync", status=FileStatus.done,
-                        duration_ms=600000, start_time_ms=1783582737000))
-        s.add(TranscriptRow(file_id="r1", provider="faster-whisper", language="en",
-                            has_speakers=True, text="hi",
-                            segments=[{"text": "hello team", "start": 1.0, "end": 2.0,
-                                       "speaker": "SPEAKER_00"}]))
-        s.add(Summary(file_id="r1", template="meeting", title="Sync",
-                      content_md="# Sync\n\n- point"))
-        s.add(Summary(file_id="r1", template="mind_map", title=None,
-                      content_md="# Sync topics\n- agenda\n  - budget\n- decisions"))
+        s.add(
+            PlaudFile(
+                id="r1",
+                filename="Weekly Sync",
+                status=FileStatus.done,
+                duration_ms=600000,
+                start_time_ms=1783582737000,
+            )
+        )
+        s.add(
+            TranscriptRow(
+                file_id="r1",
+                provider="faster-whisper",
+                language="en",
+                has_speakers=True,
+                text="hi",
+                segments=[
+                    {"text": "hello team", "start": 1.0, "end": 2.0, "speaker": "SPEAKER_00"}
+                ],
+            )
+        )
+        s.add(
+            Summary(file_id="r1", template="meeting", title="Sync", content_md="# Sync\n\n- point")
+        )
+        s.add(
+            Summary(
+                file_id="r1",
+                template="mind_map",
+                title=None,
+                content_md="# Sync topics\n- agenda\n  - budget\n- decisions",
+            )
+        )
 
 
 def test_detail_page_renders_mind_map_tab(monkeypatch, tmp_path):
@@ -347,3 +381,38 @@ def test_export_markdown_includes_mind_map_before_transcript(monkeypatch, tmp_pa
     assert md.index("## Mind map") < md.index("## Transcript")
     # The generic notes section does not duplicate the outline.
     assert "## mind_map" not in md
+
+
+def test_mind_map_png_export_contains_complete_tree(monkeypatch, tmp_path):
+    import io
+
+    from PIL import Image
+
+    c = _client(monkeypatch, tmp_path)
+    _seed_ui()
+    response = c.get("/file/r1/export/mind-map.png")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["content-disposition"] == 'attachment; filename="r1-mind-map.png"'
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    image = Image.open(io.BytesIO(response.content))
+    assert image.width == 1400
+    assert image.height > 200
+
+
+def test_mind_map_png_export_requires_local_mind_map(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile, Summary
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="cloud-map", filename="Cloud map"))
+        session.add(
+            Summary(
+                file_id="cloud-map",
+                template="mind_map",
+                content_md="# Imported\n- not local",
+                source="plaud",
+            )
+        )
+    assert c.get("/file/cloud-map/export/mind-map.png").status_code == 409

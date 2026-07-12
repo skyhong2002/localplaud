@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import time
 from pathlib import Path
 
@@ -199,7 +198,7 @@ def benchmark_suite_command(
 def auth_check():
     """Verify your Plaud session works (whoami against the configured provider)."""
     from .plaud import make_plaud_client
-    from .plaud.client import PlaudAuthError
+    from .plaud.common import PlaudAuthError
 
     settings = get_settings()
     try:
@@ -245,47 +244,6 @@ def auth_login():
         raise typer.Exit(1) from exc
     console.print(f"[green]✓[/] Signed in; tokens saved to [bold]{tokens_path}[/].")
     auth_check()
-
-
-@auth_app.command("import")
-def auth_import(
-    curl_file: str = typer.Option(
-        None, "--file", "-f", help="File with a 'Copy as cURL' command (default: read stdin)."
-    ),
-):
-    """Parse a browser 'Copy as cURL' into config/.env lines.
-
-    In your browser DevTools → Network, right-click an authenticated request to
-    api-*.plaud.ai → Copy → Copy as cURL, then pipe it here.
-    """
-    from pathlib import Path
-
-    from .plaud.auth import parse_curl
-
-    raw = Path(curl_file).read_text() if curl_file else sys.stdin.read()
-    if not raw.strip():
-        console.print("[red]No input.[/] Paste a cURL command or use --file.")
-        raise typer.Exit(1)
-    import json
-
-    parsed = parse_curl(raw)
-    if not parsed.get("token") and not parsed.get("cookie"):
-        console.print(
-            "[yellow]No Authorization or Cookie found in that cURL.[/] Copy an "
-            "[bold]authenticated[/] request to api-*.plaud.ai (e.g. /user/me)."
-        )
-        raise typer.Exit(1)
-    console.print("[bold]Add these to your .env[/] (secrets stay out of config.toml):\n")
-    if parsed.get("api_base"):
-        console.print(f'LOCALPLAUD_PLAUD__API_BASE="{parsed["api_base"]}"')
-    if parsed.get("token"):
-        console.print(f'LOCALPLAUD_PLAUD__TOKEN="{parsed["token"]}"')
-    if parsed.get("cookie"):
-        console.print(f'LOCALPLAUD_PLAUD__COOKIE="{parsed["cookie"]}"')
-    headers = parsed.get("headers", {})
-    if headers:
-        console.print("\n[dim]# Plaud client/device headers (needed if auth check fails):[/]")
-        console.print(f"LOCALPLAUD_PLAUD__EXTRA_HEADERS='{json.dumps(headers)}'")
 
 
 # --------------------------------------------------------------------------- #
@@ -571,13 +529,6 @@ def doctor():
             st["ok"],
             st["detail"] if st["ok"] else "run `localplaud auth login`",
         )
-        has_legacy = bool(settings.plaud.token or settings.plaud.cookie)
-        if settings.plaud.apse1_enrichment:
-            row(
-                "apse1 enrichment",
-                has_legacy,
-                "credentials set" if has_legacy else "no session pasted (optional)",
-            )
     elif settings.plaud.provider == "mcp":
         try:
             from .plaud import make_plaud_client
@@ -587,13 +538,6 @@ def doctor():
             row("plaud auth (mcp)", True, "official MCP OAuth and read tool verified")
         except Exception as exc:  # noqa: BLE001
             row("plaud auth (mcp)", False, str(exc)[:60])
-    else:
-        has_creds = bool(settings.plaud.token or settings.plaud.cookie)
-        row(
-            "plaud auth",
-            has_creds,
-            "credentials set" if has_creds else "run `localplaud auth import`",
-        )
 
     console.print(table)
 

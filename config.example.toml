@@ -1,9 +1,8 @@
 # localplaud configuration — copy to config.toml and edit.
 #
-# Secrets (Plaud cookie, API keys, HF token) are better kept OUT of this file.
+# Secrets (API keys and HF token) are better kept OUT of this file.
 # Any field can be overridden by an environment variable using the prefix
 # LOCALPLAUD_ and "__" between levels, e.g.:
-#     LOCALPLAUD_PLAUD__COOKIE="session=..."
 #     LOCALPLAUD_ASR__OPENAI__API_KEY="sk-..."
 # You can also put those in a .env file (see .env.example). config.toml and
 # .env are git-ignored.
@@ -15,25 +14,7 @@
 #       browser once, tokens land in ~/.plaud/tokens.json). Recommended.
 #   "mcp"       — Plaud's official local MCP server. One-time setup:
 #       `npx -y @plaud-ai/mcp@latest install`; uses ~/.plaud/tokens-mcp.json.
-#   "apse1"    — DEPRECATED compatibility adapter for old deployments only.
-#       Do not configure it for a new installation.
 provider = "official"
-
-# Legacy compatibility only: when the provider is "official" AND an old apse1
-# browser session is configured, the poller may additionally read its listing to
-# fill change-detection fields the Open API lacks (version / file_md5 /
-# edit_time / is_trash). Purely optional.
-apse1_enrichment = true
-
-# ---- apse1 (DEPRECATED legacy enrichment) ---------------------------------- #
-# API host for YOUR account/region. Find it in the browser devtools console:
-#   localStorage.getItem("pld_plaud_user_api_domain")
-# Do not assume the default below matches your region.
-api_base = "https://api-apse1.plaud.ai"
-
-# Session paste route: set the session via env vars (preferred, keeps it out
-# of this file) — LOCALPLAUD_PLAUD__TOKEN / LOCALPLAUD_PLAUD__COOKIE.
-# cookie = "paste-cookie-header-value-here"
 
   [plaud.official]
   # Defaults work for everyone; override only if Plaud changes its platform.

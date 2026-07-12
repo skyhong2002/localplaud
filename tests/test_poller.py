@@ -7,7 +7,7 @@ def _reset_db(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'t.db'}")
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 't.db'}")
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
     get_settings(reload=True)
@@ -44,41 +44,14 @@ def test_reset_download_errors_retries_only_audioless_rows(monkeypatch, tmp_path
         # Download-stage failure (429/network): no audio on disk -> retry.
         s.add(PlaudFile(id="dl-err", status=FileStatus.error, error="429"))
         # Pipeline failure: audio exists -> NOT a download problem, keep it.
-        s.add(PlaudFile(id="pipe-err", status=FileStatus.error, audio_path="/a.mp3",
-                        error="ollama down"))
+        s.add(
+            PlaudFile(
+                id="pipe-err", status=FileStatus.error, audio_path="/a.mp3", error="ollama down"
+            )
+        )
 
     assert reset_download_errors() == 1
     with session_scope() as s:
         assert s.get(PlaudFile, "dl-err").status == FileStatus.discovered
         assert s.get(PlaudFile, "dl-err").error is None
         assert s.get(PlaudFile, "pipe-err").status == FileStatus.error
-
-
-def test_sync_redownloads_when_md5_changes(monkeypatch, tmp_path):
-    _reset_db(monkeypatch, tmp_path)
-    from localplaud.config import get_settings
-    from localplaud.db.models import FileStatus, PlaudFile
-    from localplaud.db.session import init_db, session_scope
-    from localplaud.plaud.models import PlaudFileDTO
-    from localplaud.poller.poll import sync_file_list
-
-    init_db()
-    with session_scope() as s:
-        s.add(
-            PlaudFile(
-                id="f1", status=FileStatus.done, audio_path="/old.mp3",
-                file_md5="OLD", version=1, version_ms=1,
-            )
-        )
-
-    class FakeClient:
-        def iter_files(self, include_trash=False):
-            # same version, but the audio md5 changed -> must force re-download
-            yield PlaudFileDTO(id="f1", file_md5="NEW", version=1, version_ms=1)
-
-    settings = get_settings()
-    settings.poller.auto_download = True
-    new, changed = sync_file_list(FakeClient(), settings)
-    assert (new, changed) == (0, 1)
-    with session_scope() as s:
-        assert s.get(PlaudFile, "f1").status == FileStatus.discovered  # not "downloaded"

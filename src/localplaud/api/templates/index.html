@@ -239,7 +239,7 @@
       {% elif lib.q or lib.state or lib.scene is not none or lib.folder is not none or lib.tag is not none or lib.origin or lib.view == 'uncategorized' %}
         {{ t('No recordings match these filters.') }}
       {% else %}
-        {{ t('No recordings yet.') }}<br>{{ t('Run localplaud auth import then localplaud poll --once to sync.') }}
+        {{ t('No recordings yet.') }}<br>{{ t('Connect the official Plaud API or MCP in Settings, then import your library.') }}
       {% endif %}
     </div>
     {% else %}

@@ -31,45 +31,22 @@ _ARTIFACT_CHECKED_KEY = "_artifact_checked_name"
 
 def _apply_dto(row: PlaudFile, dto: PlaudFileDTO) -> None:
     """Copy DTO fields onto the row. Only fields the provider actually sent
-    are applied (the Open API omits version/md5/trash — those must not clobber
-    values enriched from api-apse1)."""
+    are applied (official transports may omit version/md5/trash)."""
     provided = dto.model_fields_set
     row.filename = dto.filename or row.filename
-    if "fullname" in provided:
-        row.fullname = dto.fullname
-    if "filesize" in provided:
-        row.filesize = dto.filesize
-    if "file_md5" in provided:
-        row.file_md5 = dto.file_md5
     if "duration" in provided:
         row.duration_ms = dto.duration
     if "start_time" in provided:
         row.start_time_ms = dto.start_time
     if "end_time" in provided:
         row.end_time_ms = dto.end_time
-    if "scene" in provided:
-        row.scene = dto.scene
-    if "is_trash" in provided:
-        row.is_trash = dto.is_trash
-    if "version" in provided:
-        row.version = dto.version
-    if "version_ms" in provided:
-        row.version_ms = dto.version_ms
-    if "edit_time" in provided:
-        row.edit_time = dto.edit_time
-    if "is_trans" in provided:
-        row.cloud_is_trans = dto.is_trans
-    if "is_summary" in provided:
-        row.cloud_is_summary = dto.is_summary
     row.raw = {**(row.raw or {}), **dto.model_dump(exclude_unset=True)}
 
 
 def sync_file_list(client, settings: Settings) -> tuple[int, int]:
     """Upsert the cloud listing. Returns (new_count, changed_count).
 
-    Works with either provider; both use the same file ids, so running this
-    once with the official client and again with the api-apse1 client (see
-    ``enrich_from_apse1``) merges cleanly into the same rows.
+    Works with either official provider; both use the same file ids.
     """
     new_count = changed_count = 0
     with session_scope() as session:
@@ -90,36 +67,7 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                 new_count += 1
                 log.info("New file discovered: %s (%s)", dto.id, dto.filename)
             else:
-                # Capture the pre-update values — _apply_dto overwrites them.
-                # Version-based change detection only applies when the provider
-                # sends version fields (the Open API doesn't — "unknown" must
-                # not read as "changed").
-                provided = dto.model_fields_set
-                changed = ("version" in provided or "version_ms" in provided) and (
-                    (dto.version_ms or 0) != (row.version_ms or 0)
-                    or (dto.version or 0) != (row.version or 0)
-                )
-                md5_changed = bool(dto.file_md5) and dto.file_md5 != row.file_md5
                 _apply_dto(row, dto)
-                # Re-process a finished/errored file when the cloud changed it.
-                # An in-flight row (downloading/processing) is left alone.
-                if (changed or md5_changed) and row.status in (
-                    FileStatus.done,
-                    FileStatus.partial,
-                    FileStatus.error,
-                ):
-                    if md5_changed or not row.audio_path:
-                        # The audio itself changed; queue it only when automatic
-                        # downloading is explicitly enabled.
-                        row.status = (
-                            FileStatus.discovered
-                            if settings.poller.auto_download
-                            else FileStatus.metadata_only
-                        )
-                    else:
-                        row.status = FileStatus.downloaded
-                    changed_count += 1
-                    log.info("File changed upstream, will reprocess: %s", dto.id)
     return new_count, changed_count
 
 
@@ -202,9 +150,7 @@ def download_pending(client, settings: Settings) -> int:
     """Download audio for discovered files, up to
     ``poller.max_concurrent_downloads`` at a time. Returns count downloaded."""
     with session_scope() as session:
-        stmt = select(PlaudFile.id, PlaudFile.raw).where(
-            PlaudFile.status == FileStatus.discovered
-        )
+        stmt = select(PlaudFile.id, PlaudFile.raw).where(PlaudFile.status == FileStatus.discovered)
         if not settings.poller.include_trash:
             stmt = stmt.where(PlaudFile.is_trash.is_(False))
         pending = [(fid, raw) for fid, raw in session.execute(stmt)]
@@ -220,30 +166,6 @@ def download_pending(client, settings: Settings) -> int:
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = pool.map(lambda fr: _download_one(client, fr[0], fr[1], settings), pending)
     return sum(results)
-
-
-def enrich_from_apse1(settings: Settings) -> tuple[int, int]:
-    """Optional second listing pass through the reverse-engineered api-apse1
-    client, filling the change-detection fields the Open API lacks
-    (``version``/``file_md5``/``edit_time``/``is_trash``, scene, cloud flags).
-
-    Both providers use the same file ids, so this is just ``sync_file_list``
-    with the legacy client. Only runs when the primary provider is
-    ``official``, enrichment is enabled, and apse1 credentials are configured;
-    failures degrade to a warning (the official sync already succeeded)."""
-    cfg = settings.plaud
-    if cfg.provider != "official" or not cfg.apse1_enrichment:
-        return (0, 0)
-    if not (cfg.token or cfg.cookie):
-        return (0, 0)
-    from ..plaud.client import PlaudClient
-
-    try:
-        with PlaudClient(cfg) as legacy:
-            return sync_file_list(legacy, settings)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("apse1 enrichment failed (continuing without it): %s", exc)
-        return (0, 0)
 
 
 def _looks_like_raw_name(name: str) -> bool:
@@ -276,8 +198,11 @@ def _ingest_artifacts_for(client, file_id: str) -> bool:
         with session_scope() as session:
             session.add(
                 SummaryRow(
-                    file_id=file_id, template="plaud", title=title,
-                    content_md=md, source="cloud",
+                    file_id=file_id,
+                    template="plaud",
+                    title=title,
+                    content_md=md,
+                    source="cloud",
                 )
             )
             session.get(PlaudFile, file_id).cloud_is_summary = True
@@ -364,9 +289,7 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
                     provider="plaud",
                     source="cloud",
                     has_speakers=any(segment.get("speaker") for segment in segments),
-                    text="\n".join(
-                        segment["text"] for segment in segments if segment.get("text")
-                    ),
+                    text="\n".join(segment["text"] for segment in segments if segment.get("text")),
                     segments=segments,
                 )
             )
@@ -396,17 +319,14 @@ def ingest_cloud_artifacts(client, settings: Settings) -> int:
             missing_summary = r.cloud_is_summary and not any(
                 s.template == "plaud" for s in r.summaries
             )
-            has_cloud_transcript = any(
-                t.source in {"cloud", "plaud"} for t in r.transcripts
-            )
+            has_cloud_transcript = any(t.source in {"cloud", "plaud"} for t in r.transcripts)
             missing_transcript = r.cloud_is_trans and not has_cloud_transcript
             renamed = (
                 bool(r.filename)
                 and not _looks_like_raw_name(r.filename)
                 and (r.raw or {}).get(_ARTIFACT_CHECKED_KEY) != r.filename
                 and (
-                    not any(s.template == "plaud" for s in r.summaries)
-                    or not has_cloud_transcript
+                    not any(s.template == "plaud" for s in r.summaries) or not has_cloud_transcript
                 )
             )
             if missing_summary or missing_transcript or renamed:
@@ -423,8 +343,8 @@ def ingest_cloud_artifacts(client, settings: Settings) -> int:
 
 
 def poll_once(settings: Settings | None = None) -> dict:
-    """One full poll cycle: sync listing (+ optional apse1 enrichment) +
-    download pending (+ mirror Plaud's own transcripts/summaries when
+    """One full poll cycle: sync the official listing + download pending
+    (+ mirror Plaud's own transcripts/summaries when
     explicit migration mode is enabled)."""
     settings = settings or get_settings()
     reset_inflight()
@@ -432,15 +352,18 @@ def poll_once(settings: Settings | None = None) -> dict:
         reset_download_errors()
     with make_plaud_client(settings.plaud) as client:
         new, changed = sync_file_list(client, settings)
-        enriched_new, enriched_changed = enrich_from_apse1(settings)
         downloaded = download_pending(client, settings) if settings.poller.auto_download else 0
         cloud_artifacts = (
             ingest_cloud_artifacts(client, settings)
             if settings.pipeline.cloud_import_enabled
             else 0
         )
-    result = {"new": new + enriched_new, "changed": changed + enriched_changed,
-              "downloaded": downloaded, "cloud_artifacts": cloud_artifacts}
+    result = {
+        "new": new,
+        "changed": changed,
+        "downloaded": downloaded,
+        "cloud_artifacts": cloud_artifacts,
+    }
     try:
         from ..automations import evaluate_library
 

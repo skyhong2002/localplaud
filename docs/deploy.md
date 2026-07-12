@@ -23,9 +23,8 @@ privacy choice rather than an automatic fallback.
    be public — the app listens on 8080 behind Caddy.
 3. **Secrets**: copy `.env.example` → `.env` and fill in:
    - `DOMAIN` and `ACME_EMAIL`
-   - Your Plaud session (`LOCALPLAUD_PLAUD__API_BASE`, `LOCALPLAUD_PLAUD__COOKIE`,
-     and `LOCALPLAUD_PLAUD__EXTRA_HEADERS` if needed) — see
-     [plaud-api.md](plaud-api.md).
+   - Authorize either the official Open API with `localplaud auth login` or the
+     official MCP with `npx -y @plaud-ai/mcp@latest install`.
    - ASR keys for whichever provider you use.
 4. **Bootstrap** installs Docker (+ optionally the NVIDIA toolkit):
    ```bash

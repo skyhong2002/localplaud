@@ -433,8 +433,8 @@ playable timestamp that seeks the player, and whole-library Ask citations deep-l
 to the cited moment (`/file/{id}?t=`). Long transcripts are summarized with full
 coverage through bounded hierarchical map/reduce. Mind maps are generated from the
 canonical transcript as full-coverage Markdown outlines, rendered as a collapsible
-tree in the recording workspace, and included in Markdown export; PNG mind-map
-export remains. Speaker identities are now persisted
+tree in the recording workspace, included in Markdown export, and downloadable as
+a complete locally rendered PNG tree. Speaker identities are now persisted
 per recording with stable local keys and user-editable display names
 (renamed from the Web detail page and applied in transcript view, regenerated
 artifacts, Ask, and export). Run-local provider labels are reconciled using clear,

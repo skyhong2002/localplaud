@@ -357,6 +357,13 @@
         </div>
       </section>
       {% endif %}
+      {% if mindmaps %}
+      <section>
+        <strong>{{ t('Mind map') }}</strong>
+        <div class="sub" style="font-size:12px;margin:3px 0 9px">{{ t('Complete tree rendered from the latest local mind map') }}</div>
+        <a class="btn sec" href="/file/{{ f.id }}/export/mind-map.png" style="padding:7px 11px">PNG</a>
+      </section>
+      {% endif %}
       <section>
         <strong>{{ t('Combined archive') }}</strong>
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">

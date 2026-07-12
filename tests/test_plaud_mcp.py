@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 
 def _client_without_process(monkeypatch):
     from localplaud.config import PlaudMcpConfig
@@ -57,16 +55,6 @@ def test_mcp_cloud_artifacts_stay_explicit(monkeypatch):
     monkeypatch.setattr(client, "_call_tool", lambda name, args=None: responses[name])
     assert client.get_cloud_summary_md("m1") == "# Imported Plaud note"
     assert client.get_cloud_transcript_segments("m1") == [{"text": "hello", "start": 0, "end": 1}]
-
-
-def test_apse1_provider_emits_deprecation_warning(monkeypatch):
-    import localplaud.plaud.client as module
-    from localplaud.config import PlaudConfig
-    from localplaud.plaud import make_plaud_client
-
-    monkeypatch.setattr(module.PlaudClient, "__init__", lambda self, cfg: None)
-    with pytest.deprecated_call(match="apse1"):
-        make_plaud_client(PlaudConfig(provider="apse1"))
 
 
 def test_mcp_auth_status_does_not_read_or_expose_tokens(tmp_path):

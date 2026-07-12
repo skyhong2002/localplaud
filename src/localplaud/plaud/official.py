@@ -9,10 +9,8 @@ OAuth-authenticated (auto-refreshing, see ``oauth.py``) and stable. Endpoints
 - ``GET /open/third-party/files/{id}``               — detail: 24h presigned
   audio URL + ``source_list`` (transcript) + ``note_list`` (summary markdown)
 
-The Open API's file objects carry less sync metadata than api-apse1 (no
-``version``/``file_md5``/``edit_time``/``is_trash``); the poller optionally
-enriches those from the legacy client. Duck-type compatible with
-``PlaudClient`` for everything the poller/CLI use.
+The Open API intentionally exposes only minimal recording metadata plus raw audio
+and optional migration artifacts.
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ import httpx
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from ..config import PlaudOfficialConfig
-from .client import (
+from .common import (
     _MAX_AUDIO_BYTES,
     PlaudAuthError,
     PlaudError,

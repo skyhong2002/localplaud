@@ -40,15 +40,14 @@ Priority map:
 auto-refresh implemented in `plaud/oauth.py`, verified live — both tokens
 rotate, 24h expiry). `/open/third-party/files/{id}` supplies a signed raw-audio
 URL. The client can also import Plaud transcripts/summaries, but that capability is
-now migration/debug-only and cannot be a primary pipeline dependency. api-apse1 is
-optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
-`version`/`file_md5`/`edit_time`/`is_trash`. Full API notes: `docs/plaud-api.md`.
+now migration/debug-only and cannot be a primary pipeline dependency. The
+reverse-engineered apse1 adapter and browser-session import path have been removed.
+Full API notes: `docs/plaud-api.md`.
 
 The official Plaud MCP is also available as a first-class read-only ingest provider
 (`plaud.provider = "mcp"`) with its own OAuth cache, stdio JSON-RPC timeout, and the
 same signed-audio SSRF/size protections. Its transcript and note tools remain
-migration/debug-only. The reverse-engineered apse1 primary provider is deprecated
-and retained solely for existing-installation compatibility.
+migration/debug-only.
 
 ### P0 — Make raw-audio processing production-safe
 
@@ -286,7 +285,7 @@ embedding raw provider credentials or model settings in each rule.
   the same bounded map/reduce chunking (existing local notes are structural context
   only). Stored as a provenanced `mind_map` note, resumable/degradable like other
   optional stages, rendered as a collapsible tree tab in the Web detail page, and
-  included in Markdown export. PNG mind-map export remains.
+  included in Markdown export and downloadable as a complete, locally rendered PNG tree.
 - ✅ Note templates are editable, versioned database records seeded from the built-in
   catalog. Settings can create templates or immutable new versions; recordings select
   a template independently, changes mark notes/maps stale for explicit Resume, remote

@@ -140,24 +140,14 @@ localplaud run
 | `localplaud export <id> [-o …]` | Export a recording to Markdown |
 | `localplaud serve` | Web UI only |
 
-### Your Plaud session
+### Connect Plaud
 
 localplaud never sees your Plaud password. The default provider is **Plaud's
 official Open API**: run `localplaud auth login` once — it opens your browser
 for native S256 PKCE OAuth (no Node.js required) and caches an
-auto-refreshing token set in `~/.plaud/tokens.json`. That's it; the session
-keeps itself alive.
-
-Optionally, you can *also* paste a legacy web session (`api-*.plaud.ai`).
-localplaud then enriches its sync metadata with fields the Open API doesn't
-expose (`version`, `file_md5`, `edit_time`, `is_trash`) — useful for detecting
-edits/deletions faster, but not required:
-
-1. Log in to <https://web.plaud.ai>, open DevTools → Network, and find an
-   authenticated request to `api-*.plaud.ai` (e.g. `GET /user/me`).
-2. Copy it as cURL and run `localplaud auth import` to turn it into `.env`
-   lines (this session expires after ~14 h).
-3. Setting `plaud.provider = "apse1"` makes this the primary provider instead.
+auto-refreshing token set in `~/.plaud/tokens.json`. The official Plaud MCP is
+also supported with `plaud.provider = "mcp"`; install and authorize it with
+`npx -y @plaud-ai/mcp@latest install`.
 
 `localplaud auth check` confirms whichever provider is configured. See
 [`docs/plaud-api.md`](docs/plaud-api.md) for API details.
@@ -170,7 +160,6 @@ an environment variable prefixed `LOCALPLAUD_` with `__` between levels, so
 **secrets stay out of the file** and in `.env`:
 
 ```bash
-LOCALPLAUD_PLAUD__COOKIE="Authorization: Bearer ..."
 LOCALPLAUD_ASR__OPENAI__API_KEY="sk-..."
 LOCALPLAUD_DIARIZE__HF_TOKEN="hf_..."
 ```
