@@ -18,6 +18,15 @@ pipeline completion. See [ADR 0007](adr/0007-subscription-independence.md).
 Sanctioned developer API, documented at <https://docs.plaud.ai> (MCP & CLI).
 All endpoints verified against a real account (2026-07-10).
 
+### Official MCP provider
+
+Set `plaud.provider = "mcp"` after running
+`npx -y @plaud-ai/mcp@latest install`. localplaud starts the official MCP stdio
+server and uses only its read tools (`get_current_user`, `list_files`, `get_file`,
+`get_note`, and `get_transcript`). Listing and `presigned_url` raw-audio download
+are valid primary ingest inputs. MCP notes/transcripts remain explicitly labelled
+migration/debug inputs and cannot satisfy independent-mode processing.
+
 - **Base**: `https://platform.plaud.ai/developer/api`, auth `Authorization:
   Bearer <access_token>`.
 - **OAuth** (PKCE, authorization-code):
@@ -54,7 +63,11 @@ All endpoints verified against a real account (2026-07-10).
 - **Not exposed** (hence the optional apse1 enrichment): `version`,
   `file_md5`, `edit_time`, `is_trash`, tags, scene.
 
-## Legacy web API (`plaud/client.py` — reverse-engineered)
+## Deprecated legacy web API (`plaud/client.py` — reverse-engineered)
+
+This adapter is retained only so existing installations can migrate. New
+deployments must use the official Open API or official Plaud MCP. It receives no
+new product features and is excluded from current acceptance paths.
 
 Everything below was observed **read-only**, against the account owner's own
 data, from the browser at <https://web.plaud.ai>. Anything marked **open** is

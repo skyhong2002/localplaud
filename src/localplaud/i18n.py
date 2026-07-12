@@ -278,6 +278,9 @@ _ZH_HANT_TW = {
     "System health": "系統健康狀態",
     "Plaud account": "Plaud 帳號",
     "Read-only Open API connection used for metadata and raw audio.": "用於中繼資料與原始音訊的唯讀 Open API 連線。",
+    "Read-only official Plaud MCP connection used for metadata and raw audio.": "用於中繼資料與原始音訊的唯讀官方 Plaud MCP 連線。",
+    "Official Plaud MCP OAuth": "官方 Plaud MCP OAuth",
+    "Run the official Plaud MCP installer on this machine to sign in.": "請在這台機器執行官方 Plaud MCP 安裝程式以登入。",
     "connected": "已連線",
     "sign-in required": "需要登入",
     "Session": "工作階段",
@@ -403,9 +406,30 @@ _ZH_HANT_TW = {
     "Speech word insertion": "語音詞彙插入率",
     "Non-speech hallucination": "非語音幻覺率",
     "not recorded": "未記錄",
+    "Saving…": "儲存中…",
+    "Saved. Applying…": "已儲存，正在套用…",
+    "Could not save preferences": "無法儲存偏好設定",
+    "Create a full backup including every local media file? This can be very large and may take time.": "要建立包含所有本機媒體檔案的完整備份嗎？檔案可能很大，並需要一段時間。",
+    "Backing up database and media…": "正在備份資料庫與媒體…",
+    "Backing up database…": "正在備份資料庫…",
+    "Backup ready. Reloading…": "備份已完成，正在重新載入…",
+    "Backup failed": "備份失敗",
+    "checking": "檢查中",
+    "checking…": "檢查中…",
+    "healthy": "正常",
+    "degraded": "降級",
+    "unknown": "未知",
+    "Save correction": "儲存修正",
+    "Delete this correction rule? Existing transcript revisions remain unchanged.": "要刪除此修正規則嗎？既有逐字稿修訂不會變更。",
+    "Delete failed": "刪除失敗",
 }
 
 CATALOGS = {"zh-Hant-TW": _ZH_HANT_TW}
+
+
+def catalog(locale: str) -> dict[str, str]:
+    """Return a copy safe to expose to the browser for dynamic UI messages."""
+    return dict(CATALOGS.get(locale, {}))
 
 
 def translator(locale: str) -> Callable[[str], str]:

@@ -142,3 +142,13 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
             assert '<html lang="zh-Hant-TW"' in page.text
             assert "所有檔案" in page.text
             assert text in page.text
+
+        settings = client.get("/settings")
+        assert 'const tr=window.localplaudT' in settings.text
+        assert 'window.localplaudT = message => ({' in settings.text
+
+        from localplaud.i18n import catalog
+
+        messages = catalog("zh-Hant-TW")
+        assert messages["Saving…"] == "儲存中…"
+        assert messages["healthy"] == "正常"

@@ -44,7 +44,7 @@ from ..db.models import (
     recording_tags,
 )
 from ..db.session import init_db, session_scope
-from ..i18n import SUPPORTED_LOCALES, translator
+from ..i18n import SUPPORTED_LOCALES, catalog, translator
 from ..preferences import (
     get_workspace_preferences,
     save_workspace_preferences,
@@ -216,6 +216,7 @@ def _base_ctx(request: Request, active: str) -> dict:
         "workspace_preferences": workspace_preferences,
         "supported_locales": SUPPORTED_LOCALES,
         "t": translator(workspace_preferences["locale"]),
+        "translations": catalog(workspace_preferences["locale"]),
     }
 
 
@@ -1554,14 +1555,19 @@ def settings_page(request: Request):
     from ..system_info import about_info
 
     settings = get_settings()
-    from ..plaud.oauth import OfficialTokenStore
+    if settings.plaud.provider == "mcp":
+        from ..plaud.mcp import PlaudMcpClient
 
-    plaud_auth = OfficialTokenStore(
-        settings.plaud.official.tokens_path,
-        settings.plaud.official.refresh_url,
-        settings.plaud.official.request_timeout_seconds,
-    ).status()
-    plaud_auth["tokens_path"] = str(settings.plaud.official.tokens_path.expanduser())
+        plaud_auth = PlaudMcpClient.auth_status(settings.plaud.mcp)
+    else:
+        from ..plaud.oauth import OfficialTokenStore
+
+        plaud_auth = OfficialTokenStore(
+            settings.plaud.official.tokens_path,
+            settings.plaud.official.refresh_url,
+            settings.plaud.official.request_timeout_seconds,
+        ).status()
+        plaud_auth["tokens_path"] = str(settings.plaud.official.tokens_path.expanduser())
     try:
         workspace_backups = list_workspace_backups()
         backup_error = None
@@ -1611,6 +1617,7 @@ def settings_page(request: Request):
             ],
             "hardware_recommendations": hardware_recommendations(),
             "plaud_auth": plaud_auth,
+            "plaud_provider": settings.plaud.provider,
             "workspace_backups": workspace_backups,
             "backup_error": backup_error,
             "backup_destinations": backup_destinations,
@@ -1626,17 +1633,24 @@ def settings_page(request: Request):
 @app.get("/api/plaud/auth/status")
 def plaud_auth_status():
     """Non-secret status for setup/health UI."""
-    from ..plaud.oauth import OfficialTokenStore
-
     settings = get_settings()
-    status = OfficialTokenStore(
-        settings.plaud.official.tokens_path,
-        settings.plaud.official.refresh_url,
-        settings.plaud.official.request_timeout_seconds,
-    ).status()
+    if settings.plaud.provider == "mcp":
+        from ..plaud.mcp import PlaudMcpClient
+
+        status = PlaudMcpClient.auth_status(settings.plaud.mcp)
+        login_method = "plaud-mcp-oauth"
+    else:
+        from ..plaud.oauth import OfficialTokenStore
+
+        status = OfficialTokenStore(
+            settings.plaud.official.tokens_path,
+            settings.plaud.official.refresh_url,
+            settings.plaud.official.request_timeout_seconds,
+        ).status()
+        login_method = "native-pkce-loopback"
     return status | {
         "provider": settings.plaud.provider,
-        "login_method": "native-pkce-loopback",
+        "login_method": login_method,
     }
 
 

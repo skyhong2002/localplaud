@@ -12,6 +12,7 @@ def _client(monkeypatch, tmp_path):
     from localplaud.config import get_settings
 
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'ui.db'}")
+    monkeypatch.setenv("LOCALPLAUD_PLAUD__PROVIDER", "official")
     monkeypatch.setenv(
         "LOCALPLAUD_PLAUD__OFFICIAL__TOKENS_PATH", str(tmp_path / "plaud-tokens.json")
     )

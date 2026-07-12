@@ -257,6 +257,7 @@
     </section>
   </div>
   <script>
+    window.localplaudT = message => ({{ translations|tojson }})[message] || message;
     window.spkColor = (() => { const m={}, n=8; let i=0;
       return s => { if(!s) return null; if(!(s in m)) m[s]=i++%n; return m[s]; }; })();
     (()=>{

@@ -44,6 +44,12 @@ now migration/debug-only and cannot be a primary pipeline dependency. api-apse1 
 optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
 `version`/`file_md5`/`edit_time`/`is_trash`. Full API notes: `docs/plaud-api.md`.
 
+The official Plaud MCP is also available as a first-class read-only ingest provider
+(`plaud.provider = "mcp"`) with its own OAuth cache, stdio JSON-RPC timeout, and the
+same signed-audio SSRF/size protections. Its transcript and note tools remain
+migration/debug-only. The reverse-engineered apse1 primary provider is deprecated
+and retained solely for existing-installation compatibility.
+
 ### P0 — Make raw-audio processing production-safe
 
 - ✅ Added default `pipeline.artifact_mode = "independent"`: only `source=local`

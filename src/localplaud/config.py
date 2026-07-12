@@ -53,6 +53,15 @@ class PlaudOfficialConfig(BaseModel):
     request_timeout_seconds: float = 30.0
 
 
+class PlaudMcpConfig(BaseModel):
+    """Official Plaud MCP stdio server used as a read-only cloud transport."""
+
+    command: str = "npx"
+    args: list[str] = Field(default_factory=lambda: ["-y", "@plaud-ai/mcp@latest"])
+    tokens_path: Path = Path("~/.plaud/tokens-mcp.json")
+    request_timeout_seconds: float = 30.0
+
+
 class PlaudConfig(BaseModel):
     """How to reach and authenticate against the Plaud cloud.
 
@@ -60,11 +69,12 @@ class PlaudConfig(BaseModel):
 
     - ``official`` (default) — the sanctioned Open API with auto-refreshing
       OAuth (see ``official``). No more pasting browser sessions.
-    - ``apse1`` — the reverse-engineered web API, driven by a pasted browser
-      session (``cookie``/``token``/``extra_headers``).
+    - ``mcp`` — Plaud's official local MCP server and its separate OAuth cache.
+    - ``apse1`` — deprecated compatibility adapter for the reverse-engineered
+      web API. It is not a supported path for new deployments.
 
-    When the provider is ``official`` and apse1 credentials are ALSO present,
-    the poller uses apse1 as an optional enrichment source for change-detection
+    When the provider is ``official`` and legacy apse1 credentials are ALSO present,
+    the poller may use apse1 as an optional compatibility enrichment source for change-detection
     fields the Open API lacks (``version``/``file_md5``/``edit_time``/
     ``is_trash``) — disable with ``apse1_enrichment = false``.
 
@@ -73,8 +83,9 @@ class PlaudConfig(BaseModel):
     browser — do not assume the default matches your account.
     """
 
-    provider: Literal["official", "apse1"] = "official"
+    provider: Literal["official", "mcp", "apse1"] = "official"
     official: PlaudOfficialConfig = Field(default_factory=PlaudOfficialConfig)
+    mcp: PlaudMcpConfig = Field(default_factory=PlaudMcpConfig)
     apse1_enrichment: bool = True
 
     api_base: str = "https://api-apse1.plaud.ai"

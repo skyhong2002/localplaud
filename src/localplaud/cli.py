@@ -578,6 +578,15 @@ def doctor():
                 has_legacy,
                 "credentials set" if has_legacy else "no session pasted (optional)",
             )
+    elif settings.plaud.provider == "mcp":
+        try:
+            from .plaud import make_plaud_client
+
+            with make_plaud_client(settings.plaud) as client:
+                client.check_auth()
+            row("plaud auth (mcp)", True, "official MCP OAuth and read tool verified")
+        except Exception as exc:  # noqa: BLE001
+            row("plaud auth (mcp)", False, str(exc)[:60])
     else:
         has_creds = bool(settings.plaud.token or settings.plaud.cookie)
         row(
