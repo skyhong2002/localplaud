@@ -13,6 +13,7 @@ def _reset(monkeypatch, tmp_path):
     from localplaud.config import get_settings
 
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'usage.db'}")
+    monkeypatch.setenv("LOCALPLAUD_ASR__PROVIDER", "faster-whisper")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__DIARIZE", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__SUMMARIZE", "false")
