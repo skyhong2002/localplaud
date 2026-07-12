@@ -146,7 +146,7 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   executable = "opencode"
   model = "qwen3.7-plus"
   agent = "transcript-polish"    # project agent denies every tool
-  timeout_seconds = 240
+  timeout_seconds = 900
 
 # --------------------------------------------------------------------------- #
 # Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.

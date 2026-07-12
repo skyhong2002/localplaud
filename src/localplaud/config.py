@@ -251,7 +251,9 @@ class OpenCodeGoLlmConfig(BaseModel):
     executable: str = "opencode"
     model: str = "qwen3.7-plus"
     agent: str = "transcript-polish"
-    timeout_seconds: int = Field(default=240, ge=10, le=1800)
+    # Transcript correction is a long-context generation task.  Production
+    # recordings routinely need more than the short interactive CLI timeout.
+    timeout_seconds: int = Field(default=900, ge=10, le=1800)
 
 
 class LlmConfig(BaseModel):
