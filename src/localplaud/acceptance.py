@@ -29,6 +29,7 @@ def subscription_independence_report(file_id: str) -> dict:
             None,
         )
         segments = list((transcript.segments if transcript else []) or [])
+        word_count = sum(len(item.get("words") or []) for item in segments)
         local_notes = [
             row for row in file.summaries if row.source == "local" and row.template != "mind_map"
         ]
@@ -40,6 +41,9 @@ def subscription_independence_report(file_id: str) -> dict:
         stage_runs = list(file.stage_runs)
         correct_stage = next(
             (row for row in stage_runs if row.stage.value == "correct"), None
+        )
+        align_stage = next(
+            (row for row in stage_runs if row.stage.value == "align"), None
         )
         checks = [
             _check(
@@ -72,6 +76,21 @@ def subscription_independence_report(file_id: str) -> dict:
                 bool(segments)
                 and all(item.get("start") is not None and item.get("end") is not None for item in segments),
                 f"{len(segments)} segment(s) with start/end timestamps",
+            ),
+            _check(
+                "word_alignment",
+                word_count > 0
+                and align_stage is not None
+                and align_stage.status == StageStatus.completed
+                and (
+                    align_stage.detail.get("strategy") == "provider-word-timestamps"
+                    or align_stage.detail.get("method") == "asr-word-timestamps"
+                ),
+                (
+                    f"{word_count} word timestamp(s) validated by durable align stage"
+                    if word_count
+                    else "no word-level timestamp evidence"
+                ),
             ),
             _check(
                 "speaker_assignment",

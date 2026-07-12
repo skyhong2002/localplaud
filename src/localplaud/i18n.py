@@ -441,6 +441,7 @@ _ZH_HANT_TW = {
     "local_transcript": "本機標準逐字稿",
     "transcript_polish": "AI 潤飾逐字稿",
     "timestamped_segments": "時間戳記段落",
+    "word_alignment": "逐字時間對齊",
     "speaker_assignment": "語者指派",
     "local_notes": "本機生成筆記",
     "local_mind_map": "本機心智圖",
