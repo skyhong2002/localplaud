@@ -228,6 +228,7 @@
     <div class="grow"></div>
     <a class="navi {% if active=='settings' %}on{% endif %}" href="/settings"><span class="ic">⚙️</span><span class="lbl">{{ t('Settings') }}</span></a>
     <a class="navi {% if active=='status' %}on{% endif %}" href="/status"><span class="ic">🩺</span><span class="lbl">{{ t('Status') }}</span></a>
+    {% if web_login_configured %}<form method="post" action="/logout"><button class="navi" type="submit" style="width:100%;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer"><span class="ic">↪</span><span class="lbl">{{ t('Log out') }}</span></button></form>{% endif %}
     <div class="foot lbl">{{ workspace_preferences.workspace_name }} · {{ t('self-hosted') }}</div>
   </aside>
   {% block body %}{% endblock %}

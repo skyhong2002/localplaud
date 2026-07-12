@@ -11,12 +11,13 @@ addressing before wider use.
 
 ## Decision
 
-- **Web UI is loopback-by-default with an optional token gate.** `api.host`
+- **Web UI is loopback-by-default with an optional login page.** `api.host`
   defaults to `127.0.0.1` so a stray `localplaud run` isn't exposed to the LAN.
   Docker overrides it to `0.0.0.0` (the container sits behind Caddy and its port
-  isn't published). `api.auth_token`, when set, requires an `X-Auth-Token`
-  header or `?token=` on every request except `/healthz`. For real deployments
-  the recommended front line is Caddy `basic_auth`.
+  isn't published). `api.login_password` plus `api.session_secret` enable the
+  built-in `/login` form and a signed, expiring, HttpOnly, Secure, SameSite=Lax
+  cookie. `api.auth_token` independently supports `Authorization: Bearer`,
+  `X-Auth-Token`, or `?token=` for API clients. `/healthz` remains public.
 - **Fetches are SSRF-guarded.** URLs pulled from API responses must be `https`
   and must not resolve to private/loopback/link-local/reserved IPs; redirects
   are not followed after the check. This blocks a compromised or MITM'd response
@@ -33,9 +34,9 @@ addressing before wider use.
 
 ## Consequences
 
-- The default local experience is safe, but exposing the UI to a network still
-  requires the operator to set `auth_token` and/or put auth in the reverse proxy
-  — documented in the README and deploy guide.
+- The default local experience is safe, but exposing the UI to a network requires
+  HTTPS plus the built-in login credentials (or an independently reviewed upstream
+  authentication layer) — documented in the README and deploy guide.
 - The SSRF allowlist is deny-private rather than allow-listed hosts, chosen
   because the API host is region-variable and user-supplied; a stricter host
   allowlist can be layered on later if needed.

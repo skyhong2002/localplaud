@@ -174,4 +174,8 @@ port = 8080
 # Optional shared secret: when set, every request needs it as an X-Auth-Token
 # header or ?token= param. Prefer real auth (Caddy basic_auth) in front.
 # auth_token via LOCALPLAUD_API__AUTH_TOKEN
+# Web App login is separate from Plaud OAuth and API bearer auth. Keep these
+# secrets in environment variables rather than this file:
+# LOCALPLAUD_API__LOGIN_PASSWORD and LOCALPLAUD_API__SESSION_SECRET
+# session_max_age_seconds = 2592000
 # public_url = "https://plaud.observe.tw"   # set to your domain behind the reverse proxy

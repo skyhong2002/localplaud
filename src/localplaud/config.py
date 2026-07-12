@@ -302,6 +302,13 @@ class ApiConfig(BaseModel):
     # ``X-Auth-Token`` header or ``?token=`` query param. Prefer putting real
     # auth (e.g. Caddy basic_auth) in front; this is a lightweight backstop.
     auth_token: str | None = None
+    # Optional password for the Web App's own /login form. This is separate
+    # from Plaud OAuth and from auth_token (which remains available to API
+    # clients). Configure it through an environment variable in production.
+    login_password: str | None = None
+    # HMAC key for signed browser sessions. Required when login_password is set.
+    session_secret: str | None = None
+    session_max_age_seconds: int = Field(default=2_592_000, ge=300, le=31_536_000)
     # Used to build absolute links behind a reverse proxy; set per machine.
     public_url: str | None = None
 

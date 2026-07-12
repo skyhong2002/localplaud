@@ -105,11 +105,14 @@ docker compose --profile cpu up -d --build
 
 ## Securing an exposed instance
 
-The UI has no auth of its own beyond an optional shared token. If it's reachable
-from anything but localhost:
+If the UI is reachable from anything but localhost:
 
-- Set `LOCALPLAUD_API__AUTH_TOKEN` (required on every request), **and/or**
-- Add `basic_auth` to the `Caddyfile` in front of `reverse_proxy`.
+- Serve it through HTTPS and set both `LOCALPLAUD_API__LOGIN_PASSWORD` and a long,
+  random `LOCALPLAUD_API__SESSION_SECRET` to enable the built-in `/login` page.
+- Set `LOCALPLAUD_API__AUTH_TOKEN` separately when non-browser API clients need
+  Bearer or `X-Auth-Token` access.
+- The reverse proxy normally only terminates HTTPS; upstream authentication can
+  still be used when a deployment deliberately delegates identity to it.
 
 See [ADR 0006](adr/0006-security-posture.md).
 

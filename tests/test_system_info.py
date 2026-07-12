@@ -87,12 +87,10 @@ def test_about_and_diagnostics_are_truthful_aggregate_and_redacted(monkeypatch, 
         assert about.json()["build_commit"] == "abcdef1234567890"
         assert about.json()["access"] == {
             "application_token_configured": True,
+            "browser_login_configured": False,
             "reverse_proxy": "external / not observable by localplaud",
             "active_sessions": None,
-            "session_detail": (
-                "localplaud uses a stateless application token and/or reverse-proxy authentication; "
-                "it does not create or retain browser login sessions"
-            ),
+            "session_detail": "localplaud Web App login is not configured",
         }
 
         response = client.get("/api/system/diagnostics.json")
@@ -132,6 +130,6 @@ def test_about_and_diagnostics_are_truthful_aggregate_and_redacted(monkeypatch, 
         assert 'href="#access-security"' in settings_page.text
         assert 'id="support-about"' in settings_page.text
         assert 'href="#support-about"' in settings_page.text
-        assert "app token configured" in settings_page.text
+        assert "Web login not configured" in settings_page.text
         assert "Active sessions" in settings_page.text and "Not tracked" in settings_page.text
         assert 'href="/api/system/diagnostics.json"' in settings_page.text

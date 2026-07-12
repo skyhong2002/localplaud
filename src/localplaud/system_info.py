@@ -41,11 +41,16 @@ def access_boundary(settings: Settings | None = None) -> dict:
     settings = settings or get_settings()
     return {
         "application_token_configured": bool(settings.api.auth_token),
+        "browser_login_configured": bool(
+            settings.api.login_password and settings.api.session_secret
+        ),
         "reverse_proxy": "external / not observable by localplaud",
         "active_sessions": None,
         "session_detail": (
-            "localplaud uses a stateless application token and/or reverse-proxy authentication; "
-            "it does not create or retain browser login sessions"
+            "localplaud uses signed, expiring browser sessions without storing their contents; "
+            "active-session enumeration and remote revocation are not yet available"
+            if settings.api.login_password and settings.api.session_secret
+            else "localplaud Web App login is not configured"
         ),
     }
 

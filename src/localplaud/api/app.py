@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
+import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import UTC
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -97,21 +104,121 @@ _static = _HERE / "static"
 if _static.exists():
     app.mount("/static", StaticFiles(directory=str(_static)), name="static")
 
+_SESSION_COOKIE = "localplaud_session"
+
+
+def _session_token(secret: str, max_age: int) -> str:
+    payload = {"exp": int(time.time()) + max_age, "nonce": secrets.token_urlsafe(18)}
+    body = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).rstrip(b"=")
+    signature = hmac.new(secret.encode(), body, hashlib.sha256).digest()
+    return f"{body.decode()}.{base64.urlsafe_b64encode(signature).rstrip(b'=').decode()}"
+
+
+def _valid_session(token: str | None, secret: str | None) -> bool:
+    if not token or not secret or "." not in token:
+        return False
+    try:
+        body_text, signature_text = token.split(".", 1)
+        body = body_text.encode()
+        signature = base64.urlsafe_b64decode(signature_text + "=" * (-len(signature_text) % 4))
+        expected = hmac.new(secret.encode(), body, hashlib.sha256).digest()
+        if not hmac.compare_digest(signature, expected):
+            return False
+        decoded = base64.urlsafe_b64decode(body_text + "=" * (-len(body_text) % 4))
+        payload = json.loads(decoded)
+        return isinstance(payload.get("exp"), int) and payload["exp"] >= int(time.time())
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def _safe_next(value: str | None) -> str:
+    if not value or not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return "/"
+    return value
+
+
+def _is_browser_navigation(request: Request) -> bool:
+    return request.method == "GET" and "text/html" in request.headers.get("accept", "")
+
 
 @app.middleware("http")
 async def _auth_gate(request: Request, call_next):
-    """If api.auth_token is configured, require it on every request (except the
-    health check) via an X-Auth-Token header or ?token= query param."""
-    token = get_settings().api.auth_token
+    """Protect the Web App with a signed login session and APIs with a token."""
+    settings = get_settings().api
+    token = settings.auth_token
+    login_password = settings.login_password
+    public_paths = {"/healthz", "/login"}
     if (
-        token
-        and request.url.path != "/healthz"
+        (token or login_password)
+        and request.url.path not in public_paths
+        and not request.url.path.startswith("/static/")
         and not request.url.path.startswith("/api/worker/v1")
     ):
         supplied = request.headers.get("x-auth-token") or request.query_params.get("token")
-        if supplied != token:
+        bearer = request.headers.get("authorization", "")
+        if bearer.lower().startswith("bearer "):
+            supplied = bearer[7:]
+        token_ok = bool(token and supplied and hmac.compare_digest(supplied, token))
+        session_ok = bool(
+            login_password
+            and _valid_session(request.cookies.get(_SESSION_COOKIE), settings.session_secret)
+        )
+        if not token_ok and not session_ok:
+            if _is_browser_navigation(request) and login_password:
+                next_path = request.url.path
+                if request.url.query:
+                    next_path += f"?{request.url.query}"
+                return RedirectResponse(url=f"/login?next={quote(next_path, safe='')}", status_code=303)
             return JSONResponse({"error": "unauthorized"}, status_code=401)
     return await call_next(request)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/", error: str | None = None):
+    settings = get_settings().api
+    if not settings.login_password:
+        return RedirectResponse(url="/", status_code=303)
+    if _valid_session(request.cookies.get(_SESSION_COOKIE), settings.session_secret):
+        return RedirectResponse(url=_safe_next(next), status_code=303)
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"next": _safe_next(next), "error": bool(error)},
+    )
+
+
+@app.post("/login")
+def login_submit(request: Request, password: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
+    settings = get_settings().api
+    if not settings.login_password or not settings.session_secret:
+        raise HTTPException(status_code=503, detail="Web login is not configured")
+    if not hmac.compare_digest(password, settings.login_password):
+        return templates.TemplateResponse(
+            request=request,
+            name="login.html",
+            context={"next": _safe_next(next), "error": True},
+            status_code=401,
+        )
+    response = RedirectResponse(url=_safe_next(next), status_code=303)
+    response.set_cookie(
+        _SESSION_COOKIE,
+        _session_token(settings.session_secret, settings.session_max_age_seconds),
+        max_age=settings.session_max_age_seconds,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@app.post("/logout")
+def logout() -> RedirectResponse:
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(_SESSION_COOKIE, path="/", httponly=True, secure=True, samesite="lax")
+    return response
 
 
 # --------------------------------------------------------------------------- #
@@ -213,6 +320,7 @@ def _base_ctx(request: Request, active: str) -> dict:
         "request": request,
         "active": active,
         "public_url": get_settings().api.public_url,
+        "web_login_configured": bool(get_settings().api.login_password),
         "unread_notifications": unread_notifications,
         "workspace_preferences": workspace_preferences,
         "supported_locales": SUPPORTED_LOCALES,

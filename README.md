@@ -244,9 +244,10 @@ variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
 - localplaud only ever issues **read-only** requests against the Plaud cloud,
   and refuses to fetch non-`https` or private-IP URLs (SSRF-guarded), with
   bounded downloads.
-- The web UI binds to `127.0.0.1` by default. **Before exposing it**, set
-  `api.auth_token` (or `LOCALPLAUD_API__AUTH_TOKEN`) and/or put auth in front
-  (Caddy `basic_auth`). See [ADR 0006](docs/adr/0006-security-posture.md).
+- The web UI binds to `127.0.0.1` by default. **Before exposing it**, configure
+  `LOCALPLAUD_API__LOGIN_PASSWORD` and `LOCALPLAUD_API__SESSION_SECRET` to enable
+  the built-in `/login` page over HTTPS. `api.auth_token` remains available for
+  non-browser API clients. See [ADR 0006](docs/adr/0006-security-posture.md).
 - Settings can create private, checksummed workspace backups from a consistent
   SQLite snapshot, optionally including local media, then upload them to an
   explicitly authorized HTTPS or private/LAN destination with durable, idempotent
