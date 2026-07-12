@@ -3,10 +3,10 @@
 Working notes for continuing development (synced across machines via git).
 No secrets here — those live in `.env` / the Caddyfile, never committed.
 
-## Status snapshot (2026-07-11)
+## Status snapshot (2026-07-12)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (313 tests passing locally).
+  Active development is merged directly to `main` (332 tests passing locally).
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -18,9 +18,11 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
   restarted on the current `main` with `artifact_mode = "independent"` and
   `prefer_cloud_artifacts = false`; local transcript revisions preserve provenance,
   mind maps are resumable, and a real failed mind-map stage was retried successfully
-  after fixing thinking-only Ollama completions. The remaining production quality
-  blocker is diarization: pyannote is configured, but model-term acceptance and a
-  Hugging Face token are still missing, so affected files remain usable `partial`.
+  after fixing thinking-only Ollama completions. Pyannote Community-1, its accepted
+  model terms, and the Hugging Face token are now live: production has completed
+  diarization for real recordings. Speaker assignment now closes Whisper/pyannote
+  VAD boundary gaps with the nearest detected turn instead of claiming completion
+  while leaving segments unassigned; backlog reprocessing remains in progress.
 - Dev env on SkyLabMac: `~/Projects/localplaud` (venv, ffmpeg static, config.toml, `.env`). Claude Code CLI installed (`~/.local/bin/claude`).
 
 ## TODO — prioritized
