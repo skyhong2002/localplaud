@@ -91,7 +91,11 @@ def reset_inflight() -> int:
         reset += session.execute(
             update(PlaudFile)
             .where(PlaudFile.status == FileStatus.processing)
-            .values(status=FileStatus.downloaded)
+            .values(
+                status=FileStatus.downloaded,
+                processing_token=None,
+                processing_lease_until=None,
+            )
         ).rowcount
         session.execute(
             update(StageRun)

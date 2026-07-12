@@ -406,6 +406,34 @@ def migrate_pipeline_retry_schema(engine: Engine) -> list[str]:
     return migrated
 
 
+def migrate_processing_claim_schema(engine: Engine) -> list[str]:
+    """Add the durable per-recording worker claim to legacy libraries."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "plaud_files" not in inspector.get_table_names():
+        return []
+    columns = {item["name"] for item in inspector.get_columns("plaud_files")}
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for column, ddl in (
+            ("processing_token", "VARCHAR(64)"),
+            ("processing_lease_until", "DATETIME"),
+        ):
+            if column not in columns:
+                connection.execute(text(f"ALTER TABLE plaud_files ADD COLUMN {column} {ddl}"))
+                migrated.append(f"plaud_files.{column}")
+        connection.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_plaud_files_processing_token
+            ON plaud_files (processing_token)
+        """))
+        connection.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_plaud_files_processing_lease_until
+            ON plaud_files (processing_lease_until)
+        """))
+    return migrated
+
+
 def migrate_stage_attempt_schema(engine: Engine) -> list[str]:
     """Create the append-only stage usage ledger for an existing library."""
     if engine.dialect.name != "sqlite":

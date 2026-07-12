@@ -184,6 +184,10 @@ class PlaudFile(Base):
     pipeline_last_failure_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )
+    processing_token: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
+    processing_lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, index=True
+    )
     origin: Mapped[str] = mapped_column(String(32), default="plaud", index=True)
     folder_id: Mapped[int | None] = mapped_column(
         ForeignKey("folders.id", ondelete="SET NULL"), default=None, index=True

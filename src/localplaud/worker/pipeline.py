@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import math
+import uuid
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -62,6 +63,63 @@ from .diarize import DiarizationUnavailable, diarize
 
 log = logging.getLogger(__name__)
 _PROFILE_SNAPSHOT: ContextVar[dict | None] = ContextVar("resolved_profile_snapshot", default=None)
+_PROCESSING_LEASE = timedelta(hours=24)
+
+
+class PipelineAlreadyRunning(RuntimeError):
+    pass
+
+
+def processing_claim_active(row: PlaudFile, *, now: datetime | None = None) -> bool:
+    if not row.processing_token or row.processing_lease_until is None:
+        return False
+    lease = row.processing_lease_until
+    if lease.tzinfo is None:
+        lease = lease.replace(tzinfo=UTC)
+    return lease > (now or datetime.now(UTC))
+
+
+def _claim_processing(file_id: str) -> str:
+    """Atomically claim one recording so UI and daemon work cannot overlap."""
+    token = uuid.uuid4().hex
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            raise ValueError(f"unknown file {file_id}")
+        if not row.audio_path or not Path(row.audio_path).exists():
+            raise FileNotFoundError(f"audio missing for {file_id}: {row.audio_path}")
+        claimed = session.execute(
+            update(PlaudFile)
+            .where(
+                PlaudFile.id == file_id,
+                or_(
+                    PlaudFile.processing_token.is_(None),
+                    PlaudFile.processing_lease_until.is_(None),
+                    PlaudFile.processing_lease_until <= now,
+                ),
+            )
+            .values(
+                processing_token=token,
+                processing_lease_until=now + _PROCESSING_LEASE,
+                status=FileStatus.processing,
+                error=None,
+            )
+            .execution_options(synchronize_session=False)
+        ).rowcount
+    if claimed != 1:
+        raise PipelineAlreadyRunning(f"recording {file_id} is already processing")
+    return token
+
+
+def _release_processing(file_id: str, token: str) -> None:
+    with session_scope() as session:
+        session.execute(
+            update(PlaudFile)
+            .where(PlaudFile.id == file_id, PlaudFile.processing_token == token)
+            .values(processing_token=None, processing_lease_until=None)
+            .execution_options(synchronize_session=False)
+        )
 
 
 def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Settings:
@@ -465,6 +523,17 @@ def _schedule_pipeline_retry(row: PlaudFile, settings: Settings) -> None:
 
 
 def process_file(file_id: str, settings: Settings | None = None, force: bool = False) -> None:
+    """Process one recording under an exclusive durable lease."""
+    token = _claim_processing(file_id)
+    try:
+        _process_file_claimed(file_id, settings=settings, force=force)
+    finally:
+        _release_processing(file_id, token)
+
+
+def _process_file_claimed(
+    file_id: str, settings: Settings | None = None, force: bool = False
+) -> None:
     settings = settings or get_settings()
     pcfg = settings.pipeline
 

@@ -2099,13 +2099,17 @@ def reprocess(file_id: str, force: bool = False):
     import threading
 
     from ..db.models import FileStatus
-    from ..worker.pipeline import process_file, reset_pipeline_retry
+    from ..worker.pipeline import process_file, processing_claim_active, reset_pipeline_retry
 
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
         if r is None or not r.audio_path:
             return HTMLResponse(
                 '<span style="color:var(--err)">no audio to reprocess</span>', status_code=400
+            )
+        if processing_claim_active(r):
+            return HTMLResponse(
+                '<span style="color:var(--warn)">already processing</span>', status_code=409
             )
         r.status = FileStatus.downloaded
         reset_pipeline_retry(r)
