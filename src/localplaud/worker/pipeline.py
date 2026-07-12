@@ -58,7 +58,7 @@ from ..store.speakers import (
     speaker_keys_from_segments,
     sync_speakers,
 )
-from . import convert, index, mindmap, polish, summarize, summary_templates, transcribe
+from . import align, convert, index, mindmap, polish, summarize, summary_templates, transcribe
 from .diarize import DiarizationUnavailable, diarize
 
 log = logging.getLogger(__name__)
@@ -567,6 +567,14 @@ def _process_file_claimed(
         requested_template_key = row.note_template_key or pcfg.summary_template
         template_key = "default" if requested_template_key == "auto" else requested_template_key
         snapshot = resolve_recording_profile(session, file_id).to_dict()
+        align_run = next(
+            (run for run in row.stage_runs if run.stage == StageName.align), None
+        )
+        reusable_alignment = bool(
+            not force
+            and align_run is not None
+            and align_run.status in {StageStatus.completed, StageStatus.degraded}
+        )
 
     profile_token = _PROFILE_SNAPSHOT.set(snapshot)
     diarize_settings = _settings_for_stage(settings, snapshot, "diarize")
@@ -665,6 +673,51 @@ def _process_file_claimed(
                 )
         else:
             _skip_stage(file_id, StageName.transcribe, "disabled")
+
+        # --- align (durable word timing evidence; honestly degradable) -- #
+        if transcript is None:
+            _skip_stage(file_id, StageName.align, "no transcript")
+        elif not pcfg.align:
+            _skip_stage(file_id, StageName.align, "disabled")
+        elif transcript_source != "local":
+            _skip_stage(file_id, StageName.align, "imported migration artifact")
+        elif reusable_alignment:
+            _finish_stage(
+                file_id,
+                StageName.align,
+                provider=transcript.provider,
+                model=transcript.model,
+                artifact_source=transcript_source,
+                detail=dict(align_run.detail or {}) | {"reused": True},
+            )
+        else:
+            _begin_stage(file_id, StageName.align)
+            try:
+                alignment_detail = align.inspect_word_alignment(transcript)
+                _finish_stage(
+                    file_id,
+                    StageName.align,
+                    provider=transcript.provider,
+                    model=transcript.model,
+                    artifact_source=transcript_source,
+                    detail=alignment_detail,
+                    usage={"input_words": alignment_detail["word_count"]},
+                )
+            except align.AlignmentUnavailable as exc:
+                _set_stage(
+                    file_id,
+                    StageName.align,
+                    StageStatus.degraded,
+                    provider=transcript.provider,
+                    model=transcript.model,
+                    artifact_source=transcript_source,
+                    detail={
+                        "strategy": "unavailable",
+                        "forced_alignment": False,
+                        "reason": str(exc),
+                    },
+                    error=str(exc),
+                )
 
         # --- diarize (downstream/degradable; transcript stays usable) -- #
         if transcript is None:

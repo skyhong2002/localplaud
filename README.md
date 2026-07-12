@@ -61,8 +61,8 @@ available as conveniences. Durable provider/model/execution profiles, explicit
 stage fallbacks, remote workers, local AutoFlow rules, inbox notifications,
 TXT/SRT/VTT AutoFlow exports, scoped authorized webhooks, and authorized SMTP email
 delivery are also implemented.
-The remaining work centers on production diarization/alignment acceptance across
-real hardware, broader integrations, and Plaud-level Web App polish. Plaud-produced
+The remaining work centers on broader integrations and Plaud-level Web App polish.
+Plaud-produced
 transcripts and summaries may be imported for
 migration or comparison, but are not part of the target primary workflow.
 
@@ -83,8 +83,8 @@ flowchart LR
   `version`/`version_ms`), downloads the `.opus` audio.
 - **store** — audio bytes on the filesystem; metadata, transcripts, summaries
   and embeddings in SQLite.
-- **worker** — the independent pipeline: audio → Whisper large-v3-turbo → word
-  alignment → speaker diarization → notes/mind map → embeddings.
+- **worker** — the independent pipeline: audio → Whisper large-v3-turbo → durable
+  word-timestamp alignment evidence → speaker diarization → notes/mind map → embeddings.
 - **api / ui** — the primary daily-use Web App: browse, listen, review, edit,
   regenerate, organize, Ask, and export.
 

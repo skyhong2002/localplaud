@@ -236,6 +236,12 @@ embedding raw provider credentials or model settings in each rule.
   assignment, model provenance, and actionable health checks. SkyLabMac has the
   dependency, accepted model terms, Hugging Face credential, and repeated real-audio
   completion evidence. VAD validation and word-level forced alignment remain.
+- ✅ Activated the durable `align` stage between ASR and diarization. It validates
+  finite, ordered word timestamps, records coverage/provider/model/profile evidence,
+  reuses valid results on Resume, and reports a clear degraded state when a provider
+  supplies only segment timing. The strategy is explicitly labelled
+  `provider-word-timestamps` with `forced_alignment=false`; it does not misrepresent
+  Whisper timing as wav2vec2/WhisperX forced alignment.
 - ✅ Added optional VAD groundwork behind a **default-off** `asr.vad.enabled` flag
   (`asr/vad.py`): provider-agnostic silero-vad detection + region merge/pad/split
   planning, ffmpeg region slicing, and honest `health()`. The mlx path transcribes
@@ -245,10 +251,9 @@ embedding raw provider credentials or model settings in each rule.
   falls back to whole-file transcription, and the provider `health()` says so.
   Remaining: validate VAD on real Taiwan Mandarin / code-switch recordings before
   enabling it by default. **Word-level forced alignment is deliberately NOT
-  implemented here** — Whisper's own word timestamps are currently the alignment
-  source, and a whisperX-style wav2vec2 forced aligner needs per-language models
-  plus a Mandarin/code-switch accuracy evaluation, so it must be validated on real
-  user recordings first.
+  claimed** — the active align stage validates Whisper's own word timestamps. A
+  future wav2vec2/WhisperX strategy would require per-language models and explicit
+  Mandarin/code-switch accuracy validation before selection.
 - ✅ Persist stable speaker IDs separately from editable display names: `speakers`
   rows mirror the diarization keys per recording, renames are upserted from the
   Web detail page (legend inline forms), and flow into transcript view, regenerated

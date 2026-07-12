@@ -41,8 +41,9 @@ database_url = "sqlite:///./data/localplaud.db"
 [pipeline]
 # Local processing stages to run after each download.
 convert = true                   # opus -> 16kHz mono wav (needs ffmpeg)
-transcribe = true
-diarize = true
+  transcribe = true
+  align = true
+  diarize = true
 polish = true                    # contextual AI cleanup; raw ASR stays immutable
 summarize = true
 mind_map = true                  # nested Markdown outline rendered as a tree in the Web App

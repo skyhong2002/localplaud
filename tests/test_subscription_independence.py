@@ -19,7 +19,7 @@ def _setup(monkeypatch, tmp_path):
 
 
 def _providers(monkeypatch):
-    from localplaud.asr.base import Segment, Transcript
+    from localplaud.asr.base import Segment, Transcript, Word
 
     monkeypatch.setattr(
         "localplaud.worker.pipeline.transcribe.run_asr",
@@ -30,6 +30,14 @@ def _providers(monkeypatch):
                     start=0.0,
                     end=2.0,
                     speaker="SPEAKER_00",
+                    words=[
+                        Word(
+                            text="今天確認本機處理流程。",
+                            start=0.0,
+                            end=2.0,
+                            speaker="SPEAKER_00",
+                        )
+                    ],
                 )
             ],
             language="zh",
@@ -87,6 +95,8 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     from localplaud.db.models import (
         FileStatus,
         PlaudFile,
+        StageName,
+        StageStatus,
     )
     from localplaud.db.session import init_db, session_scope
     from localplaud.worker.pipeline import process_file
@@ -116,6 +126,10 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
             "opencode-go"
         )
         assert all(summary.input_transcript_revision == 1 for summary in row.summaries)
+        alignment = next(stage for stage in row.stage_runs if stage.stage == StageName.align)
+        assert alignment.status == StageStatus.completed
+        assert alignment.detail["strategy"] == "provider-word-timestamps"
+        assert alignment.detail["forced_alignment"] is False
         correct = next(stage for stage in row.stage_runs if stage.stage.value == "correct")
         assert correct.status.value == "completed"
         assert correct.provider == "opencode-go"

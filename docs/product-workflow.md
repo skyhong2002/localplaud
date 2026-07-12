@@ -428,11 +428,12 @@ the code targets pyannote Community-1. Optional VAD groundwork now exists behind
 default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-timestamp
 region offsetting; faster-whisper's native bundled VAD filter), and degrades honestly
 to whole-file transcription with a visible health note when the optional `vad` extra
-is absent — but it still needs a real Taiwan Mandarin / code-switch benchmark before
-being enabled by default. Word-level forced alignment is still not implemented:
-Whisper's own word timestamps remain the alignment source, and a whisperX-style
-wav2vec2 aligner needs per-language models and a real-recording accuracy evaluation
-first. Authenticated real-audio diarization is verified on SkyLabMac, including
+is absent — but it still needs real Taiwan Mandarin / code-switch validation before
+being enabled by default. The durable align stage now validates Whisper word timing,
+records coverage and provenance, and degrades visibly when word timestamps are
+unavailable. It explicitly reports `forced_alignment=false`; a whisperX-style
+wav2vec2 strategy still needs per-language models and accuracy validation before it
+can be selected. Authenticated real-audio diarization is verified on SkyLabMac, including
 durable speaker output and resume behavior. Single-file
 Ask now answers grounded only in one recording and renders each citation as a
 playable timestamp that seeks the player, and whole-library Ask citations deep-link

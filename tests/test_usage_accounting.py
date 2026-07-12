@@ -334,6 +334,7 @@ def test_pipeline_blocks_provider_call_then_resumes_under_new_ceiling(monkeypatc
         PlaudFile,
         ProviderConnection,
         StageAttempt,
+        StageName,
     )
     from localplaud.db.session import session_scope
     from localplaud.providers.usage import CostPolicyError
@@ -415,7 +416,10 @@ def test_pipeline_blocks_provider_call_then_resumes_under_new_ceiling(monkeypatc
         attempts = list(
             session.scalars(
                 select(StageAttempt)
-                .where(StageAttempt.file_id == "ceiling")
+                .where(
+                    StageAttempt.file_id == "ceiling",
+                    StageAttempt.stage == StageName.transcribe,
+                )
                 .order_by(StageAttempt.attempt)
             )
         )

@@ -75,6 +75,9 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
         assert stages[StageName.convert].status == StageStatus.skipped
         assert stages[StageName.transcribe].attempts == 1
         assert stages[StageName.transcribe].status == StageStatus.completed
+        assert stages[StageName.align].status == StageStatus.degraded
+        assert stages[StageName.align].detail["forced_alignment"] is False
+        assert "no word timestamps" in stages[StageName.align].error
         assert stages[StageName.diarize].detail["provided_by_asr"] is True
         assert stages[StageName.summarize].attempts == 1
         assert stages[StageName.index].attempts == 1
@@ -94,6 +97,7 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
     with session_scope() as s:
         stages = {run.stage: run for run in s.get(PlaudFile, "f1").stage_runs}
         assert stages[StageName.transcribe].attempts == 1
+        assert stages[StageName.align].attempts == 1
         assert stages[StageName.summarize].attempts == 1
         assert stages[StageName.index].attempts == 1
 
@@ -103,6 +107,7 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
     with session_scope() as s:
         stages = {run.stage: run for run in s.get(PlaudFile, "f1").stage_runs}
         assert stages[StageName.transcribe].attempts == 2
+        assert stages[StageName.align].attempts == 2
         assert stages[StageName.summarize].attempts == 2
         assert stages[StageName.index].attempts == 2
 

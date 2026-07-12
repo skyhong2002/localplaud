@@ -98,6 +98,7 @@ class PipelineConfig(BaseModel):
 
     convert: bool = True  # opus -> 16kHz mono wav for ASR
     transcribe: bool = True
+    align: bool = True  # validate durable word timestamps before diarization
     diarize: bool = True
     polish: bool = True  # AI correction after speakers, before notes/index
     summarize: bool = True
