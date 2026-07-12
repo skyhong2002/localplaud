@@ -142,6 +142,17 @@ def _is_browser_navigation(request: Request) -> bool:
     return request.method == "GET" and "text/html" in request.headers.get("accept", "")
 
 
+def _login_context(next_path: str, error: bool) -> dict:
+    with session_scope() as session:
+        preferences = get_workspace_preferences(session)
+    return {
+        "next": _safe_next(next_path),
+        "error": error,
+        "workspace_preferences": preferences,
+        "t": translator(preferences["locale"]),
+    }
+
+
 @app.middleware("http")
 async def _auth_gate(request: Request, call_next):
     """Protect the Web App with a revocable opaque session and APIs with a token."""
@@ -187,7 +198,7 @@ def login_page(request: Request, next: str = "/", error: str | None = None):
     return templates.TemplateResponse(
         request=request,
         name="login.html",
-        context={"next": _safe_next(next), "error": bool(error)},
+        context=_login_context(next, bool(error)),
     )
 
 
@@ -200,7 +211,7 @@ def login_submit(request: Request, password: Annotated[str, Form()], next: Annot
         return templates.TemplateResponse(
             request=request,
             name="login.html",
-            context={"next": _safe_next(next), "error": True},
+            context=_login_context(next, True),
             status_code=401,
         )
     token = secrets.token_urlsafe(32)

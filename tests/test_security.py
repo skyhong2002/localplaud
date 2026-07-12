@@ -64,12 +64,17 @@ def test_web_login_session_and_logout(monkeypatch, tmp_path):
     )
     assert redirected.status_code == 303
     assert redirected.headers["location"].startswith("/login?next=")
+    login_page = client.get(redirected.headers["location"])
+    assert login_page.status_code == 200
+    assert '<html lang="en"' in login_page.text
+    assert "Sign in to your self-hosted localplaud workspace." in login_page.text
     assert client.get("/api/files").status_code == 401
 
     wrong = client.post(
         "/login", data={"password": "wrong", "next": "/settings"}, follow_redirects=False
     )
     assert wrong.status_code == 401
+    assert "Incorrect password. Try again." in wrong.text
     assert "localplaud_session=" not in wrong.headers.get("set-cookie", "")
 
     logged_in = client.post(
@@ -134,6 +139,32 @@ def test_session_can_be_listed_and_revoked_remotely(monkeypatch, tmp_path):
     assert revoked.status_code == 200
     assert revoked.json() == {"ok": True, "current": False}
     assert second.get("/", headers={"Accept": "text/html"}, follow_redirects=False).status_code == 303
+
+
+def test_login_page_uses_durable_workspace_locale_and_theme(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("LOCALPLAUD_API__LOGIN_PASSWORD", "pw")
+    monkeypatch.setenv("LOCALPLAUD_API__SESSION_SECRET", "a-long-random-session-secret")
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.api.app import app
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.preferences import get_workspace_preferences, save_workspace_preferences
+
+    init_db()
+    with session_scope() as session:
+        values = get_workspace_preferences(session) | {"locale": "zh-Hant-TW", "theme": "dark"}
+        save_workspace_preferences(session, values)
+
+    client = TestClient(app, base_url="https://testserver")
+    page = client.get("/login")
+    assert page.status_code == 200
+    assert '<html lang="zh-Hant-TW" data-theme="dark">' in page.text
+    assert "登入你的自架 localplaud 工作空間。" in page.text
+    assert ">密碼<" in page.text
+    wrong = client.post("/login", data={"password": "wrong"})
+    assert wrong.status_code == 401
+    assert "密碼不正確，請再試一次。" in wrong.text
 
 
 def test_login_rejects_open_redirect_and_tampered_cookie(monkeypatch, tmp_path):

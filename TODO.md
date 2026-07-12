@@ -478,7 +478,8 @@ embedding raw provider credentials or model settings in each rule.
   error, and action messages. Access &
   security now reports the built-in Web login, durable hashed browser sessions,
   current-session state, immediate revocation, and the separate API-token/reverse-
-  proxy boundary; Support & About shows
+  proxy boundary. The pre-authentication `/login` page follows the durable workspace
+  locale and light/dark preference, including localized error states; Support & About shows
   runtime/build identity and downloads a tested redacted diagnostics bundle with no
   recording identifiers/content, paths, URLs, errors, environment variables, or
   credentials.

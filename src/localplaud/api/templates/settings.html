@@ -38,11 +38,11 @@
   <div class="panel" style="margin-top:16px" id="access-security">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Access & security') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Truthful authentication boundaries for this deployment.') }}</div></div><span class="st {{ 'done' if about.access.browser_login_configured else 'degraded' }}">{{ t('Web login configured') if about.access.browser_login_configured else t('Web login not configured') }}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px;margin-top:12px">
-      <div class="tile"><div class="k">{{ t('Application authentication') }}</div><div style="margin-top:4px">{{ t('Signed browser session') if about.access.browser_login_configured else t('No Web login') }}</div></div>
+      <div class="tile"><div class="k">{{ t('Application authentication') }}</div><div style="margin-top:4px">{{ t('Revocable browser session') if about.access.browser_login_configured else t('No Web login') }}</div></div>
       <div class="tile"><div class="k">{{ t('Reverse proxy') }}</div><div style="margin-top:4px">{{ t('External · not observable by localplaud') }}</div></div>
       <div class="tile"><div class="k">{{ t('Active sessions') }}</div><div style="margin-top:4px">{{ browser_sessions|length }}</div></div>
     </div>
-    <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ about.access.session_detail }}. Configure <code>api.login_password</code> and <code>api.session_secret</code> before remote exposure; keep <code>api.auth_token</code> for API clients.</p>
+    <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t(about.access.session_detail) }}. {{ t('Configure login_password and session_secret before remote exposure; keep auth_token for API clients.') }}</p>
     {% if about.access.browser_login_configured %}<div style="display:grid;gap:8px;margin-top:13px" id="browser-session-list">
       {% for item in browser_sessions %}<div class="tile" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <div style="min-width:0;flex:1"><strong>{{ t('This session') if item.current else t('Browser session') }}</strong>{% if item.current %} <span class="chip on">{{ t('current') }}</span>{% endif %}<div class="sub" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ item.user_agent }}">{{ item.user_agent }}</div><div class="sub" style="font-size:10.5px">{{ t('Last active') }}: {{ item.last_seen_at[:16]|replace('T',' · ') }} · {{ t('Expires') }}: {{ item.expires_at[:10] }}</div></div>
@@ -365,23 +365,23 @@ function resetVocabulary(){editingVocabulary=null;const form=document.getElement
 function editVocabulary(id){const term=VOCABULARY.find(item=>item.id===id),form=document.getElementById('vocabulary-form');editingVocabulary=id;for(const key of ['source_text','replacement_text','language'])form.elements[key].value=term[key]||'';form.elements.case_sensitive.checked=term.case_sensitive;form.elements.enabled.checked=term.enabled;form.querySelector('[type=submit]').textContent=tr('Save correction');document.getElementById('cancel-vocabulary').hidden=false;form.scrollIntoView({behavior:'smooth'});}
 async function deleteVocabulary(id){if(!confirm(tr('Delete this correction rule? Existing transcript revisions remain unchanged.')))return;const response=await fetch(`/api/vocabulary/${id}`,{method:'DELETE'});if(response.ok)location.reload();else{const data=await response.json();alert(data.detail||tr('Delete failed'));}}
 document.getElementById('cancel-vocabulary').addEventListener('click',resetVocabulary);
-document.getElementById('vocabulary-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.target,data=new FormData(form),body={source_text:data.get('source_text'),replacement_text:data.get('replacement_text'),language:data.get('language')||null,case_sensitive:data.get('case_sensitive')==='on',enabled:data.get('enabled')==='on'};const response=await fetch(editingVocabulary?`/api/vocabulary/${editingVocabulary}`:'/api/vocabulary',{method:editingVocabulary?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),result=await response.json(),out=document.getElementById('vocabulary-result');if(response.ok){out.textContent='Saved. Reloading…';location.reload();}else out.textContent=result.detail?.[0]?.msg||result.detail||'Could not save correction';});
-document.getElementById('apply-vocabulary').addEventListener('click',async event=>{if(!confirm('Apply enabled corrections to existing local transcripts? Changed summaries and indexes will be marked for regeneration.'))return;event.target.disabled=true;const out=document.getElementById('vocabulary-result');out.textContent='Applying corrections…';const response=await fetch('/api/vocabulary/apply-library',{method:'POST'}),result=await response.json();if(response.ok){out.textContent=`Updated ${result.changed} recordings · ${result.replacements} replacements`;setTimeout(()=>location.reload(),900);}else{event.target.disabled=false;out.textContent=result.detail||'Could not apply corrections';}});
+document.getElementById('vocabulary-form').addEventListener('submit',async event=>{event.preventDefault();const form=event.target,data=new FormData(form),body={source_text:data.get('source_text'),replacement_text:data.get('replacement_text'),language:data.get('language')||null,case_sensitive:data.get('case_sensitive')==='on',enabled:data.get('enabled')==='on'};const response=await fetch(editingVocabulary?`/api/vocabulary/${editingVocabulary}`:'/api/vocabulary',{method:editingVocabulary?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),result=await response.json(),out=document.getElementById('vocabulary-result');if(response.ok){out.textContent=tr('Saved. Reloading…');location.reload();}else out.textContent=tr(result.detail?.[0]?.msg||result.detail||'Could not save correction');});
+document.getElementById('apply-vocabulary').addEventListener('click',async event=>{if(!confirm(tr('Apply enabled corrections to existing local transcripts? Changed summaries and indexes will be marked for regeneration.')))return;event.target.disabled=true;const out=document.getElementById('vocabulary-result');out.textContent=tr('Applying corrections…');const response=await fetch('/api/vocabulary/apply-library',{method:'POST'}),result=await response.json();if(response.ok){out.textContent=`${tr('Updated')} ${result.changed} ${tr('recordings')} · ${result.replacements} ${tr('replacements')}`;setTimeout(()=>location.reload(),900);}else{event.target.disabled=false;out.textContent=tr(result.detail||'Could not apply corrections');}});
 function editNoteTemplate(key){
   const t=NOTE_TEMPLATES.find(x=>x.key===key),form=document.getElementById('note-template-form');
   editingNoteTemplate=key;form.elements.name.value=t.name;form.elements.key.value=t.key;form.elements.key.disabled=true;
   form.elements.system_prompt.value=t.system_prompt;form.elements.instructions.value=t.instructions;
-  form.querySelector('button[type=submit]').textContent='Create new version';document.getElementById('cancel-template-edit').hidden=false;
+  form.querySelector('button[type=submit]').textContent=tr('Create new version');document.getElementById('cancel-template-edit').hidden=false;
   form.scrollIntoView({behavior:'smooth'});
 }
 function resetNoteTemplateForm(){
   const form=document.getElementById('note-template-form');editingNoteTemplate=null;form.reset();form.elements.key.disabled=false;
-  form.querySelector('button[type=submit]').textContent='Create template';document.getElementById('cancel-template-edit').hidden=true;
+  form.querySelector('button[type=submit]').textContent=tr('Create template');document.getElementById('cancel-template-edit').hidden=true;
 }
 async function archiveNoteTemplate(key){
-  if(!confirm('Archive this template? Recordings using it will return to the system default. Existing notes are preserved.'))return;
+  if(!confirm(tr('Archive this template? Recordings using it will return to the system default. Existing notes are preserved.')))return;
   const response=await fetch(`/api/note-templates/${key}`,{method:'DELETE'});const data=await response.json();
-  if(response.ok)location.reload();else alert(data.detail||'Could not archive template');
+  if(response.ok)location.reload();else alert(tr(data.detail||'Could not archive template'));
 }
 document.getElementById('cancel-template-edit').addEventListener('click',resetNoteTemplateForm);
 document.getElementById('note-template-form').addEventListener('submit',async event=>{
@@ -390,29 +390,29 @@ document.getElementById('note-template-form').addEventListener('submit',async ev
   const response=await fetch(editingNoteTemplate?`/api/note-templates/${editingNoteTemplate}`:'/api/note-templates',{
     method:editingNoteTemplate?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)
   });const result=await response.json();const out=document.getElementById('note-template-result');
-  if(response.ok){out.textContent=`Saved ${result.key} v${result.version}. Reloading…`;location.reload();}
-  else out.textContent=result.detail?.[0]?.msg||result.detail||'Could not save template';
+  if(response.ok){out.textContent=`${tr('Saved')} ${result.key} v${result.version}. ${tr('Reloading…')}`;location.reload();}
+  else out.textContent=tr(result.detail?.[0]?.msg||result.detail||'Could not save template');
 });
 async function removeItem(kind,id){
-  if(!confirm(`Delete this ${kind.slice(0,-1)}?`))return;
+  if(!confirm(`${tr('Delete this item?')} (${tr(kind.slice(0,-1))})`))return;
   const r=await fetch(`/api/providers/${kind}/${id}`,{method:'DELETE'});
-  if(r.ok)location.reload();else{const data=await r.json();alert(data.detail||'Delete failed');}
+  if(r.ok)location.reload();else{const data=await r.json();alert(tr(data.detail||'Delete failed'));}
 }
 async function editConnection(id){
-  const c=CONNECTIONS.find(x=>x.id===id);const name=prompt('Display name',c.name);if(name===null)return;
-  const secret=prompt('Secret reference (env:VARIABLE or blank)',c.secret_ref||'');if(secret===null)return;
+  const c=CONNECTIONS.find(x=>x.id===id);const name=prompt(tr('Display name'),c.name);if(name===null)return;
+  const secret=prompt(tr('Secret reference (env:VARIABLE or blank)'),c.secret_ref||'');if(secret===null)return;
   const body={key:c.key,name,provider_type:c.provider_type,execution_target:c.execution_target,data_egress:c.data_egress,secret_ref:secret||null,config:c.config||{}};
-  const r=await fetch(`/api/providers/connections/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.ok)location.reload();else{const d=await r.json();alert(d.detail||'Update failed');}
+  const r=await fetch(`/api/providers/connections/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.ok)location.reload();else{const d=await r.json();alert(tr(d.detail||'Update failed'));}
 }
 async function editModel(id){
-  const m=MODELS.find(x=>x.id===id);const name=prompt('Display name',m.display_name);if(name===null)return;const key=prompt('Model identifier',m.model_key);if(key===null)return;
+  const m=MODELS.find(x=>x.id===id);const name=prompt(tr('Display name'),m.display_name);if(name===null)return;const key=prompt(tr('Model identifier'),m.model_key);if(key===null)return;
   const body={connection_id:m.connection_id,model_key:key,display_name:name,capabilities:m.capabilities,enabled:m.enabled};
-  const r=await fetch(`/api/providers/models/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.ok)location.reload();else{const d=await r.json();alert(d.detail||'Update failed');}
+  const r=await fetch(`/api/providers/models/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.ok)location.reload();else{const d=await r.json();alert(tr(d.detail||'Update failed'));}
 }
 function newProfileVersion(id){
   const p=PROFILES.find(x=>x.id===id),form=document.getElementById('profile-form');form.elements.name.value=p.name;form.elements.key.value=p.key;form.elements.no_egress.checked=p.policy.no_egress;
   for(const [stage,s] of Object.entries(p.stages)){const el=form.elements[`stage-${stage}`];if(el)el.value=`${s.connection}|||${s.model}`;}for(const [stage,candidates] of Object.entries(p.policy.fallback_policy?.stages||{})){const el=form.elements[`fallback-${stage}`],candidate=candidates[0];if(el&&candidate)el.value=`${candidate.connection}|||${candidate.model}`;}
-  form.scrollIntoView({behavior:'smooth'});document.getElementById('profile-result').textContent=`Creating the next version of ${p.key}`;
+  form.scrollIntoView({behavior:'smooth'});document.getElementById('profile-result').textContent=`${tr('Creating the next version of')} ${p.key}`;
 }
 async function testHealth(id){
   const badge=document.getElementById(`health-${id}`); badge.textContent=tr('checking');

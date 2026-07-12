@@ -272,6 +272,8 @@ Access & Security reports whether the built-in Web login and API token are confi
 and that reverse-proxy authentication is external. The Web login creates durable,
 expiring browser sessions using opaque cookies and peppered token hashes. Settings
 enumerates them, marks the current browser, and supports immediate remote revocation.
+The pre-authentication login surface follows the workspace's durable interface locale
+and explicit light/dark preference, while keeping Plaud OAuth visibly separate.
 Support & About exposes package/build/runtime identity and a downloadable, no-store
 diagnostics document containing only aggregate counts and non-secret switches. Tests
 prove that recording identity/content, paths, URLs/addresses, errors, environment
