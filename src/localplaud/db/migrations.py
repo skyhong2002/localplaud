@@ -213,6 +213,87 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
     return ["note_templates"]
 
 
+def migrate_legacy_summary_schema(engine: Engine) -> list[str]:
+    """Remove obsolete NOT NULL summary columns from deployed SQLite databases.
+
+    Early releases stored ``revision``, ``transcript_revision``, and
+    ``profile_snapshot`` directly on summaries.  The current schema replaced
+    those fields with explicit canonical-transcript lineage and an immutable
+    resolved profile snapshot.  SQLite keeps removed NOT NULL columns after an
+    ORM-only upgrade, which makes every current insert fail unless the table is
+    rebuilt.
+    """
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "summaries" not in set(inspector.get_table_names()):
+        return []
+    columns = {column["name"] for column in inspector.get_columns("summaries")}
+    legacy_columns = {"revision", "transcript_revision", "profile_snapshot"}
+    if not columns & legacy_columns:
+        return []
+
+    def legacy(column: str, default: str = "NULL") -> str:
+        return column if column in columns else default
+
+    raw = engine.raw_connection()
+    try:
+        cursor = raw.cursor()
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.executescript(f"""
+            BEGIN;
+            CREATE TABLE summaries_new (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                file_id VARCHAR(64) NOT NULL,
+                template VARCHAR(64) NOT NULL,
+                template_version INTEGER,
+                template_snapshot JSON,
+                title VARCHAR(512),
+                content_md TEXT NOT NULL,
+                llm_provider VARCHAR(64),
+                model VARCHAR(128),
+                source VARCHAR(16) NOT NULL,
+                input_transcript_id INTEGER,
+                input_transcript_revision INTEGER,
+                input_transcript_source VARCHAR(16),
+                resolved_profile_snapshot JSON,
+                created_at DATETIME NOT NULL,
+                FOREIGN KEY(file_id) REFERENCES plaud_files (id) ON DELETE CASCADE,
+                CONSTRAINT uq_summary_file_template UNIQUE (file_id, template)
+            );
+            INSERT INTO summaries_new (
+                id, file_id, template, template_version, template_snapshot,
+                title, content_md, llm_provider, model, source,
+                input_transcript_id, input_transcript_revision,
+                input_transcript_source, resolved_profile_snapshot, created_at
+            )
+            SELECT
+                id, file_id, template, {legacy('template_version')},
+                {legacy('template_snapshot')}, title, content_md, llm_provider,
+                model, source, {legacy('input_transcript_id')},
+                COALESCE({legacy('input_transcript_revision')},
+                         {legacy('transcript_revision')}),
+                {legacy('input_transcript_source')},
+                COALESCE({legacy('resolved_profile_snapshot')},
+                         {legacy('profile_snapshot')}),
+                created_at
+            FROM summaries;
+            DROP TABLE summaries;
+            ALTER TABLE summaries_new RENAME TO summaries;
+        """)
+        violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeError(f"legacy summary migration broke foreign keys: {violations}")
+        raw.commit()
+        cursor.execute("PRAGMA foreign_keys=ON")
+    except Exception:
+        raw.rollback()
+        raise
+    finally:
+        raw.close()
+    return ["summaries"]
+
+
 def migrate_automation_ownership_schema(engine: Engine) -> list[str]:
     """Add explicit local/external ownership to existing AutoFlow rules."""
     if engine.dialect.name != "sqlite":

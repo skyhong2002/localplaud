@@ -166,6 +166,13 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
     return resolved
 
 
+def _llm_model(settings: Settings) -> str | None:
+    """Return the configured model for the selected LLM provider."""
+    provider = settings.llm.provider.replace("-", "_")
+    config = getattr(settings.llm, provider, None)
+    return getattr(config, "model", None)
+
+
 def _remote_selection(snapshot: dict, stage: str) -> dict | None:
     selection = snapshot.get("stages", {}).get(stage)
     return selection if selection and selection.get("execution_target") == "remote_worker" else None
@@ -709,7 +716,10 @@ def _process_file_claimed(
                     else:
                         source = diarize(wav, source, candidate_settings.diarize)
                         provider = candidate_settings.diarize.provider
-                    model = candidate["stages"]["diarize"].get("model")
+                    # Legacy system-default snapshots can legitimately have no
+                    # explicit stage map.  ``candidate_settings`` already
+                    # resolves that case against durable settings.
+                    model = candidate_settings.diarize.model
                     speaker_mapping = _persist_transcript(file_id, source)
                     return {
                         "value": source,
@@ -869,9 +879,7 @@ def _process_file_claimed(
                                 },
                             )
                             result.setdefault("provider", "remote-worker")
-                            result.setdefault(
-                                "model", candidate["stages"]["summarize"].get("model")
-                            )
+                            result.setdefault("model", _llm_model(candidate_settings))
                         else:
                             result = summarize.summarize(transcript, candidate_settings)
                         _persist_summary(file_id, result, transcript_lineage)
@@ -945,7 +953,7 @@ def _process_file_claimed(
                                 options={"summary_md": summary_md},
                             )
                             result.setdefault("provider", "remote-worker")
-                            result.setdefault("model", candidate["stages"]["mind_map"].get("model"))
+                            result.setdefault("model", _llm_model(candidate_settings))
                         else:
                             result = mindmap.generate_mind_map(
                                 transcript, candidate_settings, summary_md

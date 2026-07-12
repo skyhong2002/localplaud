@@ -12,6 +12,7 @@ from localplaud.config import Settings
 from localplaud.db.migrations import (
     migrate_artifact_lineage_columns,
     migrate_legacy_provider_profile_schema,
+    migrate_legacy_summary_schema,
     migrate_profile_snapshot_columns,
     migrate_stage_run_snapshot_column,
 )
@@ -263,6 +264,49 @@ def test_legacy_artifact_lineage_migration(tmp_path):
             "input_transcript_revision",
             "input_transcript_source",
         } <= columns
+
+
+def test_legacy_summary_schema_rebuild_preserves_data_and_is_idempotent(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-summary.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
+        connection.execute(text("INSERT INTO plaud_files (id) VALUES ('r1')"))
+        connection.execute(text("""
+            CREATE TABLE summaries (
+                id INTEGER PRIMARY KEY,
+                file_id VARCHAR(64) NOT NULL,
+                template VARCHAR(64) NOT NULL,
+                title VARCHAR(512),
+                content_md TEXT NOT NULL,
+                llm_provider VARCHAR(64),
+                model VARCHAR(128),
+                source VARCHAR(16) NOT NULL,
+                revision INTEGER NOT NULL,
+                transcript_revision INTEGER,
+                profile_snapshot JSON NOT NULL,
+                created_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO summaries (
+                id, file_id, template, content_md, source, revision,
+                transcript_revision, profile_snapshot, created_at
+            ) VALUES (1, 'r1', 'default', '# Notes', 'local', 3, 2,
+                      '{"version": 1}', CURRENT_TIMESTAMP)
+        """))
+
+    assert migrate_legacy_summary_schema(engine) == ["summaries"]
+    assert migrate_legacy_summary_schema(engine) == []
+    columns = {column["name"] for column in inspect(engine).get_columns("summaries")}
+    assert not {"revision", "transcript_revision", "profile_snapshot"} & columns
+    with engine.connect() as connection:
+        row = connection.execute(text("""
+            SELECT content_md, input_transcript_revision, resolved_profile_snapshot
+            FROM summaries WHERE id = 1
+        """)).one()
+    assert row.content_md == "# Notes"
+    assert row.input_transcript_revision == 2
+    assert '"version": 1' in row.resolved_profile_snapshot
 
 
 def test_provider_read_api(monkeypatch, tmp_path):
