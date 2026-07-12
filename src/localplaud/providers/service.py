@@ -22,6 +22,16 @@ from .contracts import Capability, Health, ProviderStage, StageCapabilities
 from .resolver import ResolvedProfile, resolve_profile
 
 DEFAULT_PROFILE_KEY = "legacy-settings-default"
+_STAGE_FAMILY = {
+    "transcribe": "asr",
+    "align": "asr",
+    "diarize": "diarize",
+    "correct": "correct",
+    "summarize": "llm",
+    "mind_map": "llm",
+    "embed": "embeddings",
+    "ask": "llm",
+}
 
 
 def _is_cloud(name: str) -> bool:
@@ -50,25 +60,8 @@ def _capability(stages: list[ProviderStage], *, cloud: bool) -> dict:
     ).model_dump(mode="json")
 
 
-def bootstrap_default_profile(session: Session, settings: Settings) -> ExecutionProfile:
-    """Create a Settings-equivalent profile once, without changing runtime dispatch."""
-    existing = session.scalar(
-        select(ExecutionProfile)
-        .where(ExecutionProfile.key == DEFAULT_PROFILE_KEY)
-        .order_by(ExecutionProfile.version.desc())
-        .options(selectinload(ExecutionProfile.stage_selections))
-    )
-    if existing is not None:
-        correct = next(
-            (selection for selection in existing.stage_selections if selection.stage == "correct"),
-            None,
-        )
-        connection = session.get(ProviderConnection, correct.connection_id) if correct else None
-        if connection is not None and connection.provider_type == "opencode-go":
-            return existing
-        return _upgrade_default_polish_profile(session, existing, settings)
-
-    specs = [
+def _settings_specs(settings: Settings):
+    return [
         ("asr", settings.asr.provider, _model_for(settings, "asr", settings.asr.provider),
          [ProviderStage.transcribe, ProviderStage.align]),
         ("diarize", settings.diarize.provider, settings.diarize.model,
@@ -78,25 +71,101 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
         ("llm", settings.llm.provider, _model_for(settings, "llm", settings.llm.provider),
          [ProviderStage.summarize, ProviderStage.mind_map, ProviderStage.ask]),
         ("embeddings", settings.embeddings.provider,
-         _model_for(settings, "embeddings", settings.embeddings.provider), [ProviderStage.embed]),
+         _model_for(settings, "embeddings", settings.embeddings.provider),
+         [ProviderStage.embed]),
     ]
+
+
+def _ensure_settings_entries(
+    session: Session, settings: Settings
+) -> dict[str, tuple[ProviderConnection, ModelCatalogEntry]]:
+    """Return catalog entries for every Settings-backed stage family.
+
+    Deployed databases predate the family-prefixed connection keys used by a
+    clean install. Reuse their compatible provider connection instead of
+    duplicating it, while always adding the explicit model/capability row that
+    immutable profile selections require.
+    """
     entries: dict[str, tuple[ProviderConnection, ModelCatalogEntry]] = {}
-    for family, provider, model, stages in specs:
-        connection = ProviderConnection(
-            key=f"{family}:{provider}", name=f"{provider} ({family})", provider_type=provider,
-            execution_target="cloud" if _is_cloud(provider) else "local",
-            data_egress=_is_cloud(provider), secret_ref=None,
+    for family, provider, model_key, stages in _settings_specs(settings):
+        preferred_keys = (f"{family}:{provider}", provider)
+        connection = session.scalar(
+            select(ProviderConnection)
+            .where(
+                ProviderConnection.provider_type == provider,
+                ProviderConnection.key.in_(preferred_keys),
+            )
+            .order_by(ProviderConnection.id)
         )
-        entry = ModelCatalogEntry(
-            model_key=model, display_name=model,
-            capabilities=_capability(stages, cloud=_is_cloud(provider)),
+        if connection is None:
+            connection = ProviderConnection(
+                key=f"{family}:{provider}",
+                name=(
+                    "OpenCode Go (transcript polish)"
+                    if family == "correct"
+                    else f"{provider} ({family})"
+                ),
+                provider_type=provider,
+                execution_target="cloud" if _is_cloud(provider) else "local",
+                data_egress=_is_cloud(provider),
+                secret_ref=None,
+                config=(
+                    {
+                        "agent": settings.llm.opencode_go.agent,
+                        "executable": settings.llm.opencode_go.executable,
+                    }
+                    if family == "correct"
+                    else {}
+                ),
+            )
+            session.add(connection)
+            session.flush()
+        entry = session.scalar(
+            select(ModelCatalogEntry).where(
+                ModelCatalogEntry.connection_id == connection.id,
+                ModelCatalogEntry.model_key == model_key,
+            )
         )
-        session.add(connection)
-        session.flush()
-        entry.connection_id = connection.id
-        session.add(entry)
-        session.flush()
+        if entry is None:
+            entry = ModelCatalogEntry(
+                connection_id=connection.id,
+                model_key=model_key,
+                display_name=model_key,
+                capabilities=_capability(stages, cloud=_is_cloud(provider)),
+            )
+            session.add(entry)
+            session.flush()
         entries[family] = (connection, entry)
+    return entries
+
+
+def _profile_is_complete(session: Session, profile: ExecutionProfile) -> bool:
+    by_stage = {selection.stage: selection for selection in profile.stage_selections}
+    if set(by_stage) != set(_STAGE_FAMILY):
+        return False
+    for selection in by_stage.values():
+        model = session.get(ModelCatalogEntry, selection.model_id)
+        if model is None or model.connection_id != selection.connection_id:
+            return False
+    correct = by_stage["correct"]
+    connection = session.get(ProviderConnection, correct.connection_id)
+    return connection is not None and connection.provider_type == "opencode-go"
+
+
+def bootstrap_default_profile(session: Session, settings: Settings) -> ExecutionProfile:
+    """Create a Settings-equivalent profile once, without changing runtime dispatch."""
+    existing = session.scalar(
+        select(ExecutionProfile)
+        .where(ExecutionProfile.key == DEFAULT_PROFILE_KEY)
+        .order_by(ExecutionProfile.version.desc())
+        .options(selectinload(ExecutionProfile.stage_selections))
+    )
+    if existing is not None:
+        if _profile_is_complete(session, existing):
+            return existing
+        return _upgrade_default_profile(session, existing, settings)
+
+    entries = _ensure_settings_entries(session, settings)
 
     cloud = any(connection.data_egress for connection, _ in entries.values())
     profile = ExecutionProfile(
@@ -106,11 +175,7 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
     )
     session.add(profile)
     session.flush()
-    stage_family = {
-        "transcribe": "asr", "align": "asr", "diarize": "diarize", "correct": "correct",
-        "summarize": "llm", "mind_map": "llm", "embed": "embeddings", "ask": "llm",
-    }
-    for stage, family in stage_family.items():
+    for stage, family in _STAGE_FAMILY.items():
         connection, entry = entries[family]
         profile.stage_selections.append(ProfileStageSelection(
             stage=stage, connection_id=connection.id, model_id=entry.id, options={},
@@ -119,43 +184,11 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
     return profile
 
 
-def _upgrade_default_polish_profile(
+def _upgrade_default_profile(
     session: Session, previous: ExecutionProfile, settings: Settings
 ) -> ExecutionProfile:
-    """Create one immutable default version with OpenCode Go correction."""
-    connection = session.scalar(
-        select(ProviderConnection).where(ProviderConnection.key == "correct:opencode-go")
-    )
-    if connection is None:
-        connection = ProviderConnection(
-            key="correct:opencode-go",
-            name="OpenCode Go (transcript polish)",
-            provider_type="opencode-go",
-            execution_target="cloud",
-            data_egress=True,
-            secret_ref=None,
-            config={
-                "agent": settings.llm.opencode_go.agent,
-                "executable": settings.llm.opencode_go.executable,
-            },
-        )
-        session.add(connection)
-        session.flush()
-    model = session.scalar(
-        select(ModelCatalogEntry).where(
-            ModelCatalogEntry.connection_id == connection.id,
-            ModelCatalogEntry.model_key == settings.llm.opencode_go.model,
-        )
-    )
-    if model is None:
-        model = ModelCatalogEntry(
-            connection_id=connection.id,
-            model_key=settings.llm.opencode_go.model,
-            display_name=settings.llm.opencode_go.model,
-            capabilities=_capability([ProviderStage.correct], cloud=True),
-        )
-        session.add(model)
-        session.flush()
+    """Create a complete immutable default version from a partial legacy one."""
+    entries = _ensure_settings_entries(session, settings)
 
     for row in session.scalars(
         select(ExecutionProfile).where(ExecutionProfile.is_system_default.is_(True))
@@ -173,25 +206,35 @@ def _upgrade_default_polish_profile(
     )
     session.add(upgraded)
     session.flush()
-    for selection in previous.stage_selections:
-        if selection.stage == "correct":
-            continue
-        upgraded.stage_selections.append(
-            ProfileStageSelection(
-                stage=selection.stage,
+    previous_by_stage = {
+        selection.stage: selection
+        for selection in previous.stage_selections
+        if selection.stage in _STAGE_FAMILY and selection.stage != "correct"
+    }
+    for stage, family in _STAGE_FAMILY.items():
+        selection = previous_by_stage.get(stage)
+        if selection is None:
+            connection, model = entries[family]
+            selection = ProfileStageSelection(
+                stage=stage,
+                connection_id=connection.id,
+                model_id=model.id,
+                options=(
+                    {"agent": settings.llm.opencode_go.agent}
+                    if stage == "correct"
+                    else {}
+                ),
+            )
+        else:
+            selection = ProfileStageSelection(
+                stage=stage,
                 connection_id=selection.connection_id,
                 model_id=selection.model_id,
                 options=selection.options,
             )
+        upgraded.stage_selections.append(
+            selection
         )
-    upgraded.stage_selections.append(
-        ProfileStageSelection(
-            stage="correct",
-            connection_id=connection.id,
-            model_id=model.id,
-            options={"agent": settings.llm.opencode_go.agent},
-        )
-    )
     session.flush()
     return upgraded
 

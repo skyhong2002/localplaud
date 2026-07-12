@@ -19,6 +19,7 @@ from localplaud.db.migrations import (
 from localplaud.db.models import (
     Base,
     ExecutionProfile,
+    ModelCatalogEntry,
     PlaudFile,
     ProfileStageSelection,
     ProviderConnection,
@@ -191,10 +192,90 @@ def test_legacy_provider_profile_schema_rebuild_preserves_ids_and_config(tmp_pat
         assert upgraded.id == 4
         assert upgraded.version == 3 and upgraded.is_system_default is True
         assert upgraded.no_egress is False
+        assert {item.stage for item in upgraded.stage_selections} == {
+            stage.value for stage in ProviderStage
+        }
         correct = next(item for item in upgraded.stage_selections if item.stage == "correct")
         assert session.get(ProviderConnection, correct.connection_id).provider_type == "opencode-go"
+        assert bootstrap_default_profile(session, Settings()).id == upgraded.id
         selection = session.get(ProfileStageSelection, 19)
         assert (selection.profile_id, selection.connection_id, selection.model_id) == (3, 7, 11)
+
+
+def test_partial_default_profile_reuses_deployed_connections_and_fills_all_stages(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'partial-default.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        for key, provider in (
+            ("mlx-whisper", "mlx-whisper"),
+            ("pyannote", "pyannote"),
+            ("ollama", "ollama"),
+        ):
+            session.add(
+                ProviderConnection(
+                    key=key,
+                    name=key,
+                    provider_type=provider,
+                    execution_target="local",
+                    data_egress=False,
+                )
+            )
+        opencode = ProviderConnection(
+            key="correct:opencode-go",
+            name="OpenCode Go",
+            provider_type="opencode-go",
+            execution_target="cloud",
+            data_egress=True,
+        )
+        session.add(opencode)
+        session.flush()
+        model = ModelCatalogEntry(
+            connection_id=opencode.id,
+            model_key="qwen3.7-plus",
+            display_name="qwen3.7-plus",
+            capabilities={},
+        )
+        session.add(model)
+        session.flush()
+        partial = ExecutionProfile(
+            key="legacy-settings-default",
+            name="partial",
+            version=3,
+            is_system_default=True,
+        )
+        partial.stage_selections.append(
+            ProfileStageSelection(
+                stage="correct",
+                connection_id=opencode.id,
+                model_id=model.id,
+                options={},
+            )
+        )
+        session.add(partial)
+        session.commit()
+
+        upgraded = bootstrap_default_profile(
+            session,
+            Settings(
+                asr={"provider": "mlx-whisper"},
+                diarize={"provider": "pyannote"},
+                llm={"provider": "ollama"},
+                embeddings={"provider": "ollama"},
+            ),
+        )
+        session.commit()
+        assert upgraded.version == 4
+        assert {item.stage for item in upgraded.stage_selections} == {
+            stage.value for stage in ProviderStage
+        }
+        assert session.query(ProviderConnection).count() == 4
+        assert {item.connection.key for item in upgraded.stage_selections} == {
+            "mlx-whisper",
+            "pyannote",
+            "ollama",
+            "correct:opencode-go",
+        }
+        assert bootstrap_default_profile(session, Settings(asr={"provider": "mlx-whisper"})).id == upgraded.id
 
 
 def test_profile_key_can_have_multiple_versions(tmp_path):
