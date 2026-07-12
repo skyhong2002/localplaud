@@ -85,19 +85,34 @@ def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig) -> Transcript:
         log.info("Diarization produced no turns for %s; leaving speakers unset", wav_path)
         return transcript
 
-    def speaker_for(start: float, end: float) -> str | None:
+    def speaker_for(start: float, end: float) -> str:
         # Zero-length spans (Whisper emits some) become a point query.
         if end <= start:
             for t_start, t_end, spk in turns:
                 if t_start <= start <= t_end:
                     return spk
-            return None
         best, best_overlap = None, 0.0
         for t_start, t_end, spk in turns:
             overlap = max(0.0, min(end, t_end) - max(start, t_start))
             if overlap > best_overlap:
                 best, best_overlap = spk, overlap
-        return best
+        if best is not None:
+            return best
+
+        # Pyannote speech turns and Whisper timestamps use independent VAD
+        # boundaries, so short ASR words/segments can legitimately land in a
+        # small gap. Assign the closest detected turn rather than leaving a
+        # partially diarized transcript that falsely reports completion. Ties
+        # preserve pyannote's deterministic turn order.
+        def distance(turn: tuple[float, float, str]) -> float:
+            t_start, t_end, _speaker = turn
+            if end < t_start:
+                return t_start - end
+            if start > t_end:
+                return start - t_end
+            return 0.0
+
+        return min(turns, key=distance)[2]
 
     for seg in transcript.segments:
         if seg.words:
@@ -112,5 +127,7 @@ def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig) -> Transcript:
         else:
             seg.speaker = speaker_for(seg.start, seg.end)
 
-    transcript.has_speakers = True
+    transcript.has_speakers = bool(transcript.segments) and all(
+        segment.speaker for segment in transcript.segments
+    )
     return transcript
