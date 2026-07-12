@@ -26,6 +26,7 @@ recording ID and model/provider names may still be identifying in some deploymen
   "schema": "localplaud-benchmark-reference/v1",
   "language": "zh-TW+en",
   "case": "code-switch",
+  "coverage": "full_audio",
   "segments": [
     {"start": 0.0, "end": 2.4, "speaker": "REF_1", "text": "今天 review 進度。"},
     {"start": 2.4, "end": 4.8, "speaker": "REF_2", "text": "下一步開始測試。"}
@@ -35,6 +36,8 @@ recording ID and model/provider names may still be identifying in some deploymen
 
 Every segment needs non-empty text and start/end seconds. Speaker labels need only be
 stable within this reference; they do not have to match localplaud labels.
+Set `coverage` to `full_audio` only when every speech region in the complete recording
+has been annotated. Omit it or use another label for partial references.
 
 ## Metrics
 
@@ -48,6 +51,11 @@ stable within this reference; they do not have to match localplaud labels.
 - **Boundary MAE**: mean absolute start/end error when reference and hypothesis have
   the same segment count; otherwise reported as unavailable instead of inventing an
   alignment.
+- **Non-speech hallucination rate**: only available for `coverage: full_audio`.
+  Hypothesis characters are weighted by the fraction of their segment duration that
+  falls outside all annotated speech intervals. The report also counts segments that
+  are mostly outside speech. This detects invented text during annotated silence; it
+  does not claim to detect semantic hallucinations inside real speech.
 - **Real-time factor**: latest completed transcribe attempt latency divided by audio
   duration. Provider/model and raw latency are included.
 - **Peak memory**: the Python worker process RSS high-water mark observed when the

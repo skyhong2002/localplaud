@@ -462,6 +462,9 @@ transcript content. Completed stage attempts also retain the worker process RSS
 high-water mark; this is explicitly process-level memory evidence. See
 [`benchmarking.md`](benchmarking.md). Actual multi-recording
 Apple/NVIDIA/CPU measurements remain required before changing defaults.
+References that explicitly cover the full audio also report hypothesis text falling
+outside all annotated speech intervals; partial references never imply a zero
+hallucination rate.
 The recording workspace runs this comparison from a private reference JSON without
 persisting it; a bounded upload API returns the identical report used by the CLI.
 

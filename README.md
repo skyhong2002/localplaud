@@ -246,6 +246,8 @@ Reports contain metrics and execution provenance, not transcript text. See
 Recording Detail can run the same benchmark from an in-memory private JSON upload;
 the reference is never stored. New stage attempts also report the worker process RSS
 high-water mark as an honest process-level peak-memory metric.
+Full-audio references additionally report time-weighted hypothesis text outside
+annotated speech, while partial references leave that metric unavailable.
 
 ## Security
 

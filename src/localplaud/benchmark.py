@@ -112,6 +112,64 @@ def _timestamp_metrics(reference: list[dict], hypothesis: list[dict]) -> dict:
     }
 
 
+def _interval_overlap(start: float, end: float, intervals: list[tuple[float, float]]) -> float:
+    clipped = sorted(
+        (max(start, left), min(end, right))
+        for left, right in intervals
+        if min(end, right) > max(start, left)
+    )
+    total = 0.0
+    cursor_start = cursor_end = None
+    for left, right in clipped:
+        if cursor_start is None:
+            cursor_start, cursor_end = left, right
+        elif left <= cursor_end:
+            cursor_end = max(cursor_end, right)
+        else:
+            total += cursor_end - cursor_start
+            cursor_start, cursor_end = left, right
+    if cursor_start is not None:
+        total += cursor_end - cursor_start
+    return total
+
+
+def _hallucination_metrics(reference: dict, hypothesis: list[dict]) -> dict:
+    if reference.get("coverage") != "full_audio":
+        return {
+            "non_speech_character_rate": None,
+            "estimated_non_speech_characters": None,
+            "hypothesis_characters": None,
+            "majority_non_speech_segments": None,
+            "reason": "reference coverage is not full_audio",
+        }
+    speech = [
+        (float(item.get("start") or 0), float(item.get("end") or 0))
+        for item in reference["segments"]
+    ]
+    total_characters = 0
+    estimated_non_speech = 0.0
+    majority_non_speech = 0
+    for item in hypothesis:
+        characters = len(_normalize(str(item.get("text") or "")).replace(" ", ""))
+        total_characters += characters
+        start, end = float(item.get("start") or 0), float(item.get("end") or 0)
+        duration = max(0.0, end - start)
+        speech_overlap = min(duration, _interval_overlap(start, end, speech))
+        non_speech_fraction = 1.0 - speech_overlap / duration if duration else 0.0
+        estimated_non_speech += characters * non_speech_fraction
+        if characters and non_speech_fraction > 0.5:
+            majority_non_speech += 1
+    return {
+        "non_speech_character_rate": (
+            round(estimated_non_speech / total_characters, 6) if total_characters else None
+        ),
+        "estimated_non_speech_characters": round(estimated_non_speech, 3),
+        "hypothesis_characters": total_characters,
+        "majority_non_speech_segments": majority_non_speech,
+        "reason": None,
+    }
+
+
 def load_reference(path: str | Path) -> dict:
     return validate_reference(json.loads(Path(path).read_text(encoding="utf-8")))
 
@@ -184,6 +242,7 @@ def benchmark_recording(file_id: str, reference: dict) -> dict:
             "schema": reference["schema"],
             "language": reference.get("language"),
             "case": reference.get("case"),
+            "coverage": reference.get("coverage"),
         },
         "accuracy": {
             "cer": _error_rate(expected_chars, actual_chars),
@@ -193,5 +252,6 @@ def benchmark_recording(file_id: str, reference: dict) -> dict:
         },
         "speakers": _speaker_metrics(expected, segments),
         "timestamps": _timestamp_metrics(expected, segments),
+        "hallucination": _hallucination_metrics(reference, segments),
         "execution": execution,
     }
