@@ -439,6 +439,7 @@ _ZH_HANT_TW = {
     "Complete the failed or missing local stages below; Plaud-generated transcript or summary never satisfies this gate.": "請完成下列失敗或缺少的本機階段；Plaud 生成的逐字稿或摘要不會使此驗收通過。",
     "raw_audio_local": "本機原始音訊",
     "local_transcript": "本機標準逐字稿",
+    "transcript_polish": "AI 潤飾逐字稿",
     "timestamped_segments": "時間戳記段落",
     "speaker_assignment": "語者指派",
     "local_notes": "本機生成筆記",

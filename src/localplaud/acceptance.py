@@ -20,6 +20,14 @@ def subscription_independence_report(file_id: str) -> dict:
         if file is None:
             raise LookupError(f"recording not found: {file_id}")
         transcript = file.local_transcript
+        polished = next(
+            (
+                row
+                for row in reversed(file.transcript_revisions)
+                if row.kind == "ai_polish" and row.source == "local"
+            ),
+            None,
+        )
         segments = list((transcript.segments if transcript else []) or [])
         local_notes = [
             row for row in file.summaries if row.source == "local" and row.template != "mind_map"
@@ -30,6 +38,9 @@ def subscription_independence_report(file_id: str) -> dict:
         chunks = list(file.chunks)
         speakers = list(file.speakers)
         stage_runs = list(file.stage_runs)
+        correct_stage = next(
+            (row for row in stage_runs if row.stage.value == "correct"), None
+        )
         checks = [
             _check(
                 "raw_audio_local",
@@ -40,6 +51,21 @@ def subscription_independence_report(file_id: str) -> dict:
                 "local_transcript",
                 transcript is not None and transcript.source == "local",
                 "canonical transcript has source=local",
+            ),
+            _check(
+                "transcript_polish",
+                polished is not None
+                and transcript is not None
+                and polished.base_transcript_id == transcript.id
+                and bool(polished.provider and polished.model and polished.prompt_version)
+                and correct_stage is not None
+                and correct_stage.status == StageStatus.completed,
+                (
+                    f"AI polish revision {polished.revision} via "
+                    f"{polished.provider}:{polished.model} · {polished.prompt_version}"
+                    if polished is not None
+                    else "no local AI-polished transcript revision"
+                ),
             ),
             _check(
                 "timestamped_segments",

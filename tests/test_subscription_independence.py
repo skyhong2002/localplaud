@@ -140,6 +140,7 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     assert {item["name"] for item in report["checks"]} == {
         "raw_audio_local",
         "local_transcript",
+        "transcript_polish",
         "timestamped_segments",
         "speaker_assignment",
         "local_notes",
@@ -215,6 +216,7 @@ def test_polish_failure_blocks_notes_and_index_but_keeps_raw_transcript(
     monkeypatch, tmp_path
 ):
     _setup(monkeypatch, tmp_path)
+    from localplaud.acceptance import subscription_independence_report
     from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
     from localplaud.db.session import init_db, session_scope
     from localplaud.worker.pipeline import process_file
@@ -246,3 +248,13 @@ def test_polish_failure_blocks_notes_and_index_but_keeps_raw_transcript(
         correct = next(stage for stage in row.stage_runs if stage.stage == StageName.correct)
         assert correct.status == StageStatus.failed
         assert "provider down" in correct.error
+
+    report = subscription_independence_report("polish-failure")
+    polish_check = next(
+        item for item in report["checks"] if item["name"] == "transcript_polish"
+    )
+    assert polish_check == {
+        "name": "transcript_polish",
+        "passed": False,
+        "detail": "no local AI-polished transcript revision",
+    }

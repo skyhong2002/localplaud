@@ -192,6 +192,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert evidence.json()["schema"] == "localplaud-subscription-independence/v1"
     assert {item["name"] for item in evidence.json()["checks"]} >= {
         "local_transcript",
+        "transcript_polish",
         "local_notes",
         "ask_index",
         "required_exports",

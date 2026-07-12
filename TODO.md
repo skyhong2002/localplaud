@@ -22,7 +22,7 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
   model terms, and the Hugging Face token are now live: production has completed
   diarization for real recordings. The contextual AI-polish stage is also live with
   OpenCode Go `qwen3.7-plus`: a real production recording completed correction,
-  full-coverage notes, mind map, index, and the nine-part subscription-independence
+  full-coverage notes, mind map, index, and the ten-part subscription-independence
   gate using the polished transcript revision. Speaker assignment now closes Whisper/pyannote
   VAD boundary gaps with the nearest detected turn instead of claiming completion
   while leaving segments unassigned; backlog reprocessing remains in progress.
@@ -87,7 +87,7 @@ migration/debug-only.
   and mind map, Ask-ready local chunks, durable profile snapshots, and TXT/SRT/VTT.
   The network-free acceptance harness starts with raw audio and no Plaud Intelligence
   artifacts, executes the whole pipeline plus grounded single-file Ask, and verifies
-  a playable source citation. The recording Web workspace now shows the same nine
+  a playable source citation. The recording Web workspace now shows the same ten
   checks, overall pass/not-ready state, actionable evidence, and versioned JSON API;
   CLI access is no longer required to inspect readiness. Hardware/model quality
   validation remains internal engineering work rather than a product feature.
