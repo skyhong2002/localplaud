@@ -361,6 +361,10 @@ def test_export_menu_and_format_endpoints(monkeypatch, tmp_path):
     pdf = c.get("/file/r1/export/transcript.pdf")
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF-")
     assert pdf.headers["content-type"].startswith("application/pdf")
+    notes_docx = c.get("/file/r1/export/notes.docx")
+    assert notes_docx.status_code == 200 and notes_docx.content.startswith(b"PK")
+    notes_pdf = c.get("/file/r1/export/notes.pdf")
+    assert notes_pdf.status_code == 200 and notes_pdf.content.startswith(b"%PDF-")
     assert c.get("/file/r1/export/transcript.json").status_code == 404
     assert c.get("/file/r1/export/notes.txt").status_code == 200
     assert c.get("/file/r1/export/audio").content == b"audio"

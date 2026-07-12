@@ -48,7 +48,11 @@ def seeded_db(monkeypatch, tmp_path):
             ],
         )
         f.summaries = [
-            Summary(template="default", title="A Chat", content_md="# A Chat\n\nShort chat."),
+            Summary(
+                template="default",
+                title="A Chat",
+                content_md="# A Chat\n\n繁體中文 **重點**。\n\n- 決策一\n- Decision two",
+            ),
             Summary(template="meeting", title="Standup", content_md="# Standup\n\nDecisions."),
         ]
         f.user_notes = [
@@ -138,6 +142,20 @@ def test_transcript_document_formats_and_options(seeded_db):
 def test_notes_portable_formats(seeded_db):
     markdown, _ = render_notes(FILE_ID, "md")
     assert b"## A Chat" in markdown and b"## Launch answer" in markdown
+
+    docx_bytes, docx_media = render_notes(FILE_ID, "docx")
+    assert docx_media.endswith("wordprocessingml.document")
+    document = Document(BytesIO(docx_bytes))
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "繁體中文 重點。" in text and "決策一" in text and "Launch answer" in text
+    assert "**" not in text
+    assert any(paragraph.style.name == "List Bullet" for paragraph in document.paragraphs)
+
+    pdf_bytes, pdf_media = render_notes(FILE_ID, "pdf")
+    assert pdf_media == "application/pdf" and pdf_bytes.startswith(b"%PDF-")
+    reader = PdfReader(BytesIO(pdf_bytes))
+    pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "繁體中文" in pdf_text and "Launch answer" in pdf_text
 
 
 def test_independent_export_excludes_imported_plaud_artifacts(monkeypatch, tmp_path):

@@ -18,7 +18,8 @@ The gate requires all of the following evidence:
 - grounded retrieval chunks consume a local transcript, making single-file and
   library Ask retrieval-ready;
 - durable stage rows have immutable resolved-profile snapshots and no failed stage;
-- TXT, SRT, VTT, DOCX, and PDF render successfully from the local canonical transcript.
+- TXT, SRT, VTT, DOCX, and PDF render successfully from the local canonical transcript;
+  generated/Saved notes render as Markdown, TXT, DOCX, and PDF.
 
 Run the human-readable report:
 

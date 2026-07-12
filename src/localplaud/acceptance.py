@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .db.models import PlaudFile, StageStatus
 from .db.session import session_scope
-from .export_formats import render_transcript, transcript_provenance
+from .export_formats import render_notes, render_transcript, transcript_provenance
 
 
 def _check(name: str, passed: bool, detail: str) -> dict:
@@ -172,9 +172,16 @@ def subscription_independence_report(file_id: str) -> dict:
         try:
             payload, _media_type = render_transcript(file_id, fmt)
             if not payload:
-                export_errors.append(f"{fmt}: empty")
+                export_errors.append(f"transcript {fmt}: empty")
         except Exception as exc:  # noqa: BLE001 - report evidence, do not hide it
-            export_errors.append(f"{fmt}: {exc}")
+            export_errors.append(f"transcript {fmt}: {exc}")
+    for fmt in ("md", "txt", "docx", "pdf"):
+        try:
+            payload, _media_type = render_notes(file_id, fmt)
+            if not payload:
+                export_errors.append(f"notes {fmt}: empty")
+        except Exception as exc:  # noqa: BLE001 - report evidence, do not hide it
+            export_errors.append(f"notes {fmt}: {exc}")
     provenance = transcript_provenance(file_id)
     checks.append(
         _check(
@@ -183,7 +190,7 @@ def subscription_independence_report(file_id: str) -> dict:
             and provenance.get("transcript_source") == "local"
             and provenance.get("transcript_id") == expected_transcript_id
             and provenance.get("transcript_revision") == expected_revision,
-            "TXT/SRT/VTT/DOCX/PDF render from the local AI-polished canonical revision"
+            "transcript TXT/SRT/VTT/DOCX/PDF and notes MD/TXT/DOCX/PDF render locally"
             if not export_errors
             else "; ".join(export_errors),
         )

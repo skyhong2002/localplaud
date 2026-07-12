@@ -2240,7 +2240,7 @@ def export_notes_format(file_id: str, fmt: str):
     """Export generated and user-authored notes separately from transcript."""
     from ..export_formats import render_notes
 
-    if fmt not in {"md", "txt"}:
+    if fmt not in {"md", "txt", "docx", "pdf"}:
         raise HTTPException(status_code=404, detail="unsupported notes format")
     try:
         content, media_type = render_notes(file_id, fmt)

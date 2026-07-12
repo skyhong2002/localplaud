@@ -372,11 +372,13 @@ diarization/alignment stages, not by Whisper itself.
 | Content | Formats |
 | --- | --- |
 | Transcript | TXT, SRT, VTT, DOCX, PDF |
+| Generated and Saved notes | Markdown, TXT, DOCX, PDF |
 
 The recording workspace provides transcript TXT/SRT/VTT/DOCX/PDF exports with
 timestamp and speaker-label controls. DOCX uses a compact long-form transcript
 layout; PDF embeds Noto Sans TC so mixed Taiwan Mandarin/English remains portable.
-Existing notes, audio, archive, and mind-map exports remain complementary formats.
+Generated and Saved notes use Markdown-aware DOCX/PDF rendering rather than exposing
+raw Markdown syntax. Audio, archive, and mind-map exports remain complementary formats.
 
 Transcript export must allow timestamps and speaker names to be toggled.
 

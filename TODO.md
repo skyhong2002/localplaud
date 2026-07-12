@@ -394,8 +394,9 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Consolidated recording exports in one modal: canonical transcript TXT/SRT/VTT,
   DOCX, and PDF with timestamp and speaker-label toggles. DOCX uses an explicit
   compact-reference Word layout; PDF embeds the OFL-licensed Noto Sans TC font for
-  portable Taiwan Mandarin/English output. Existing notes, archive, mind-map image,
-  and original-audio exports remain available alongside the transcript formats.
+  portable Taiwan Mandarin/English output. Generated and Saved notes use the same
+  document pipeline for Markdown/TXT/DOCX/PDF; archive, mind-map image, and
+  original-audio exports remain available alongside the transcript formats.
 - ✅ Generated notes now create one provenance-linked editable copy instead of
   mutating AI output. The recording workspace opens that user-owned note tab and
   edits title/Markdown inline; the original generated content, template/model, and
@@ -408,7 +409,8 @@ embedding raw provider credentials or model settings in each rule.
 - Add original localplaud visual design with Plaud-like interaction density and
   information architecture; do not copy Plaud assets.
 - Transcript TXT/SRT/VTT/DOCX/PDF is the completed required export scope. Existing
-  notes, original-audio, archive, and mind-map exports remain complementary formats.
+  notes (MD/TXT/DOCX/PDF), original-audio, archive, and mind-map exports remain
+  complementary formats.
 
 ### P1 — Multi-host deployment
 
