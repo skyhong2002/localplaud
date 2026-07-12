@@ -53,6 +53,7 @@ from ..remote.server import resume_pending_jobs
 from ..remote.server import router as worker_router
 from ..store.speakers import display_names, speaker_keys_from_segments
 from .automations import router as automations_router
+from .backups import router as backups_router
 from .imports import router as imports_router
 from .integrations import router as integrations_router
 from .note_templates import _item as note_template_item
@@ -85,6 +86,7 @@ app.include_router(notes_router)
 app.include_router(imports_router)
 app.include_router(integrations_router)
 app.include_router(automations_router)
+app.include_router(backups_router)
 app.include_router(worker_router)
 
 _static = _HERE / "static"
@@ -1475,6 +1477,7 @@ def status_page(request: Request):
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
+    from ..backups import list_workspace_backups
     from ..email_integrations import list_email_integrations
     from ..integrations import list_webhook_integrations
     from ..providers.contracts import ProviderStage
@@ -1491,6 +1494,12 @@ def settings_page(request: Request):
         settings.plaud.official.request_timeout_seconds,
     ).status()
     plaud_auth["tokens_path"] = str(settings.plaud.official.tokens_path.expanduser())
+    try:
+        workspace_backups = list_workspace_backups()
+        backup_error = None
+    except ValueError as exc:
+        workspace_backups = []
+        backup_error = str(exc)
 
     with session_scope() as session:
         ctx = _base_ctx(request, "settings") | {
@@ -1533,6 +1542,8 @@ def settings_page(request: Request):
             ],
             "hardware_recommendations": hardware_recommendations(),
             "plaud_auth": plaud_auth,
+            "workspace_backups": workspace_backups,
+            "backup_error": backup_error,
         }
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
 

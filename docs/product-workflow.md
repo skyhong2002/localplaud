@@ -236,6 +236,14 @@ IANA timezone, and 12/24-hour clock apply to every browser using the instance. I
 timezones are rejected before persistence. Interface-language selection remains
 unavailable until the corresponding translations exist.
 
+Private workspace backup is available from Settings and the API for file-backed
+SQLite deployments. It uses SQLite's online backup API so the snapshot is consistent
+while the service remains available, and can optionally include regular files under
+the configured media root. Every archive carries a versioned manifest and SHA-256;
+environment/config secrets, Plaud tokens, reverse-proxy credentials, and symlinks are
+excluded. Restore remains an explicit offline operation documented in
+[`backups.md`](backups.md), so an active Web request can never replace the live database.
+
 The recording workspace now has a sticky custom player backed by locally generated
 and cached ffmpeg waveform envelopes. Playback state survives tab switches and stays
 synchronized with transcript segments; seek, speed, skip, deep links, and keyboard

@@ -408,9 +408,12 @@ embedding raw provider credentials or model settings in each rule.
   desktop section rail remains visible while scrolling and becomes a contained
   horizontal section list on mobile. Durable workspace preferences now apply the
   workspace name, system/light/dark theme, comfortable/compact density, IANA
-  timezone, and 12/24-hour clock across browsers. Remaining product sections are
-  active sessions, translated interface locale, private sync/backup, and
-  support/version information.
+  timezone, and 12/24-hour clock across browsers. Private workspace backup now uses
+  SQLite's online backup API and produces a manifest plus SHA-256, with an explicit
+  optional media scope; secrets/config/OAuth tokens and media symlinks are excluded,
+  downloads are cataloged, and offline restore is documented. Remaining product
+  sections are active sessions, translated interface locale, private cross-host
+  sync, and support/version information.
 - ✅ Added native loopback S256 PKCE inside localplaud. First login no longer needs
   Node.js or the Plaud CLI; state, two-minute expiry, public-client exchange,
   atomic `0600` token storage, auto-refresh, CLI-compatible schema, and actionable
