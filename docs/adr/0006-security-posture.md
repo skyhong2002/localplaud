@@ -15,8 +15,10 @@ addressing before wider use.
   defaults to `127.0.0.1` so a stray `localplaud run` isn't exposed to the LAN.
   Docker overrides it to `0.0.0.0` (the container sits behind Caddy and its port
   isn't published). `api.login_password` plus `api.session_secret` enable the
-  built-in `/login` form and a signed, expiring, HttpOnly, Secure, SameSite=Lax
-  cookie. `api.auth_token` independently supports `Authorization: Bearer`,
+  built-in `/login` form and an opaque, expiring, HttpOnly, Secure, SameSite=Lax
+  cookie. Only a peppered token hash and bounded user-agent label are stored, so
+  Settings can enumerate and revoke sessions without retaining plaintext tokens.
+  `api.auth_token` independently supports `Authorization: Bearer`,
   `X-Auth-Token`, or `?token=` for API clients. `/healthz` remains public.
 - **Fetches are SSRF-guarded.** URLs pulled from API responses must be `https`
   and must not resolve to private/loopback/link-local/reserved IPs; redirects

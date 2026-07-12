@@ -254,8 +254,8 @@ variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
   retries. Secrets, configuration, and Plaud OAuth tokens are excluded; configure,
   verify, and restore using
   [`docs/backups.md`](docs/backups.md).
-- Settings reports the real stateless-token/reverse-proxy access boundary and can
-  download aggregate, redacted diagnostics for support. See
+- Settings reports the built-in Web login and API-token boundary, lists revocable
+  browser sessions, and can download aggregate, redacted diagnostics for support. See
   [`docs/support.md`](docs/support.md).
 - Workspace preferences can persist English or Traditional Chinese (Taiwan) for the
   shared shell and primary library, search, notes, automation, template, and status

@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
-import json
 import secrets
-import time
 from contextlib import asynccontextmanager
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
@@ -29,6 +26,7 @@ from ..config import get_settings
 from ..db.models import (
     AskThread,
     AutomationRun,
+    BrowserSession,
     Chunk,
     ExecutionProfile,
     FileStatus,
@@ -107,30 +105,31 @@ if _static.exists():
 _SESSION_COOKIE = "localplaud_session"
 
 
-def _session_token(secret: str, max_age: int) -> str:
-    payload = {"exp": int(time.time()) + max_age, "nonce": secrets.token_urlsafe(18)}
-    body = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":")).encode()
-    ).rstrip(b"=")
-    signature = hmac.new(secret.encode(), body, hashlib.sha256).digest()
-    return f"{body.decode()}.{base64.urlsafe_b64encode(signature).rstrip(b'=').decode()}"
+def _session_hash(token: str, secret: str) -> str:
+    return hmac.new(secret.encode(), token.encode(), hashlib.sha256).hexdigest()
 
 
-def _valid_session(token: str | None, secret: str | None) -> bool:
-    if not token or not secret or "." not in token:
-        return False
-    try:
-        body_text, signature_text = token.split(".", 1)
-        body = body_text.encode()
-        signature = base64.urlsafe_b64decode(signature_text + "=" * (-len(signature_text) % 4))
-        expected = hmac.new(secret.encode(), body, hashlib.sha256).digest()
-        if not hmac.compare_digest(signature, expected):
-            return False
-        decoded = base64.urlsafe_b64decode(body_text + "=" * (-len(body_text) % 4))
-        payload = json.loads(decoded)
-        return isinstance(payload.get("exp"), int) and payload["exp"] >= int(time.time())
-    except (ValueError, TypeError, json.JSONDecodeError):
-        return False
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _browser_session(token: str | None, secret: str | None) -> BrowserSession | None:
+    if not token or not secret:
+        return None
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        row = session.scalar(
+            select(BrowserSession).where(
+                BrowserSession.token_hash == _session_hash(token, secret),
+                BrowserSession.expires_at > now,
+            )
+        )
+        if row and now - _aware(row.last_seen_at) >= timedelta(minutes=5):
+            row.last_seen_at = now
+        if row:
+            session.flush()
+            session.expunge(row)
+        return row
 
 
 def _safe_next(value: str | None) -> str:
@@ -145,7 +144,7 @@ def _is_browser_navigation(request: Request) -> bool:
 
 @app.middleware("http")
 async def _auth_gate(request: Request, call_next):
-    """Protect the Web App with a signed login session and APIs with a token."""
+    """Protect the Web App with a revocable opaque session and APIs with a token."""
     settings = get_settings().api
     token = settings.auth_token
     login_password = settings.login_password
@@ -161,10 +160,13 @@ async def _auth_gate(request: Request, call_next):
         if bearer.lower().startswith("bearer "):
             supplied = bearer[7:]
         token_ok = bool(token and supplied and hmac.compare_digest(supplied, token))
-        session_ok = bool(
-            login_password
-            and _valid_session(request.cookies.get(_SESSION_COOKIE), settings.session_secret)
+        browser_session = (
+            _browser_session(request.cookies.get(_SESSION_COOKIE), settings.session_secret)
+            if login_password
+            else None
         )
+        session_ok = bool(browser_session)
+        request.state.browser_session_id = browser_session.id if browser_session else None
         if not token_ok and not session_ok:
             if _is_browser_navigation(request) and login_password:
                 next_path = request.url.path
@@ -180,7 +182,7 @@ def login_page(request: Request, next: str = "/", error: str | None = None):
     settings = get_settings().api
     if not settings.login_password:
         return RedirectResponse(url="/", status_code=303)
-    if _valid_session(request.cookies.get(_SESSION_COOKIE), settings.session_secret):
+    if _browser_session(request.cookies.get(_SESSION_COOKIE), settings.session_secret):
         return RedirectResponse(url=_safe_next(next), status_code=303)
     return templates.TemplateResponse(
         request=request,
@@ -201,10 +203,23 @@ def login_submit(request: Request, password: Annotated[str, Form()], next: Annot
             context={"next": _safe_next(next), "error": True},
             status_code=401,
         )
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        session.execute(delete(BrowserSession).where(BrowserSession.expires_at <= now))
+        session.add(
+            BrowserSession(
+                token_hash=_session_hash(token, settings.session_secret),
+                user_agent=request.headers.get("user-agent", "")[:256],
+                created_at=now,
+                last_seen_at=now,
+                expires_at=now + timedelta(seconds=settings.session_max_age_seconds),
+            )
+        )
     response = RedirectResponse(url=_safe_next(next), status_code=303)
     response.set_cookie(
         _SESSION_COOKIE,
-        _session_token(settings.session_secret, settings.session_max_age_seconds),
+        token,
         max_age=settings.session_max_age_seconds,
         httponly=True,
         secure=True,
@@ -215,10 +230,29 @@ def login_submit(request: Request, password: Annotated[str, Form()], next: Annot
 
 
 @app.post("/logout")
-def logout() -> RedirectResponse:
+def logout(request: Request) -> RedirectResponse:
+    settings = get_settings().api
+    token = request.cookies.get(_SESSION_COOKIE)
+    if token and settings.session_secret:
+        with session_scope() as session:
+            session.execute(
+                delete(BrowserSession).where(
+                    BrowserSession.token_hash == _session_hash(token, settings.session_secret)
+                )
+            )
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(_SESSION_COOKIE, path="/", httponly=True, secure=True, samesite="lax")
     return response
+
+
+@app.post("/api/sessions/{session_id}/revoke")
+def revoke_browser_session(session_id: int, request: Request) -> dict:
+    with session_scope() as session:
+        row = session.get(BrowserSession, session_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session.delete(row)
+    return {"ok": True, "current": getattr(request.state, "browser_session_id", None) == session_id}
 
 
 # --------------------------------------------------------------------------- #
@@ -1722,6 +1756,14 @@ def settings_page(request: Request):
 
     with session_scope() as session:
         backup_destinations = list_destinations(session)
+        now = datetime.now(UTC)
+        browser_sessions = list(
+            session.scalars(
+                select(BrowserSession)
+                .where(BrowserSession.expires_at > now)
+                .order_by(BrowserSession.last_seen_at.desc())
+            )
+        )
         ctx = _base_ctx(request, "settings") | {
             "connections": list_connections(session),
             "models": list_models(session),
@@ -1771,6 +1813,17 @@ def settings_page(request: Request):
             ],
             "backup_sync_deliveries": list_deliveries(session, 30),
             "about": about_info(settings),
+            "browser_sessions": [
+                {
+                    "id": item.id,
+                    "user_agent": item.user_agent or "Unknown browser",
+                    "created_at": _aware(item.created_at).isoformat(),
+                    "last_seen_at": _aware(item.last_seen_at).isoformat(),
+                    "expires_at": _aware(item.expires_at).isoformat(),
+                    "current": getattr(request.state, "browser_session_id", None) == item.id,
+                }
+                for item in browser_sessions
+            ],
         }
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
 

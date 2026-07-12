@@ -269,9 +269,9 @@ idempotent completion, independent retry, and authorization revocation keep this
 transport separate from backup creation and restore.
 
 Access & Security reports whether the built-in Web login and API token are configured
-and that reverse-proxy authentication is external. The Web login creates signed,
-expiring browser sessions; active-session enumeration and remote revocation remain
-explicitly unavailable rather than being presented as implemented.
+and that reverse-proxy authentication is external. The Web login creates durable,
+expiring browser sessions using opaque cookies and peppered token hashes. Settings
+enumerates them, marks the current browser, and supports immediate remote revocation.
 Support & About exposes package/build/runtime identity and a downloadable, no-store
 diagnostics document containing only aggregate counts and non-secret switches. Tests
 prove that recording identity/content, paths, URLs/addresses, errors, environment

@@ -40,9 +40,15 @@
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px;margin-top:12px">
       <div class="tile"><div class="k">{{ t('Application authentication') }}</div><div style="margin-top:4px">{{ t('Signed browser session') if about.access.browser_login_configured else t('No Web login') }}</div></div>
       <div class="tile"><div class="k">{{ t('Reverse proxy') }}</div><div style="margin-top:4px">{{ t('External · not observable by localplaud') }}</div></div>
-      <div class="tile"><div class="k">{{ t('Active sessions') }}</div><div style="margin-top:4px">{{ t('Not tracked') }}</div></div>
+      <div class="tile"><div class="k">{{ t('Active sessions') }}</div><div style="margin-top:4px">{{ browser_sessions|length }}</div></div>
     </div>
     <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ about.access.session_detail }}. Configure <code>api.login_password</code> and <code>api.session_secret</code> before remote exposure; keep <code>api.auth_token</code> for API clients.</p>
+    {% if about.access.browser_login_configured %}<div style="display:grid;gap:8px;margin-top:13px" id="browser-session-list">
+      {% for item in browser_sessions %}<div class="tile" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="min-width:0;flex:1"><strong>{{ t('This session') if item.current else t('Browser session') }}</strong>{% if item.current %} <span class="chip on">{{ t('current') }}</span>{% endif %}<div class="sub" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ item.user_agent }}">{{ item.user_agent }}</div><div class="sub" style="font-size:10.5px">{{ t('Last active') }}: {{ item.last_seen_at[:16]|replace('T',' · ') }} · {{ t('Expires') }}: {{ item.expires_at[:10] }}</div></div>
+        <button class="btn sec session-revoke" data-id="{{ item.id }}" data-current="{{ 'true' if item.current else 'false' }}" type="button" style="padding:6px 9px;color:var(--red)">{{ t('Revoke') }}</button>
+      </div>{% else %}<div class="sub">{{ t('No active browser sessions.') }}</div>{% endfor %}
+    </div>{% endif %}
   </div>
 
   <div class="panel" style="margin-top:16px" id="workspace-preferences">
@@ -457,5 +463,6 @@ document.getElementById('webhook-form').addEventListener('submit',async e=>{e.pr
 async function testEmail(id){const out=document.getElementById(`email-health-${id}`);out.textContent=tr('checking…');const r=await fetch(`/api/integrations/emails/${id}/test`,{method:'POST'}),data=await r.json();out.textContent=tr(data.status||'error');out.className=`st ${data.status||'error'}`;out.title=data.detail||'';}
 async function deleteEmail(id){if(!confirm(tr('Delete this email authorization? Delivery history is preserved.')))return;const r=await fetch(`/api/integrations/emails/${id}`,{method:'DELETE'});if(r.ok)location.reload();else{const data=await r.json();alert(data.detail||tr('Delete failed'));}}
 document.getElementById('email-form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target),recipients=String(f.get('to_addresses')).split(',').map(value=>value.trim()).filter(Boolean),body={name:f.get('name'),smtp_host:f.get('smtp_host'),smtp_port:Number(f.get('smtp_port')),security:f.get('security'),allow_insecure_private:f.get('allow_insecure_private')==='on',username:f.get('username')||null,password_ref:f.get('password_ref')||null,from_address:f.get('from_address'),to_addresses:recipients,subject_prefix:f.get('subject_prefix'),scopes:f.getAll('scope'),enabled:f.get('enabled')==='on'};const r=await fetch('/api/integrations/emails',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await r.json(),out=document.getElementById('email-result');if(r.ok){out.textContent=tr('Authorized. Reloading…');location.reload();}else out.textContent=data.detail?.[0]?.msg||data.detail||tr('Could not authorize email');});
+document.querySelectorAll('.session-revoke').forEach(button=>button.addEventListener('click',async()=>{if(!confirm(tr('Revoke this browser session?')))return;const response=await fetch(`/api/sessions/${button.dataset.id}/revoke`,{method:'POST'});if(response.ok){if(button.dataset.current==='true')location.assign('/login');else location.reload();}else{const data=await response.json();alert(data.detail||tr('Could not revoke session'));}}));
 </script>
 {% endblock %}

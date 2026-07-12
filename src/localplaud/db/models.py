@@ -37,6 +37,19 @@ class Base(DeclarativeBase):
     pass
 
 
+class BrowserSession(Base):
+    """Revocable Web login session; the plaintext cookie is never stored."""
+
+    __tablename__ = "browser_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_agent: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class FileStatus(enum.StrEnum):
     """Local lifecycle of a file, independent of the cloud's own flags."""
 

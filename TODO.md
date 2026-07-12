@@ -6,8 +6,11 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-12)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (346 tests passing locally).
-- **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
+  Active development is merged directly to `main` (test count is verified per change).
+- **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service
+  `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy
+  at **https://plaud.observe.tw** with localplaud's built-in `/login`. Local ASR =
+  mlx-whisper (Metal); transcript polish = OpenCode Go; embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
   recordings)**. Raw audio download works without requesting Plaud AI generation.
@@ -473,8 +476,9 @@ embedding raw provider credentials or model settings in each rule.
   section navigation and primary account, backup, provider/profile, integration, and
   support controls are translated. Remaining locale work is dynamic helper, health,
   error, and action messages. Access &
-  security now truthfully reports the stateless token/reverse-proxy boundary and
-  explains why app-managed active sessions do not exist; Support & About shows
+  security now reports the built-in Web login, durable hashed browser sessions,
+  current-session state, immediate revocation, and the separate API-token/reverse-
+  proxy boundary; Support & About shows
   runtime/build identity and downloads a tested redacted diagnostics bundle with no
   recording identifiers/content, paths, URLs, errors, environment variables, or
   credentials.
@@ -491,5 +495,6 @@ embedding raw provider credentials or model settings in each rule.
 - Update prod: `git -C ~/Projects/localplaud pull && launchctl kickstart -k gui/$(id -u)/com.localplaud.agent`
 - Logs: `~/Projects/localplaud/data/service.{out,err}.log`
 - Service: `launchctl list | grep localplaud`; plist at `~/Library/LaunchAgents/com.localplaud.agent.plist`
-- Caddy vhost: block for `plaud.observe.tw` in `/usr/local/etc/caddy/Caddyfile` (basic_auth user `sky`); reload `caddy reload --config /usr/local/etc/caddy/Caddyfile`
+- Caddy vhost: block for `plaud.observe.tw` in `/usr/local/etc/caddy/Caddyfile`;
+  Caddy terminates HTTPS while localplaud owns `/login` and browser sessions.
 - Session/creds: `~/Projects/localplaud/.env` (git-ignored)

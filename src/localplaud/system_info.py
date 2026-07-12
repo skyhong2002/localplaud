@@ -15,12 +15,14 @@ from sqlalchemy.orm import Session
 from .config import Settings, get_settings
 from .db.models import (
     AutomationRule,
+    BrowserSession,
     EmailIntegration,
     PlaudFile,
     RemoteWorker,
     StageRun,
     WebhookIntegration,
 )
+from .db.session import get_engine
 
 _COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
@@ -39,17 +41,24 @@ def build_commit() -> str | None:
 
 def access_boundary(settings: Settings | None = None) -> dict:
     settings = settings or get_settings()
+    browser_login = bool(settings.api.login_password and settings.api.session_secret)
+    active_sessions = 0
+    if browser_login:
+        with Session(get_engine()) as session:
+            active_sessions = session.scalar(
+                select(func.count()).select_from(BrowserSession).where(
+                    BrowserSession.expires_at > datetime.now(UTC)
+                )
+            ) or 0
     return {
         "application_token_configured": bool(settings.api.auth_token),
-        "browser_login_configured": bool(
-            settings.api.login_password and settings.api.session_secret
-        ),
+        "browser_login_configured": browser_login,
         "reverse_proxy": "external / not observable by localplaud",
-        "active_sessions": None,
+        "active_sessions": active_sessions if browser_login else None,
         "session_detail": (
-            "localplaud uses signed, expiring browser sessions without storing their contents; "
-            "active-session enumeration and remote revocation are not yet available"
-            if settings.api.login_password and settings.api.session_secret
+            "localplaud stores only peppered session-token hashes; active sessions can be "
+            "reviewed and revoked from Settings"
+            if browser_login
             else "localplaud Web App login is not configured"
         ),
     }

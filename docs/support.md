@@ -1,11 +1,11 @@
 # Support, runtime identity, and safe diagnostics
 
 Settings → **Access & security** describes the authentication boundary that
-localplaud can actually observe. The application supports an optional stateless
-`api.auth_token`; deployments may additionally use an authenticated HTTPS reverse
-proxy. Neither mechanism creates a localplaud browser-session record, so the UI says
-**Active sessions: Not tracked** rather than inventing a session list. Reverse-proxy
-sessions must be managed at that proxy.
+localplaud can actually observe. The built-in `/login` page creates durable,
+expiring browser-session records containing only a peppered token hash and a bounded
+user-agent label. The page lists active sessions, marks the current one, and can
+revoke any session immediately. `api.auth_token` remains an independent stateless
+credential for API clients; upstream-proxy sessions remain managed at that proxy.
 
 Settings → **Support & about** shows the installed package version, optional build
 commit (`LOCALPLAUD_BUILD_COMMIT`), Python version, operating-system family,

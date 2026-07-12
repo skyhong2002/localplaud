@@ -84,11 +84,56 @@ def test_web_login_session_and_logout(monkeypatch, tmp_path):
     assert "HttpOnly" in cookie and "Secure" in cookie and "SameSite=lax" in cookie
     assert client.get("/settings").status_code == 200
 
+    from sqlalchemy import select
+
+    from localplaud.db.models import BrowserSession
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        stored = session.scalar(select(BrowserSession))
+        assert stored is not None
+        assert stored.token_hash != client.cookies["localplaud_session"]
+        assert len(stored.token_hash) == 64
+
     logged_out = client.post("/logout", follow_redirects=False)
     assert logged_out.status_code == 303
     assert client.get(
         "/settings", headers={"Accept": "text/html"}, follow_redirects=False
     ).status_code == 303
+    with session_scope() as session:
+        assert session.scalar(select(BrowserSession)) is None
+
+
+def test_session_can_be_listed_and_revoked_remotely(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    monkeypatch.delenv("LOCALPLAUD_API__AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("LOCALPLAUD_API__LOGIN_PASSWORD", "pw")
+    monkeypatch.setenv("LOCALPLAUD_API__SESSION_SECRET", "a-long-random-session-secret")
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.api.app import app
+    from localplaud.db.models import BrowserSession
+    from localplaud.db.session import init_db, session_scope
+
+    init_db()
+    first = TestClient(app, base_url="https://testserver")
+    second = TestClient(app, base_url="https://testserver")
+    for client in (first, second):
+        assert client.post("/login", data={"password": "pw"}, follow_redirects=False).status_code == 303
+
+    with session_scope() as session:
+        sessions = list(session.scalars(select(BrowserSession).order_by(BrowserSession.id)))
+        assert len(sessions) == 2
+        second_id = sessions[1].id
+
+    page = first.get("/settings")
+    assert page.status_code == 200
+    assert "2" in page.text and f'data-id="{second_id}"' in page.text
+    revoked = first.post(f"/api/sessions/{second_id}/revoke")
+    assert revoked.status_code == 200
+    assert revoked.json() == {"ok": True, "current": False}
+    assert second.get("/", headers={"Accept": "text/html"}, follow_redirects=False).status_code == 303
 
 
 def test_login_rejects_open_redirect_and_tampered_cookie(monkeypatch, tmp_path):

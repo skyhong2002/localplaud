@@ -131,5 +131,5 @@ def test_about_and_diagnostics_are_truthful_aggregate_and_redacted(monkeypatch, 
         assert 'id="support-about"' in settings_page.text
         assert 'href="#support-about"' in settings_page.text
         assert "Web login not configured" in settings_page.text
-        assert "Active sessions" in settings_page.text and "Not tracked" in settings_page.text
+        assert "Active sessions" in settings_page.text and ">0</div>" in settings_page.text
         assert 'href="/api/system/diagnostics.json"' in settings_page.text
