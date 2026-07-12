@@ -165,6 +165,14 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
     audio = tmp_path / "audio.mp3"
     audio.write_bytes(b"audio")
     _seed(str(audio))
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, "r1")
+        recording.status = FileStatus.error
+        recording.error = "provider unavailable"
+        recording.pipeline_retry_count = 99
     with c:
         preferences = c.get("/api/preferences/workspace").json()
         assert c.put(
@@ -191,6 +199,8 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         "訂閱獨立性",
         "尚未通過",
         "JSON 證據",
+        "自動重試次數已用盡",
+        "按下繼續處理會立即重試並重設次數",
     ):
         assert text in page.text
 
