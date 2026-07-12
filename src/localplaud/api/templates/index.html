@@ -112,8 +112,23 @@
       <div class="tile"><div class="k">{{ t('Total audio') }}</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
     </div>
 
+    <div class="sub" style="margin:2px 0 8px;font-size:13px">{{ t('Ask across your library. Answers stay grounded in indexed recordings and cite their sources.') }}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+      {% for chip in ["What decisions were made recently?", "Show action items across recordings", "What themes keep recurring?"] %}
+      <button type="button" class="btn sec library-ask-chip" data-q="{{ t(chip) }}" style="padding:5px 11px;font-size:12px">{{ t(chip) }}</button>
+      {% endfor %}
+    </div>
+    <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:6px">{{ t('QUICK ACTIONS · LIBRARY GROUNDED · READ ONLY') }}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">
+      {% for skill in ask_skills %}
+      <form hx-post="/ask/skill" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin">
+        <input type="hidden" name="skill_key" value="{{ skill.key }}">
+        <button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px">{{ skill.name }}</button>
+      </form>
+      {% endfor %}
+    </div>
     <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin">
-      <input name="q" placeholder="{{ t('Ask Plaud anything about your recordings…') }}" autocomplete="off" required>
+      <input id="library-ask-q" name="q" placeholder="{{ t('Ask Plaud anything about your recordings…') }}" autocomplete="off" required>
       <button class="btn" type="submit">{{ t('Ask') }}</button>
     </form>
     <div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{{ t('thinking…') }}</div>
@@ -266,6 +281,11 @@
   const apply = document.getElementById('bulk-apply');
   const clear = document.getElementById('bulk-clear');
   const message = document.getElementById('bulk-message');
+
+  document.querySelectorAll('.library-ask-chip').forEach(chip => chip.addEventListener('click', () => {
+    const input = document.getElementById('library-ask-q');
+    if (input) { input.value = chip.dataset.q; input.focus(); }
+  }));
 
   function selected() { return checks.filter(c => c.checked).map(c => c.value); }
   function sync() {

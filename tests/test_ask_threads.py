@@ -249,3 +249,58 @@ def test_grounded_quick_action_is_durable_versioned_and_non_mutating(monkeypatch
     assert client.post(
         "/file/missing/ask/skill", data={"skill_key": "task_table"}
     ).status_code == 404
+
+
+def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    calls = []
+
+    def fake_answer(query, **kwargs):
+        calls.append((query, kwargs))
+        return {
+            "answer": "Cross-recording task table.",
+            "sources": [
+                {
+                    "file_id": "r1",
+                    "filename": "Weekly Sync",
+                    "start": 8.0,
+                    "text": "Sky will prepare the draft",
+                },
+                {
+                    "file_id": "r2",
+                    "filename": "Interview",
+                    "start": 4.0,
+                    "text": "Alex will review it",
+                },
+            ],
+        }
+
+    monkeypatch.setattr("localplaud.worker.qa.answer", fake_answer)
+    page = client.get("/")
+    assert 'hx-post="/ask/skill"' in page.text
+    assert "What decisions were made recently?" in page.text
+    assert "LIBRARY GROUNDED" in page.text
+
+    catalog = client.get("/api/ask/skills?scope=library").json()["skills"]
+    assert all(item["scope"] == "library" for item in catalog)
+    assert "Recording, Task" in next(
+        item["instruction"] for item in catalog if item["key"] == "task_table"
+    )
+    response = client.post("/ask/skill", data={"skill_key": "task_table"})
+    assert response.status_code == 200
+    assert "Cross-recording task table." in response.text
+    assert calls[0][1]["file_id"] is None
+    assert "across the retrieved recordings" in calls[0][1]["instruction"]
+
+    from localplaud.db.models import AskMessage, AutomationRun, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        messages = list(session.scalars(select(AskMessage).order_by(AskMessage.id)))
+        assert {message.skill_key for message in messages} == {"task_table"}
+        assert messages[0].skill_snapshot["scope"] == "library"
+        assert list(session.scalars(select(UserNote))) == []
+        assert list(session.scalars(select(AutomationRun))) == []
+
+    assert client.post("/ask/skill", data={"skill_key": "missing"}).status_code == 404

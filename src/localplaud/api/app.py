@@ -823,6 +823,7 @@ def index(
         "attention_states": _ATTENTION_STATES,
         "ask_threads": [{"id": row.id, "title": row.title} for row in recent_ask_threads],
         "selected_ask_thread": selected_ask_thread_data,
+        "ask_skills": list_ask_skills("library"),
     }
     return templates.TemplateResponse(request=request, name="index.html", context=ctx)
 
@@ -1749,9 +1750,34 @@ def file_ask(
 
 
 @app.get("/api/ask/skills")
-def ask_skills_catalog():
+def ask_skills_catalog(scope: Literal["recording", "library"] = "recording"):
     """Reusable local quick actions. Prompts are inspectable and versioned."""
-    return {"skills": list_ask_skills()}
+    return {"skills": list_ask_skills(scope)}
+
+
+@app.post("/ask/skill", response_class=HTMLResponse)
+def library_ask_skill(request: Request, skill_key: str = Form(...)):
+    """Run a read-only skill through whole-library grounded Ask."""
+    try:
+        skill = get_ask_skill(skill_key, "library")
+    except LookupError as exc:
+        return HTMLResponse(str(exc), status_code=404)
+    from ..ask_threads import ask_in_thread
+
+    try:
+        thread = ask_in_thread(
+            skill["retrieval_query"],
+            display_query=skill["name"],
+            instruction=skill["instruction"],
+            skill_snapshot=skill,
+        )
+    except Exception:  # noqa: BLE001 - embeddings/LLM provider may be unavailable
+        thread = _unavailable_ask_thread(skill["name"], None)
+    return templates.TemplateResponse(
+        request=request,
+        name="_ask_thread.html",
+        context={"thread": thread, "file_id": None, "target": "answer"},
+    )
 
 
 @app.post("/file/{file_id}/ask/skill", response_class=HTMLResponse)

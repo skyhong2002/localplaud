@@ -119,6 +119,10 @@ accessibility require a different design.
   note. Saved notes retain source moments, link back to recordings, appear in the
   recording workspace, and can be copied or exported as Markdown, edited, or deleted
   independently without altering the original Ask thread.
+- Suggested questions and versioned quick actions for action items, cross-recording
+  task tables, and recurring insights run through this same library-scoped retrieval.
+  Their scope-specific prompt snapshot is durable; execution creates only an Ask
+  thread unless the user explicitly saves an answer as a note.
 
 ### 4. Templates and generation
 
