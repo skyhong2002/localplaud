@@ -62,7 +62,12 @@ def test_pending_queue_prioritizes_fresh_and_only_due_retries(monkeypatch, tmp_p
     with session_scope() as session:
         session.add_all(
             [
-                PlaudFile(id="fresh", status=FileStatus.downloaded, start_time_ms=100),
+                PlaudFile(
+                    id="fresh",
+                    status=FileStatus.downloaded,
+                    audio_path=str(audio),
+                    start_time_ms=int(now.timestamp() * 1000),
+                ),
                 PlaudFile(
                     id="due",
                     status=FileStatus.error,
@@ -77,6 +82,7 @@ def test_pending_queue_prioritizes_fresh_and_only_due_retries(monkeypatch, tmp_p
                     audio_path=str(audio),
                     start_time_ms=300,
                     pipeline_retry_count=0,
+                    pipeline_last_failure_at=now - timedelta(seconds=2),
                 ),
                 PlaudFile(
                     id="future",
@@ -107,6 +113,44 @@ def test_pending_queue_prioritizes_fresh_and_only_due_retries(monkeypatch, tmp_p
     )
     assert pipeline.process_pending(settings, limit=3) == 3
     assert seen == ["fresh", "due", "legacy"]
+
+
+def test_due_retry_is_not_starved_by_older_download_backlog(monkeypatch, tmp_path):
+    settings = _reset(monkeypatch, tmp_path)
+    import localplaud.worker.pipeline as pipeline
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    audio = tmp_path / "queue.wav"
+    audio.write_bytes(b"RIFF")
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        session.add_all(
+            [
+                PlaudFile(
+                    id=f"backlog-{index}",
+                    status=FileStatus.downloaded,
+                    audio_path=str(audio),
+                    start_time_ms=int((now - timedelta(days=10 + index)).timestamp() * 1000),
+                )
+                for index in range(20)
+            ]
+            + [
+                PlaudFile(
+                    id="due-retry",
+                    status=FileStatus.error,
+                    audio_path=str(audio),
+                    pipeline_retry_count=1,
+                    pipeline_next_retry_at=now - timedelta(minutes=1),
+                )
+            ]
+        )
+    seen: list[str] = []
+    monkeypatch.setattr(
+        pipeline, "process_file", lambda file_id, *_args, **_kwargs: seen.append(file_id)
+    )
+    assert pipeline.process_pending(settings, limit=1) == 1
+    assert seen == ["due-retry"]
 
 
 def test_pipeline_failure_is_retried_then_success_clears_state(monkeypatch, tmp_path):

@@ -22,7 +22,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import case, delete, or_, select, update
+from sqlalchemy import delete, or_, select, update
 
 from ..asr.base import Segment, Transcript, Word
 from ..config import Settings, get_settings
@@ -1246,18 +1246,48 @@ def process_pending(
                 PlaudFile.pipeline_next_retry_at <= now,
             )
         )
-        stmt = (
-            select(PlaudFile.id)
-            .where(or_(PlaudFile.status == FileStatus.downloaded, due_retry))
-            .order_by(
-                case((PlaudFile.status == FileStatus.downloaded, 0), else_=1),
-                PlaudFile.start_time_ms.desc().nulls_last(),
-                PlaudFile.created_at.desc(),
+        rows = list(
+            session.execute(
+                select(
+                    PlaudFile.id,
+                    PlaudFile.status,
+                    PlaudFile.start_time_ms,
+                    PlaudFile.created_at,
+                    PlaudFile.pipeline_next_retry_at,
+                    PlaudFile.pipeline_last_failure_at,
+                ).where(
+                    PlaudFile.audio_path.is_not(None),
+                    or_(PlaudFile.status == FileStatus.downloaded, due_retry),
+                )
             )
         )
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        ids = list(session.scalars(stmt))
+
+        def timestamp(value: datetime | None) -> float:
+            if value is None:
+                return 0.0
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=UTC)
+            return value.timestamp()
+
+        def queue_key(item) -> tuple[float, int, str]:
+            if item.status == FileStatus.downloaded:
+                event_time = (
+                    item.start_time_ms / 1000
+                    if item.start_time_ms is not None
+                    else timestamp(item.created_at)
+                )
+                fresh_tiebreak = 1
+            else:
+                event_time = timestamp(
+                    item.pipeline_next_retry_at
+                    or item.pipeline_last_failure_at
+                    or item.created_at
+                )
+                fresh_tiebreak = 0
+            return event_time, fresh_tiebreak, item.id
+
+        rows.sort(key=queue_key, reverse=True)
+        ids = [item.id for item in (rows[:limit] if limit is not None else rows)]
     if not ids:
         return 0
 
