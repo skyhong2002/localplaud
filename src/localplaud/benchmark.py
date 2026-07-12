@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 from sqlalchemy import select
@@ -42,11 +43,51 @@ def _error_rate(reference: list[str], hypothesis: list[str]) -> float | None:
     return _edit_distance(reference, hypothesis) / len(reference)
 
 
-def _speaker_at(segments: list[dict], moment: float) -> str | None:
-    for item in segments:
-        if float(item.get("start") or 0) <= moment < float(item.get("end") or 0):
-            return item.get("speaker")
-    return None
+def _active_speakers(segments: list[dict], moment: float) -> set[str]:
+    return {
+        speaker
+        for item in segments
+        if float(item.get("start") or 0) <= moment < float(item.get("end") or 0)
+        if (speaker := item.get("speaker"))
+    }
+
+
+def _speaker_mapping(overlap: dict[tuple[str, str], float]) -> dict[str, str]:
+    hypotheses = sorted({hyp for hyp, _ref in overlap})
+    references = sorted({ref for _hyp, ref in overlap})
+
+    # Typical meetings have few speakers. Use an exact maximum-overlap assignment
+    # there and retain a bounded deterministic fallback for unusually large labels.
+    if len(hypotheses) <= 12 and len(references) <= 12:
+        @lru_cache(maxsize=None)
+        def assign(index: int, used: int) -> tuple[float, tuple[str | None, ...]]:
+            if index == len(hypotheses):
+                return 0.0, ()
+            tail_score, tail = assign(index + 1, used)
+            best = (tail_score, (None, *tail))
+            for ref_index, ref in enumerate(references):
+                if used & (1 << ref_index):
+                    continue
+                score, candidate_tail = assign(index + 1, used | (1 << ref_index))
+                candidate = (score + overlap.get((hypotheses[index], ref), 0.0), (ref, *candidate_tail))
+                if candidate[0] > best[0]:
+                    best = candidate
+            return best
+
+        _score, assignment = assign(0, 0)
+        return {
+            hyp: ref
+            for hyp, ref in zip(hypotheses, assignment, strict=True)
+            if ref is not None and overlap.get((hyp, ref), 0.0) > 0
+        }
+
+    mapping: dict[str, str] = {}
+    used_ref: set[str] = set()
+    for (hyp, ref), _duration in sorted(overlap.items(), key=lambda item: (-item[1], item[0])):
+        if hyp not in mapping and ref not in used_ref:
+            mapping[hyp] = ref
+            used_ref.add(ref)
+    return mapping
 
 
 def _speaker_metrics(reference: list[dict], hypothesis: list[dict]) -> dict:
@@ -58,32 +99,31 @@ def _speaker_metrics(reference: list[dict], hypothesis: list[dict]) -> dict:
         }
     )
     intervals = [
-        (start, end, _speaker_at(reference, (start + end) / 2), _speaker_at(hypothesis, (start + end) / 2))
+        (
+            start,
+            end,
+            _active_speakers(reference, (start + end) / 2),
+            _active_speakers(hypothesis, (start + end) / 2),
+        )
         for start, end in zip(boundaries, boundaries[1:], strict=False)
         if end > start
     ]
     overlap: dict[tuple[str, str], float] = {}
-    for start, end, ref, hyp in intervals:
-        if ref and hyp:
-            overlap[(hyp, ref)] = overlap.get((hyp, ref), 0.0) + end - start
-    mapping: dict[str, str] = {}
-    used_ref: set[str] = set()
-    for (hyp, ref), _duration in sorted(overlap.items(), key=lambda item: -item[1]):
-        if hyp not in mapping and ref not in used_ref:
-            mapping[hyp] = ref
-            used_ref.add(ref)
+    for start, end, refs, hyps in intervals:
+        for hyp in hyps:
+            for ref in refs:
+                overlap[(hyp, ref)] = overlap.get((hyp, ref), 0.0) + end - start
+    mapping = _speaker_mapping(overlap)
 
     miss = false_alarm = confusion = reference_speech = 0.0
-    for start, end, ref, hyp in intervals:
+    for start, end, refs, hyps in intervals:
         duration = end - start
-        if ref:
-            reference_speech += duration
-        if ref and not hyp:
-            miss += duration
-        elif hyp and not ref:
-            false_alarm += duration
-        elif ref and hyp and mapping.get(hyp) != ref:
-            confusion += duration
+        reference_speech += len(refs) * duration
+        mapped_hyps = {mapping[hyp] for hyp in hyps if hyp in mapping}
+        correct = len(refs & mapped_hyps)
+        miss += max(0, len(refs) - len(hyps)) * duration
+        false_alarm += max(0, len(hyps) - len(refs)) * duration
+        confusion += (min(len(refs), len(hyps)) - correct) * duration
     total_error = miss + false_alarm + confusion
     return {
         "der": total_error / reference_speech if reference_speech else None,
@@ -91,6 +131,7 @@ def _speaker_metrics(reference: list[dict], hypothesis: list[dict]) -> dict:
         "false_alarm_seconds": round(false_alarm, 3),
         "confusion_seconds": round(confusion, 3),
         "reference_speech_seconds": round(reference_speech, 3),
+        "overlap_aware": True,
         "speaker_mapping": mapping,
     }
 

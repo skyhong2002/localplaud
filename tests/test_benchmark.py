@@ -84,6 +84,27 @@ def _reference():
     }
 
 
+def test_speaker_metrics_count_overlapping_speaker_time():
+    from localplaud.benchmark import _speaker_metrics
+
+    reference = [
+        {"start": 0, "end": 4, "speaker": "REF_A"},
+        {"start": 1, "end": 3, "speaker": "REF_B"},
+    ]
+    perfect = [
+        {"start": 0, "end": 4, "speaker": "HYP_X"},
+        {"start": 1, "end": 3, "speaker": "HYP_Y"},
+    ]
+    missing_overlap = [{"start": 0, "end": 4, "speaker": "HYP_X"}]
+
+    assert _speaker_metrics(reference, perfect)["der"] == 0
+    metrics = _speaker_metrics(reference, missing_overlap)
+    assert metrics["der"] == pytest.approx(2 / 6)
+    assert metrics["miss_seconds"] == 2
+    assert metrics["reference_speech_seconds"] == 6
+    assert metrics["overlap_aware"] is True
+
+
 def test_benchmark_reports_accuracy_speakers_timestamps_and_rtf(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     from localplaud.benchmark import benchmark_recording

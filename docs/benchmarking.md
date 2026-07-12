@@ -45,9 +45,11 @@ has been annotated. Omit it or use another label for partial references.
 - **WER**: whitespace-token edit distance. CER is the primary Taiwan Mandarin metric;
   WER remains useful for English/code-switch spans.
 - **DER**: zero-collar, time-weighted miss + false alarm + speaker confusion divided
-  by reference speech time. Hypothesis speakers are mapped one-to-one to reference
-  speakers by maximum speech overlap. This v1 evaluator assumes one active speaker
-  per instant; overlapping-speech evaluation remains a future schema revision.
+  by reference speaker time. Overlapping speakers are counted independently, so two
+  simultaneous reference voices contribute two speaker-seconds per elapsed second.
+  Hypothesis speakers are mapped one-to-one to reference speakers by maximum speech
+  overlap (exact assignment for up to 12 labels, deterministic bounded fallback for
+  unusually large label sets).
 - **Boundary MAE**: mean absolute start/end error when reference and hypothesis have
   the same segment count; otherwise reported as unavailable instead of inventing an
   alignment.
