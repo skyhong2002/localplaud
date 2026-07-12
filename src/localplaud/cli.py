@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -139,6 +140,61 @@ def benchmark_recording_command(
         console.print("[yellow]Peak memory is not recorded by current stage telemetry.[/]")
 
 
+@app.command("benchmark-suite")
+def benchmark_suite_command(
+    manifest: str = typer.Argument(help="Private benchmark suite manifest JSON path."),
+    json_output: bool = typer.Option(False, "--json", help="Print machine-readable JSON."),
+    output: str | None = typer.Option(None, "--output", "-o", help="Write sanitized report JSON."),
+):
+    """Run and gate a private multi-recording quality suite."""
+    from .benchmark import benchmark_suite, load_suite_manifest
+    from .db.session import init_db
+
+    init_db()
+    try:
+        suite, base_dir = load_suite_manifest(manifest)
+        report = benchmark_suite(suite, base_dir)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[red]✗ Benchmark suite failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    rendered = json.dumps(report, ensure_ascii=False, indent=2)
+    if output:
+        Path(output).write_text(rendered + "\n", encoding="utf-8")
+    if json_output:
+        console.print_json(rendered)
+    else:
+        table = Table(title=f"Benchmark suite · {report['suite']}")
+        table.add_column("Metric")
+        table.add_column("Aggregate")
+        table.add_column("Gate")
+        thresholds = {item["metric"]: item for item in report["thresholds"]}
+        for name in (
+            "cer",
+            "wer",
+            "der",
+            "speech_character_insertion_rate",
+            "speech_word_insertion_rate",
+            "non_speech_character_rate",
+            "boundary_mae_seconds",
+            "real_time_factor",
+            "peak_memory_mb",
+        ):
+            value = report["aggregates"][name]
+            gate = thresholds.get(name)
+            gate_text = "—"
+            if gate:
+                gate_text = f"{'PASS' if gate['passed'] else 'FAIL'} ≤ {gate['maximum']:.4f}"
+            table.add_row(name, "not recorded" if value is None else f"{value:.4f}", gate_text)
+        console.print(table)
+        counts = report["case_counts"]
+        console.print(
+            f"{counts['completed']}/{counts['total']} cases completed · "
+            + ("[green]PASS[/]" if report["passed"] else "[red]FAIL[/]")
+        )
+    if not report["passed"]:
+        raise typer.Exit(1)
+
+
 @auth_app.command("check")
 def auth_check():
     """Verify your Plaud session works (whoami against the configured provider)."""
@@ -258,7 +314,9 @@ def poll(
 @app.command()
 def work(
     once: bool = typer.Option(False, "--once", help="Process the backlog once and exit."),
-    force: bool = typer.Option(False, "--force", help="Recompute all stages, ignoring cached artifacts."),
+    force: bool = typer.Option(
+        False, "--force", help="Recompute all stages, ignoring cached artifacts."
+    ),
 ):
     """Run the local pipeline on downloaded recordings."""
     from .worker.pipeline import process_pending
@@ -278,7 +336,9 @@ def work(
 @app.command()
 def export(
     file_id: str = typer.Argument(..., help="Recording id (see `localplaud ls`)."),
-    out: str = typer.Option(None, "--out", "-o", help="Output path (default: alongside the audio)."),
+    out: str = typer.Option(
+        None, "--out", "-o", help="Output path (default: alongside the audio)."
+    ),
 ):
     """Export a recording's transcript + summaries to a Markdown file."""
     from .exporter import export_to_file
@@ -401,9 +461,7 @@ def status():
     table.add_column("count", justify="right")
     with session_scope() as session:
         counts = dict(
-            session.execute(
-                select(PlaudFile.status, func.count()).group_by(PlaudFile.status)
-            ).all()
+            session.execute(select(PlaudFile.status, func.count()).group_by(PlaudFile.status)).all()
         )
     for st in FileStatus:
         table.add_row(st.value, str(counts.get(st, 0)))
@@ -452,7 +510,11 @@ def doctor():
 
     from .worker.convert import ffmpeg_available
 
-    row("ffmpeg", ffmpeg_available(), "on PATH" if ffmpeg_available() else "missing (needed to transcode)")
+    row(
+        "ffmpeg",
+        ffmpeg_available(),
+        "on PATH" if ffmpeg_available() else "missing (needed to transcode)",
+    )
 
     from .worker.diarize import health as diarization_health
 
@@ -504,15 +566,25 @@ def doctor():
         st = OfficialTokenStore(
             settings.plaud.official.tokens_path, settings.plaud.official.refresh_url
         ).status()
-        row("plaud auth (official)", st["ok"],
-            st["detail"] if st["ok"] else "run `localplaud auth login`")
+        row(
+            "plaud auth (official)",
+            st["ok"],
+            st["detail"] if st["ok"] else "run `localplaud auth login`",
+        )
         has_legacy = bool(settings.plaud.token or settings.plaud.cookie)
         if settings.plaud.apse1_enrichment:
-            row("apse1 enrichment", has_legacy,
-                "credentials set" if has_legacy else "no session pasted (optional)")
+            row(
+                "apse1 enrichment",
+                has_legacy,
+                "credentials set" if has_legacy else "no session pasted (optional)",
+            )
     else:
         has_creds = bool(settings.plaud.token or settings.plaud.cookie)
-        row("plaud auth", has_creds, "credentials set" if has_creds else "run `localplaud auth import`")
+        row(
+            "plaud auth",
+            has_creds,
+            "credentials set" if has_creds else "run `localplaud auth import`",
+        )
 
     console.print(table)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 from sqlalchemy import select
@@ -15,6 +15,23 @@ from .export_formats import recording_data
 
 REFERENCE_SCHEMA = "localplaud-benchmark-reference/v1"
 REPORT_SCHEMA = "localplaud-benchmark-report/v1"
+SUITE_MANIFEST_SCHEMA = "localplaud-benchmark-suite/v1"
+SUITE_REPORT_SCHEMA = "localplaud-benchmark-suite-report/v1"
+
+SUITE_THRESHOLD_PATHS = {
+    "cer": ("accuracy", "cer"),
+    "wer": ("accuracy", "wer"),
+    "der": ("speakers", "der"),
+    "speech_character_insertion_rate": (
+        "hallucination",
+        "speech_character_insertion_rate",
+    ),
+    "speech_word_insertion_rate": ("hallucination", "speech_word_insertion_rate"),
+    "non_speech_character_rate": ("hallucination", "non_speech_character_rate"),
+    "boundary_mae_seconds": ("timestamps", "boundary_mae_seconds"),
+    "real_time_factor": ("execution", "real_time_factor"),
+    "peak_memory_mb": ("execution", "peak_memory_mb"),
+}
 
 
 def _normalize(text: str) -> str:
@@ -40,7 +57,9 @@ def _edit_breakdown(reference: list[str], hypothesis: list[str]) -> dict:
                 ((above[0] + 1, above[1], above[2] + 1, above[3]), 1),
                 ((left[0] + 1, left[1], left[2], left[3] + 1), 2),
             )
-            current.append(min(candidates, key=lambda candidate: (candidate[0][0], candidate[1]))[0])
+            current.append(
+                min(candidates, key=lambda candidate: (candidate[0][0], candidate[1]))[0]
+            )
         previous = current
     errors, substitutions, deletions, insertions = previous[-1]
     return {
@@ -50,11 +69,7 @@ def _edit_breakdown(reference: list[str], hypothesis: list[str]) -> dict:
         "errors": errors,
         "reference_units": len(reference),
         "hypothesis_units": len(hypothesis),
-        "error_rate": (
-            errors / len(reference)
-            if reference
-            else None
-        ),
+        "error_rate": (errors / len(reference) if reference else None),
         "insertion_rate": insertions / len(reference) if reference else None,
     }
 
@@ -75,7 +90,8 @@ def _speaker_mapping(overlap: dict[tuple[str, str], float]) -> dict[str, str]:
     # Typical meetings have few speakers. Use an exact maximum-overlap assignment
     # there and retain a bounded deterministic fallback for unusually large labels.
     if len(hypotheses) <= 12 and len(references) <= 12:
-        @lru_cache(maxsize=None)
+
+        @cache
         def assign(index: int, used: int) -> tuple[float, tuple[str | None, ...]]:
             if index == len(hypotheses):
                 return 0.0, ()
@@ -85,7 +101,10 @@ def _speaker_mapping(overlap: dict[tuple[str, str], float]) -> dict[str, str]:
                 if used & (1 << ref_index):
                     continue
                 score, candidate_tail = assign(index + 1, used | (1 << ref_index))
-                candidate = (score + overlap.get((hypotheses[index], ref), 0.0), (ref, *candidate_tail))
+                candidate = (
+                    score + overlap.get((hypotheses[index], ref), 0.0),
+                    (ref, *candidate_tail),
+                )
                 if candidate[0] > best[0]:
                     best = candidate
             return best
@@ -108,11 +127,7 @@ def _speaker_mapping(overlap: dict[tuple[str, str], float]) -> dict[str, str]:
 
 def _speaker_metrics(reference: list[dict], hypothesis: list[dict]) -> dict:
     boundaries = sorted(
-        {
-            float(item.get(key) or 0)
-            for item in reference + hypothesis
-            for key in ("start", "end")
-        }
+        {float(item.get(key) or 0) for item in reference + hypothesis for key in ("start", "end")}
     )
     intervals = [
         (
@@ -248,6 +263,42 @@ def load_reference(path: str | Path) -> dict:
     return validate_reference(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
+def load_suite_manifest(path: str | Path) -> tuple[dict, Path]:
+    manifest_path = Path(path)
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return validate_suite_manifest(data), manifest_path.resolve().parent
+
+
+def validate_suite_manifest(data: object) -> dict:
+    if not isinstance(data, dict) or data.get("schema") != SUITE_MANIFEST_SCHEMA:
+        raise ValueError(f"suite schema must be {SUITE_MANIFEST_SCHEMA}")
+    cases = data.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("suite must contain at least one case")
+    seen: set[str] = set()
+    for index, case in enumerate(cases, 1):
+        if not isinstance(case, dict):
+            raise ValueError("every suite case must be an object")
+        case_id = str(case.get("id") or f"case-{index}")
+        if case_id in seen:
+            raise ValueError(f"duplicate suite case id: {case_id}")
+        seen.add(case_id)
+        if not str(case.get("file_id") or "").strip():
+            raise ValueError(f"suite case {case_id} requires file_id")
+        if not str(case.get("reference") or "").strip():
+            raise ValueError(f"suite case {case_id} requires reference")
+    thresholds = data.get("thresholds") or {}
+    if not isinstance(thresholds, dict):
+        raise ValueError("suite thresholds must be an object")
+    unknown = sorted(set(thresholds) - set(SUITE_THRESHOLD_PATHS))
+    if unknown:
+        raise ValueError(f"unknown suite thresholds: {', '.join(unknown)}")
+    for name, value in thresholds.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise ValueError(f"suite threshold {name} must be a non-negative number")
+    return data
+
+
 def validate_reference(data: object) -> dict:
     if not isinstance(data, dict):
         raise ValueError("reference must be a JSON object")
@@ -331,8 +382,149 @@ def benchmark_recording(file_id: str, reference: dict) -> dict:
         "speakers": _speaker_metrics(expected, segments),
         "timestamps": _timestamp_metrics(expected, segments),
         "hallucination": _hallucination_metrics(reference, segments)
-        | _reference_insertion_metrics(
-            expected_chars, actual_chars, expected_words, actual_words
-        ),
+        | _reference_insertion_metrics(expected_chars, actual_chars, expected_words, actual_words),
         "execution": execution,
+    }
+
+
+def _suite_aggregates(reports: list[dict]) -> dict:
+    def ratio(numerator, denominator):
+        return round(numerator / denominator, 6) if denominator else None
+
+    character_errors = sum(item["accuracy"]["character_errors"]["errors"] for item in reports)
+    reference_characters = sum(item["accuracy"]["reference_characters"] for item in reports)
+    word_errors = sum(item["accuracy"]["word_errors"]["errors"] for item in reports)
+    reference_words = sum(item["accuracy"]["reference_words"] for item in reports)
+    speaker_errors = sum(
+        item["speakers"]["miss_seconds"]
+        + item["speakers"]["false_alarm_seconds"]
+        + item["speakers"]["confusion_seconds"]
+        for item in reports
+    )
+    reference_speaker_seconds = sum(
+        item["speakers"]["reference_speech_seconds"] for item in reports
+    )
+    character_insertions = sum(
+        item["accuracy"]["character_errors"]["insertions"] for item in reports
+    )
+    word_insertions = sum(item["accuracy"]["word_errors"]["insertions"] for item in reports)
+    non_speech_reports = [
+        item
+        for item in reports
+        if item["hallucination"]["estimated_non_speech_characters"] is not None
+    ]
+    non_speech_characters = sum(
+        item["hallucination"]["estimated_non_speech_characters"] for item in non_speech_reports
+    )
+    hypothesis_characters = sum(
+        item["hallucination"]["hypothesis_characters"] for item in non_speech_reports
+    )
+    timestamp_reports = [
+        item
+        for item in reports
+        if item["timestamps"]["boundary_mae_seconds"] is not None
+        and item["timestamps"]["paired_segments"]
+    ]
+    paired_segments = sum(item["timestamps"]["paired_segments"] for item in timestamp_reports)
+    boundary_error = sum(
+        item["timestamps"]["boundary_mae_seconds"] * item["timestamps"]["paired_segments"]
+        for item in timestamp_reports
+    )
+    execution_reports = [
+        item
+        for item in reports
+        if item["execution"]["latency_seconds"] is not None and item["execution"]["audio_seconds"]
+    ]
+    latency_seconds = sum(item["execution"]["latency_seconds"] for item in execution_reports)
+    audio_seconds = sum(item["execution"]["audio_seconds"] for item in execution_reports)
+    memory = [
+        item["execution"]["peak_memory_mb"]
+        for item in reports
+        if item["execution"]["peak_memory_mb"] is not None
+    ]
+    return {
+        "recordings": len(reports),
+        "cer": ratio(character_errors, reference_characters),
+        "wer": ratio(word_errors, reference_words),
+        "der": ratio(speaker_errors, reference_speaker_seconds),
+        "speech_character_insertion_rate": ratio(character_insertions, reference_characters),
+        "speech_word_insertion_rate": ratio(word_insertions, reference_words),
+        "non_speech_character_rate": ratio(non_speech_characters, hypothesis_characters),
+        "boundary_mae_seconds": ratio(boundary_error, paired_segments),
+        "real_time_factor": ratio(latency_seconds, audio_seconds),
+        "peak_memory_mb": max(memory) if memory else None,
+        "coverage": {
+            "reference_characters": reference_characters,
+            "reference_words": reference_words,
+            "reference_speaker_seconds": round(reference_speaker_seconds, 3),
+            "full_audio_recordings": len(non_speech_reports),
+            "timestamp_paired_recordings": len(timestamp_reports),
+            "execution_timed_recordings": len(execution_reports),
+        },
+    }
+
+
+def benchmark_suite(manifest: dict, base_dir: str | Path) -> dict:
+    manifest = validate_suite_manifest(manifest)
+    base = Path(base_dir)
+    cases: list[dict] = []
+    reports: list[dict] = []
+    for index, item in enumerate(manifest["cases"], 1):
+        case_id = str(item.get("id") or f"case-{index}")
+        file_id = str(item["file_id"])
+        reference_path = Path(str(item["reference"]))
+        if not reference_path.is_absolute():
+            reference_path = base / reference_path
+        try:
+            reference = load_reference(reference_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            cases.append(
+                {
+                    "id": case_id,
+                    "file_id": file_id,
+                    "status": "error",
+                    "error": "reference could not be loaded or validated",
+                }
+            )
+            continue
+        try:
+            report = benchmark_recording(file_id, reference)
+        except (LookupError, ValueError):
+            cases.append(
+                {
+                    "id": case_id,
+                    "file_id": file_id,
+                    "status": "error",
+                    "error": "recording could not be benchmarked",
+                }
+            )
+            continue
+        reports.append(report)
+        cases.append({"id": case_id, "file_id": file_id, "status": "completed", "report": report})
+
+    aggregates = _suite_aggregates(reports)
+    threshold_results = []
+    for name, maximum in (manifest.get("thresholds") or {}).items():
+        actual = aggregates[name]
+        threshold_results.append(
+            {
+                "metric": name,
+                "maximum": maximum,
+                "actual": actual,
+                "passed": actual is not None and actual <= maximum,
+            }
+        )
+    return {
+        "schema": SUITE_REPORT_SCHEMA,
+        "suite": str(manifest.get("name") or "Private benchmark suite"),
+        "target": manifest.get("target"),
+        "passed": len(reports) == len(cases) and all(item["passed"] for item in threshold_results),
+        "case_counts": {
+            "total": len(cases),
+            "completed": len(reports),
+            "errors": len(cases) - len(reports),
+        },
+        "aggregates": aggregates,
+        "thresholds": threshold_results,
+        "cases": cases,
     }

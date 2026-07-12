@@ -468,6 +468,9 @@ outside all annotated speech intervals; partial references never imply a zero
 hallucination rate.
 The recording workspace runs this comparison from a private reference JSON without
 persisting it; a bounded upload API returns the identical report used by the CLI.
+`localplaud benchmark-suite` runs a private multi-recording manifest, continues after
+case-level failures, produces unit-weighted aggregate metrics, and applies explicit
+maximum gates without exposing reference paths or content in its versioned report.
 
 The deterministic subscription-independence gate is available as
 `localplaud acceptance-check RECORDING_ID` (or `--json` for automation). It audits

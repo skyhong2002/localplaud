@@ -19,6 +19,46 @@ not contain transcript text, recording title, or the reference path, so reports 
 be aggregated without copying private content. Review them before sharing: the
 recording ID and model/provider names may still be identifying in some deployments.
 
+For a repeatable multi-recording hardware/profile gate, keep a private suite manifest
+beside the private references and run:
+
+```bash
+localplaud benchmark-suite /private/path/suite.json \
+  --output /private/path/apple-mlx-report.json
+```
+
+```json
+{
+  "schema": "localplaud-benchmark-suite/v1",
+  "name": "Taiwan Mandarin and code-switch acceptance",
+  "target": "apple-mlx",
+  "thresholds": {
+    "cer": 0.12,
+    "der": 0.20,
+    "speech_character_insertion_rate": 0.04,
+    "real_time_factor": 1.0
+  },
+  "cases": [
+    {"id": "meeting-01", "file_id": "LOCAL_RECORDING_ID", "reference": "meeting-01.json"},
+    {"id": "code-switch-01", "file_id": "LOCAL_RECORDING_ID_2", "reference": "code-switch-01.json"}
+  ]
+}
+```
+
+Relative reference paths resolve beside the manifest. A broken case is reported with
+a generic error and does not prevent the remaining cases from running. Aggregates are
+weighted by reference characters/words, speaker-time, paired timestamp segments, or
+audio duration as appropriate; peak memory is the maximum observed value. The suite
+fails when any case fails or any configured maximum is exceeded. Supported gates are
+`cer`, `wer`, `der`, `speech_character_insertion_rate`,
+`speech_word_insertion_rate`, `non_speech_character_rate`,
+`boundary_mae_seconds`, `real_time_factor`, and `peak_memory_mb`.
+
+The suite report contains the sanitized per-recording reports, aggregate coverage,
+and gate decisions. It never includes reference filenames, paths, or transcript text.
+Use the same manifest/reference revision on each target; only the local recording IDs
+may need a private per-host manifest copy.
+
 ## Reference format
 
 ```json
@@ -70,6 +110,7 @@ has been annotated. Omit it or use another label for partial references.
   transcribe attempt completes. This is cross-platform process telemetry, not a claim
   about memory exclusively owned by the ASR model. Older attempts remain `null`.
 
-The output schema is `localplaud-benchmark-report/v1`. Keep the raw reports for each
-profile/model/version; compare equivalent recordings and reference revisions. Do not
-change a production default based on a single recording.
+Single-recording output uses `localplaud-benchmark-report/v1`; suite output uses
+`localplaud-benchmark-suite-report/v1`. Keep reports for each profile/model/version;
+compare equivalent recordings and reference revisions. Do not change a production
+default based on a single recording.

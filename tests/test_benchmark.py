@@ -10,7 +10,7 @@ def _setup(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'bench.db'}")
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'bench.db'}")
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
     get_settings(reload=True)
@@ -189,6 +189,98 @@ def test_benchmark_cli_json_and_reference_validation(monkeypatch, tmp_path):
     reference_path.write_text(json.dumps({"schema": "wrong", "segments": []}), encoding="utf-8")
     with pytest.raises(ValueError, match="reference schema"):
         load_reference(reference_path)
+
+
+def test_benchmark_suite_aggregates_cases_and_applies_thresholds(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    from localplaud.benchmark import benchmark_suite
+
+    reference_path = tmp_path / "private-reference.json"
+    reference_path.write_text(json.dumps(_reference()), encoding="utf-8")
+    manifest = {
+        "schema": "localplaud-benchmark-suite/v1",
+        "name": "Taiwan Mandarin private set",
+        "target": "apple-mlx",
+        "thresholds": {"cer": 0.2, "der": 0.1, "real_time_factor": 0.6},
+        "cases": [
+            {"id": "code-switch-1", "file_id": "bench", "reference": reference_path.name},
+            {"id": "code-switch-2", "file_id": "bench", "reference": reference_path.name},
+        ],
+    }
+    report = benchmark_suite(manifest, tmp_path)
+    assert report["schema"] == "localplaud-benchmark-suite-report/v1"
+    assert report["passed"] is True
+    assert report["case_counts"] == {"total": 2, "completed": 2, "errors": 0}
+    assert report["aggregates"]["cer"] < 0.2
+    assert report["aggregates"]["der"] == pytest.approx(0.075)
+    assert report["aggregates"]["coverage"]["reference_characters"] == 24
+    assert all(item["passed"] for item in report["thresholds"])
+    serialized = json.dumps(report)
+    assert str(reference_path) not in serialized
+    assert "Private benchmark" not in serialized
+
+
+def test_benchmark_suite_continues_after_private_reference_error(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    from localplaud.benchmark import benchmark_suite
+
+    valid = tmp_path / "valid.json"
+    valid.write_text(json.dumps(_reference()), encoding="utf-8")
+    report = benchmark_suite(
+        {
+            "schema": "localplaud-benchmark-suite/v1",
+            "cases": [
+                {"id": "valid", "file_id": "bench", "reference": valid.name},
+                {"id": "missing", "file_id": "bench", "reference": "secret-name.json"},
+            ],
+        },
+        tmp_path,
+    )
+    assert report["passed"] is False
+    assert report["case_counts"] == {"total": 2, "completed": 1, "errors": 1}
+    assert report["cases"][1]["error"] == "reference could not be loaded or validated"
+    assert "secret-name.json" not in json.dumps(report)
+
+
+def test_benchmark_suite_rejects_unknown_or_invalid_gates():
+    from localplaud.benchmark import validate_suite_manifest
+
+    base = {
+        "schema": "localplaud-benchmark-suite/v1",
+        "cases": [{"file_id": "recording", "reference": "reference.json"}],
+    }
+    with pytest.raises(ValueError, match="unknown suite thresholds"):
+        validate_suite_manifest(base | {"thresholds": {"quality": 1}})
+    with pytest.raises(ValueError, match="non-negative number"):
+        validate_suite_manifest(base | {"thresholds": {"cer": -0.1}})
+
+
+def test_benchmark_suite_cli_writes_sanitized_report(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    from localplaud.cli import app
+
+    reference = tmp_path / "reference.json"
+    reference.write_text(json.dumps(_reference()), encoding="utf-8")
+    manifest = tmp_path / "suite.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "localplaud-benchmark-suite/v1",
+                "thresholds": {"cer": 0.2},
+                "cases": [{"file_id": "bench", "reference": reference.name}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "report.json"
+    result = CliRunner().invoke(
+        app, ["benchmark-suite", str(manifest), "--json", "--output", str(output)]
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["passed"] is True
+    saved = json.loads(output.read_text(encoding="utf-8"))
+    assert saved["passed"] is True
+    assert str(reference) not in output.read_text(encoding="utf-8")
 
 
 def test_benchmark_upload_api_is_bounded_and_does_not_persist_reference(monkeypatch, tmp_path):

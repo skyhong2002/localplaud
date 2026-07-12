@@ -261,8 +261,11 @@ embedding raw provider credentials or model settings in each rule.
   honestly return unavailable. DER now accounts for overlapping voices using
   speaker-time and globally maximized one-to-one label assignment. Deterministic
   character/word insertion rates now flag extra ASR content inside annotated speech
-  without overclaiming semantic judgment. Full semantic review and the actual
-  multi-recording Taiwan Mandarin/code-switch benchmark set remain open. Recording
+  without overclaiming semantic judgment. A private manifest-driven suite runner now
+  executes multiple recordings without fail-fast, produces correctly weighted and
+  sanitized aggregate reports, and gates explicit metric maxima for comparable
+  Apple/NVIDIA/CPU runs. Full semantic review and collecting/correcting the actual
+  Taiwan Mandarin/code-switch reference set remain open. Recording
   Detail now runs the same evaluator from a bounded, memory-only reference upload and
   renders six headline metrics without requiring CLI access.
 
