@@ -48,6 +48,7 @@ def init_db() -> dict[str, int] | None:
         migrate_import_schema,
         migrate_legacy_note_template_schema,
         migrate_legacy_provider_profile_schema,
+        migrate_legacy_stage_run_schema,
         migrate_legacy_summary_schema,
         migrate_local_transcript_uniqueness,
         migrate_note_template_schema,
@@ -64,6 +65,7 @@ def init_db() -> dict[str, int] | None:
     migrate_legacy_provider_profile_schema(engine)
     migrate_legacy_note_template_schema(engine)
     migrate_legacy_summary_schema(engine)
+    migrate_legacy_stage_run_schema(engine)
     migrate_local_transcript_uniqueness(engine)
     migrate_profile_snapshot_columns(engine)
     migrate_automation_ownership_schema(engine)

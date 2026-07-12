@@ -239,6 +239,53 @@ def test_stage_attempt_migration_rebuilds_legacy_deployed_schema(tmp_path):
     assert row.estimated_cost_usd == 0.25
 
 
+def test_legacy_stage_run_schema_is_rebuilt_without_losing_state(tmp_path):
+    from localplaud.db.migrations import migrate_legacy_stage_run_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-stage-runs.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
+        connection.execute(text("INSERT INTO plaud_files (id) VALUES ('r1')"))
+        connection.execute(text("""
+            CREATE TABLE stage_runs (
+                id INTEGER PRIMARY KEY, file_id VARCHAR(64) NOT NULL,
+                stage VARCHAR(32) NOT NULL, status VARCHAR(20) NOT NULL,
+                attempts INTEGER NOT NULL, provider VARCHAR(64), model VARCHAR(128),
+                artifact_source VARCHAR(32), detail JSON NOT NULL, error TEXT,
+                started_at DATETIME, completed_at DATETIME, updated_at DATETIME NOT NULL,
+                profile_snapshot JSON NOT NULL, latency_ms BIGINT, usage JSON NOT NULL,
+                estimated_cost FLOAT, actual_cost FLOAT,
+                resolved_profile_snapshot JSON
+            )
+        """))
+        connection.exec_driver_sql("""
+            INSERT INTO stage_runs (
+                id,file_id,stage,status,attempts,detail,updated_at,
+                profile_snapshot,usage
+            ) VALUES (7,'r1','transcribe','completed',2,'{"reused":true}',
+                      CURRENT_TIMESTAMP,'{"version":3}','{}')
+        """)
+    assert migrate_legacy_stage_run_schema(engine) == ["stage_runs"]
+    assert migrate_legacy_stage_run_schema(engine) == []
+    columns = {column["name"] for column in inspect(engine).get_columns("stage_runs")}
+    assert not {
+        "profile_snapshot",
+        "latency_ms",
+        "usage",
+        "estimated_cost",
+        "actual_cost",
+    } & columns
+    with engine.connect() as connection:
+        row = connection.execute(text("""
+            SELECT id,status,attempts,detail,resolved_profile_snapshot
+            FROM stage_runs WHERE file_id='r1'
+        """)).one()
+        assert connection.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+    assert (row.id, row.status, row.attempts) == (7, "completed", 2)
+    assert '"reused":true' in row.detail
+    assert '"version":3' in row.resolved_profile_snapshot
+
+
 def test_external_cost_ceiling_requires_pricing_and_reserves_budget(tmp_path):
     from sqlalchemy.orm import Session
 

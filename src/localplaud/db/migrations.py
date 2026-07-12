@@ -294,6 +294,73 @@ def migrate_legacy_summary_schema(engine: Engine) -> list[str]:
     return ["summaries"]
 
 
+def migrate_legacy_stage_run_schema(engine: Engine) -> list[str]:
+    """Rebuild the first deployed stage-run table to the current ORM contract."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "stage_runs" not in set(inspector.get_table_names()):
+        return []
+    columns = {column["name"] for column in inspector.get_columns("stage_runs")}
+    legacy_columns = {"profile_snapshot", "latency_ms", "usage", "estimated_cost", "actual_cost"}
+    if not columns & legacy_columns:
+        return []
+
+    def legacy(column: str, default: str = "NULL") -> str:
+        return column if column in columns else default
+
+    raw = engine.raw_connection()
+    try:
+        cursor = raw.cursor()
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.executescript(f"""
+            BEGIN;
+            CREATE TABLE stage_runs_new (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                file_id VARCHAR(64) NOT NULL,
+                stage VARCHAR(32) NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                attempts INTEGER NOT NULL,
+                provider VARCHAR(64),
+                model VARCHAR(128),
+                artifact_source VARCHAR(32),
+                detail JSON NOT NULL,
+                resolved_profile_snapshot JSON,
+                error TEXT,
+                started_at DATETIME,
+                completed_at DATETIME,
+                updated_at DATETIME NOT NULL,
+                FOREIGN KEY(file_id) REFERENCES plaud_files (id) ON DELETE CASCADE,
+                CONSTRAINT uq_stage_run_file_stage UNIQUE (file_id, stage)
+            );
+            INSERT INTO stage_runs_new (
+                id, file_id, stage, status, attempts, provider, model,
+                artifact_source, detail, resolved_profile_snapshot, error,
+                started_at, completed_at, updated_at
+            )
+            SELECT
+                id, file_id, stage, status, attempts, provider, model,
+                artifact_source, COALESCE(detail, '{{}}'),
+                COALESCE({legacy('resolved_profile_snapshot')},
+                         {legacy('profile_snapshot')}),
+                error, started_at, completed_at, updated_at
+            FROM stage_runs;
+            DROP TABLE stage_runs;
+            ALTER TABLE stage_runs_new RENAME TO stage_runs;
+        """)
+        violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeError(f"legacy stage-run migration broke foreign keys: {violations}")
+        raw.commit()
+        cursor.execute("PRAGMA foreign_keys=ON")
+    except Exception:
+        raw.rollback()
+        raise
+    finally:
+        raw.close()
+    return ["stage_runs"]
+
+
 def migrate_automation_ownership_schema(engine: Engine) -> list[str]:
     """Add explicit local/external ownership to existing AutoFlow rules."""
     if engine.dialect.name != "sqlite":
