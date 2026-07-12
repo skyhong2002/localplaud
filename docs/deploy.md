@@ -85,13 +85,27 @@ diarization). Verify the GPU is visible: `docker compose exec localplaud-gpu nvi
 Set `[asr] provider = "faster-whisper"`, model `large-v3-turbo`, device `cuda`,
 and keep the diarization profile enabled with `[diarize] device = "cuda"`.
 
+True word-level forced alignment is available through the separately selectable
+`align:whisperx` / `wav2vec2-auto` catalog entry. Native installs require the
+optional runtime:
+
+```bash
+uv sync --extra faster-whisper --extra forced-align --extra diarize
+```
+
+The bundled CUDA image does not yet install the `forced-align` extra. Selecting the
+WhisperX profile in that image therefore reports an actionable degraded align stage;
+build a derived image with the extra before enabling it. Keep provider timestamps as
+the production selection until the language-specific model has been benchmarked on
+owned Taiwan Mandarin and Mandarin/English recordings.
+
 For a fully local text path on the same NVIDIA host, enable the separately named
 Ollama profile and install an explicit model. Ollama is reachable only on the
 private Compose network; port 11434 is not published on the host:
 
 ```bash
 docker compose --profile gpu --profile ollama up -d --build
-docker compose exec ollama-gpu ollama pull qwen3:4b
+docker compose exec ollama-gpu ollama pull qwen3:4b-instruct-2507-q4_K_M
 ```
 
 Point the stage-scoped LLM selections at the bundled service:
@@ -102,13 +116,16 @@ provider = "ollama"
 
   [llm.ollama]
   host = "http://ollama-gpu:11434"
-  model = "qwen3:4b"
+  model = "qwen3:4b-instruct-2507-q4_K_M"
 ```
 
 The `ollama` profile is opt-in because provider choice and data-egress policy are
 explicit localplaud settings. Its model cache is durable in the `ollama_data`
 volume. On smaller GPUs, keep ASR, diarization, and text generation sequential and
 select a model that leaves enough memory for the configured context window.
+Use an instruction model for correction and structured notes: the floating
+`qwen3:4b` tag may resolve to a thinking variant whose visible reasoning is not
+valid structured output even when thinking is disabled by the client.
 
 > **Running CUDA natively (no Docker)**: the NVIDIA driver alone isn't enough —
 > CTranslate2 needs cuBLAS and cuDNN 9. Install the `cuda` extra
