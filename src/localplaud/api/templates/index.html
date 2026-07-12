@@ -102,66 +102,66 @@
   {% set active_id = None %}
   {% include "_filelist.html" %}
   <section class="pane"><div class="pane-inner">
-    <h1 class="page">Recordings</h1>
-    <div class="sub">Your Plaud cloud, mirrored locally.</div>
+    <h1 class="page">{{ t('Recordings') }}</h1>
+    <div class="sub">{{ t('Your Plaud cloud, mirrored locally.') }}</div>
 
     <div class="stats">
-      <div class="tile"><div class="k">Files</div><div class="v">{{ stats.total }}</div></div>
-      <div class="tile"><div class="k">Processed</div><div class="v">{{ stats.done }}</div></div>
-      <div class="tile"><div class="k">In progress</div><div class="v">{{ stats.processing }}</div></div>
-      <div class="tile"><div class="k">Total audio</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
+      <div class="tile"><div class="k">{{ t('Files') }}</div><div class="v">{{ stats.total }}</div></div>
+      <div class="tile"><div class="k">{{ t('Processed') }}</div><div class="v">{{ stats.done }}</div></div>
+      <div class="tile"><div class="k">{{ t('In progress') }}</div><div class="v">{{ stats.processing }}</div></div>
+      <div class="tile"><div class="k">{{ t('Total audio') }}</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
     </div>
 
     <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin">
-      <input name="q" placeholder="Ask Plaud anything about your recordings…" autocomplete="off" required>
-      <button class="btn" type="submit">Ask</button>
+      <input name="q" placeholder="{{ t('Ask Plaud anything about your recordings…') }}" autocomplete="off" required>
+      <button class="btn" type="submit">{{ t('Ask') }}</button>
     </form>
-    <div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">thinking…</div>
+    <div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{{ t('thinking…') }}</div>
     {% if ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-5px 0 10px"><span class="sub" style="font-size:11px">Recent Ask</span>{% for thread in ask_threads %}<a class="chip {% if selected_ask_thread and selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/?ask_thread={{ thread.id }}">{{ thread.title | truncate(38) }}</a>{% endfor %}</div>{% endif %}
     <div id="answer">{% if selected_ask_thread %}{% set thread=selected_ask_thread %}{% set file_id=None %}{% set target='answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
 
     <div class="orgbox" aria-label="Library organization">
       <div class="orgrow">
-        <span class="lbl">Folders</span>
-        <a class="fchip {% if lib.folder is none %}on{% endif %}" href="/?view=all">All</a>
+        <span class="lbl">{{ t('Folders') }}</span>
+        <a class="fchip {% if lib.folder is none %}on{% endif %}" href="/?view=all">{{ t('All') }}</a>
         {% for folder in organization.folders %}
         <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="/?view=all&amp;folder={{ folder.id }}">
           {{ folder.name }} <span class="n">{{ folder.count }}</span>
         </a>
         {% endfor %}
-        <details class="quickadd"><summary>+ Folder</summary>
-          <form data-create-kind="folders"><input name="name" maxlength="80" placeholder="Folder name" required><button>Add</button></form>
+        <details class="quickadd"><summary>+ {{ t('Folder') }}</summary>
+          <form data-create-kind="folders"><input name="name" maxlength="80" placeholder="{{ t('Folder name') }}" required><button>{{ t('Add') }}</button></form>
         </details>
       </div>
       <div class="orgrow">
-        <span class="lbl">Tags</span>
-        <a class="fchip {% if lib.tag is none %}on{% endif %}" href="/?view=all">All</a>
+        <span class="lbl">{{ t('Tags') }}</span>
+        <a class="fchip {% if lib.tag is none %}on{% endif %}" href="/?view=all">{{ t('All') }}</a>
         {% for tag in organization.tags %}
         <a class="fchip {% if lib.tag == tag.id %}on{% endif %}" href="/?view=all&amp;tag={{ tag.id }}">
           {{ tag.name }} <span class="n">{{ tag.count }}</span>
         </a>
         {% endfor %}
-        <details class="quickadd"><summary>+ Tag</summary>
-          <form data-create-kind="tags"><input name="name" maxlength="80" placeholder="Tag name" required><button>Add</button></form>
+        <details class="quickadd"><summary>+ {{ t('Tag') }}</summary>
+          <form data-create-kind="tags"><input name="name" maxlength="80" placeholder="{{ t('Tag name') }}" required><button>{{ t('Add') }}</button></form>
         </details>
       </div>
     </div>
 
     <div class="libbar">
       <div class="filtrow">
-        <span class="lbl">State</span>
+        <span class="lbl">{{ t('State') }}</span>
         <a class="fchip {% if not lib.state %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, '', lib.scene, lib.view) }}">All</a>
+           href="{{ liburl(lib.sort, lib.dir, '', lib.scene, lib.view) }}">{{ t('All') }}</a>
         {% for s in states %}
         <a class="fchip {% if lib.state == s %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, s, lib.scene, lib.view) }}">{{ s }}</a>
+           href="{{ liburl(lib.sort, lib.dir, s, lib.scene, lib.view) }}">{{ t(s) }}</a>
         {% endfor %}
       </div>
       {% if facets.scenes %}
       <div class="filtrow">
-        <span class="lbl">Source</span>
+        <span class="lbl">{{ t('Source') }}</span>
         <a class="fchip {% if lib.scene is none %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, '', lib.view) }}">All</a>
+           href="{{ liburl(lib.sort, lib.dir, lib.state, '', lib.view) }}">{{ t('All') }}</a>
         {% for sc in facets.scenes %}
         <a class="fchip {% if sc.active %}on{% endif %}"
            href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{{ sc.label }} <span class="n">{{ sc.count }}</span></a>
@@ -170,51 +170,50 @@
       {% endif %}
       {% if facets.origins %}
       <div class="filtrow">
-        <span class="lbl">Comes from</span>
-        <a class="fchip {% if not lib.origin %}on{% endif %}" href="/?view={{ lib.view }}">All</a>
+        <span class="lbl">{{ t('Comes from') }}</span>
+        <a class="fchip {% if not lib.origin %}on{% endif %}" href="/?view={{ lib.view }}">{{ t('All') }}</a>
         {% for source in facets.origins %}<a class="fchip {% if source.active %}on{% endif %}" href="/?view={{ lib.view }}&amp;origin={{ source.value }}">{{ source.label }} <span class="n">{{ source.count }}</span></a>{% endfor %}
       </div>
       {% endif %}
       <div class="filtrow">
-        <span class="lbl">View</span>
+        <span class="lbl">{{ t('View') }}</span>
         <a class="fchip {% if lib.view == 'all' %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'all') }}">All files</a>
+           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'all') }}">{{ t('All files') }}</a>
         <a class="fchip {% if lib.view == 'uncategorized' %}on{% endif %}"
-           href="/?view=uncategorized">Uncategorized</a>
+           href="/?view=uncategorized">{{ t('Uncategorized') }}</a>
         <a class="fchip trash {% if lib.view == 'trash' %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'trash') }}">🗑 Trash <span class="n">{{ facets.trash_count }}</span></a>
+           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'trash') }}">🗑 {{ t('Trash') }} <span class="n">{{ facets.trash_count }}</span></a>
       </div>
     </div>
 
     {% if lib.view == 'trash' %}
     <div class="banner trash">
-      <strong>Trash mirrors Plaud's cloud trash.</strong> This is a read-only recovery view —
-      localplaud never deletes your cloud data. Restore a recording in the Plaud app to bring it back.
+      <strong>{{ t("Trash mirrors Plaud's cloud trash.") }}</strong> {{ t('This is a read-only recovery view — localplaud never deletes your cloud data. Restore a recording in the Plaud app to bring it back.') }}
     </div>
     {% endif %}
 
     {% if not files %}
     <div class="empty"><div class="big">🎙️</div>
       {% if lib.view == 'trash' %}
-        Nothing in trash.
+        {{ t('Nothing in trash.') }}
       {% elif lib.q or lib.state or lib.scene is not none or lib.folder is not none or lib.tag is not none or lib.origin or lib.view == 'uncategorized' %}
-        No recordings match these filters.
+        {{ t('No recordings match these filters.') }}
       {% else %}
-        No recordings yet.<br>Run <code>localplaud auth import</code> then <code>localplaud poll --once</code> to sync.
+        {{ t('No recordings yet.') }}<br>{{ t('Run localplaud auth import then localplaud poll --once to sync.') }}
       {% endif %}
     </div>
     {% else %}
     {% if lib.view != 'trash' %}
     <div class="bulkbar" id="bulkbar">
-      <strong><span id="selected-count">0</span> selected</strong>
+      <strong><span id="selected-count">0</span> {{ t('selected') }}</strong>
       <select id="bulk-action" aria-label="Organization action">
-        <option value="folder">Move to folder</option>
-        <option value="add-tag">Add tag</option>
-        <option value="remove-tag">Remove tag</option>
+        <option value="folder">{{ t('Move to folder') }}</option>
+        <option value="add-tag">{{ t('Add tag') }}</option>
+        <option value="remove-tag">{{ t('Remove tag') }}</option>
       </select>
       <select id="bulk-target" aria-label="Folder or tag"></select>
-      <button type="button" id="bulk-apply">Apply</button>
-      <button type="button" class="clear" id="bulk-clear">Clear</button>
+      <button type="button" id="bulk-apply">{{ t('Apply') }}</button>
+      <button type="button" class="clear" id="bulk-clear">{{ t('Clear') }}</button>
       <div class="bulkmsg" id="bulk-message" role="status"></div>
     </div>
     {% endif %}
@@ -222,11 +221,11 @@
       <thead>
         <tr>
           {% if lib.view != 'trash' %}<th class="select-cell"><input id="select-all" type="checkbox" aria-label="Select all visible recordings"></th>{% endif %}
-          <th>{{ sorth('name', 'Name') }}</th>
-          <th>Source</th>
-          <th>State</th>
-          <th class="num">{{ sorth('duration', 'Duration') }}</th>
-          <th class="num">{{ sorth('recorded', 'Recorded') }}</th>
+          <th>{{ sorth('name', t('Name')) }}</th>
+          <th>{{ t('Source') }}</th>
+          <th>{{ t('State') }}</th>
+          <th class="num">{{ sorth('duration', t('Duration')) }}</th>
+          <th class="num">{{ sorth('recorded', t('Recorded')) }}</th>
         </tr>
       </thead>
       <tbody>

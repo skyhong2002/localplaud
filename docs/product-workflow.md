@@ -229,9 +229,10 @@ provider/profile, remote-worker, and authorized-integration controls behind a
 responsive section navigator with a direct system-health destination. Translated-
 interface locale now has a durable English / Traditional Chinese (Taiwan) selector,
 correct document language metadata, localized dates, and a centralized catalog used
-by the global shell and primary Home, Templates, Discover, and Notifications pages.
-The remaining secondary-page strings are tracked as translation coverage work rather
-than being represented by a non-functional control.
+by the global shell and Home, Library, Search, Saved notes, Templates, Discover,
+Notifications, and Status pages. The remaining recording-workspace and deep Settings
+strings are tracked as translation coverage work rather than being represented by a
+non-functional control.
 
 Workspace display preferences are durable local data rather than browser-only state:
 the chosen workspace name, system/light/dark theme, comfortable/compact density,

@@ -2,15 +2,15 @@
 {% block title %}Saved notes — localplaud{% endblock %}
 {% block body %}
 <div class="content"><div class="pane-inner">
-  <h1 class="page">Saved notes</h1>
-  <p class="sub">Grounded Ask answers you promoted into editable notes. Source links stay attached.</p>
-  {% if not notes %}<div class="empty"><div class="big">📝</div>No saved notes yet.<br>Ask a question and choose <strong>Save as note</strong>.</div>{% endif %}
+  <h1 class="page">{{ t('Saved notes') }}</h1>
+  <p class="sub">{{ t('Grounded Ask answers you promoted into editable notes. Source links stay attached.') }}</p>
+  {% if not notes %}<div class="empty"><div class="big">📝</div>{{ t('No saved notes yet.') }}<br>{{ t('Ask a question and choose') }} <strong>{{ t('Save as note') }}</strong>。</div>{% endif %}
   <div style="display:grid;gap:12px;margin-top:18px">
   {% for note in notes %}
     <article class="panel" id="note-{{ note.id }}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-        <div><strong>{{ note.title }}</strong>{% if note.filename %}<div class="sub" style="font-size:12px"><a href="/file/{{ note.file_id }}">{{ note.filename }}</a> · {{ note.source_type }}</div>{% else %}<div class="sub" style="font-size:12px">Library · {{ note.source_type }}</div>{% endif %}</div>
-        <div><button class="btn sec" style="padding:6px 9px" onclick="copySavedNote({{ note.id }},this)">Copy</button> <a class="btn sec" style="padding:6px 9px" href="/api/notes/{{ note.id }}/export.md">Export</a> <button class="btn sec" style="padding:6px 9px" onclick="editSavedNote({{ note.id }})">Edit</button> <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="deleteSavedNote({{ note.id }})">Delete</button></div>
+        <div><strong>{{ note.title }}</strong>{% if note.filename %}<div class="sub" style="font-size:12px"><a href="/file/{{ note.file_id }}">{{ note.filename }}</a> · {{ note.source_type }}</div>{% else %}<div class="sub" style="font-size:12px">{{ t('Library') }} · {{ note.source_type }}</div>{% endif %}</div>
+        <div><button class="btn sec" style="padding:6px 9px" onclick="copySavedNote({{ note.id }},this)">{{ t('Copy') }}</button> <a class="btn sec" style="padding:6px 9px" href="/api/notes/{{ note.id }}/export.md">{{ t('Export') }}</a> <button class="btn sec" style="padding:6px 9px" onclick="editSavedNote({{ note.id }})">{{ t('Edit') }}</button> <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="deleteSavedNote({{ note.id }})">{{ t('Delete') }}</button></div>
       </div>
       <div class="md" data-note-body style="white-space:pre-wrap;margin-top:10px">{{ note.content_md }}</div>
       {% if note.citations %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
@@ -19,7 +19,7 @@
       <form data-note-form hidden style="display:grid;gap:8px;margin-top:10px">
         <input class="search-input" name="title" value="{{ note.title }}" maxlength="200" required>
         <textarea class="search-input" name="content_md" rows="9" maxlength="200000" required style="width:100%;resize:vertical">{{ note.content_md }}</textarea>
-        <div><button class="btn" type="submit">Save</button> <button class="btn sec" type="button" onclick="cancelSavedNote({{ note.id }})">Cancel</button> <span class="sub" data-note-status></span></div>
+        <div><button class="btn" type="submit">{{ t('Save') }}</button> <button class="btn sec" type="button" onclick="cancelSavedNote({{ note.id }})">{{ t('Cancel') }}</button> <span class="sub" data-note-status></span></div>
       </form>
     </article>
   {% endfor %}

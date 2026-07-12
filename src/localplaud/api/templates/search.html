@@ -2,41 +2,41 @@
 {% block title %}Search — localplaud{% endblock %}
 {% block body %}
 <div class="content"><div class="pane-inner">
-<h1 class="page">Search</h1>
+<h1 class="page">{{ t('Search') }}</h1>
 <form method="get" action="/search" class="panel" style="padding:14px;margin-bottom:14px">
   <div class="ask" style="margin-bottom:10px">
     <input class="search-input" name="q" value="{{ q }}" autofocus
-           placeholder="Search titles, transcripts, and notes…">
-    <button class="btn" type="submit">Search</button>
+           placeholder="{{ t('Search titles, transcripts, and notes…') }}">
+    <button class="btn" type="submit">{{ t('Search') }}</button>
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px">
-    <label class="sub">Folder
+    <label class="sub">{{ t('Folder') }}
       <select class="search-input" name="folder" style="width:100%;margin-top:4px">
-        <option value="">Any folder</option>
+        <option value="">{{ t('Any folder') }}</option>
         {% for folder in organization.folders %}<option value="{{ folder.id }}" {% if search_filters.folder == folder.id %}selected{% endif %}>{{ folder.name }}</option>{% endfor %}
       </select>
     </label>
-    <label class="sub">Tag
+    <label class="sub">{{ t('Tag') }}
       <select class="search-input" name="tag" style="width:100%;margin-top:4px">
-        <option value="">Any tag</option>
+        <option value="">{{ t('Any tag') }}</option>
         {% for tag in organization.tags %}<option value="{{ tag.id }}" {% if search_filters.tag == tag.id %}selected{% endif %}>{{ tag.name }}</option>{% endfor %}
       </select>
     </label>
-    <label class="sub">Source
+    <label class="sub">{{ t('Source') }}
       <select class="search-input" name="origin" style="width:100%;margin-top:4px">
-        <option value="">Any source</option>
+        <option value="">{{ t('Any source') }}</option>
         <option value="plaud" {% if search_filters.origin == 'plaud' %}selected{% endif %}>Plaud</option>
-        <option value="local" {% if search_filters.origin == 'local' %}selected{% endif %}>Local</option>
+        <option value="local" {% if search_filters.origin == 'local' %}selected{% endif %}>{{ t('Local') }}</option>
       </select>
     </label>
-    <label class="sub">From<input class="search-input" type="date" name="date_from" value="{{ search_filters.date_from }}" style="width:100%;margin-top:4px"></label>
-    <label class="sub">To<input class="search-input" type="date" name="date_to" value="{{ search_filters.date_to }}" style="width:100%;margin-top:4px"></label>
+    <label class="sub">{{ t('From') }}<input class="search-input" type="date" name="date_from" value="{{ search_filters.date_from }}" style="width:100%;margin-top:4px"></label>
+    <label class="sub">{{ t('To') }}<input class="search-input" type="date" name="date_to" value="{{ search_filters.date_to }}" style="width:100%;margin-top:4px"></label>
   </div>
 </form>
 
 {% if q and not groups %}
 <div class="empty"><div class="big">🔍</div>No matches for “{{ q }}”.<br>
-  <span class="sub">No title, transcript, or note matches within these filters.</span>
+  <span class="sub">{{ t('No title, transcript, or note matches within these filters.') }}</span>
 </div>
 {% elif groups %}
 <div class="sub" style="margin:6px 2px 14px">{{ groups|length }} recording(s) matched · local keyword results plus semantic matches when available.</div>
@@ -54,7 +54,7 @@
   {% endfor %}
 </div>
 {% else %}
-<div class="empty"><div class="big">🔎</div>Search works locally without an AI provider.<br><span class="sub">Find words in titles, transcripts, and notes; semantic results are blended in when configured.</span></div>
+<div class="empty"><div class="big">🔎</div>{{ t('Search works locally without an AI provider.') }}<br><span class="sub">{{ t('Find words in titles, transcripts, and notes; semantic results are blended in when configured.') }}</span></div>
 {% endif %}
 </div></div>
 {% endblock %}

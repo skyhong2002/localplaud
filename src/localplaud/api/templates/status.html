@@ -2,19 +2,19 @@
 {% block title %}Status — localplaud{% endblock %}
 {% block body %}
 <div class="content"><div class="pane-inner">
-<h1 class="page">Status</h1>
+<h1 class="page">{{ t('Status') }}</h1>
 
 <div class="stats">
-  <div class="tile"><div class="k">Recordings</div><div class="v">{{ stats.total }}</div></div>
-  <div class="tile"><div class="k">Processed</div><div class="v">{{ stats.done }}</div></div>
-  <div class="tile"><div class="k">In progress</div><div class="v">{{ stats.processing }}</div></div>
-  <div class="tile"><div class="k">Total audio</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
+  <div class="tile"><div class="k">{{ t('Recordings') }}</div><div class="v">{{ stats.total }}</div></div>
+  <div class="tile"><div class="k">{{ t('Processed') }}</div><div class="v">{{ stats.done }}</div></div>
+  <div class="tile"><div class="k">{{ t('In progress') }}</div><div class="v">{{ stats.processing }}</div></div>
+  <div class="tile"><div class="k">{{ t('Total audio') }}</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
 </div>
-<div class="sub" style="margin:8px 2px 0">{{ usage_totals.attempts }} recorded stage attempts · {{ usage_totals.latency_hours }} execution hours{% if usage_totals.estimated_cost_usd %} · estimated provider cost ${{ usage_totals.estimated_cost_usd }}{% else %} · no priced provider usage recorded{% endif %}</div>
+<div class="sub" style="margin:8px 2px 0">{{ usage_totals.attempts }} {{ t('recorded stage attempts') }} · {{ usage_totals.latency_hours }} {{ t('execution hours') }}{% if usage_totals.estimated_cost_usd %} · {{ t('estimated provider cost') }} ${{ usage_totals.estimated_cost_usd }}{% else %} · {{ t('no priced provider usage recorded') }}{% endif %}</div>
 
 <div class="cols" style="grid-template-columns:1fr 1fr; gap:16px">
   <div class="panel">
-    <strong>Environment</strong>
+    <strong>{{ t('Environment') }}</strong>
     <div style="margin-top:10px; display:flex; flex-direction:column; gap:7px">
       {% for c in checks %}
       <div style="display:flex; align-items:center; justify-content:space-between; gap:10px">
@@ -29,7 +29,7 @@
   </div>
 
   <div class="panel">
-    <strong>Pipeline</strong>
+    <strong>{{ t('Pipeline') }}</strong>
     <div style="margin-top:10px; display:flex; flex-direction:column; gap:7px">
       {% for name, count in status_rows %}
       <div style="display:flex; justify-content:space-between">
@@ -43,7 +43,7 @@
 
 {% if stage_rows %}
 <div class="panel" style="margin-top:16px">
-  <strong>Processing stages</strong>
+  <strong>{{ t('Processing stages') }}</strong>
   <div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px">
     {% for stage, state, count in stage_rows %}
     <div style="display:flex;justify-content:space-between;gap:8px">
@@ -57,7 +57,7 @@
 
 {% if stage_issues %}
 <div class="panel" style="margin-top:16px">
-  <strong>Needs attention</strong>
+  <strong>{{ t('Needs attention') }}</strong>
   <div style="margin-top:10px;display:flex;flex-direction:column;gap:9px">
     {% for issue in stage_issues %}
     <div>
@@ -71,16 +71,16 @@
 {% endif %}
 
 <div class="panel" style="margin-top:16px">
-  <strong>Configuration</strong>
+  <strong>{{ t('Configuration') }}</strong>
   <div style="margin-top:10px; display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px">
     <div><span class="sub">ASR</span><br><code>{{ cfg.asr }}</code></div>
     <div><span class="sub">LLM</span><br><code>{{ cfg.llm }}</code></div>
-    <div><span class="sub">Embeddings</span><br><code>{{ cfg.embeddings }}</code></div>
-    <div><span class="sub">Diarize</span><br><code>{{ cfg.diarize }}</code></div>
-    <div><span class="sub">Summary template</span><br><code>{{ cfg.summary_template }}</code></div>
-    <div><span class="sub">Files per cycle</span><br><code>{{ cfg.files_per_cycle }}</code></div>
-    <div><span class="sub">Retry policy</span><br><code>{{ cfg.retry_policy }}</code></div>
-    <div><span class="sub">Poll interval</span><br><code>{{ cfg.poll_interval }}s</code></div>
+    <div><span class="sub">{{ t('Embeddings') }}</span><br><code>{{ cfg.embeddings }}</code></div>
+    <div><span class="sub">{{ t('Diarize') }}</span><br><code>{{ cfg.diarize }}</code></div>
+    <div><span class="sub">{{ t('Summary template') }}</span><br><code>{{ cfg.summary_template }}</code></div>
+    <div><span class="sub">{{ t('Files per cycle') }}</span><br><code>{{ cfg.files_per_cycle }}</code></div>
+    <div><span class="sub">{{ t('Retry policy') }}</span><br><code>{{ cfg.retry_policy }}</code></div>
+    <div><span class="sub">{{ t('Poll interval') }}</span><br><code>{{ cfg.poll_interval }}s</code></div>
   </div>
 </div>
 </div></div>

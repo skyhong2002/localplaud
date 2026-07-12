@@ -417,9 +417,10 @@ embedding raw provider credentials or model settings in each rule.
   stable delivery IDs, durable retries, idempotent completion, and revocation that
   preserves non-secret history. Durable interface locale now supports English and
   Traditional Chinese (Taiwan), sets correct document language/date formatting, and
-  translates the global shell plus Home, Templates, Discover, Notifications, and
-  workspace preference controls through a centralized catalog. Remaining locale work
-  is full secondary-page and dynamic-status coverage. Access &
+  translates the global shell plus Home, Library, Search, Saved notes, Templates,
+  Discover, Notifications, Status, and workspace preference controls through a
+  centralized catalog. Remaining locale work is the recording workspace, deep
+  Settings forms, and remaining dynamic status/action messages. Access &
   security now truthfully reports the stateless token/reverse-proxy boundary and
   explains why app-managed active sessions do not exist; Support & About shows
   runtime/build identity and downloads a tested redacted diagnostics bundle with no
