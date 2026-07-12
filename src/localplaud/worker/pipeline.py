@@ -516,7 +516,10 @@ def _llm_projected_usage(transcript: Transcript, settings: Settings) -> dict:
     chunks = max(1, math.ceil(chars / settings.pipeline.summary_chunk_chars))
     reduce_calls = math.ceil(chunks / 8) if chunks > 1 else 0
     requests = chunks + reduce_calls + 1 if chunks > 1 else 1
-    max_output_tokens = chunks * 1200 + reduce_calls * 1200 + 1500 if chunks > 1 else 1500
+    reduce_tokens = summarize._reduction_max_tokens(settings.pipeline.summary_chunk_chars)
+    max_output_tokens = (
+        chunks * 1200 + reduce_calls * reduce_tokens + 1500 if chunks > 1 else 1500
+    )
     return {
         "input_chars": math.ceil(chars * (1.5 if chunks > 1 else 1.0)),
         "output_tokens": max_output_tokens,

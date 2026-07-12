@@ -14,7 +14,12 @@ import re
 from ..asr.base import Transcript as AsrTranscript
 from ..config import Settings
 from ..llm.base import build_llm
-from .summarize import _chunk_text, _group_notes, _render_transcript
+from .summarize import (
+    _chunk_text,
+    _group_notes,
+    _reduction_max_tokens,
+    _render_transcript,
+)
 
 log = logging.getLogger(__name__)
 
@@ -155,6 +160,7 @@ def generate_mind_map(
             )
             map_calls += 1
         reduction_rounds = 0
+        reduction_max_tokens = _reduction_max_tokens(chunk_chars)
         while len("\n\n".join(notes)) > chunk_chars:
             reduction_rounds += 1
             if reduction_rounds > 8:
@@ -167,7 +173,7 @@ def generate_mind_map(
                     _REDUCE_PROMPT.format(text=group),
                     system=_SYSTEM,
                     temperature=0.1,
-                    max_tokens=1200,
+                    max_tokens=reduction_max_tokens,
                 )
                 for group in groups
             ]

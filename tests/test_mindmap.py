@@ -62,10 +62,12 @@ def test_normalize_rejects_empty_output():
 class _FakeLlm:
     def __init__(self, final: str = "# Root topic\n- a\n  - b\n- c"):
         self.calls: list[str] = []
+        self.options: list[dict] = []
         self.final = final
 
     def complete(self, prompt, **kwargs):
         self.calls.append(prompt)
+        self.options.append(kwargs)
         if prompt.startswith("Extract hierarchical outline notes"):
             return f"- outline note {len(self.calls)}"
         if prompt.startswith("Consolidate these ordered outline notes"):
@@ -92,6 +94,12 @@ def test_long_transcript_outline_covers_every_chunk(monkeypatch):
     assert result["detail"]["chunks"] > 1
     assert len(map_prompts) == result["detail"]["chunks"]
     assert "[truncated]" not in "".join(map_prompts)
+    reduce_options = [
+        options
+        for prompt, options in zip(llm.calls, llm.options, strict=True)
+        if prompt.startswith("Consolidate these ordered outline notes")
+    ]
+    assert reduce_options and all(call["max_tokens"] == 32 for call in reduce_options)
     # Every chunk of the transcript reached the LLM.
     joined = "".join(map_prompts)
     for idx in range(4):

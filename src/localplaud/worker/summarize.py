@@ -93,6 +93,17 @@ def _group_notes(notes: list[str], max_chars: int) -> list[str]:
     return groups
 
 
+def _reduction_max_tokens(chunk_chars: int) -> int:
+    """Budget reducer output so each hierarchy level can actually contract.
+
+    For ordinary prose, one token can occupy roughly four characters.  Limiting
+    output to about one third of the input group leaves room for conservative
+    consolidation while ensuring that adjacent reduced notes can be grouped on
+    the next round.  The provider still owns the exact tokenization.
+    """
+    return max(32, min(600, chunk_chars // 12))
+
+
 _COVERAGE_PROMPT = """\
 Extract faithful coverage notes from transcript part {part} of {total}.
 Preserve decisions, facts, names, numbers, questions, and action items. Keep the
@@ -166,6 +177,7 @@ def summarize(
             )
             map_calls += 1
         reduction_rounds = 0
+        reduction_max_tokens = _reduction_max_tokens(chunk_chars)
         while len("\n\n".join(notes)) > chunk_chars:
             reduction_rounds += 1
             if reduction_rounds > 8:
@@ -178,7 +190,7 @@ def summarize(
                     _REDUCE_PROMPT.format(text=group),
                     system="Preserve coverage while consolidating notes. Never invent facts.",
                     temperature=0.1,
-                    max_tokens=1200,
+                    max_tokens=reduction_max_tokens,
                 )
                 for group in groups
             ]
