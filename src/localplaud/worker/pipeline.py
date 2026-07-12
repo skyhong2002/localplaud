@@ -715,12 +715,17 @@ def _process_file_claimed(
             _finish_stage(
                 file_id,
                 StageName.align,
-                provider=transcript.provider,
-                model=transcript.model,
+                provider=align_run.provider,
+                model=align_run.model,
                 artifact_source=transcript_source,
                 detail=dict(align_run.detail or {}) | {"reused": True},
             )
         else:
+            # Alignment is derived from the immutable ASR lane. A canonical user
+            # or AI revision may have different text and must never be written
+            # back into the raw transcript row.
+            alignment_input = _load_raw_transcript(file_id, settings) or transcript
+
             def alignment_selection(candidate):
                 selected = (candidate.get("stages") or {}).get("align")
                 if selected:
@@ -748,7 +753,7 @@ def _process_file_claimed(
                     )
                     result = align.run_alignment(
                         wav,
-                        transcript,
+                        alignment_input,
                         provider=provider,
                         model=selection.get("model"),
                         options=options,
@@ -771,14 +776,25 @@ def _process_file_claimed(
                     snapshot,
                     run_align,
                 )
-            except align.AlignmentUnavailable as exc:
-                failed_selection = alignment_selection(
-                    candidate_snapshots(snapshot, "align")[-1]
-                )
+            except align.AlignmentError as exc:
+                with session_scope() as session:
+                    failed_run = session.scalar(
+                        select(StageRun).where(
+                            StageRun.file_id == file_id,
+                            StageRun.stage == StageName.align,
+                        )
+                    )
+                    failed_snapshot = (
+                        failed_run.resolved_profile_snapshot
+                        if failed_run is not None
+                        else snapshot
+                    )
+                failed_selection = alignment_selection(failed_snapshot)
                 failed_provider = failed_selection.get("provider_type") or str(
                     failed_selection["connection"]
                 ).split(":", 1)[-1]
-                if failed_provider == align.WHISPERX_PROVIDER:
+                requested_forced = failed_provider == align.WHISPERX_PROVIDER
+                if requested_forced or not isinstance(exc, align.AlignmentUnavailable):
                     partial_errors.append(f"align: {exc}")
                 _set_stage(
                     file_id,
@@ -789,8 +805,9 @@ def _process_file_claimed(
                     artifact_source=transcript_source,
                     detail={
                         "strategy": "unavailable",
-                        "forced_alignment": failed_provider == align.WHISPERX_PROVIDER,
-                        "retryable": failed_provider == align.WHISPERX_PROVIDER,
+                        "forced_alignment": False,
+                        "requested_forced_alignment": requested_forced,
+                        "retryable": isinstance(exc, align.AlignmentUnavailable),
                         "reason": str(exc),
                     },
                     error=str(exc),
@@ -1253,6 +1270,14 @@ def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str]
         return (_apply_speaker_display_names(transcript, names), selected.source)
 
 
+def _load_raw_transcript(file_id: str, settings: Settings) -> Transcript | None:
+    """Load the immutable transcript lane without applying canonical revisions."""
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        selected = _select_raw_transcript(row, settings) if row is not None else None
+        return _rehydrate_transcript(selected) if selected is not None else None
+
+
 def _transcript_lineage(file_id: str, settings: Settings) -> dict | None:
     """Identify the exact canonical transcript input used by derived stages."""
     with session_scope() as session:
@@ -1370,8 +1395,9 @@ def _persist_aligned_transcript(file_id: str, transcript: Transcript) -> None:
         )
         if row is None:
             raise ValueError("forced alignment requires a persisted local transcript")
+        if transcript.text != row.text:
+            raise ValueError("forced alignment cannot replace immutable ASR text")
         segments = [asdict(segment) for segment in transcript.segments]
-        row.text = transcript.text
         row.segments = segments
         row.has_speakers = transcript.has_speakers
         if (snapshot := _PROFILE_SNAPSHOT.get()) is not None:

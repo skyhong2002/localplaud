@@ -371,8 +371,37 @@ def test_pipeline_dispatches_forced_alignment_and_resumes_without_replacing_edit
     assert calls[0][1]["device"] == "cuda"
     assert calls[0][1]["interpolate_method"] == "nearest"
     with session_scope() as session:
+        row = session.get(PlaudFile, "forced")
         run = next(
-            item for item in session.get(PlaudFile, "forced").stage_runs
+            item for item in row.stage_runs
             if item.stage == StageName.align
         )
         assert run.attempts == 1
+        assert (run.provider, run.model) == ("whisperx", "wav2vec2-auto")
+        assert row.local_transcript.text == "hello world"
+        assert row.transcript_revisions[0].text == "edited"
+
+        session.add(
+            PlaudFile(
+                id="invalid-align",
+                filename="Invalid alignment",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+            )
+        )
+        session.flush()
+        select_recording_override(session, "invalid-align", profile["id"])
+
+    def invalid_forced_align(*_args, **_kwargs):
+        raise AlignmentError("WhisperX returned invalid timing evidence")
+
+    monkeypatch.setattr(alignment, "_forced_align_whisperx", invalid_forced_align)
+    process_file("invalid-align")
+    with session_scope() as session:
+        row = session.get(PlaudFile, "invalid-align")
+        run = next(item for item in row.stage_runs if item.stage == StageName.align)
+        assert row.status == FileStatus.partial
+        assert row.local_transcript.text == "hello world"
+        assert run.status == StageStatus.degraded
+        assert run.detail["forced_alignment"] is False
+        assert run.detail["requested_forced_alignment"] is True
