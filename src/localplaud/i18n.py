@@ -459,6 +459,7 @@ _ZH_HANT_TW = {
     "Saving…": "儲存中…",
     "Saved. Applying…": "已儲存，正在套用…",
     "Could not save preferences": "無法儲存偏好設定",
+    "Could not save": "無法儲存",
     "Create a full backup including every local media file? This can be very large and may take time.": "要建立包含所有本機媒體檔案的完整備份嗎？檔案可能很大，並需要一段時間。",
     "Backing up database and media…": "正在備份資料庫與媒體…",
     "Backing up database…": "正在備份資料庫…",

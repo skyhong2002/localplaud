@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -159,3 +162,17 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         assert messages["healthy"] == "正常"
         assert messages["align"] == "時間對齊"
         assert "Speech character insertion" not in messages
+
+
+def test_traditional_chinese_catalog_covers_all_static_template_messages():
+    """Every explicitly translatable template literal must have a zh-TW value."""
+    from localplaud.i18n import catalog
+
+    template_dir = Path(__file__).parents[1] / "src/localplaud/api/templates"
+    keys: set[str] = set()
+    for template in template_dir.glob("*.html"):
+        source = template.read_text(encoding="utf-8")
+        keys.update(re.findall(r"\b(?:t|tr)\('([^']+)'\)", source))
+
+    missing = sorted(keys - catalog("zh-Hant-TW").keys())
+    assert missing == []
