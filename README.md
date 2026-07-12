@@ -249,6 +249,9 @@ variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
   SQLite snapshot, optionally including local media. Secrets, configuration, and
   Plaud OAuth tokens are excluded; verify and restore using
   [`docs/backups.md`](docs/backups.md).
+- Settings reports the real stateless-token/reverse-proxy access boundary and can
+  download aggregate, redacted diagnostics for support. See
+  [`docs/support.md`](docs/support.md).
 
 ## License
 

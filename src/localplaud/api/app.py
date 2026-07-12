@@ -60,6 +60,7 @@ from .note_templates import _item as note_template_item
 from .note_templates import router as note_templates_router
 from .notes import router as notes_router
 from .providers import router as providers_router
+from .system import router as system_router
 from .vocabulary import router as vocabulary_router
 
 _HERE = Path(__file__).parent
@@ -88,6 +89,7 @@ app.include_router(integrations_router)
 app.include_router(automations_router)
 app.include_router(backups_router)
 app.include_router(worker_router)
+app.include_router(system_router)
 
 _static = _HERE / "static"
 if _static.exists():
@@ -1484,6 +1486,7 @@ def settings_page(request: Request):
     from ..providers.hardware import hardware_recommendations
     from ..providers.service import list_connections, list_models, list_profiles
     from ..remote.registry import list_workers
+    from ..system_info import about_info
 
     settings = get_settings()
     from ..plaud.oauth import OfficialTokenStore
@@ -1544,6 +1547,7 @@ def settings_page(request: Request):
             "plaud_auth": plaud_auth,
             "workspace_backups": workspace_backups,
             "backup_error": backup_error,
+            "about": about_info(settings),
         }
     return templates.TemplateResponse(request=request, name="settings.html", context=ctx)
 

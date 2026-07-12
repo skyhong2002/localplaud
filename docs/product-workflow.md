@@ -226,9 +226,9 @@ rerunning processing or local rule actions. See [`email-integrations.md`](email-
 
 Settings now groups its implemented account, processing, vocabulary, template,
 provider/profile, remote-worker, and authorized-integration controls behind a
-responsive section navigator with a direct system-health destination. Active-session,
-translated-interface locale, private-backup, and support/about surfaces remain
-explicitly unfinished rather than being represented by non-functional controls.
+responsive section navigator with a direct system-health destination. Translated-
+interface locale and private cross-host sync remain explicitly unfinished rather
+than being represented by non-functional controls.
 
 Workspace display preferences are durable local data rather than browser-only state:
 the chosen workspace name, system/light/dark theme, comfortable/compact density,
@@ -243,6 +243,14 @@ the configured media root. Every archive carries a versioned manifest and SHA-25
 environment/config secrets, Plaud tokens, reverse-proxy credentials, and symlinks are
 excluded. Restore remains an explicit offline operation documented in
 [`backups.md`](backups.md), so an active Web request can never replace the live database.
+
+Access & Security reports whether the stateless application token is configured and
+that reverse-proxy authentication is external. Because neither mechanism creates
+localplaud browser sessions, it explicitly reports active sessions as untracked.
+Support & About exposes package/build/runtime identity and a downloadable, no-store
+diagnostics document containing only aggregate counts and non-secret switches. Tests
+prove that recording identity/content, paths, URLs/addresses, errors, environment
+variables, tokens, and credentials are absent. See [`support.md`](support.md).
 
 The recording workspace now has a sticky custom player backed by locally generated
 and cached ffmpeg waveform envelopes. Playback state survives tab switches and stays

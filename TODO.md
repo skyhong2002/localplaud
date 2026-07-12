@@ -412,8 +412,12 @@ embedding raw provider credentials or model settings in each rule.
   SQLite's online backup API and produces a manifest plus SHA-256, with an explicit
   optional media scope; secrets/config/OAuth tokens and media symlinks are excluded,
   downloads are cataloged, and offline restore is documented. Remaining product
-  sections are active sessions, translated interface locale, private cross-host
-  sync, and support/version information.
+  sections are translated interface locale and private cross-host sync. Access &
+  security now truthfully reports the stateless token/reverse-proxy boundary and
+  explains why app-managed active sessions do not exist; Support & About shows
+  runtime/build identity and downloads a tested redacted diagnostics bundle with no
+  recording identifiers/content, paths, URLs, errors, environment variables, or
+  credentials.
 - ✅ Added native loopback S256 PKCE inside localplaud. First login no longer needs
   Node.js or the Plaud CLI; state, two-minute expiry, public-client exchange,
   atomic `0600` token storage, auto-refresh, CLI-compatible schema, and actionable

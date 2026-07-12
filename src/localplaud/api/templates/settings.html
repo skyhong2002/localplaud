@@ -7,6 +7,7 @@
   <div class="settings-layout">
     <nav class="settings-nav" aria-label="Settings sections">
       <a href="#plaud-account">Account</a>
+      <a href="#access-security">Access &amp; security</a>
       <a href="#workspace-preferences">Workspace</a>
       <a href="#private-backup">Data &amp; backup</a>
       <a href="#hardware-profiles">Processing</a>
@@ -16,6 +17,7 @@
       <a href="#remote-workers">Remote workers</a>
       <a href="#webhook-integrations">Webhooks</a>
       <a href="#email-integrations">Email</a>
+      <a href="#support-about">Support &amp; about</a>
       <a href="/status">System health ↗</a>
     </nav>
     <div class="settings-sections">
@@ -31,6 +33,16 @@
       <div class="tile"><div class="k">Token storage</div><div style="margin-top:4px;overflow-wrap:anywhere"><code>{{ plaud_auth.tokens_path }}</code></div></div>
     </div>
     {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">On the machine running localplaud, run <code>localplaud auth login</code>. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.</div>{% endif %}
+  </div>
+
+  <div class="panel" style="margin-top:16px" id="access-security">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>Access &amp; security</strong><div class="sub" style="font-size:12px;margin-top:3px">Truthful authentication boundaries for this deployment.</div></div><span class="st {{ 'done' if about.access.application_token_configured else 'degraded' }}">{{ 'app token configured' if about.access.application_token_configured else 'app token not configured' }}</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px;margin-top:12px">
+      <div class="tile"><div class="k">Application authentication</div><div style="margin-top:4px">{{ 'Stateless API token' if about.access.application_token_configured else 'No application token' }}</div></div>
+      <div class="tile"><div class="k">Reverse proxy</div><div style="margin-top:4px">External · not observable by localplaud</div></div>
+      <div class="tile"><div class="k">Active sessions</div><div style="margin-top:4px">Not tracked</div></div>
+    </div>
+    <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ about.access.session_detail }}. Configure <code>api.auth_token</code> or authenticated HTTPS at the reverse proxy before remote exposure.</p>
   </div>
 
   <div class="panel" style="margin-top:16px" id="workspace-preferences">
@@ -297,6 +309,13 @@
       <label class="sub"><input type="checkbox" name="enabled" checked> Enabled</label>
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">Authorize email</button><span id="email-result" class="sub"></span></div>
     </form>
+  </div>
+
+  <div class="panel" style="margin-top:16px" id="support-about">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>Support &amp; about</strong><div class="sub" style="font-size:12px;margin-top:3px">Runtime identity and a deliberately redacted support bundle.</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;margin-top:12px"><div class="tile"><div class="k">Runtime</div><div style="margin-top:4px">Python {{ about.python }}</div></div><div class="tile"><div class="k">Host</div><div style="margin-top:4px">{{ about.system }} · {{ about.machine }}</div></div><div class="tile"><div class="k">License</div><div style="margin-top:4px">{{ about.license }}</div></div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px"><a class="btn" href="/api/system/diagnostics.json">Download safe diagnostics</a><a class="btn sec" href="/status">System health</a><a class="btn sec" href="/api/docs">API documentation</a><a class="btn sec" href="{{ about.support.repository }}" target="_blank" rel="noopener">GitHub repository ↗</a></div>
+    <p class="sub" style="font-size:11.5px;margin:10px 0 0">Diagnostics contain aggregate counts and non-secret runtime switches only. Recording IDs, titles, content, paths, URLs, addresses, errors, environment variables, and credentials are excluded.</p>
   </div>
     </div>
   </div>
