@@ -91,6 +91,7 @@ def test_ollama_llm_disables_thinking_and_honors_visible_token_budget():
         return_value=httpx.Response(200, json={"message": {"content": "# Demo\n- Ready"}})
     )
     provider = OllamaProvider(OllamaConfig(host=HOST, model="qwen3.5:9b"))
+    assert provider.model == "qwen3.5:9b"
     schema = {"type": "object"}
     assert (
         provider.complete("make an outline", max_tokens=321, json_schema=schema)

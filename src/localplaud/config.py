@@ -116,7 +116,7 @@ class PipelineConfig(BaseModel):
     retry_max_seconds: int = Field(default=21_600, ge=1, le=604_800)
     # Character budget per LLM call. Longer transcripts are covered through
     # hierarchical map/reduce notes instead of being truncated.
-    summary_chunk_chars: int = 12_000
+    summary_chunk_chars: int = 6_000
     polish_chunk_chars: int = Field(default=2_500, ge=1_000, le=60_000)
     # Which summary template to use (default | meeting | call | lecture |
     # personal — see worker/summary_templates.py).

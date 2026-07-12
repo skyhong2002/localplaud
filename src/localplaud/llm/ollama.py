@@ -21,6 +21,10 @@ class OllamaProvider:
     def __init__(self, cfg: OllamaConfig) -> None:
         self.cfg = cfg
 
+    @property
+    def model(self) -> str:
+        return self.cfg.model
+
     def available(self) -> bool:
         return self.health()[0]
 

@@ -915,6 +915,7 @@ def _process_file_claimed(
         polish_failed = False
         polish_input = _load_transcript(file_id, settings)
         current_kind = None
+        current_provenance_complete = False
         if polish_input is not None:
             transcript, transcript_source = polish_input
             with session_scope() as session:
@@ -926,6 +927,15 @@ def _process_file_claimed(
                     else None
                 )
                 current_kind = current.kind if current is not None else None
+                current_provenance_complete = bool(
+                    current is not None
+                    and current.provider
+                    and current.model
+                    and current.prompt_version
+                )
+                if current_kind == "ai_polish" and not current_provenance_complete and raw:
+                    transcript = _rehydrate_transcript(raw)
+                    transcript_source = raw.source
         if transcript is None:
             _skip_stage(file_id, StageName.correct, "no transcript")
         elif not pcfg.polish:
@@ -934,7 +944,7 @@ def _process_file_claimed(
             _skip_stage(file_id, StageName.correct, "imported migration artifact")
         elif current_kind in {"user_edit", "restore"}:
             _skip_stage(file_id, StageName.correct, "preserved user correction")
-        elif current_kind == "ai_polish" and not force:
+        elif current_kind == "ai_polish" and current_provenance_complete and not force:
             _finish_stage(
                 file_id,
                 StageName.correct,
