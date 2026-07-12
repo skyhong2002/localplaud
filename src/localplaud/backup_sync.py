@@ -15,6 +15,7 @@ from sqlalchemy import select
 from .backups import file_sha256, workspace_backup_path
 from .db.models import BackupDestination, BackupSyncDelivery
 from .db.session import session_scope
+from .error_redaction import sanitize_error
 
 _ENV_REF = re.compile(r"^env:[A-Za-z_][A-Za-z0-9_]*$")
 MAX_RESPONSE_BYTES = 64 * 1024
@@ -274,19 +275,20 @@ def deliver_backup(backup_name: str, destination_id: int) -> dict:
             result = serialize_delivery(row)
         return result
     except Exception as exc:  # noqa: BLE001 - durable retry state
+        error = sanitize_error(exc)
         with session_scope() as session:
             row = session.get(BackupSyncDelivery, delivery_row_id)
             if row is not None:
                 row.status = "failed"
                 row.response_status = response_status
                 row.response_excerpt = (response_excerpt or "")[:1000] or None
-                row.error = str(exc)[:2000]
+                row.error = error
             destination = session.get(BackupDestination, destination_id)
             if destination is not None:
                 destination.last_used_at = datetime.now(UTC)
                 destination.health = {
                     "status": "unavailable",
-                    "detail": str(exc)[:500],
+                    "detail": sanitize_error(exc, max_length=500),
                     "checked_at": datetime.now(UTC).isoformat(),
                 }
         raise

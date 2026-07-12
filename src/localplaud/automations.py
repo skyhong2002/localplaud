@@ -25,6 +25,7 @@ from .db.models import (
     Tag,
 )
 from .db.session import session_scope
+from .error_redaction import sanitize_error
 
 
 def rule_sentence(rule: AutomationRule | dict) -> str:
@@ -216,6 +217,7 @@ def evaluate_recording(file_id: str) -> list[dict]:
                 notification_requested = rule.notify
                 results.append({"rule_id": rule.id, "status": "completed", "applied": applied})
             except Exception as exc:  # noqa: BLE001
+                error = sanitize_error(exc)
                 session.add(
                     AutomationRun(
                         rule_id=rule.id,
@@ -224,24 +226,29 @@ def evaluate_recording(file_id: str) -> list[dict]:
                         status="failed",
                         matched=True,
                         detail={"reasons": reasons},
-                        error=str(exc)[:2000],
+                        error=error,
                     )
                 )
-                results.append({"rule_id": rule.id, "status": "failed", "error": str(exc)})
+                results.append({"rule_id": rule.id, "status": "failed", "error": error})
         if downstream_run_id is not None and notification_requested:
             try:
                 notification = deliver_local_notification(downstream_run_id)
                 results[-1]["notification"] = notification
             except Exception as exc:  # noqa: BLE001 - actions remain committed
                 _record_notification_failure(downstream_run_id, exc)
-                results[-1]["notification"] = {"status": "failed", "error": str(exc)}
+                results[-1]["notification"] = {
+                    "status": "failed",
+                    "error": sanitize_error(exc),
+                }
         if downstream_run_id is not None:
             exports = []
             for fmt in _requested_export_formats(downstream_run_id):
                 try:
                     exports.append(deliver_automation_export(downstream_run_id, fmt))
                 except Exception as exc:  # noqa: BLE001 - actions remain committed
-                    exports.append({"format": fmt, "status": "failed", "error": str(exc)})
+                    exports.append(
+                        {"format": fmt, "status": "failed", "error": sanitize_error(exc)}
+                    )
             if exports:
                 results[-1]["exports"] = exports
             webhooks = []
@@ -251,7 +258,7 @@ def evaluate_recording(file_id: str) -> list[dict]:
 
                     webhooks.append(deliver_webhook(downstream_run_id, snapshot))
                 except Exception as exc:  # noqa: BLE001 - actions remain committed
-                    webhooks.append({"status": "failed", "error": str(exc)})
+                    webhooks.append({"status": "failed", "error": sanitize_error(exc)})
             if webhooks:
                 results[-1]["webhooks"] = webhooks
             emails = []
@@ -261,7 +268,7 @@ def evaluate_recording(file_id: str) -> list[dict]:
 
                     emails.append(deliver_email(downstream_run_id, snapshot))
                 except Exception as exc:  # noqa: BLE001 - actions remain committed
-                    emails.append({"status": "failed", "error": str(exc)})
+                    emails.append({"status": "failed", "error": sanitize_error(exc)})
             if emails:
                 results[-1]["emails"] = emails
     return results
@@ -378,12 +385,13 @@ def deliver_automation_export(run_id: int, fmt: str) -> dict:
             row.error = None
         return {"id": export_id, "format": fmt, "status": "completed"}
     except Exception as exc:  # noqa: BLE001 - durable failure is independently retryable
+        error = sanitize_error(exc)
         with session_scope() as session:
             row = session.get(AutomationExport, export_id)
             if row is not None:
                 row.status = "failed"
-                row.error = str(exc)[:2000]
-        return {"id": export_id, "format": fmt, "status": "failed", "error": str(exc)}
+                row.error = error
+        return {"id": export_id, "format": fmt, "status": "failed", "error": error}
 
 
 def deliver_local_notification(run_id: int) -> dict:
@@ -432,7 +440,10 @@ def _record_notification_failure(run_id: int, exc: Exception) -> None:
             run = session.get(AutomationRun, run_id)
             if run is not None:
                 run.detail = (run.detail or {}) | {
-                    "notification": {"status": "failed", "error": str(exc)[:1000]}
+                    "notification": {
+                        "status": "failed",
+                        "error": sanitize_error(exc, max_length=1000),
+                    }
                 }
     except Exception:  # noqa: BLE001 - notification metadata must never affect actions
         pass

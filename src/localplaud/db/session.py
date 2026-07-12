@@ -6,15 +6,29 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import get_settings
+from ..error_redaction import sanitize_error_value
 from .models import Base
 
 _engine: Engine | None = None
 _Session: sessionmaker[Session] | None = None
+
+
+@event.listens_for(Session, "before_flush")
+def _sanitize_durable_diagnostics(session: Session, _flush_context, _instances) -> None:
+    """Redact diagnostic fields immediately before ORM persistence."""
+    for instance in session.new.union(session.dirty):
+        for attribute in ("error", "health", "detail", "response_excerpt"):
+            if not hasattr(instance, attribute):
+                continue
+            value = getattr(instance, attribute)
+            sanitized = sanitize_error_value(value)
+            if sanitized != value:
+                setattr(instance, attribute, sanitized)
 
 
 def _ensure_sqlite_dir(url: str) -> None:
@@ -60,6 +74,7 @@ def init_db() -> dict[str, int] | None:
         migrate_stage_attempt_schema,
         migrate_transcript_revision_provenance,
         migrate_vocabulary_schema,
+        redact_legacy_error_text,
     )
 
     migrate_legacy_provider_profile_schema(engine)
@@ -81,6 +96,7 @@ def init_db() -> dict[str, int] | None:
     migrate_speaker_timeline_schema(engine)
     migrate_import_schema(engine)
     migrate_vocabulary_schema(engine)
+    redact_legacy_error_text(engine)
     with Session(engine) as session:
         bootstrap_default_profile(session, get_settings())
         from ..worker.summary_templates import bootstrap_note_templates

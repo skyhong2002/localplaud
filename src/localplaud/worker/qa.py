@@ -18,6 +18,7 @@ from ..config import Settings, get_settings
 from ..db.models import Chunk, PlaudFile, Speaker, Tag
 from ..db.session import session_scope
 from ..embeddings.base import build_embedder
+from ..error_redaction import sanitize_error
 from ..llm.base import build_llm
 from ..providers.fallback import candidate_snapshots, is_retryable_fallback_error
 from ..providers.service import preview_resolution, resolve_recording_profile
@@ -284,7 +285,7 @@ def _retrieve_with_profile(
                     "index": index,
                     "connection": selection["connection"],
                     "model": selection["model"],
-                    "error": str(exc)[:500],
+                    "error": sanitize_error(exc, max_length=500),
                     "retryable": retryable,
                 }
             )
@@ -395,7 +396,7 @@ def answer(
                     "index": index,
                     "connection": selection["connection"],
                     "model": selection["model"],
-                    "error": str(exc)[:500],
+                    "error": sanitize_error(exc, max_length=500),
                     "retryable": retryable,
                 }
             )

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .db.models import PlaudFile, StageStatus
 from .db.session import session_scope
+from .error_redaction import sanitize_error
 from .export_formats import render_notes, render_transcript, transcript_provenance
 
 
@@ -174,14 +175,14 @@ def subscription_independence_report(file_id: str) -> dict:
             if not payload:
                 export_errors.append(f"transcript {fmt}: empty")
         except Exception as exc:  # noqa: BLE001 - report evidence, do not hide it
-            export_errors.append(f"transcript {fmt}: {exc}")
+            export_errors.append(f"transcript {fmt}: {sanitize_error(exc, max_length=500)}")
     for fmt in ("md", "txt", "docx", "pdf"):
         try:
             payload, _media_type = render_notes(file_id, fmt)
             if not payload:
                 export_errors.append(f"notes {fmt}: empty")
         except Exception as exc:  # noqa: BLE001 - report evidence, do not hide it
-            export_errors.append(f"notes {fmt}: {exc}")
+            export_errors.append(f"notes {fmt}: {sanitize_error(exc, max_length=500)}")
     provenance = transcript_provenance(file_id)
     checks.append(
         _check(

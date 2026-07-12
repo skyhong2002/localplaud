@@ -23,6 +23,7 @@ from .db.models import (
     PlaudFile,
 )
 from .db.session import session_scope
+from .error_redaction import sanitize_error
 from .export_formats import recording_data
 
 EMAIL_SCOPES = {"metadata", "transcript", "notes"}
@@ -335,18 +336,19 @@ def deliver_email(run_id: int, snapshot: dict) -> dict:
                 }
         return {"id": delivery_id, "status": "completed", "message_id": message_id}
     except Exception as exc:  # noqa: BLE001 - durable failure remains retryable
+        error = sanitize_error(exc)
         with session_scope() as session:
             row = session.get(AutomationEmailDelivery, delivery_id)
             if row is not None:
                 row.status = "failed"
                 row.payload_sha256 = payload_sha256
-                row.error = str(exc)[:2000]
+                row.error = error
             integration = session.get(EmailIntegration, integration_id)
             if integration is not None:
                 integration.last_used_at = datetime.now(UTC)
                 integration.health = {
                     "status": "unavailable",
-                    "detail": str(exc)[:1000],
+                    "detail": sanitize_error(exc, max_length=1000),
                     "checked_at": datetime.now(UTC).isoformat(),
                 }
-        return {"id": delivery_id, "status": "failed", "error": str(exc)}
+        return {"id": delivery_id, "status": "failed", "error": error}

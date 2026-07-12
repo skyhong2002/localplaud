@@ -22,6 +22,7 @@ from .db.models import (
     WebhookIntegration,
 )
 from .db.session import session_scope
+from .error_redaction import sanitize_error
 from .export_formats import recording_data
 
 WEBHOOK_SCOPES = {"metadata", "transcript", "notes"}
@@ -315,6 +316,7 @@ def deliver_webhook(run_id: int, snapshot: dict) -> dict:
             "response_status": response_status,
         }
     except Exception as exc:  # noqa: BLE001 - durable failure remains independently retryable
+        error = sanitize_error(exc)
         with session_scope() as session:
             row = session.get(AutomationWebhookDelivery, delivery_id)
             if row is not None:
@@ -322,13 +324,13 @@ def deliver_webhook(run_id: int, snapshot: dict) -> dict:
                 row.payload_sha256 = payload_sha256
                 row.response_status = response_status
                 row.response_excerpt = (response_excerpt or "")[:1000] or None
-                row.error = str(exc)[:2000]
+                row.error = error
             integration = session.get(WebhookIntegration, integration_id)
             if integration is not None:
                 integration.last_used_at = datetime.now(UTC)
                 integration.health = {
                     "status": "unavailable",
-                    "detail": str(exc)[:1000],
+                    "detail": sanitize_error(exc, max_length=1000),
                     "checked_at": datetime.now(UTC).isoformat(),
                 }
-        return {"id": delivery_id, "status": "failed", "error": str(exc)}
+        return {"id": delivery_id, "status": "failed", "error": error}

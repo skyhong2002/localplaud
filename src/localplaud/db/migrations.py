@@ -8,10 +8,49 @@ from sqlalchemy import delete, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from ..error_redaction import sanitize_error
 from .models import Chunk, FileStatus, KeyValue, PlaudFile, Transcript
 
 INDEPENDENT_MIGRATION_KEY = "migration.independent-artifacts.v1"
 _PLAUD_SOURCES = {"cloud", "plaud"}
+
+
+def redact_legacy_error_text(engine: Engine) -> int:
+    """Idempotently clean credential fragments from deployed diagnostic rows."""
+    if engine.dialect.name != "sqlite":
+        return 0
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    changed = 0
+    with engine.begin() as connection:
+        quote = engine.dialect.identifier_preparer.quote
+        for table in tables:
+            columns = {column["name"] for column in inspector.get_columns(table)}
+            if "id" not in columns:
+                continue
+            diagnostic_columns = {"error", "health", "response_excerpt"} & columns
+            if table in {"stage_runs", "automation_runs", "notifications"}:
+                diagnostic_columns |= {"detail"} & columns
+            for column in diagnostic_columns:
+                rows = connection.execute(
+                    text(
+                        f"SELECT {quote('id')}, {quote(column)} FROM {quote(table)} "
+                        f"WHERE {quote(column)} IS NOT NULL"
+                    )
+                ).all()
+                for row_id, value in rows:
+                    sanitized = sanitize_error(value)
+                    if sanitized == value:
+                        continue
+                    connection.execute(
+                        text(
+                            f"UPDATE {quote(table)} SET {quote(column)} = :value "
+                            f"WHERE {quote('id')} = :id"
+                        ),
+                        {"id": row_id, "value": sanitized},
+                    )
+                    changed += 1
+    return changed
 
 
 def migrate_legacy_provider_profile_schema(engine: Engine) -> list[str]:

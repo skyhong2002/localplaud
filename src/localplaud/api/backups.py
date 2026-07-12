@@ -20,6 +20,7 @@ from ..backups import (
     workspace_backup_path,
 )
 from ..db.session import session_scope
+from ..error_redaction import sanitize_error
 
 router = APIRouter(prefix="/api/backups", tags=["backups"])
 
@@ -129,7 +130,7 @@ def sync_backup(name: str, destination_id: int) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - durable failure returned to UI
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=sanitize_error(exc)) from exc
 
 
 @router.post("/sync-deliveries/{delivery_id}/retry")
@@ -141,4 +142,4 @@ def retry_backup_sync(delivery_id: int) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - durable failure returned to UI
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=sanitize_error(exc)) from exc
