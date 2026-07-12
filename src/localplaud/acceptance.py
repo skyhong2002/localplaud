@@ -45,6 +45,9 @@ def subscription_independence_report(file_id: str) -> dict:
         align_stage = next(
             (row for row in stage_runs if row.stage.value == "align"), None
         )
+        diarize_stage = next(
+            (row for row in stage_runs if row.stage.value == "diarize"), None
+        )
         checks = [
             _check(
                 "raw_audio_local",
@@ -98,6 +101,18 @@ def subscription_independence_report(file_id: str) -> dict:
                 and all(item.get("speaker") for item in segments)
                 and bool(speakers),
                 f"{len(speakers)} stable speaker identity row(s)",
+            ),
+            _check(
+                "speaker_diarization",
+                diarize_stage is not None
+                and diarize_stage.status == StageStatus.completed
+                and bool(diarize_stage.provider and diarize_stage.model),
+                (
+                    f"durable diarization via "
+                    f"{diarize_stage.provider}:{diarize_stage.model}"
+                    if diarize_stage is not None
+                    else "no durable diarization stage evidence"
+                ),
             ),
             _check(
                 "local_notes",

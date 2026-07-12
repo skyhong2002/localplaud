@@ -194,6 +194,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
         "local_transcript",
         "transcript_polish",
         "word_alignment",
+        "speaker_diarization",
         "local_notes",
         "ask_index",
         "required_exports",

@@ -144,6 +144,7 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         "timestamped_segments",
         "word_alignment",
         "speaker_assignment",
+        "speaker_diarization",
         "local_notes",
         "local_mind_map",
         "ask_index",
