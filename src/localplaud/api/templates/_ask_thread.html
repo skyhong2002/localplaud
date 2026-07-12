@@ -5,6 +5,7 @@
     {% if thread.retrieval_scope.folder_id %}<span class="chip">{{ t('Folder') }} · {% for item in organization.folders if item.id == thread.retrieval_scope.folder_id %}{{ item.name }}{% else %}#{{ thread.retrieval_scope.folder_id }}{% endfor %}</span>{% endif %}
     {% if thread.retrieval_scope.tag_id %}<span class="chip">{{ t('Tag') }} · {% for item in organization.tags if item.id == thread.retrieval_scope.tag_id %}{{ item.name }}{% else %}#{{ thread.retrieval_scope.tag_id }}{% endfor %}</span>{% endif %}
     {% if thread.retrieval_scope.origin %}<span class="chip">{{ t('Source') }} · {{ thread.retrieval_scope.origin }}</span>{% endif %}
+    {% if thread.retrieval_scope.speaker_name %}<span class="chip">{{ t('Named speaker') }} · {{ thread.retrieval_scope.speaker_name }}</span>{% endif %}
     {% if thread.retrieval_scope.date_from %}<span class="chip">{{ t('From') }} · {{ thread.retrieval_scope.date_from }}</span>{% endif %}
     {% if thread.retrieval_scope.date_to %}<span class="chip">{{ t('To') }} · {{ thread.retrieval_scope.date_to }}</span>{% endif %}
     {% if thread.retrieval_scope.file_ids %}<span class="chip">{{ thread.retrieval_scope.file_ids|length }} {{ t('recordings') }}</span>{% endif %}

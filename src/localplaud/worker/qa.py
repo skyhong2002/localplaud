@@ -12,10 +12,10 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import exists, func, select
 
 from ..config import Settings, get_settings
-from ..db.models import Chunk, PlaudFile, Tag
+from ..db.models import Chunk, PlaudFile, Speaker, Tag
 from ..db.session import session_scope
 from ..embeddings.base import build_embedder
 from ..llm.base import build_llm
@@ -34,7 +34,16 @@ def normalize_library_scope(value: dict | None) -> dict:
     if not isinstance(value, dict):
         raise ValueError("library Ask scope must be an object")
     unknown = sorted(
-        set(value) - {"folder_id", "tag_id", "origin", "date_from", "date_to", "file_ids"}
+        set(value)
+        - {
+            "folder_id",
+            "tag_id",
+            "origin",
+            "speaker_name",
+            "date_from",
+            "date_to",
+            "file_ids",
+        }
     )
     if unknown:
         raise ValueError(f"unknown library Ask scope fields: {', '.join(unknown)}")
@@ -54,6 +63,14 @@ def normalize_library_scope(value: dict | None) -> dict:
         if origin not in {"plaud", "local"}:
             raise ValueError("origin must be plaud or local")
         scope["origin"] = origin
+    speaker_name = value.get("speaker_name")
+    if speaker_name not in (None, ""):
+        if not isinstance(speaker_name, str):
+            raise ValueError("speaker_name must be text")
+        speaker_name = " ".join(speaker_name.split())
+        if not speaker_name or len(speaker_name) > 128:
+            raise ValueError("speaker_name must contain 1 to 128 characters")
+        scope["speaker_name"] = speaker_name
     parsed_dates = {}
     for key in ("date_from", "date_to"):
         raw = value.get(key)
@@ -110,6 +127,18 @@ def _load_matrix(
             stmt = stmt.where(PlaudFile.tags.any(Tag.id == scope["tag_id"]))
         if scope.get("origin"):
             stmt = stmt.where(PlaudFile.origin == scope["origin"])
+        if scope.get("speaker_name"):
+            stmt = stmt.where(
+                exists(
+                    select(Speaker.id).where(
+                        Speaker.file_id == Chunk.file_id,
+                        Speaker.key == Chunk.speaker,
+                        Speaker.display_name.is_not(None),
+                        func.lower(Speaker.display_name)
+                        == scope["speaker_name"].lower(),
+                    )
+                )
+            )
         if scope.get("date_from"):
             stmt = stmt.where(PlaudFile.start_time_ms >= _date_ms(scope["date_from"]))
         if scope.get("date_to"):

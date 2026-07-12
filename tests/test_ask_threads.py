@@ -318,7 +318,7 @@ def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, 
 def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed()
-    from localplaud.db.models import AskThread, Folder, PlaudFile, Tag
+    from localplaud.db.models import AskThread, Folder, PlaudFile, Speaker, Tag
     from localplaud.db.session import session_scope
 
     with session_scope() as session:
@@ -329,6 +329,7 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
         recording = session.get(PlaudFile, "r1")
         recording.folder_id = folder.id
         recording.tags.append(tag)
+        session.add(Speaker(file_id="r1", key="SPEAKER_00", display_name="Sky"))
         folder_id, tag_id = folder.id, tag.id
 
     scopes = []
@@ -341,6 +342,7 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
     page = client.get("/")
     assert 'id="library-ask-scope"' in page.text
     assert 'hx-include="#library-ask-scope"' in page.text
+    assert 'name="ask_speaker_name"' in page.text and "Sky · 1" in page.text
     first = client.post(
         "/ask",
         data={
@@ -348,6 +350,7 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
             "ask_folder_id": str(folder_id),
             "ask_tag_id": str(tag_id),
             "ask_origin": "plaud",
+            "ask_speaker_name": "Sky",
             "ask_date_from": "2026-07-01",
             "ask_date_to": "2026-07-31",
             "ask_file_ids": "r1",
@@ -361,11 +364,13 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
         "folder_id": folder_id,
         "tag_id": tag_id,
         "origin": "plaud",
+        "speaker_name": "Sky",
         "date_from": "2026-07-01",
         "date_to": "2026-07-31",
         "file_ids": ["r1"],
     }
     assert scopes == [expected]
+    assert "Named speaker · Sky" in first.text
 
     followup = client.post("/ask", data={"q": "And next?", "thread_id": thread_id})
     assert followup.status_code == 200
@@ -375,5 +380,9 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
         data={"q": "Change scope", "thread_id": thread_id, "ask_origin": "local"},
     )
     assert changed.status_code == 409
+    unknown_speaker = client.post(
+        "/ask", data={"q": "Unknown", "ask_speaker_name": "Not a named speaker"}
+    )
+    assert unknown_speaker.status_code == 409
     with session_scope() as session:
         assert session.get(AskThread, thread_id).retrieval_scope == expected

@@ -100,6 +100,8 @@ _ZH_HANT_TW = {
     "ANSWER SCOPE": "回答範圍",
     "Follow-ups keep this scope.": "後續提問會維持此範圍。",
     "Only selected recordings": "僅限已選錄音",
+    "Named speaker": "已命名講者",
+    "Any named speaker": "任何已命名講者",
     "Ask": "詢問",
     "thinking…": "思考中…",
     "Recent Ask": "最近詢問",

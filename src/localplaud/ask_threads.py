@@ -8,7 +8,16 @@ from uuid import uuid4
 from sqlalchemy import func, select
 
 from .config import Settings, get_settings
-from .db.models import AskMessage, AskThread, Folder, PlaudFile, StageAttempt, Tag, UserNote
+from .db.models import (
+    AskMessage,
+    AskThread,
+    Folder,
+    PlaudFile,
+    Speaker,
+    StageAttempt,
+    Tag,
+    UserNote,
+)
 from .db.session import session_scope
 from .worker import qa
 
@@ -78,6 +87,14 @@ def ask_in_thread(
             raise ValueError("library Ask folder does not exist")
         if effective_scope.get("tag_id") and session.get(Tag, effective_scope["tag_id"]) is None:
             raise ValueError("library Ask tag does not exist")
+        if effective_scope.get("speaker_name") and session.scalar(
+            select(Speaker.id).where(
+                Speaker.display_name.is_not(None),
+                func.lower(Speaker.display_name)
+                == effective_scope["speaker_name"].lower(),
+            )
+        ) is None:
+            raise ValueError("library Ask named speaker does not exist")
         if effective_scope.get("file_ids"):
             known = set(
                 session.scalars(

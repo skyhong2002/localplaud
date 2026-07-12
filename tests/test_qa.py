@@ -81,7 +81,7 @@ def test_retrieve_applies_combined_library_scope(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
     _seed_two_files()
     monkeypatch.setattr("localplaud.worker.qa.build_embedder", lambda cfg: _FakeEmbedder())
-    from localplaud.db.models import Folder, PlaudFile, Tag
+    from localplaud.db.models import Folder, PlaudFile, Speaker, Tag
     from localplaud.db.session import session_scope
     from localplaud.worker.qa import normalize_library_scope, retrieve
 
@@ -98,12 +98,19 @@ def test_retrieve_applies_combined_library_scope(monkeypatch, tmp_path):
         second = session.get(PlaudFile, "r2")
         second.origin = "local"
         second.start_time_ms = 1_735_689_600_000  # 2025-01-01 UTC
+        session.add_all(
+            [
+                Speaker(file_id="r1", key="SPEAKER_00", display_name="Sky"),
+                Speaker(file_id="r2", key="SPEAKER_00", display_name="Alex"),
+            ]
+        )
         folder_id, tag_id = folder.id, tag.id
 
     scope = {
         "folder_id": folder_id,
         "tag_id": tag_id,
         "origin": "plaud",
+        "speaker_name": "Sky",
         "date_from": "2026-01-01",
         "date_to": "2026-12-31",
     }

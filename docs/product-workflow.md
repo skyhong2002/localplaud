@@ -114,11 +114,13 @@ accessibility require a different design.
 - Searches corrected transcripts and appropriate notes across the whole library.
 - Answers must be grounded, name their recordings, and link to playable timestamps.
 - Filters may scope by date, folder/tag, speaker, or selected recordings.
-- Folder, tag, capture source, inclusive date range, and an API-level selected
-  recording list are enforced before vector ranking. The normalized boundary is
+- Folder, tag, capture source, user-assigned speaker display name, inclusive date
+  range, and a selected recording list are enforced before vector ranking. The
+  speaker filter joins each chunk's recording-local stable key to its editable name;
+  anonymous labels are deliberately excluded rather than conflated across files.
+  The normalized boundary is
   stored on the Ask thread, shown with the answer, and cannot change during a
-  follow-up; starting a different scope creates a new thread. Speaker-scoped Ask
-  remains future work because stable speaker identity is recording-local.
+  follow-up; starting a different scope creates a new thread.
 - A citation opens the recording at the cited moment.
 - Users can continue a durable grounded thread and save any answer as an editable
   note. Saved notes retain source moments, link back to recordings, appear in the

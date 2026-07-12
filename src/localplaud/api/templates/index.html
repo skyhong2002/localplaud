@@ -115,7 +115,7 @@
     <div class="sub" style="margin:2px 0 8px;font-size:13px">{{ t('Ask across your library. Answers stay grounded in indexed recordings and cite their sources.') }}</div>
     <fieldset id="library-ask-scope" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:0 0 10px">
       <legend class="sub" style="font-size:11px;font-weight:700;padding:0 5px">{{ t('ANSWER SCOPE') }}</legend>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px">
         <label class="sub" style="font-size:11px">{{ t('Folder') }}
           <select class="search-input" name="ask_folder_id" style="width:100%;margin-top:3px;padding:7px 9px">
             <option value="">{{ t('Any folder') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}
@@ -128,6 +128,9 @@
         </label>
         <label class="sub" style="font-size:11px">{{ t('Source') }}
           <select class="search-input" name="ask_origin" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any source') }}</option><option value="plaud">Plaud</option><option value="local">{{ t('Local') }}</option></select>
+        </label>
+        <label class="sub" style="font-size:11px">{{ t('Named speaker') }}
+          <select class="search-input" name="ask_speaker_name" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any named speaker') }}</option>{% for speaker in named_speakers %}<option value="{{ speaker.name }}">{{ speaker.name }} · {{ speaker.recording_count }}</option>{% endfor %}</select>
         </label>
         <label class="sub" style="font-size:11px">{{ t('From') }}<input class="search-input" type="date" name="ask_date_from" style="width:100%;margin-top:3px;padding:7px 9px"></label>
         <label class="sub" style="font-size:11px">{{ t('To') }}<input class="search-input" type="date" name="ask_date_to" style="width:100%;margin-top:3px;padding:7px 9px"></label>

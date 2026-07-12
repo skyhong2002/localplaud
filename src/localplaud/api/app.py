@@ -524,6 +524,25 @@ def _organization_summary(session) -> dict:
     }
 
 
+def _named_speaker_summary(session) -> list[dict]:
+    grouped: dict[str, dict] = {}
+    rows = session.execute(
+        select(Speaker.display_name, Speaker.file_id).where(
+            Speaker.display_name.is_not(None), Speaker.display_name != ""
+        )
+    )
+    for name, file_id in rows:
+        clean = " ".join(name.split())
+        if not clean:
+            continue
+        item = grouped.setdefault(clean.casefold(), {"name": clean, "file_ids": set()})
+        item["file_ids"].add(file_id)
+    return [
+        {"name": item["name"], "recording_count": len(item["file_ids"])}
+        for item in sorted(grouped.values(), key=lambda value: value["name"].casefold())
+    ]
+
+
 @app.get("/api/organization")
 def api_organization() -> dict:
     with session_scope() as session:
@@ -798,6 +817,7 @@ def index(
         stats = _stats(session)
         facets = _library_facets(session, params)
         organization = _organization_summary(session)
+        named_speakers = _named_speaker_summary(session)
         recent_ask_threads = list(
             session.scalars(
                 select(AskThread)
@@ -824,6 +844,7 @@ def index(
         "ask_threads": [{"id": row.id, "title": row.title} for row in recent_ask_threads],
         "selected_ask_thread": selected_ask_thread_data,
         "ask_skills": list_ask_skills("library"),
+        "named_speakers": named_speakers,
     }
     return templates.TemplateResponse(request=request, name="index.html", context=ctx)
 
@@ -1703,6 +1724,7 @@ def _library_ask_scope(
     folder_id: str | None,
     tag_id: str | None,
     origin: str | None,
+    speaker_name: str | None,
     date_from: str | None,
     date_to: str | None,
     file_ids: list[str] | None = None,
@@ -1711,13 +1733,21 @@ def _library_ask_scope(
         "folder_id": folder_id,
         "tag_id": tag_id,
         "origin": origin,
+        "speaker_name": speaker_name,
         "date_from": date_from,
         "date_to": date_to,
         "file_ids": file_ids or [],
     }
     has_scope = any(
         values[key] not in (None, "")
-        for key in ("folder_id", "tag_id", "origin", "date_from", "date_to")
+        for key in (
+            "folder_id",
+            "tag_id",
+            "origin",
+            "speaker_name",
+            "date_from",
+            "date_to",
+        )
     ) or bool(file_ids)
     return values if has_scope else None
 
@@ -1728,6 +1758,7 @@ def _ask_fragment_context(
     context = _base_ctx(request, "recordings")
     with session_scope() as session:
         context["organization"] = _organization_summary(session)
+        context["named_speakers"] = _named_speaker_summary(session)
     return context | {"thread": thread, "file_id": file_id, "target": target}
 
 
@@ -1739,6 +1770,7 @@ def ask(
     ask_folder_id: str | None = Form(None),
     ask_tag_id: str | None = Form(None),
     ask_origin: str | None = Form(None),
+    ask_speaker_name: str | None = Form(None),
     ask_date_from: str | None = Form(None),
     ask_date_to: str | None = Form(None),
     ask_file_ids: Annotated[list[str] | None, Form()] = None,
@@ -1749,6 +1781,7 @@ def ask(
         ask_folder_id,
         ask_tag_id,
         ask_origin,
+        ask_speaker_name,
         ask_date_from,
         ask_date_to,
         ask_file_ids,
@@ -1822,6 +1855,7 @@ def library_ask_skill(
     ask_folder_id: str | None = Form(None),
     ask_tag_id: str | None = Form(None),
     ask_origin: str | None = Form(None),
+    ask_speaker_name: str | None = Form(None),
     ask_date_from: str | None = Form(None),
     ask_date_to: str | None = Form(None),
     ask_file_ids: Annotated[list[str] | None, Form()] = None,
@@ -1837,6 +1871,7 @@ def library_ask_skill(
         ask_folder_id,
         ask_tag_id,
         ask_origin,
+        ask_speaker_name,
         ask_date_from,
         ask_date_to,
         ask_file_ids,
