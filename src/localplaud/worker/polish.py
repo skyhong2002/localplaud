@@ -60,8 +60,12 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
     source = [asdict(segment) for segment in transcript.segments]
     polished = copy.deepcopy(source)
     calls = 0
+    attempts = 0
+    split_retries = 0
     output_chars = 0
-    for start, end in _chunks(source, settings.pipeline.polish_chunk_chars):
+    pending = list(_chunks(source, settings.pipeline.polish_chunk_chars))
+    while pending:
+        start, end = pending.pop(0)
         targets = [
             {
                 "id": index,
@@ -88,27 +92,35 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
                 for item in source[end : min(len(source), end + 2)]
             ],
         }
-        response = _json_completion(
-            provider.complete(
-                json.dumps(request, ensure_ascii=False, separators=(",", ":")),
-                system=SYSTEM_PROMPT,
-                temperature=0.1,
-                max_tokens=max(2048, len(targets) * 80),
-            )
+        attempts += 1
+        raw_response = provider.complete(
+            json.dumps(request, ensure_ascii=False, separators=(",", ":")),
+            system=SYSTEM_PROMPT,
+            temperature=0.1,
+            max_tokens=max(2048, len(targets) * 80),
         )
-        returned = response.get("segments")
-        if not isinstance(returned, list):
-            raise LLMError("transcript polish response has no segments array")
-        by_id: dict[int, str] = {}
-        for item in returned:
-            if not isinstance(item, dict) or not isinstance(item.get("id"), int):
-                raise LLMError("transcript polish returned an invalid segment entry")
-            if not isinstance(item.get("text"), str):
-                raise LLMError("transcript polish segment text must be a string")
-            by_id[item["id"]] = item["text"].strip()
-        expected = set(range(start, end))
-        if set(by_id) != expected:
-            raise LLMError("transcript polish changed or omitted segment IDs")
+        try:
+            response = _json_completion(raw_response)
+            returned = response.get("segments")
+            if not isinstance(returned, list):
+                raise LLMError("transcript polish response has no segments array")
+            by_id: dict[int, str] = {}
+            for item in returned:
+                if not isinstance(item, dict) or not isinstance(item.get("id"), int):
+                    raise LLMError("transcript polish returned an invalid segment entry")
+                if not isinstance(item.get("text"), str):
+                    raise LLMError("transcript polish segment text must be a string")
+                by_id[item["id"]] = item["text"].strip()
+            expected = set(range(start, end))
+            if set(by_id) != expected:
+                raise LLMError("transcript polish changed or omitted segment IDs")
+        except LLMError:
+            if end - start <= 1:
+                raise
+            midpoint = start + (end - start) // 2
+            pending[0:0] = [(start, midpoint), (midpoint, end)]
+            split_retries += 1
+            continue
         for index in range(start, end):
             polished[index]["text"] = by_id[index]
             output_chars += len(by_id[index])
@@ -140,6 +152,8 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
         "detail": {
             "strategy": "contextual-segment-map",
             "chunks": calls,
+            "attempts": attempts,
+            "split_retries": split_retries,
             "segments": len(source),
             "input_chars": len(transcript.text),
             "output_chars": output_chars,

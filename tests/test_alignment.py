@@ -80,11 +80,20 @@ def test_whisperx_dispatch_forces_alignment_and_preserves_asr_text(monkeypatch, 
             return {
                 "segments": [
                     {
-                        "text": "changed text must not replace ASR text",
+                        "text": "changed text",
                         "start": 0.05,
-                        "end": 0.95,
+                        "end": 0.45,
+                        "avg_logprob": 0.0,
                         "words": [
                             {"word": "你好", "start": 0.05, "end": 0.45, "score": 0.93},
+                        ],
+                    },
+                    {
+                        "text": "must not replace ASR text",
+                        "start": 0.5,
+                        "end": 0.95,
+                        "avg_logprob": 0.0,
+                        "words": [
                             {"word": "world", "start": 0.5, "end": 0.95, "score": 0.88},
                         ],
                     }
@@ -129,6 +138,7 @@ def test_whisperx_dispatch_forces_alignment_and_preserves_asr_text(monkeypatch, 
         "interpolate_method": "nearest",
         "minimum_segment_coverage": 1.0,
         "unaligned_words": 0,
+        "unaligned_segments": 0,
     }
     assert calls["load"] == {"language_code": "zh", "device": "cuda"}
     assert calls["align"]["return_char_alignments"] is False
@@ -163,7 +173,7 @@ def test_whisperx_rejects_missing_language_and_incomplete_output(monkeypatch, tm
             model="wav2vec2-auto",
         )
 
-    with pytest.raises(AlignmentError, match="different segment count"):
+    with pytest.raises(AlignmentError, match="omitted input segment"):
         run_alignment(
             audio,
             Transcript(

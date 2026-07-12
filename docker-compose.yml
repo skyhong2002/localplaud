@@ -83,6 +83,7 @@ services:
     profiles: ["ollama"]
     environment:
       OLLAMA_KEEP_ALIVE: "2m"
+      OLLAMA_CONTEXT_LENGTH: "8192"
     volumes:
       - ollama_data:/root/.ollama
     expose:

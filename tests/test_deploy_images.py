@@ -28,6 +28,7 @@ def test_optional_ollama_runtime_is_private_and_persistent():
     assert "ollama/ollama:0.31.2" in compose
     assert 'profiles: ["ollama"]' in compose
     assert "ollama_data:/root/.ollama" in compose
+    assert 'OLLAMA_CONTEXT_LENGTH: "8192"' in compose
     assert 'expose:\n      - "11434"' in compose
     assert '11434:11434' not in compose
     assert "qwen3:4b-instruct-2507-q4_K_M" in deploy

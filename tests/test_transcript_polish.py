@@ -78,3 +78,33 @@ def test_polish_rejects_missing_segment_ids(monkeypatch):
     transcript = Transcript(segments=[Segment(text="hello", start=0, end=1)])
     with pytest.raises(LLMError, match="changed or omitted segment IDs"):
         polish_transcript(transcript, Settings())
+
+
+def test_polish_splits_structurally_invalid_multi_segment_chunks(monkeypatch):
+    class SplittingPolisher(FakePolisher):
+        def complete(self, prompt, **kwargs):
+            request = json.loads(prompt)
+            self.requests.append(request)
+            if len(request["target_segments"]) > 1:
+                return '{"segments":[]}'
+            return json.dumps({"segments": request["target_segments"]})
+
+    provider = SplittingPolisher()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        segments=[
+            Segment(text="first", start=0, end=1),
+            Segment(text="second", start=1, end=2),
+        ]
+    )
+
+    result = polish_transcript(transcript, Settings())
+
+    assert [segment.text for segment in result["transcript"].segments] == [
+        "first",
+        "second",
+    ]
+    assert [len(request["target_segments"]) for request in provider.requests] == [2, 1, 1]
+    assert result["detail"]["chunks"] == 2
+    assert result["detail"]["attempts"] == 3
+    assert result["detail"]["split_retries"] == 1

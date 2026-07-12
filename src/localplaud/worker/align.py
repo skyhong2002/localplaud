@@ -170,8 +170,16 @@ def _forced_align_whisperx(
     if not 0 <= minimum_coverage <= 1:
         raise AlignmentUnavailable("min_segment_coverage must be between 0 and 1")
     source_segments = [
-        {"text": segment.text, "start": segment.start, "end": segment.end}
-        for segment in transcript.segments
+        {
+            "text": segment.text,
+            "start": segment.start,
+            "end": segment.end,
+            # WhisperX preserves avg_logprob while splitting one input segment
+            # into sentence-level output segments. Use it only as a round-trip
+            # marker so those subsegments can be safely regrouped.
+            "avg_logprob": float(index),
+        }
+        for index, segment in enumerate(transcript.segments)
     ]
     if not source_segments or not any(item["text"].strip() for item in source_segments):
         raise AlignmentUnavailable("WhisperX forced alignment requires transcript segments")
@@ -200,43 +208,62 @@ def _forced_align_whisperx(
         raise AlignmentUnavailable(f"WhisperX forced alignment failed: {exc}") from exc
 
     aligned_segments = payload.get("segments") if isinstance(payload, dict) else None
-    if not isinstance(aligned_segments, list) or len(aligned_segments) != len(transcript.segments):
-        raise AlignmentError(
-            "WhisperX returned a different segment count; refusing to replace transcript timing"
-        )
+    if not isinstance(aligned_segments, list):
+        raise AlignmentError("WhisperX returned no aligned segments")
+    grouped: dict[int, list[dict[str, Any]]] = {
+        index: [] for index in range(len(transcript.segments))
+    }
+    for aligned in aligned_segments:
+        if not isinstance(aligned, dict):
+            raise AlignmentError("WhisperX returned a non-object segment")
+        marker = aligned.get("avg_logprob")
+        if not isinstance(marker, int | float) or not float(marker).is_integer():
+            raise AlignmentError("WhisperX did not preserve the input segment marker")
+        source_index = int(marker)
+        if source_index not in grouped:
+            raise AlignmentError("WhisperX returned an unknown input segment marker")
+        grouped[source_index].append(aligned)
+
     segments: list[Segment] = []
     unaligned_words = 0
-    for index, (source, aligned) in enumerate(zip(transcript.segments, aligned_segments, strict=True)):
-        if not isinstance(aligned, dict):
-            raise AlignmentError(f"WhisperX segment {index} is not an object")
+    unaligned_segments = 0
+    for index, source in enumerate(transcript.segments):
+        parts = grouped[index]
+        if not parts:
+            raise AlignmentError(f"WhisperX omitted input segment {index}")
         words: list[Word] = []
-        for item in aligned.get("words") or []:
-            if not isinstance(item, dict):
-                continue
-            word_text = str(item.get("word", item.get("text", "")))
-            start, end = item.get("start"), item.get("end")
-            if not word_text.strip() or start is None or end is None:
-                unaligned_words += 1
-                continue
-            words.append(
-                Word(
-                    text=word_text,
-                    start=float(start),
-                    end=float(end),
-                    speaker=item.get("speaker") or source.speaker,
-                    confidence=(
-                        float(item["score"]) if item.get("score") is not None else None
-                    ),
+        for part in parts:
+            for item in part.get("words") or []:
+                if not isinstance(item, dict):
+                    continue
+                word_text = str(item.get("word", item.get("text", "")))
+                start, end = item.get("start"), item.get("end")
+                if not word_text.strip() or start is None or end is None:
+                    unaligned_words += 1
+                    continue
+                words.append(
+                    Word(
+                        text=word_text,
+                        start=float(start),
+                        end=float(end),
+                        speaker=item.get("speaker") or source.speaker,
+                        confidence=(
+                            float(item["score"]) if item.get("score") is not None else None
+                        ),
+                    )
                 )
-            )
-        segment_start = float(aligned.get("start", source.start))
-        segment_end = float(aligned.get("end", source.end))
+        if not words:
+            unaligned_segments += 1
+        starts = [float(part["start"]) for part in parts if part.get("start") is not None]
+        ends = [float(part["end"]) for part in parts if part.get("end") is not None]
+        segment_start = min(starts, default=source.start)
+        segment_end = max(ends, default=source.end)
         segments.append(
             Segment(
                 text=source.text,
                 start=segment_start,
                 end=segment_end,
-                speaker=aligned.get("speaker") or source.speaker,
+                speaker=source.speaker,
                 words=words,
             )
         )
@@ -266,6 +293,7 @@ def _forced_align_whisperx(
         "interpolate_method": interpolate,
         "minimum_segment_coverage": minimum_coverage,
         "unaligned_words": unaligned_words,
+        "unaligned_segments": unaligned_segments,
     }
     return AlignmentResult(result, WHISPERX_PROVIDER, model or WHISPERX_AUTO_MODEL, detail)
 

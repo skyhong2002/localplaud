@@ -117,7 +117,7 @@ class PipelineConfig(BaseModel):
     # Character budget per LLM call. Longer transcripts are covered through
     # hierarchical map/reduce notes instead of being truncated.
     summary_chunk_chars: int = 12_000
-    polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
+    polish_chunk_chars: int = Field(default=2_500, ge=1_000, le=60_000)
     # Which summary template to use (default | meeting | call | lecture |
     # personal — see worker/summary_templates.py).
     summary_template: str = "default"
