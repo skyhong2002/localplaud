@@ -2,7 +2,48 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import create_engine, inspect, select, text
+
+
+def test_legacy_vocabulary_schema_is_rebuilt_without_losing_rules(tmp_path):
+    from localplaud.db.migrations import migrate_vocabulary_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path/'legacy-vocabulary.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """CREATE TABLE vocabulary_terms (
+                    id INTEGER PRIMARY KEY,
+                    term VARCHAR(256) NOT NULL UNIQUE,
+                    replacement VARCHAR(256) NOT NULL,
+                    language VARCHAR(16),
+                    case_sensitive BOOLEAN NOT NULL,
+                    enabled BOOLEAN NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )"""
+            )
+        )
+        connection.execute(
+            text(
+                """INSERT INTO vocabulary_terms
+                    (id, term, replacement, language, case_sensitive, enabled, created_at, updated_at)
+                    VALUES (9, 'old', 'new', 'zh-TW', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"""
+            )
+        )
+
+    assert migrate_vocabulary_schema(engine) == ["vocabulary_terms"]
+    columns = {item["name"] for item in inspect(engine).get_columns("vocabulary_terms")}
+    assert {"source_text", "replacement_text"} <= columns
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT id, source_text, replacement_text, language, case_sensitive, enabled "
+                "FROM vocabulary_terms"
+            )
+        ).one()
+    assert tuple(row) == (9, "old", "new", "zh-TW", 1, 1)
+    assert migrate_vocabulary_schema(engine) == []
 
 
 def _client(monkeypatch, tmp_path):

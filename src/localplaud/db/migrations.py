@@ -495,7 +495,50 @@ def migrate_vocabulary_schema(engine: Engine) -> list[str]:
         return []
     inspector = inspect(engine)
     if "vocabulary_terms" in inspector.get_table_names():
-        return []
+        columns = {column["name"] for column in inspector.get_columns("vocabulary_terms")}
+        if "source_text" in columns:
+            return []
+        if not {"term", "replacement"} <= columns:
+            return []
+        raw = engine.raw_connection()
+        try:
+            cursor = raw.cursor()
+            cursor.execute("PRAGMA foreign_keys=OFF")
+            cursor.executescript("""
+                BEGIN;
+                CREATE TABLE vocabulary_terms_new (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    source_text VARCHAR(300) NOT NULL,
+                    replacement_text VARCHAR(300) NOT NULL,
+                    language VARCHAR(24),
+                    case_sensitive BOOLEAN NOT NULL DEFAULT 0,
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    CONSTRAINT uq_vocabulary_source_language UNIQUE (source_text, language)
+                );
+                INSERT INTO vocabulary_terms_new (
+                    id, source_text, replacement_text, language, case_sensitive,
+                    enabled, created_at, updated_at
+                )
+                SELECT id, term, replacement, language, case_sensitive, enabled,
+                       created_at, updated_at
+                FROM vocabulary_terms;
+                DROP TABLE vocabulary_terms;
+                ALTER TABLE vocabulary_terms_new RENAME TO vocabulary_terms;
+                CREATE INDEX ix_vocabulary_terms_enabled ON vocabulary_terms (enabled);
+            """)
+            violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise RuntimeError(f"legacy vocabulary migration broke foreign keys: {violations}")
+            raw.commit()
+            cursor.execute("PRAGMA foreign_keys=ON")
+        except Exception:
+            raw.rollback()
+            raise
+        finally:
+            raw.close()
+        return ["vocabulary_terms"]
     with engine.begin() as connection:
         connection.execute(text("""
             CREATE TABLE vocabulary_terms (
