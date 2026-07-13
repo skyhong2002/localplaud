@@ -10,12 +10,14 @@ Two steps, both read-only against the cloud:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, insert, or_, select, update
+from sqlalchemy.exc import IntegrityError
 
 from ..config import Settings, get_settings
-from ..db.models import FileStatus, PlaudFile, StageAttempt, StageRun, StageStatus
+from ..db.models import FileStatus, KeyValue, PlaudFile, StageAttempt, StageRun, StageStatus
 from ..db.session import session_scope
 from ..plaud import make_plaud_client
 from ..plaud.models import PlaudFileDTO
@@ -27,6 +29,74 @@ log = logging.getLogger(__name__)
 # artifact check, so a rename (Plaud retitles a file when it summarizes it)
 # triggers exactly one re-check instead of one per poll cycle.
 _ARTIFACT_CHECKED_KEY = "_artifact_checked_name"
+_CATALOG_BASELINE_KEY = "plaud_catalog_baseline_v1"
+_CATALOG_SYNC_LOCK_KEY = "plaud_catalog_sync_lock_v1"
+_CATALOG_SYNC_LOCK_TTL = timedelta(minutes=15)
+
+
+def _insert_key_if_absent(session, *, key: str, value: dict) -> bool:
+    """Atomically insert a KeyValue row on SQLite, Postgres, or a generic DB."""
+    dialect = session.get_bind().dialect.name
+    values = {"key": key, "value": value}
+    if dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+
+        result = session.execute(
+            dialect_insert(KeyValue).values(**values).on_conflict_do_nothing()
+        )
+        return result.rowcount == 1
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+
+        result = session.execute(
+            dialect_insert(KeyValue).values(**values).on_conflict_do_nothing()
+        )
+        return result.rowcount == 1
+    try:
+        with session.begin_nested():
+            session.execute(insert(KeyValue).values(**values))
+        return True
+    except IntegrityError:
+        return False
+
+
+def _claim_catalog_sync() -> str | None:
+    """Return a durable sync token, or None when another poll owns the listing."""
+    now = datetime.now(UTC)
+    token = uuid4().hex
+    with session_scope() as session:
+        current = session.get(KeyValue, _CATALOG_SYNC_LOCK_KEY)
+        if current is not None:
+            claimed_at_raw = (current.value or {}).get("claimed_at")
+            try:
+                claimed_at = datetime.fromisoformat(str(claimed_at_raw))
+                if claimed_at.tzinfo is None:
+                    claimed_at = claimed_at.replace(tzinfo=UTC)
+            except (TypeError, ValueError):
+                claimed_at = now - _CATALOG_SYNC_LOCK_TTL - timedelta(seconds=1)
+            if claimed_at > now - _CATALOG_SYNC_LOCK_TTL:
+                return None
+            session.execute(
+                delete(KeyValue).where(
+                    KeyValue.key == _CATALOG_SYNC_LOCK_KEY,
+                    KeyValue.updated_at <= now - _CATALOG_SYNC_LOCK_TTL,
+                ),
+                execution_options={"synchronize_session": False},
+            )
+            session.flush()
+        claimed = _insert_key_if_absent(
+            session,
+            key=_CATALOG_SYNC_LOCK_KEY,
+            value={"token": token, "claimed_at": now.isoformat()},
+        )
+    return token if claimed else None
+
+
+def _release_catalog_sync(token: str) -> None:
+    with session_scope() as session:
+        row = session.get(KeyValue, _CATALOG_SYNC_LOCK_KEY)
+        if row is not None and (row.value or {}).get("token") == token:
+            session.delete(row)
 
 
 def _apply_dto(row: PlaudFile, dto: PlaudFileDTO) -> None:
@@ -46,29 +116,48 @@ def _apply_dto(row: PlaudFile, dto: PlaudFileDTO) -> None:
 def sync_file_list(client, settings: Settings) -> tuple[int, int]:
     """Upsert the cloud listing. Returns (new_count, changed_count).
 
-    Works with either official provider; both use the same file ids.
+    Works with either official provider; both use the same file ids. A fresh
+    workspace's first successful listing establishes a durable metadata-only
+    baseline so enabling automatic download never backfills an entire Plaud
+    history. Only recordings first observed after that baseline are queued for
+    automatic raw-audio download.
     """
-    new_count = changed_count = 0
-    with session_scope() as session:
-        for dto in client.iter_files(include_trash=settings.poller.include_trash):
-            row = session.get(PlaudFile, dto.id)
-            if row is None:
-                row = PlaudFile(
-                    id=dto.id,
-                    status=(
-                        FileStatus.discovered
-                        if settings.poller.auto_download
-                        else FileStatus.metadata_only
-                    ),
-                    origin="plaud",
+    sync_token = _claim_catalog_sync()
+    if sync_token is None:
+        log.info("Skipping Plaud listing because another poll owns the catalog sync")
+        return (0, 0)
+    try:
+        new_count = changed_count = 0
+        with session_scope() as session:
+            catalog_initialized = session.get(KeyValue, _CATALOG_BASELINE_KEY) is not None
+            for dto in client.iter_files(include_trash=settings.poller.include_trash):
+                row = session.get(PlaudFile, dto.id)
+                if row is None:
+                    row = PlaudFile(
+                        id=dto.id,
+                        status=(
+                            FileStatus.discovered
+                            if settings.poller.auto_download and catalog_initialized
+                            else FileStatus.metadata_only
+                        ),
+                        origin="plaud",
+                    )
+                    _apply_dto(row, dto)
+                    session.add(row)
+                    new_count += 1
+                    log.info("New file discovered: %s (%s)", dto.id, dto.filename)
+                else:
+                    _apply_dto(row, dto)
+            if session.get(KeyValue, _CATALOG_BASELINE_KEY) is None:
+                session.add(
+                    KeyValue(
+                        key=_CATALOG_BASELINE_KEY,
+                        value={"completed_at": datetime.now(UTC).isoformat()},
+                    )
                 )
-                _apply_dto(row, dto)
-                session.add(row)
-                new_count += 1
-                log.info("New file discovered: %s (%s)", dto.id, dto.filename)
-            else:
-                _apply_dto(row, dto)
-    return new_count, changed_count
+        return new_count, changed_count
+    finally:
+        _release_catalog_sync(sync_token)
 
 
 def reset_inflight(*, force: bool = False) -> int:
@@ -169,12 +258,34 @@ def reset_download_errors() -> int:
     return reset
 
 
-def _download_one(client, file_id: str, raw: dict, settings: Settings) -> bool:
+def _download_one(
+    client,
+    file_id: str,
+    raw: dict,
+    settings: Settings,
+    *,
+    claim_acquired: bool = False,
+) -> bool:
     dest_dir = file_dir(file_id)
     dto = PlaudFileDTO.model_validate(raw or {"id": file_id})
     try:
-        with session_scope() as session:
-            session.get(PlaudFile, file_id).status = FileStatus.downloading
+        if not claim_acquired:
+            with session_scope() as session:
+                claimed = session.execute(
+                    update(PlaudFile)
+                    .where(
+                        PlaudFile.id == file_id,
+                        PlaudFile.status == FileStatus.discovered,
+                    )
+                    .values(status=FileStatus.downloading)
+                ).rowcount
+            if claimed != 1:
+                return False
+        else:
+            with session_scope() as session:
+                row = session.get(PlaudFile, file_id)
+                if row is None or row.status != FileStatus.downloading:
+                    return False
         dest = client.download_audio(dto, dest_dir)
         with session_scope() as session:
             fresh = session.get(PlaudFile, file_id)

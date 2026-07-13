@@ -80,9 +80,9 @@ class PlaudConfig(BaseModel):
 class PollerConfig(BaseModel):
     enabled: bool = True
     interval_seconds: int = 300
-    # Metadata-first by default: new cloud rows become visible immediately, but
-    # raw audio is downloaded only when the user requests that recording.
-    auto_download: bool = False
+    # The first catalog sync is always metadata-only. After that durable baseline,
+    # newly uploaded recordings download automatically for the independent pipeline.
+    auto_download: bool = True
     include_trash: bool = False
     download_dir: Path = Path("./data/audio")
     # Cap concurrent downloads to be gentle on the cloud + local disk.

@@ -97,7 +97,102 @@ def test_local_audio_upload_and_metadata_only_ui(monkeypatch, tmp_path):
     ).status_code == 415
 
 
-def test_poller_defaults_to_metadata_only(monkeypatch, tmp_path):
+def test_on_demand_plaud_audio_import_uses_its_existing_claim(monkeypatch, tmp_path):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.imports import _run_audio_import
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="history-audio",
+                filename="History audio",
+                origin="plaud",
+                status=FileStatus.downloading,
+                raw={"id": "history-audio", "filename": "History audio"},
+            )
+        )
+
+    class FakeClient:
+        calls = 0
+
+        def download_audio(self, dto, destination):
+            self.calls += 1
+            path = destination / "audio.opus"
+            path.write_bytes(b"audio")
+            return path
+
+    fake = FakeClient()
+
+    @contextmanager
+    def fake_factory(_config):
+        yield fake
+
+    monkeypatch.setattr("localplaud.imports.make_plaud_client", fake_factory)
+    _run_audio_import("history-audio", {"id": "history-audio"}, settings)
+
+    assert fake.calls == 1
+    with session_scope() as session:
+        row = session.get(PlaudFile, "history-audio")
+        assert row.status == FileStatus.downloaded
+        assert row.audio_path
+
+
+def test_poller_baselines_history_then_queues_only_new_recordings(monkeypatch, tmp_path):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, KeyValue, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import sync_file_list
+
+    init_db()
+    assert settings.poller.auto_download is True
+
+    class FakeClient:
+        files = [PlaudFileDTO(id="historical", filename="Historical")]
+
+        def iter_files(self, include_trash=False):
+            yield from self.files
+
+    client = FakeClient()
+    assert sync_file_list(client, settings) == (1, 0)
+    with session_scope() as session:
+        assert session.get(PlaudFile, "historical").status == FileStatus.metadata_only
+        assert session.get(KeyValue, "plaud_catalog_baseline_v1") is not None
+
+    client.files.append(PlaudFileDTO(id="new-upload", filename="New upload"))
+    assert sync_file_list(client, settings) == (1, 0)
+    with session_scope() as session:
+        assert session.get(PlaudFile, "historical").status == FileStatus.metadata_only
+        assert session.get(PlaudFile, "new-upload").status == FileStatus.discovered
+
+
+def test_disabled_auto_download_keeps_post_baseline_recordings_metadata_only(
+    monkeypatch, tmp_path
+):
+    settings = _reset_db(monkeypatch, tmp_path)
+    settings.poller.auto_download = False
+    from localplaud.db.models import FileStatus, KeyValue, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import sync_file_list
+
+    init_db()
+    with session_scope() as session:
+        session.add(KeyValue(key="plaud_catalog_baseline_v1", value={}))
+
+    class FakeClient:
+        def iter_files(self, include_trash=False):
+            yield PlaudFileDTO(id="manual", filename="Manual import")
+
+    assert sync_file_list(FakeClient(), settings) == (1, 0)
+    with session_scope() as session:
+        assert session.get(PlaudFile, "manual").status == FileStatus.metadata_only
+
+
+def test_empty_catalog_baseline_queues_the_first_future_recording(monkeypatch, tmp_path):
     settings = _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, PlaudFile
     from localplaud.db.session import init_db, session_scope
@@ -107,9 +202,56 @@ def test_poller_defaults_to_metadata_only(monkeypatch, tmp_path):
     init_db()
 
     class FakeClient:
-        def iter_files(self, include_trash=False):
-            yield PlaudFileDTO(id="metadata", filename="Latest")
+        files: list[PlaudFileDTO] = []
 
-    assert sync_file_list(FakeClient(), settings) == (1, 0)
+        def iter_files(self, include_trash=False):
+            yield from self.files
+
+    client = FakeClient()
+    assert sync_file_list(client, settings) == (0, 0)
+    client.files.append(PlaudFileDTO(id="first-upload", filename="First upload"))
+    assert sync_file_list(client, settings) == (1, 0)
     with session_scope() as session:
-        assert session.get(PlaudFile, "metadata").status == FileStatus.metadata_only
+        assert session.get(PlaudFile, "first-upload").status == FileStatus.discovered
+
+
+def test_existing_catalog_without_marker_gets_one_safe_upgrade_baseline(
+    monkeypatch, tmp_path
+):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, KeyValue, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import sync_file_list
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="mirrored-history",
+                filename="Mirrored history",
+                origin="plaud",
+                status=FileStatus.metadata_only,
+            )
+        )
+
+    class FakeClient:
+        files = [
+            PlaudFileDTO(id="mirrored-history", filename="Mirrored history"),
+            PlaudFileDTO(id="found-during-upgrade", filename="Found during upgrade"),
+        ]
+
+        def iter_files(self, include_trash=False):
+            yield from self.files
+
+    client = FakeClient()
+    assert sync_file_list(client, settings) == (1, 0)
+    with session_scope() as session:
+        assert session.get(PlaudFile, "mirrored-history").status == FileStatus.metadata_only
+        assert session.get(PlaudFile, "found-during-upgrade").status == FileStatus.metadata_only
+        assert session.get(KeyValue, "plaud_catalog_baseline_v1") is not None
+
+    client.files.append(PlaudFileDTO(id="post-upgrade", filename="Post-upgrade upload"))
+    assert sync_file_list(client, settings) == (1, 0)
+    with session_scope() as session:
+        assert session.get(PlaudFile, "post-upgrade").status == FileStatus.discovered

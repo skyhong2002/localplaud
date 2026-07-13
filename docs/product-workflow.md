@@ -343,6 +343,12 @@ backoff. Newly downloaded recordings remain ahead of retries in each bounded dae
 batch; the recording UI shows the next retry or exhausted state, and an explicit
 Resume bypasses the delay and resets the consecutive-failure budget.
 
+The first successful Plaud listing establishes a durable metadata-only catalog
+baseline, so connecting an established account never downloads its entire history by
+surprise. With automatic download enabled (the default), recordings first observed
+after that baseline are downloaded and enter the worker without a Web or CLI action.
+Explicit Import audio remains available for any metadata-only historical recording.
+
 Before work starts, localplaud resolves and persists the recording's execution
 profile. Each stage dispatches independently to its selected local runtime, cloud
 provider, or remote worker. Retries are idempotent and preserve the resolved profile

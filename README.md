@@ -39,8 +39,8 @@ and pinned checksum, so normal Web App interaction does not depend on a CDN.
 ## Status
 
 The core skeleton works: OAuth polling through **Plaud's official Open API**,
-metadata-first library sync with on-demand raw-audio download, pluggable local ASR,
-diarization, LLM notes, embeddings/Q&A, audio
+a safe metadata-only first catalog sync followed by automatic download of new raw
+audio, pluggable local ASR, diarization, LLM notes, embeddings/Q&A, audio
 playback, and a FastAPI Web App. It runs natively and in Docker profiles.
 
 The subscription-replacement experience is **in progress**, not complete. The
@@ -54,7 +54,9 @@ revisions, editable per-recording speaker names,
 single-file Ask with playable citations, richer library filters, and Plaud-style
 Add audio / Import from Plaud flows are implemented. A Plaud import refreshes the
 entire metadata catalog plus any existing Plaud transcript/summary while leaving raw
-audio remote until the user requests one recording. The recording export dialog
+audio remote until the user requests one recording. After that baseline, scheduled
+polling automatically downloads recordings first observed as new uploads. The
+recording export dialog
 produces transcript TXT/SRT/VTT/DOCX/PDF formats with timestamp/speaker controls.
 PDF embeds a portable Traditional Chinese font. Generated and Saved notes export as
 Markdown, TXT, DOCX, or PDF; original-audio, mind-map image, and Markdown archive

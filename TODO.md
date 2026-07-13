@@ -85,6 +85,13 @@ migration/debug-only.
   counts provide progress. Failed and usable-partial cycles now retry automatically
   with durable bounded exponential backoff; fresh downloads stay ahead of due
   retries, exhaustion is visible, and manual Resume immediately resets the budget.
+- ✅ Automatic ingest now distinguishes the initial catalog baseline from genuinely
+  new uploads. A fresh workspace mirrors its existing Plaud history as metadata-only,
+  records that baseline durably, then downloads and processes recordings first seen
+  on later polls by default. This avoids a surprise historical backfill while making
+  the normal recorder → Plaud App → localplaud path hands-off. A durable expiring
+  catalog-sync claim serializes concurrent pollers, and each audio download uses an
+  atomic status claim so overlapping CLI/daemon cycles cannot fetch the same file twice.
 - ✅ Added a read-only `localplaud acceptance-check RECORDING_ID` product gate. It
   verifies local audio/transcript provenance, timestamped speaker output, local notes
   and mind map, Ask-ready local chunks, durable profile snapshots, and
@@ -358,7 +365,8 @@ embedding raw provider credentials or model settings in each rule.
   background Import from Plaud job. It refreshes the full metadata catalog and any
   paid Plaud transcript/summary, never downloads audio during catalog import, and
   exposes a per-recording Import audio action for metadata-only rows. Scheduled
-  polling now follows the same metadata-first default.
+  polling keeps that first-sync baseline metadata-only, then automatically downloads
+  recordings newly uploaded after the baseline.
 - ✅ (partial) Explicit raw-ASR versus corrected-canonical transcript switch with
   synchronized timestamps/speaker labels is live. Transcript-local search provides
   next/previous navigation, and case-aware replace-all creates one immutable bulk

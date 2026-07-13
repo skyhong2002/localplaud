@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime, timedelta
 
 
@@ -12,7 +13,7 @@ def _reset_db(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 't.db'}")
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
-    get_settings(reload=True)
+    return get_settings(reload=True)
 
 
 def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
@@ -170,3 +171,142 @@ def test_reset_download_errors_retries_only_audioless_rows(monkeypatch, tmp_path
         assert s.get(PlaudFile, "dl-err").status == FileStatus.discovered
         assert s.get(PlaudFile, "dl-err").error is None
         assert s.get(PlaudFile, "pipe-err").status == FileStatus.error
+
+
+def test_catalog_sync_claim_serializes_concurrent_first_listing(monkeypatch, tmp_path):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, KeyValue, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import sync_file_list
+
+    init_db()
+    entered = threading.Event()
+    release = threading.Event()
+    result: list[tuple[int, int]] = []
+
+    class BlockingClient:
+        def iter_files(self, include_trash=False):
+            entered.set()
+            assert release.wait(timeout=5)
+            yield PlaudFileDTO(id="baseline", filename="Baseline")
+
+    worker = threading.Thread(
+        target=lambda: result.append(sync_file_list(BlockingClient(), settings))
+    )
+    worker.start()
+    assert entered.wait(timeout=5)
+    assert sync_file_list(BlockingClient(), settings) == (0, 0)
+    release.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive() and result == [(1, 0)]
+
+    with session_scope() as session:
+        assert session.get(PlaudFile, "baseline").status == FileStatus.metadata_only
+        assert session.get(KeyValue, "plaud_catalog_baseline_v1") is not None
+        assert session.get(KeyValue, "plaud_catalog_sync_lock_v1") is None
+
+
+def test_failed_paginated_listing_rolls_back_baseline_and_releases_claim(
+    monkeypatch, tmp_path
+):
+    settings = _reset_db(monkeypatch, tmp_path)
+    import pytest
+
+    from localplaud.db.models import KeyValue, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import sync_file_list
+
+    init_db()
+
+    class FailingClient:
+        def iter_files(self, include_trash=False):
+            yield PlaudFileDTO(id="partial-page", filename="Partial page")
+            raise RuntimeError("next page unavailable")
+
+    with pytest.raises(RuntimeError, match="next page unavailable"):
+        sync_file_list(FailingClient(), settings)
+
+    with session_scope() as session:
+        assert session.get(PlaudFile, "partial-page") is None
+        assert session.get(KeyValue, "plaud_catalog_baseline_v1") is None
+        assert session.get(KeyValue, "plaud_catalog_sync_lock_v1") is None
+
+
+def test_stale_catalog_sync_claim_is_recovered(monkeypatch, tmp_path):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import KeyValue
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import sync_file_list
+
+    init_db()
+    stale = datetime.now(UTC) - timedelta(hours=1)
+    with session_scope() as session:
+        session.add(
+            KeyValue(
+                key="plaud_catalog_sync_lock_v1",
+                value={"token": "crashed", "claimed_at": stale.isoformat()},
+                updated_at=stale,
+            )
+        )
+
+    class EmptyClient:
+        def iter_files(self, include_trash=False):
+            return iter(())
+
+    assert sync_file_list(EmptyClient(), settings) == (0, 0)
+    with session_scope() as session:
+        assert session.get(KeyValue, "plaud_catalog_baseline_v1") is not None
+        assert session.get(KeyValue, "plaud_catalog_sync_lock_v1") is None
+
+
+def test_download_claim_prevents_duplicate_cloud_fetch(monkeypatch, tmp_path):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import _download_one
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="new-audio",
+                filename="New audio",
+                status=FileStatus.discovered,
+                raw={"id": "new-audio", "filename": "New audio"},
+            )
+        )
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingClient:
+        calls = 0
+
+        def download_audio(self, dto, destination):
+            self.calls += 1
+            entered.set()
+            assert release.wait(timeout=5)
+            path = destination / "audio.opus"
+            path.write_bytes(b"audio")
+            return path
+
+    client = BlockingClient()
+    result: list[bool] = []
+    worker = threading.Thread(
+        target=lambda: result.append(
+            _download_one(client, "new-audio", {"id": "new-audio"}, settings)
+        )
+    )
+    worker.start()
+    assert entered.wait(timeout=5)
+    assert _download_one(client, "new-audio", {"id": "new-audio"}, settings) is False
+    release.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive() and result == [True]
+    assert client.calls == 1
+    with session_scope() as session:
+        row = session.get(PlaudFile, "new-audio")
+        assert row.status == FileStatus.downloaded
+        assert row.audio_path

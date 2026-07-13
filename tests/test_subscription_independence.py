@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 
 from typer.testing import CliRunner
 
@@ -108,7 +109,7 @@ def _providers(monkeypatch):
 
 
 def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_path):
-    _setup(monkeypatch, tmp_path)
+    settings = _setup(monkeypatch, tmp_path)
     from localplaud.acceptance import subscription_independence_report
     from localplaud.cli import app
     from localplaud.db.models import (
@@ -118,24 +119,46 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         StageStatus,
     )
     from localplaud.db.session import init_db, session_scope
-    from localplaud.worker.pipeline import process_file
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import poll_once
+    from localplaud.worker.pipeline import process_pending
 
     init_db()
-    audio = tmp_path / "clean.wav"
-    audio.write_bytes(b"RIFF-local-user-owned-audio")
-    with session_scope() as session:
-        session.add(
-            PlaudFile(
-                id="clean",
-                filename="Clean raw recording",
-                status=FileStatus.downloaded,
-                audio_path=str(audio),
-            )
-        )
+    class FakePlaudClient:
+        files = [PlaudFileDTO(id="historical", filename="Historical recording")]
+        downloads: list[str] = []
+
+        def iter_files(self, include_trash=False):
+            yield from self.files
+
+        def download_audio(self, dto, destination):
+            self.downloads.append(dto.id)
+            path = destination / "audio.wav"
+            path.write_bytes(b"RIFF-local-user-owned-audio")
+            return path
+
+    cloud = FakePlaudClient()
+
+    @contextmanager
+    def fake_client_factory(_settings):
+        yield cloud
+
+    monkeypatch.setattr("localplaud.poller.poll.make_plaud_client", fake_client_factory)
+    baseline = poll_once(settings)
+    assert baseline["new"] == 1 and baseline["downloaded"] == 0
+    cloud.files.append(
+        PlaudFileDTO(id="clean", filename="Clean raw recording", start_time=1_750_000_000_000)
+    )
+    incremental = poll_once(settings)
+    assert incremental["new"] == 1 and incremental["downloaded"] == 1
+    assert cloud.downloads == ["clean"]
+
     _providers(monkeypatch)
-    process_file("clean")
+    assert process_pending(settings, limit=1) == 1
     with session_scope() as session:
+        assert session.get(PlaudFile, "historical").status == FileStatus.metadata_only
         row = session.get(PlaudFile, "clean")
+        assert row.audio_path and row.status == FileStatus.done
         polished = row.corrected_transcript
         assert polished.kind == "ai_polish"
         assert polished.provider == "ollama"

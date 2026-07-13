@@ -195,7 +195,7 @@ def start_plaud_audio_import(file_id: str, settings: Settings | None = None) -> 
 
 def _run_audio_import(file_id: str, raw: dict, settings: Settings) -> None:
     with make_plaud_client(settings.plaud) as client:
-        _download_one(client, file_id, raw, settings)
+        _download_one(client, file_id, raw, settings, claim_acquired=True)
 
 
 def audio_import_status(file_id: str) -> dict:
