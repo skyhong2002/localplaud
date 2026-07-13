@@ -67,10 +67,19 @@
     <form method="post" action="/file/{{ f.id }}/profile" class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
       <label for="profile-select" style="font-weight:650">{{ t('Execution profile') }}</label>
       <select id="profile-select" name="profile_id" class="search-input" style="flex:1;min-width:220px;padding:7px 10px">
+        <option value="" {% if f.profile_id is none %}selected{% endif %}>{{ t('Automatic') }} · {{ t('resolved from workspace rules') }}</option>
         {% for profile in f.profiles %}<option value="{{ profile.id }}" {% if profile.id == f.profile_id %}selected{% endif %}>{{ profile.label }}{% if profile.default %} · system default{% endif %}</option>{% endfor %}
       </select>
       <button class="btn sec" type="submit" style="padding:8px 12px">{{ t('Use profile') }}</button>
-      <span class="sub" style="font-size:12px">{{ t('Applied on the next Resume or Rebuild.') }}</span>
+      <span class="sub" style="font-size:12px">{{ t('Pending stages use this profile on Resume. Rebuild reruns completed stages.') }}</span>
+      <div class="sub" style="font-size:11.5px;flex-basis:100%;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span>{{ t('Resolved layers') }}:</span>
+        {% for layer in f.profile_resolution.layer_provenance %}<span class="chip">{{ layer.kind|replace('_',' ') }}{% if layer.profile_key %} · {{ layer.profile_key }}@{{ layer.profile_version }}{% endif %}</span>{% endfor %}
+      </div>
+      {% if f.profile_resolution_error %}<div style="color:var(--red);font-size:12px;flex-basis:100%">{{ t('Profile resolution needs attention') }} · {{ f.profile_resolution_error }}</div>{% endif %}
+      <div id="resolved-stage-list" style="font-size:11.5px;flex-basis:100%;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        {% for stage, choice in f.profile_resolution.stages.items() %}<span class="chip">{{ stage }} · {{ choice.connection }}:{{ choice.model }}</span>{% endfor %}
+      </div>
       {% if f.budget.ceiling_usd is not none %}<div class="sub" style="font-size:11.5px;flex-basis:100%">Cost boundary · ${{ f.budget.spent_usd }} spent · ${{ f.budget.remaining_usd }} remaining of ${{ f.budget.ceiling_usd }}{% if f.budget.exceeded %} · <span style="color:var(--red)">ceiling exceeded; choose another profile before resuming</span>{% endif %}</div>{% endif %}
     </form>
     {% endif %}
@@ -82,7 +91,7 @@
         {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
       </select>
       <button class="btn sec" type="button" id="save-note-template" style="padding:8px 12px">{{ t('Use template') }}</button>
-      <span id="note-template-result" class="sub" style="font-size:12px">{{ t('Applied on the next Resume or Rebuild.') }}</span>
+      <span id="note-template-result" class="sub" style="font-size:12px">{{ t('Resume updates derived stages. Rebuild is required for completed speech stages.') }}</span>
     </div>
 
     {% if f.has_audio %}
@@ -431,8 +440,10 @@
     else{out.textContent=data.detail||tr('Could not save template');button.disabled=false;}
   });
   const noteTemplateSelect=document.getElementById('note-template-select');
-  async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent=tr('Checking recording signals…');const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`${tr('Auto suggests')} ${data.template?.name||data.key} · ${data.confidence} ${tr('confidence')} · ${reason}`;}else out.textContent=data.detail||tr('Could not preview Auto selection');}
-  noteTemplateSelect?.addEventListener('change',()=>{if(noteTemplateSelect.value==='auto')previewAutoTemplate();else document.getElementById('note-template-result').textContent=tr('Applied on the next Resume or Rebuild.');});
+  function renderResolvedStages(resolved){const list=document.getElementById('resolved-stage-list');if(!list||!resolved?.stages)return;list.replaceChildren();for(const [stage,choice] of Object.entries(resolved.stages)){const chip=document.createElement('span');chip.className='chip';chip.textContent=`${tr(stage)} · ${choice.connection}:${choice.model}`;list.append(chip);}}
+  async function previewTemplateResolution(key){const response=await fetch(`/api/providers/recordings/{{ f.id }}/resolution?template_key=${encodeURIComponent(key)}`),data=await response.json();if(response.ok)renderResolvedStages(data.resolved);}
+  async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent=tr('Checking recording signals…');const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`${tr('Auto suggests')} ${data.template?.name||data.key} · ${data.confidence} ${tr('confidence')} · ${reason}`;previewTemplateResolution(data.key);}else out.textContent=data.detail||tr('Could not preview Auto selection');}
+  noteTemplateSelect?.addEventListener('change',()=>{if(noteTemplateSelect.value==='auto')previewAutoTemplate();else{document.getElementById('note-template-result').textContent=tr('Resume updates derived stages. Rebuild is required for completed speech stages.');previewTemplateResolution(noteTemplateSelect.value);}});
   if(noteTemplateSelect?.value==='auto')previewAutoTemplate();
   const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   document.querySelectorAll('[data-md]').forEach(el => {

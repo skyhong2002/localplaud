@@ -242,9 +242,46 @@ def test_pipeline_persists_mind_map_and_resumes(monkeypatch, tmp_path):
         run = next(x for x in s.get(PlaudFile, "mm1").stage_runs if x.stage == StageName.mind_map)
         assert run.detail == {"reused": True}
 
+    # A different notes template changes the mind-map input even when the
+    # mind-map provider selection itself is unchanged.
+    with session_scope() as s:
+        s.get(PlaudFile, "mm1").note_template_key = "meeting"
+    process_file("mm1")
+    assert counters["mm"] == 2
+    with session_scope() as s:
+        mind_map = next(
+            item for item in s.get(PlaudFile, "mm1").summaries
+            if item.template == "mind_map"
+        )
+        assert mind_map.template_snapshot["source_template_key"] == "meeting"
+
+    from localplaud.db.models import NoteTemplate
+
+    with session_scope() as s:
+        meeting = s.query(NoteTemplate).filter_by(key="meeting", is_active=True).one()
+        meeting.is_active = False
+        s.add(
+            NoteTemplate(
+                key="meeting",
+                version=meeting.version + 1,
+                name=meeting.name,
+                system_prompt=meeting.system_prompt,
+                instructions=meeting.instructions + "\n\n## New section",
+                is_active=True,
+            )
+        )
+    process_file("mm1")
+    assert counters["mm"] == 3
+    with session_scope() as s:
+        mind_map = next(
+            item for item in s.get(PlaudFile, "mm1").summaries
+            if item.template == "mind_map"
+        )
+        assert mind_map.template_snapshot["source_template_version"] == 2
+
     # Force: the mind map is rebuilt.
     process_file("mm1", force=True)
-    assert counters["mm"] == 2
+    assert counters["mm"] == 4
 
 
 def test_mind_map_failure_leaves_partial_file_with_usable_artifacts(monkeypatch, tmp_path):

@@ -18,7 +18,7 @@ from .db.models import (
     NoteTemplate,
     Notification,
     PlaudFile,
-    RecordingProfileOverride,
+    RecordingRuleProfileAssignment,
     StageName,
     StageRun,
     StageStatus,
@@ -115,7 +115,9 @@ def _mark_notes_stale(session, file_id: str) -> None:
             run.error = None
 
 
-def _apply_actions(session, rule: AutomationRule, recording: PlaudFile) -> dict:
+def _apply_actions(
+    session, rule: AutomationRule, recording: PlaudFile, *, automation_run_id: int
+) -> dict:
     actions = rule.actions or {}
     applied: dict = {}
     if key := actions.get("note_template_key"):
@@ -124,11 +126,35 @@ def _apply_actions(session, rule: AutomationRule, recording: PlaudFile) -> dict:
         applied["note_template_key"] = key
     if actions.get("profile_id") is not None:
         profile_id = int(actions["profile_id"])
-        override = session.get(RecordingProfileOverride, recording.id)
-        if override is None:
-            session.add(RecordingProfileOverride(file_id=recording.id, profile_id=profile_id))
+        assignment = session.get(
+            RecordingRuleProfileAssignment, (recording.id, rule.id)
+        )
+        if assignment is None:
+            session.add(
+                RecordingRuleProfileAssignment(
+                    file_id=recording.id,
+                    rule_id=rule.id,
+                    rule_version=rule.version,
+                    priority_snapshot=rule.priority,
+                    profile_id=profile_id,
+                    automation_run_id=automation_run_id,
+                    rule_snapshot={
+                        "name": rule.name,
+                        "owner_type": rule.owner_type,
+                        "owner_key": rule.owner_key,
+                    },
+                )
+            )
         else:
-            override.profile_id = profile_id
+            assignment.profile_id = profile_id
+            assignment.rule_version = rule.version
+            assignment.priority_snapshot = rule.priority
+            assignment.automation_run_id = automation_run_id
+            assignment.rule_snapshot = {
+                "name": rule.name,
+                "owner_type": rule.owner_type,
+                "owner_key": rule.owner_key,
+            }
         applied["profile_id"] = profile_id
     if actions.get("folder_id") is not None:
         recording.folder_id = int(actions["folder_id"])
@@ -159,6 +185,7 @@ def evaluate_recording(file_id: str) -> list[dict]:
             )
         )
     for rule_id in rule_ids:
+        run: AutomationRun | None = None
         downstream_run_id: int | None = None
         notification_requested = False
         with session_scope() as session:
@@ -193,18 +220,15 @@ def evaluate_recording(file_id: str) -> list[dict]:
                     list((rule.actions or {}).get("email_integration_ids", [])),
                     require_enabled=False,
                 )
-                with session.begin_nested():
-                    applied = _apply_actions(session, rule, recording)
                 run = AutomationRun(
                     rule_id=rule.id,
                     rule_version=rule.version,
                     file_id=file_id,
-                    status="completed",
+                    status="running",
                     matched=True,
                     detail={
                         "rule_name": rule.name,
                         "reasons": reasons,
-                        "applied": applied,
                         "notification_requested": rule.notify,
                         "export_requested": list((rule.actions or {}).get("export_formats", [])),
                         "webhook_requested": webhook_requested,
@@ -213,22 +237,33 @@ def evaluate_recording(file_id: str) -> list[dict]:
                 )
                 session.add(run)
                 session.flush()
+                with session.begin_nested():
+                    applied = _apply_actions(
+                        session, rule, recording, automation_run_id=run.id
+                    )
+                run.status = "completed"
+                run.detail = (run.detail or {}) | {"applied": applied}
                 downstream_run_id = run.id
                 notification_requested = rule.notify
                 results.append({"rule_id": rule.id, "status": "completed", "applied": applied})
             except Exception as exc:  # noqa: BLE001
                 error = sanitize_error(exc)
-                session.add(
-                    AutomationRun(
-                        rule_id=rule.id,
-                        rule_version=rule.version,
-                        file_id=file_id,
-                        status="failed",
-                        matched=True,
-                        detail={"reasons": reasons},
-                        error=error,
+                if run is not None:
+                    run.status = "failed"
+                    run.detail = {"rule_name": rule.name, "reasons": reasons}
+                    run.error = error
+                else:
+                    session.add(
+                        AutomationRun(
+                            rule_id=rule.id,
+                            rule_version=rule.version,
+                            file_id=file_id,
+                            status="failed",
+                            matched=True,
+                            detail={"rule_name": rule.name, "reasons": reasons},
+                            error=error,
+                        )
                     )
-                )
                 results.append({"rule_id": rule.id, "status": "failed", "error": error})
         if downstream_run_id is not None and notification_requested:
             try:

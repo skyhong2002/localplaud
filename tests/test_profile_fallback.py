@@ -119,6 +119,7 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
     from localplaud.embeddings.base import EmbeddingUnavailable
     from localplaud.llm.base import LLMUnavailable
     from localplaud.providers.contracts import ProviderStage
+    calls = {"summary": 0, "mind_map": 0, "embed": 0}
 
     with session_scope() as session:
         _seed_file(session, tmp_path)
@@ -175,6 +176,7 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
         )
 
     def fake_summary(transcript, candidate_settings):
+        calls["summary"] += 1
         if candidate_settings.llm.provider != "openai":
             raise LLMUnavailable("primary LLM unavailable")
         return {
@@ -186,6 +188,7 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
         }
 
     def fake_mind_map(transcript, candidate_settings, summary_md=None):
+        calls["mind_map"] += 1
         if candidate_settings.llm.provider != "openai":
             raise LLMUnavailable("primary mind map unavailable")
         return {
@@ -197,6 +200,7 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
         }
 
     def fake_embed(chunks, candidate_settings):
+        calls["embed"] += 1
         if candidate_settings.embeddings.provider != "openai":
             raise EmbeddingUnavailable("primary embeddings unavailable")
         return [b"\x00\x00\x80?" for _ in chunks], "embed-test", 1
@@ -246,6 +250,10 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
     settings_page = client.get("/settings")
     assert "Fallback order" in settings_page.text
     assert 'name="fallback-transcribe"' in settings_page.text
+
+    first_calls = dict(calls)
+    pipeline.process_file("fallback", settings)
+    assert calls == first_calls
 
 
 def test_hard_asr_error_does_not_fallback(monkeypatch, tmp_path):

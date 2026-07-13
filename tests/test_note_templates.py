@@ -51,6 +51,7 @@ def test_builtin_bootstrap_and_versioned_crud(monkeypatch, tmp_path):
     builtins = client.get("/api/note-templates").json()["templates"]
     assert {row["key"] for row in builtins} >= {"default", "meeting", "call"}
     assert all(row["version"] == 1 for row in builtins)
+    profile_id = client.get("/api/providers/profiles").json()["profiles"][0]["id"]
 
     created = client.post(
         "/api/note-templates",
@@ -59,6 +60,7 @@ def test_builtin_bootstrap_and_versioned_crud(monkeypatch, tmp_path):
             "name": "Research interview",
             "system_prompt": "Stay faithful.",
             "instructions": "# Topic\n\n## Evidence",
+            "execution_profile_id": profile_id,
         },
     )
     assert created.status_code == 201
@@ -76,6 +78,7 @@ def test_builtin_bootstrap_and_versioned_crud(monkeypatch, tmp_path):
     )
     assert version.status_code == 201
     assert version.json()["version"] == 2
+    assert version.json()["execution_profile_id"] == profile_id
     active = client.get("/api/note-templates").json()["templates"]
     assert next(row for row in active if row["key"] == "research-interview")["version"] == 2
     history = client.get("/api/note-templates?include_history=true").json()["templates"]
@@ -187,6 +190,33 @@ def test_legacy_note_template_schema_is_rebuilt_without_losing_prompts(tmp_path)
         ).one()
     assert tuple(row) == (7, "meeting-notes", 2, "system", "instructions", 1, 1)
     assert migrate_legacy_note_template_schema(engine) == []
+
+
+def test_legacy_note_template_migration_preserves_valid_profile(tmp_path):
+    from localplaud.db.migrations import migrate_legacy_note_template_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path/'legacy-note-profile.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE execution_profiles (id INTEGER PRIMARY KEY)"))
+        connection.execute(text("INSERT INTO execution_profiles (id) VALUES (12)"))
+        connection.execute(text("""
+            CREATE TABLE note_templates (
+                id INTEGER PRIMARY KEY, name VARCHAR(64) NOT NULL,
+                system_prompt TEXT NOT NULL, instructions TEXT NOT NULL,
+                execution_profile_id INTEGER, created_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO note_templates (
+                id, name, system_prompt, instructions, execution_profile_id, created_at
+            ) VALUES (1, 'Custom', 'system', 'instructions', 12, CURRENT_TIMESTAMP)
+        """))
+
+    assert migrate_legacy_note_template_schema(engine) == ["note_templates"]
+    with engine.connect() as connection:
+        assert connection.scalar(
+            text("SELECT execution_profile_id FROM note_templates WHERE id = 1")
+        ) == 12
 
 
 def test_legacy_note_template_migration_rejects_unmapped_user_settings(tmp_path):

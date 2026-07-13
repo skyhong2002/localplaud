@@ -123,10 +123,13 @@ Backend foundation landed on 2026-07-11, but this is not yet the finished featur
   records now cover provider connections, model catalog entries, versioned execution
   profiles, per-stage selections, and per-recording overrides; ordinary rows retain
   only opaque secret references.
-- ✅ Added deterministic layered resolution (system → folder/rule → template →
-  recording), immutable JSON snapshots, capability validation, no-egress enforcement,
-  an idempotent Settings-equivalent bootstrap, legacy SQLite migration, and headless
-  list/preview/override APIs.
+- ✅ Added deterministic layered resolution (system → folder → durable AutoFlow
+  assignment → active template version → recording profile/patch), versioned
+  structured provenance plus compatible layer strings, capability validation,
+  no-egress enforcement, an idempotent Settings-equivalent bootstrap, legacy SQLite
+  migration, guarded deletion, and headless list/preview/assign/clear APIs. Settings
+  assigns folder/template profiles; recording detail exposes Automatic inheritance
+  and the resolved chain.
 - ✅ Pipeline stages now dispatch through the resolved recording profile without
   mutating process-wide Settings. The immutable snapshot is persisted on stage runs,
   transcripts, notes, and embedding chunks; local-only profiles disable legacy cloud
@@ -448,7 +451,10 @@ embedding raw provider credentials or model settings in each rule.
   sentences, mutation-free dry-run, versioned idempotency, metadata-sync hooks, and
   per-recording success/failure history with retry semantics.
 - ✅ Rule actions can select a named execution profile and note template or move/add
-  organization metadata; validation prevents dangling references.
+  organization metadata; validation prevents dangling references. Profile actions
+  use a durable per-rule assignment below manual recording overrides, capture
+  rule/version/priority/run provenance, preserve the prior choice when a newer run
+  fails, and resolve competing actions deterministically.
 - ✅ Notification-enabled rules now create a durable, deduplicated local inbox item
   after rule actions commit. Notifications support unread state, mark-all-read,
   dismissal, preserved rule/recording snapshots, and independent delivery retry;

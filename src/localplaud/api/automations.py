@@ -29,6 +29,7 @@ from ..db.models import (
     AutomationWebhookDelivery,
     Notification,
     PlaudFile,
+    RecordingRuleProfileAssignment,
 )
 from ..db.session import session_scope
 
@@ -291,6 +292,11 @@ def delete_rule(rule_id: int) -> dict:
         session.execute(
             update(Notification)
             .where(Notification.automation_run_id.in_(run_ids))
+            .values(automation_run_id=None)
+        )
+        session.execute(
+            update(RecordingRuleProfileAssignment)
+            .where(RecordingRuleProfileAssignment.automation_run_id.in_(run_ids))
             .values(automation_run_id=None)
         )
         session.execute(delete(AutomationRun).where(AutomationRun.rule_id == rule_id))

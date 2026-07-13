@@ -193,12 +193,31 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
         cursor = raw.cursor()
         unsupported = [
             column
-            for column in ("language", "execution_profile_id")
+            for column in ("language",)
             if column in columns
             and cursor.execute(
                 f"SELECT 1 FROM note_templates WHERE {column} IS NOT NULL LIMIT 1"
             ).fetchone()
         ]
+        has_profile_values = (
+            "execution_profile_id" in columns
+            and cursor.execute(
+                "SELECT 1 FROM note_templates WHERE execution_profile_id IS NOT NULL LIMIT 1"
+            ).fetchone()
+        )
+        if has_profile_values:
+            if "execution_profiles" not in inspector.get_table_names():
+                unsupported.append("execution_profile_id (missing execution_profiles table)")
+            elif cursor.execute("""
+                SELECT 1
+                FROM note_templates AS template
+                LEFT JOIN execution_profiles AS profile
+                  ON profile.id = template.execution_profile_id
+                WHERE template.execution_profile_id IS NOT NULL
+                  AND profile.id IS NULL
+                LIMIT 1
+            """).fetchone():
+                unsupported.append("execution_profile_id (unknown profile)")
         if unsupported:
             raise RuntimeError(
                 "legacy note-template migration cannot preserve non-empty columns: "
@@ -220,15 +239,18 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
                 author VARCHAR(120),
                 provenance VARCHAR(32),
                 popularity INTEGER,
+                execution_profile_id INTEGER,
                 is_builtin BOOLEAN NOT NULL DEFAULT 0,
                 is_active BOOLEAN NOT NULL DEFAULT 1,
                 created_at DATETIME NOT NULL,
-                CONSTRAINT uq_note_template_key_version UNIQUE (key, version)
+                CONSTRAINT uq_note_template_key_version UNIQUE (key, version),
+                FOREIGN KEY(execution_profile_id) REFERENCES execution_profiles(id)
+                  ON DELETE SET NULL
             );
             INSERT INTO note_templates_new (
                 id, key, version, name, system_prompt, instructions, category,
                 scenario, description, author, provenance, popularity,
-                is_builtin, is_active, created_at
+                execution_profile_id, is_builtin, is_active, created_at
             )
             SELECT
                 id,
@@ -243,6 +265,7 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
                 {legacy('author')},
                 {legacy('provenance')},
                 {legacy('popularity')},
+                {legacy('execution_profile_id')},
                 CASE WHEN {legacy('provenance')} = 'builtin' THEN 1 ELSE 0 END,
                 COALESCE({legacy('enabled', '1')}, 1),
                 {legacy('created_at', 'CURRENT_TIMESTAMP')}
@@ -264,6 +287,54 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
         raw.cursor().execute("PRAGMA foreign_keys=ON")
         raw.close()
     return ["note_templates"]
+
+
+def migrate_profile_resolution_schema(engine: Engine) -> list[str]:
+    """Add durable folder/template/rule layers for real profile resolution."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for table in ("folders", "note_templates"):
+            if table not in tables:
+                continue
+            columns = {column["name"] for column in inspector.get_columns(table)}
+            if "execution_profile_id" not in columns:
+                connection.execute(text(
+                    f"ALTER TABLE {table} ADD COLUMN execution_profile_id INTEGER "
+                    "REFERENCES execution_profiles(id) ON DELETE SET NULL"
+                ))
+                migrated.append(f"{table}.execution_profile_id")
+        if "recording_rule_profile_assignments" not in tables:
+            connection.execute(text("""
+                CREATE TABLE recording_rule_profile_assignments (
+                    file_id VARCHAR(64) NOT NULL,
+                    profile_id INTEGER NOT NULL,
+                    rule_id INTEGER NOT NULL,
+                    rule_version INTEGER NOT NULL,
+                    priority_snapshot INTEGER NOT NULL,
+                    automation_run_id INTEGER,
+                    rule_snapshot JSON NOT NULL DEFAULT '{}',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    PRIMARY KEY(file_id, rule_id),
+                    FOREIGN KEY(file_id) REFERENCES plaud_files(id) ON DELETE CASCADE,
+                    FOREIGN KEY(profile_id) REFERENCES execution_profiles(id) ON DELETE RESTRICT,
+                    FOREIGN KEY(automation_run_id) REFERENCES automation_runs(id) ON DELETE SET NULL
+                )
+            """))
+            migrated.append("recording_rule_profile_assignments")
+        violations = []
+        for table in ("folders", "note_templates", "recording_rule_profile_assignments"):
+            if table in set(inspect(connection).get_table_names()):
+                violations.extend(connection.exec_driver_sql(
+                    f"PRAGMA foreign_key_check({table})"
+                ).fetchall())
+        if violations:
+            raise RuntimeError(
+                f"profile resolution migration broke foreign keys: {violations}"
+            )
+    return migrated
 
 
 def migrate_legacy_summary_schema(engine: Engine) -> list[str]:

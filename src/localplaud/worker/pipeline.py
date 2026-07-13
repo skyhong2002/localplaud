@@ -299,7 +299,8 @@ def _set_stage(
             run = StageRun(file_id=file_id, stage=stage, attempts=0, detail={})
             session.add(run)
         snapshot = _PROFILE_SNAPSHOT.get()
-        if snapshot is not None:
+        reused = bool((detail or {}).get("reused"))
+        if snapshot is not None and not (reused and run.resolved_profile_snapshot is not None):
             run.resolved_profile_snapshot = snapshot
         profile_stage = "embed" if stage == StageName.index else stage.value
         if begin_attempt:
@@ -588,7 +589,9 @@ def _process_file_claimed(
         existing_wav = row.wav_path
         requested_template_key = row.note_template_key or pcfg.summary_template
         template_key = "default" if requested_template_key == "auto" else requested_template_key
-        snapshot = resolve_recording_profile(session, file_id).to_dict()
+        snapshot = resolve_recording_profile(
+            session, file_id, template_key=requested_template_key
+        ).to_dict()
         align_run = next(
             (run for run in row.stage_runs if run.stage == StageName.align), None
         )
@@ -610,11 +613,9 @@ def _process_file_claimed(
         )
 
     profile_token = _PROFILE_SNAPSHOT.set(snapshot)
+    derived_profile_token = None
+    derived_snapshot = snapshot
     diarize_settings = _settings_for_stage(settings, snapshot, "diarize")
-    summarize_settings = _settings_for_stage(settings, snapshot, "summarize")
-    mind_map_settings = _settings_for_stage(settings, snapshot, "mind_map")
-    summarize_settings.pipeline.summary_template = template_key
-    mind_map_settings.pipeline.summary_template = template_key
 
     partial_errors: list[str] = []
     try:
@@ -1013,12 +1014,17 @@ def _process_file_claimed(
                 duration_ms=row.duration_ms,
             )
             template_key = auto_recommendation["key"]
-            summarize_settings.pipeline.summary_template = template_key
-            mind_map_settings.pipeline.summary_template = template_key
+            with session_scope() as session:
+                derived_snapshot = resolve_recording_profile(
+                    session, file_id, template_key=template_key
+                ).to_dict()
+            derived_profile_token = _PROFILE_SNAPSHOT.set(derived_snapshot)
 
         # --- summarize (skip if this template's summary already exists) #
         if pcfg.summarize and transcript is not None:
-            if force or not _has_summary(file_id, template_key):
+            if force or not _has_summary(
+                file_id, template_key, derived_snapshot, "summarize"
+            ):
                 try:
 
                     def run_summary(candidate):
@@ -1069,7 +1075,7 @@ def _process_file_claimed(
                         file_id,
                         "summarize",
                         StageName.summarize,
-                        snapshot,
+                        derived_snapshot,
                         run_summary,
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript remains usable
@@ -1095,7 +1101,13 @@ def _process_file_claimed(
 
         # --- mind map (skip if a local mind map already exists) ------- #
         if pcfg.mind_map and transcript is not None:
-            if force or not _has_summary(file_id, "mind_map"):
+            if force or not _has_summary(
+                file_id,
+                "mind_map",
+                derived_snapshot,
+                "mind_map",
+                source_template_key=template_key,
+            ):
                 try:
 
                     def run_mind_map(candidate):
@@ -1118,6 +1130,12 @@ def _process_file_claimed(
                             result = mindmap.generate_mind_map(
                                 transcript, candidate_settings, summary_md
                             )
+                        result["template_snapshot"] = {
+                            "source_template_key": template_key,
+                            "source_template_version": summary_templates.get_effective_template(
+                                template_key
+                            ).version,
+                        }
                         _persist_summary(file_id, result, transcript_lineage)
                         return {
                             "value": result,
@@ -1144,7 +1162,7 @@ def _process_file_claimed(
                         file_id,
                         "mind_map",
                         StageName.mind_map,
-                        snapshot,
+                        derived_snapshot,
                         run_mind_map,
                     )
                 except Exception as exc:  # noqa: BLE001 - transcript/notes stay usable
@@ -1166,7 +1184,7 @@ def _process_file_claimed(
 
         # --- index (skip if chunks already exist) --------------------- #
         if pcfg.index and transcript is not None:
-            if force or not _has_chunks(file_id):
+            if force or not _has_chunks(file_id, derived_snapshot):
                 try:
 
                     def run_index(candidate):
@@ -1208,7 +1226,7 @@ def _process_file_claimed(
                         }
 
                     _model, _selected_snapshot = _run_fallback_stage(
-                        file_id, "embed", StageName.index, snapshot, run_index
+                        file_id, "embed", StageName.index, derived_snapshot, run_index
                     )
                 except Exception as exc:  # noqa: BLE001 - notes remain usable
                     log.exception("Indexing failed for %s", file_id)
@@ -1248,6 +1266,8 @@ def _process_file_claimed(
             _schedule_pipeline_retry(r, settings)
         raise
     finally:
+        if derived_profile_token is not None:
+            _PROFILE_SNAPSHOT.reset(derived_profile_token)
         _PROFILE_SNAPSHOT.reset(profile_token)
 
 
@@ -1308,11 +1328,30 @@ def _transcript_lineage(file_id: str, settings: Settings) -> dict | None:
         }
 
 
-def _has_summary(file_id: str, template: str) -> bool:
+def _profile_stage_matches(existing: dict | None, current: dict, stage: str) -> bool:
+    existing_selection = ((existing or {}).get("stages") or {}).get(stage)
+    return any(
+        existing_selection == ((candidate.get("stages") or {}).get(stage))
+        for candidate in candidate_snapshots(current, stage)
+    )
+
+
+def _has_summary(
+    file_id: str,
+    template: str,
+    snapshot: dict | None = None,
+    profile_stage: str | None = None,
+    source_template_key: str | None = None,
+) -> bool:
     expected_version = (
         None
         if template == "mind_map"
         else summary_templates.get_effective_template(template).version
+    )
+    source_template_version = (
+        summary_templates.get_effective_template(source_template_key).version
+        if source_template_key is not None
+        else None
     )
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
@@ -1324,6 +1363,20 @@ def _has_summary(file_id: str, template: str) -> bool:
             s.template == template
             and s.source == "local"
             and (template == "mind_map" or (s.template_version or 1) == expected_version)
+            and (
+                snapshot is None
+                or profile_stage is None
+                or _profile_stage_matches(s.resolved_profile_snapshot, snapshot, profile_stage)
+            )
+            and (
+                source_template_key is None
+                or (
+                    (s.template_snapshot or {}).get("source_template_key")
+                    == source_template_key
+                    and (s.template_snapshot or {}).get("source_template_version")
+                    == source_template_version
+                )
+            )
             for s in row.summaries
         )
 
@@ -1338,11 +1391,14 @@ def _load_summary_md(file_id: str, template: str) -> str | None:
         return rows[-1] if rows else None
 
 
-def _has_chunks(file_id: str) -> bool:
+def _has_chunks(file_id: str, snapshot: dict) -> bool:
     from ..db.models import Chunk
 
     with session_scope() as session:
-        return session.query(Chunk.id).filter(Chunk.file_id == file_id).first() is not None
+        row = session.query(Chunk).filter(Chunk.file_id == file_id).first()
+        return row is not None and _profile_stage_matches(
+            row.resolved_profile_snapshot, snapshot, "embed"
+        )
 
 
 def _persist_transcript(file_id: str, transcript: Transcript) -> dict[str, str]:

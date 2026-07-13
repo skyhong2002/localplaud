@@ -13,22 +13,30 @@ from localplaud.db.migrations import (
     migrate_artifact_lineage_columns,
     migrate_legacy_provider_profile_schema,
     migrate_legacy_summary_schema,
+    migrate_profile_resolution_schema,
     migrate_profile_snapshot_columns,
     migrate_stage_run_snapshot_column,
 )
 from localplaud.db.models import (
+    AutomationRule,
     Base,
     ExecutionProfile,
+    Folder,
     ModelCatalogEntry,
+    NoteTemplate,
     PlaudFile,
     ProfileStageSelection,
     ProviderConnection,
+    RecordingProfileOverride,
+    RecordingRuleProfileAssignment,
     StageRun,
 )
 from localplaud.providers.contracts import Capability, ProviderStage, StageCapabilities
 from localplaud.providers.resolver import ResolutionError, resolve_profile
 from localplaud.providers.service import (
     bootstrap_default_profile,
+    clear_recording_override,
+    delete_profile,
     list_connections,
     list_models,
     list_profiles,
@@ -113,6 +121,114 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
         resolved = resolve_recording_profile(session, "recording").to_dict()
         assert resolved["stages"]["ask"]["options"] == {"x": 1}
         assert resolved["layers"][-1] == "recording:recording"
+
+
+def test_recording_resolution_layers_provenance_and_reference_guards(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'resolution-layers.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        system = bootstrap_default_profile(session, Settings())
+        profiles = {
+            key: ExecutionProfile(key=key, name=key.title(), version=1)
+            for key in ("folder", "rule", "template", "manual", "rule-action")
+        }
+        session.add_all(profiles.values())
+        session.flush()
+        folder = Folder(name="Meetings", execution_profile_id=profiles["folder"].id)
+        session.add(folder)
+        session.flush()
+        recording = PlaudFile(id="layered", filename="Layered", folder_id=folder.id)
+        session.add(recording)
+        session.add(
+            NoteTemplate(
+                key="layered",
+                version=1,
+                name="Layered",
+                system_prompt="system",
+                instructions="instructions",
+                execution_profile_id=profiles["template"].id,
+                is_active=True,
+            )
+        )
+        rule = AutomationRule(
+            name="Profile rule",
+            priority=10,
+            actions={"profile_id": profiles["rule-action"].id},
+        )
+        session.add(rule)
+        session.flush()
+        session.add(
+            RecordingRuleProfileAssignment(
+                file_id=recording.id,
+                profile_id=profiles["rule"].id,
+                rule_id=rule.id,
+                rule_version=3,
+                priority_snapshot=10,
+                rule_snapshot={"name": rule.name},
+            )
+        )
+        winning_rule = AutomationRule(name="Tie winner", priority=10, actions={})
+        session.add(winning_rule)
+        session.flush()
+        session.add(
+            RecordingRuleProfileAssignment(
+                file_id=recording.id,
+                profile_id=profiles["rule"].id,
+                rule_id=winning_rule.id,
+                rule_version=4,
+                priority_snapshot=10,
+                rule_snapshot={"name": winning_rule.name},
+            )
+        )
+        session.add(
+            RecordingProfileOverride(
+                file_id=recording.id,
+                profile_id=profiles["manual"].id,
+                stage_overrides={},
+                policy_overrides={},
+            )
+        )
+        session.flush()
+
+        resolved = resolve_recording_profile(
+            session, recording.id, template_key="layered"
+        ).to_dict()
+        assert resolved["schema"] == "localplaud-resolved-profile/v2"
+        assert [item["kind"] for item in resolved["layer_provenance"]] == [
+            "system",
+            "folder",
+            "rule",
+            "template",
+            "recording_profile",
+            "recording_patch",
+        ]
+        assert {
+            key: resolved["layer_provenance"][2][key]
+            for key in ("source_rule_id", "rule_version", "priority")
+        } == {
+            "source_rule_id": winning_rule.id,
+            "rule_version": 4,
+            "priority": 10,
+        }
+        assert resolved["layer_provenance"][-2]["profile_id"] == profiles["manual"].id
+        with pytest.raises(ValueError, match="recording"):
+            delete_profile(session, profiles["manual"].id)
+
+        clear_recording_override(session, recording.id)
+        inherited = resolve_recording_profile(
+            session, recording.id, template_key="layered"
+        ).to_dict()
+        assert inherited["layer_provenance"][-1]["kind"] == "template"
+        assert system.id == inherited["layer_provenance"][0]["profile_id"]
+
+        for key, message in (
+            ("folder", "folder"),
+            ("rule", "AutoFlow"),
+            ("template", "note template"),
+            ("rule-action", "AutoFlow rule"),
+        ):
+            with pytest.raises(ValueError, match=message):
+                delete_profile(session, profiles[key].id)
 
 
 def test_legacy_provider_profile_schema_rebuild_preserves_ids_and_config(tmp_path):
@@ -507,6 +623,50 @@ def test_provider_read_api(monkeypatch, tmp_path):
         assert settings_page.status_code == 200
         assert "<h1 class=\"page\">Settings</h1>" in settings_page.text
         assert 'aria-label="Settings sections"' in settings_page.text
+
+
+def test_profile_resolution_schema_migration_is_additive_and_idempotent(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'profile-resolution-schema.db'}")
+    with engine.begin() as connection:
+        for statement in (
+            "CREATE TABLE folders (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE note_templates (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)",
+            "CREATE TABLE execution_profiles (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE automation_runs (id INTEGER PRIMARY KEY)",
+        ):
+            connection.execute(text(statement))
+        connection.execute(text("INSERT INTO folders (id) VALUES (7)"))
+        connection.execute(text("INSERT INTO note_templates (id) VALUES (9)"))
+    assert set(migrate_profile_resolution_schema(engine)) == {
+        "folders.execution_profile_id",
+        "note_templates.execution_profile_id",
+        "recording_rule_profile_assignments",
+    }
+    assert migrate_profile_resolution_schema(engine) == []
+    inspector = inspect(engine)
+    assignment_columns = {
+        column["name"]
+        for column in inspector.get_columns("recording_rule_profile_assignments")
+    }
+    assert {
+        "file_id",
+        "profile_id",
+        "rule_id",
+        "rule_version",
+        "priority_snapshot",
+        "automation_run_id",
+        "rule_snapshot",
+    } <= assignment_columns
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT id FROM folders")) == 7
+        assert connection.scalar(text("SELECT id FROM note_templates")) == 9
+    assert {
+        foreign_key["referred_table"]
+        for foreign_key in inspector.get_foreign_keys(
+            "recording_rule_profile_assignments"
+        )
+    } == {"plaud_files", "execution_profiles", "automation_runs"}
 
 
 def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, tmp_path):

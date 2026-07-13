@@ -158,9 +158,11 @@ setting.
   enabled stages. Starting profiles include Apple Local, NVIDIA Local, CPU/Other
   Local, OpenAI Cloud, OpenAI-compatible, and Remote GPU; users can copy and edit
   them.
-- Profile resolution is deterministic: system default → folder/AutoFlow rule →
-  template default → per-recording override. The UI previews the resolved choices
-  before processing or reprocessing.
+- Profile resolution is deterministic: system default → folder → winning durable
+  AutoFlow assignment → active template version → per-recording profile →
+  per-recording stage/policy patch. Lower numeric AutoFlow priority wins, with the
+  higher source rule ID breaking ties. The UI shows the structured resolved layer
+  chain and can return a recording to inherited Automatic mode.
 - Providers advertise capabilities and health rather than relying on their names.
   OpenAI-compatible text generation, audio transcription, and embeddings are
   independently testable capabilities. A service that implements only one remains
@@ -211,6 +213,13 @@ future work. AutoFlow transcript export is implemented for its automation-safe
 TXT/SRT/VTT formats: each run/format records canonical transcript lineage, checksum,
 size, status, error, and an independently retryable local file without rolling back
 the matched rule's core actions.
+
+A successful AutoFlow profile action is stored per recording and source rule. It is
+below a manual recording override and uses the rule priority/version captured by the
+successful run. A failed newer run leaves the prior assignment intact. Disabling or
+deleting the rule stops future execution but does not silently undo past organization,
+template, or profile actions; another successful action or a manual override changes
+the recording's effective choice.
 
 Authorized webhook destinations are durable Settings records with explicit
 metadata/transcript/notes scopes and environment-only bearer secret references.
@@ -490,7 +499,12 @@ scenario/category browsing, provenance, descriptions, authorship/popularity sign
 prompt preview, immutable version editing, and copy-to-workspace. Other major gaps
 include automation and UI polish. Auto template selection is local and deterministic,
 uses title/transcript/duration signals, previews its reasoning before processing, and
-persists the actual selected template plus recommendation engine provenance.
+persists the actual selected template plus recommendation engine provenance. Because
+the recommendation depends on the transcript, speech/correction stages retain the
+pre-template profile snapshot while notes, mind maps, and indexing re-resolve against
+the selected template. Reuse accepts an explicit current fallback candidate without
+repeating provider calls, and a changed template key/version invalidates the mind-map
+input lineage.
 Provider/model/profile management and the versioned remote-worker protocol
 are implemented. Local hardware/runtime detection now provides evidence-backed,
 ranked Apple MLX, NVIDIA CUDA, and CPU ASR recommendations with guarded one-click

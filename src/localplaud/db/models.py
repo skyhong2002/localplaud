@@ -81,6 +81,9 @@ class Folder(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(80))
     color: Mapped[str | None] = mapped_column(String(64), default=None)
+    execution_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("execution_profiles.id", ondelete="SET NULL"), default=None
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
@@ -424,6 +427,9 @@ class NoteTemplate(Base):
     author: Mapped[str | None] = mapped_column(String(120), default=None)
     provenance: Mapped[str | None] = mapped_column(String(32), default=None)
     popularity: Mapped[int | None] = mapped_column(Integer, default=None)
+    execution_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("execution_profiles.id", ondelete="SET NULL"), default=None
+    )
     is_builtin: Mapped[bool] = mapped_column(default=False)
     is_active: Mapped[bool] = mapped_column(default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -944,6 +950,31 @@ class RecordingProfileOverride(Base):
     profile_id: Mapped[int] = mapped_column(ForeignKey("execution_profiles.id"))
     stage_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
     policy_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class RecordingRuleProfileAssignment(Base):
+    """Durable AutoFlow profile action, kept below a user's recording override."""
+
+    __tablename__ = "recording_rule_profile_assignments"
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), primary_key=True
+    )
+    profile_id: Mapped[int] = mapped_column(
+        ForeignKey("execution_profiles.id", ondelete="RESTRICT")
+    )
+    # This is intentionally a source identifier rather than a live foreign key:
+    # deleting an AutoFlow stops future runs but must not undo its past actions.
+    rule_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rule_version: Mapped[int] = mapped_column(Integer)
+    priority_snapshot: Mapped[int] = mapped_column(Integer)
+    automation_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_runs.id", ondelete="SET NULL"), default=None
+    )
+    rule_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

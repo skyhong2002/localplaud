@@ -42,7 +42,16 @@ def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tm
     from fastapi.testclient import TestClient
 
     from localplaud.api.app import app
-    from localplaud.db.models import FileStatus, PlaudFile, StageName, Summary, Transcript
+    from localplaud.db.models import (
+        ExecutionProfile,
+        FileStatus,
+        NoteTemplate,
+        PlaudFile,
+        StageAttempt,
+        StageName,
+        Summary,
+        Transcript,
+    )
     from localplaud.db.session import init_db, session_scope
     from localplaud.worker.pipeline import process_file
 
@@ -50,6 +59,15 @@ def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tm
     audio = tmp_path / "meeting.wav"
     audio.write_bytes(b"RIFFfake")
     with session_scope() as session:
+        template_profile = ExecutionProfile(
+            key="meeting-derived", name="Meeting derived", version=1
+        )
+        session.add(template_profile)
+        session.flush()
+        meeting_template = session.query(NoteTemplate).filter_by(
+            key="meeting", is_active=True
+        ).one()
+        meeting_template.execution_profile_id = template_profile.id
         session.add(
             PlaudFile(
                 id="auto",
@@ -102,3 +120,30 @@ def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tm
         assert summary.template == "meeting"
         assert stage.detail["auto_template"]["key"] == "meeting"
         assert stage.detail["auto_template"]["engine"] == "local-deterministic-v1"
+        upstream = next(
+            item for item in session.get(PlaudFile, "auto").stage_runs
+            if item.stage == StageName.transcribe
+        )
+        downstream = next(
+            item for item in session.get(PlaudFile, "auto").stage_runs
+            if item.stage == StageName.index
+        )
+        assert not any(
+            item["kind"] == "template"
+            for item in upstream.resolved_profile_snapshot["layer_provenance"]
+        )
+        for snapshot in (
+            stage.resolved_profile_snapshot,
+            downstream.resolved_profile_snapshot,
+            summary.resolved_profile_snapshot,
+        ):
+            assert any(
+                item["kind"] == "template" and item["template_key"] == "meeting"
+                for item in snapshot["layer_provenance"]
+            )
+        attempt = session.query(StageAttempt).filter_by(
+            file_id="auto", stage=StageName.summarize
+        ).one()
+        assert attempt.resolved_profile_snapshot["layers"] == summary.resolved_profile_snapshot[
+            "layers"
+        ]

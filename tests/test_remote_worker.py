@@ -258,7 +258,11 @@ def test_pipeline_uses_remote_transcribe_selection(monkeypatch, tmp_path):
         def to_dict(self):
             return snapshot
 
-    monkeypatch.setattr(pipeline, "resolve_recording_profile", lambda session, file_id: Resolved())
+    monkeypatch.setattr(
+        pipeline,
+        "resolve_recording_profile",
+        lambda session, file_id, **_kwargs: Resolved(),
+    )
     monkeypatch.setattr(
         pipeline,
         "_run_remote_stage",

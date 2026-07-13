@@ -11,12 +11,16 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..config import Settings, get_settings
 from ..db.models import (
+    AutomationRule,
     ExecutionProfile,
+    Folder,
     ModelCatalogEntry,
+    NoteTemplate,
     PlaudFile,
     ProfileStageSelection,
     ProviderConnection,
     RecordingProfileOverride,
+    RecordingRuleProfileAssignment,
 )
 from .contracts import Capability, Health, ProviderStage, StageCapabilities
 from .resolver import ResolvedProfile, resolve_profile
@@ -441,8 +445,35 @@ def preview_resolution(session: Session, *partial_layers: dict | None) -> Resolv
     )
 
 
-def resolve_recording_profile(session: Session, file_id: str) -> ResolvedProfile:
-    """Resolve the durable execution profile selected for one recording."""
+def _profile_resolution_layer(
+    session: Session,
+    profile_id: int | None,
+    label: str,
+    *,
+    kind: str,
+    source: dict[str, Any] | None = None,
+) -> dict | None:
+    if profile_id is None:
+        return None
+    profile = session.scalar(_profile_query().where(ExecutionProfile.id == profile_id))
+    if profile is None:
+        raise ValueError(f"{label} profile {profile_id} no longer exists")
+    layer = _profile_layer(profile)
+    layer["key"] = f"{label}:{profile.key}@{profile.version}"
+    layer["provenance"] = {
+        "kind": kind,
+        "profile_id": profile.id,
+        "profile_key": profile.key,
+        "profile_version": profile.version,
+        **(source or {}),
+    }
+    return layer
+
+
+def resolve_recording_profile(
+    session: Session, file_id: str, *, template_key: str | None = None
+) -> ResolvedProfile:
+    """Resolve system -> folder -> rule -> template -> recording layers."""
     system = session.scalar(
         _profile_query()
         .where(ExecutionProfile.is_system_default)
@@ -450,21 +481,101 @@ def resolve_recording_profile(session: Session, file_id: str) -> ResolvedProfile
     )
     if system is None:
         raise ValueError("no system default execution profile")
+    recording = session.get(PlaudFile, file_id)
+    if recording is None:
+        raise ValueError(f"recording {file_id} no longer exists")
 
-    layers: list[dict | None] = [_profile_layer(system)]
+    system_layer = _profile_layer(system)
+    system_layer["key"] = f"system:{system.key}@{system.version}"
+    system_layer["provenance"] = {
+        "kind": "system",
+        "profile_id": system.id,
+        "profile_key": system.key,
+        "profile_version": system.version,
+    }
+    layers: list[dict | None] = [system_layer]
+
+    folder = session.get(Folder, recording.folder_id) if recording.folder_id else None
+    if folder is not None:
+        layers.append(
+            _profile_resolution_layer(
+                session,
+                folder.execution_profile_id,
+                f"folder:{folder.id}",
+                kind="folder",
+                source={"folder_id": folder.id, "folder_name": folder.name},
+            )
+        )
+
+    rule_assignment = session.scalar(
+        select(RecordingRuleProfileAssignment)
+        .where(RecordingRuleProfileAssignment.file_id == file_id)
+        .order_by(
+            RecordingRuleProfileAssignment.priority_snapshot,
+            RecordingRuleProfileAssignment.rule_id.desc(),
+        )
+    )
+    if rule_assignment is not None:
+        label = f"rule:{rule_assignment.rule_id}@{rule_assignment.rule_version}"
+        layers.append(
+            _profile_resolution_layer(
+                session,
+                rule_assignment.profile_id,
+                label,
+                kind="rule",
+                source={
+                    "source_rule_id": rule_assignment.rule_id,
+                    "rule_version": rule_assignment.rule_version,
+                    "priority": rule_assignment.priority_snapshot,
+                    "automation_run_id": rule_assignment.automation_run_id,
+                    "rule": rule_assignment.rule_snapshot or {},
+                },
+            )
+        )
+
+    selected_template_key = template_key
+    if selected_template_key is None:
+        selected_template_key = recording.note_template_key or get_settings().pipeline.summary_template
+    if selected_template_key != "auto":
+        template = session.scalar(
+            select(NoteTemplate)
+            .where(
+                NoteTemplate.key == selected_template_key,
+                NoteTemplate.is_active.is_(True),
+            )
+            .order_by(NoteTemplate.version.desc())
+        )
+        if template is not None:
+            layers.append(
+                _profile_resolution_layer(
+                    session,
+                    template.execution_profile_id,
+                    f"template:{template.key}@{template.version}",
+                    kind="template",
+                    source={
+                        "template_key": template.key,
+                        "template_version": template.version,
+                    },
+                )
+            )
+
     override = session.get(RecordingProfileOverride, file_id)
     if override is not None:
-        selected = session.scalar(
-            _profile_query().where(ExecutionProfile.id == override.profile_id)
+        layers.append(
+            _profile_resolution_layer(
+                session,
+                override.profile_id,
+                f"recording-profile:{file_id}",
+                kind="recording_profile",
+                source={"file_id": file_id},
+            )
         )
-        if selected is None:
-            raise ValueError(f"recording profile {override.profile_id} no longer exists")
-        layers.append(_profile_layer(selected))
         layers.append(
             {
                 "key": f"recording:{file_id}",
                 "stages": override.stage_overrides,
                 "policy": override.policy_overrides,
+                "provenance": {"kind": "recording_patch", "file_id": file_id},
             }
         )
     return resolve_profile(
@@ -486,6 +597,28 @@ def select_recording_override(session: Session, file_id: str, profile_id: int,
     session.flush()
     return {"file_id": file_id, "profile_id": profile_id,
             "stages": row.stage_overrides, "policy": row.policy_overrides}
+
+
+def clear_recording_override(session: Session, file_id: str) -> dict:
+    if session.get(PlaudFile, file_id) is None:
+        raise LookupError("recording not found")
+    row = session.get(RecordingProfileOverride, file_id)
+    if row is not None:
+        session.delete(row)
+    return {"file_id": file_id, "profile_id": None}
+
+
+def select_folder_profile(
+    session: Session, folder_id: int, profile_id: int | None
+) -> dict:
+    folder = session.get(Folder, folder_id)
+    if folder is None:
+        raise LookupError("folder not found")
+    if profile_id is not None and session.get(ExecutionProfile, profile_id) is None:
+        raise LookupError("profile not found")
+    folder.execution_profile_id = profile_id
+    session.flush()
+    return {"folder_id": folder.id, "profile_id": folder.execution_profile_id}
 
 
 def save_connection(session: Session, data: dict, connection_id: int | None = None) -> dict:
@@ -758,6 +891,21 @@ def delete_profile(session: Session, profile_id: int) -> None:
         select(RecordingProfileOverride.file_id).where(RecordingProfileOverride.profile_id == profile_id)
     ):
         raise ValueError("profile is selected by a recording")
+    if session.scalar(select(Folder.id).where(Folder.execution_profile_id == profile_id)):
+        raise ValueError("profile is selected by a folder")
+    if session.scalar(
+        select(NoteTemplate.id).where(NoteTemplate.execution_profile_id == profile_id)
+    ):
+        raise ValueError("profile is selected by a note template")
+    if session.scalar(
+        select(RecordingRuleProfileAssignment.file_id).where(
+            RecordingRuleProfileAssignment.profile_id == profile_id
+        )
+    ):
+        raise ValueError("profile was selected by an AutoFlow")
+    for rule in session.scalars(select(AutomationRule)):
+        if (rule.actions or {}).get("profile_id") == profile_id:
+            raise ValueError("profile is selected by an AutoFlow rule")
     session.delete(row)
 
 

@@ -131,6 +131,91 @@ def test_lower_priority_number_wins_and_toggle_stops_execution(monkeypatch, tmp_
     assert client.delete(f"/api/automations/rules/{broad_id}").status_code == 200
 
 
+def test_autoflow_profile_is_durable_and_never_overwrites_manual_override(
+    monkeypatch, tmp_path
+):
+    client, _folder_id, _tag_id = _seed(monkeypatch, tmp_path)
+    from localplaud.db.models import (
+        ExecutionProfile,
+        RecordingProfileOverride,
+        RecordingRuleProfileAssignment,
+    )
+    from localplaud.db.session import session_scope
+    from localplaud.providers.service import resolve_recording_profile
+
+    with session_scope() as session:
+        manual_id = session.query(ExecutionProfile.id).filter_by(
+            is_system_default=True
+        ).scalar()
+        automated = ExecutionProfile(key="automated", name="Automated", version=1)
+        session.add(automated)
+        session.flush()
+        automated_id = automated.id
+        session.add(
+            RecordingProfileOverride(file_id="match", profile_id=manual_id)
+        )
+
+    rule = client.post(
+        "/api/automations/rules",
+        json={
+            "name": "Choose automated profile",
+            "priority": 8,
+            "trigger": {"origin": "plaud"},
+            "actions": {"profile_id": automated_id},
+        },
+    ).json()
+    assert client.post("/api/automations/run").json()["recordings_changed"] == 1
+    with session_scope() as session:
+        override = session.get(RecordingProfileOverride, "match")
+        assignment = session.get(
+            RecordingRuleProfileAssignment, ("match", rule["id"])
+        )
+        assert override.profile_id == manual_id
+        assert assignment.profile_id == automated_id
+        assert assignment.priority_snapshot == 8
+        assert resolve_recording_profile(session, "match").to_dict()[
+            "layer_provenance"
+        ][-2]["profile_id"] == manual_id
+
+    with session_scope() as session:
+        replacement = ExecutionProfile(key="replacement", name="Replacement", version=1)
+        session.add(replacement)
+        session.flush()
+        replacement_id = replacement.id
+    updated = client.put(
+        f"/api/automations/rules/{rule['id']}",
+        json={
+            "name": "Choose replacement profile",
+            "priority": 4,
+            "enabled": True,
+            "trigger": {"origin": "plaud"},
+            "actions": {"profile_id": replacement_id},
+        },
+    )
+    assert updated.status_code == 200 and updated.json()["version"] == 2
+    import localplaud.automations as automations
+
+    monkeypatch.setattr(
+        automations,
+        "_apply_actions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("action failed")),
+    )
+    assert automations.evaluate_recording("match")[0]["status"] == "failed"
+    with session_scope() as session:
+        assignment = session.get(
+            RecordingRuleProfileAssignment, ("match", rule["id"])
+        )
+        assert assignment.profile_id == automated_id
+        assert assignment.rule_version == 1
+
+    assert client.delete(f"/api/automations/rules/{rule['id']}").status_code == 200
+    with session_scope() as session:
+        assignment = session.get(
+            RecordingRuleProfileAssignment, ("match", rule["id"])
+        )
+        assert assignment is not None and assignment.automation_run_id is None
+
+
 def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
     invalid = client.post(

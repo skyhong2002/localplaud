@@ -7,6 +7,7 @@ from ..db.session import session_scope
 from ..providers.service import (
     check_connection_health,
     check_model_health,
+    clear_recording_override,
     create_profile_version,
     delete_connection,
     delete_model,
@@ -16,8 +17,10 @@ from ..providers.service import (
     list_models,
     list_profiles,
     preview_resolution,
+    resolve_recording_profile,
     save_connection,
     save_model,
+    select_folder_profile,
     select_recording_override,
 )
 from ..remote.registry import check_worker, delete_worker, list_workers, save_worker
@@ -35,6 +38,10 @@ class OverrideRequest(BaseModel):
     profile_id: int
     stages: dict = Field(default_factory=dict)
     policy: dict = Field(default_factory=dict)
+
+
+class ProfileSelectionRequest(BaseModel):
+    profile_id: int | None = None
 
 
 class ConnectionRequest(BaseModel):
@@ -244,6 +251,39 @@ def recording_override(file_id: str, body: OverrideRequest):
             return select_recording_override(
                 session, file_id, body.profile_id, stages=body.stages, policy=body.policy
             )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/recordings/{file_id}/override")
+def remove_recording_override(file_id: str):
+    with session_scope() as session:
+        try:
+            return clear_recording_override(session, file_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/recordings/{file_id}/resolution")
+def recording_resolution(file_id: str, template_key: str | None = None):
+    with session_scope() as session:
+        from ..db.models import PlaudFile
+
+        if session.get(PlaudFile, file_id) is None:
+            raise HTTPException(status_code=404, detail="recording not found")
+        try:
+            return {"resolved": resolve_recording_profile(
+                session, file_id, template_key=template_key
+            ).to_dict()}
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.put("/folders/{folder_id}/profile")
+def folder_profile(folder_id: int, body: ProfileSelectionRequest):
+    with session_scope() as session:
+        try:
+            return select_folder_profile(session, folder_id, body.profile_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

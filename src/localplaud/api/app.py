@@ -50,6 +50,7 @@ from ..db.models import (
     recording_tags,
 )
 from ..db.session import init_db, session_scope
+from ..error_redaction import sanitize_error
 from ..i18n import SUPPORTED_LOCALES, catalog, translator
 from ..preferences import (
     get_workspace_preferences,
@@ -678,7 +679,12 @@ def _organization_summary(session) -> dict:
     )
     return {
         "folders": [
-            _organization_item(row) | {"count": folder_counts.get(row.id, 0)} for row in folders
+            _organization_item(row)
+            | {
+                "count": folder_counts.get(row.id, 0),
+                "execution_profile_id": row.execution_profile_id,
+            }
+            for row in folders
         ],
         "tags": [_organization_item(row) | {"count": tag_counts.get(row.id, 0)} for row in tags],
     }
@@ -1599,16 +1605,19 @@ def file_detail(
             }
             for profile in profile_rows
         ]
-        f["profile_id"] = (
-            override.profile_id
-            if override is not None
-            else next((profile.id for profile in profile_rows if profile.is_system_default), None)
-        )
-        from ..providers.service import resolve_recording_profile
+        f["profile_id"] = override.profile_id if override is not None else None
+        from ..providers.service import preview_resolution, resolve_recording_profile
         from ..providers.usage import cost_budget_status
 
+        try:
+            profile_resolution = resolve_recording_profile(session, file_id).to_dict()
+            f["profile_resolution_error"] = None
+        except ValueError as exc:
+            f["profile_resolution_error"] = sanitize_error(exc)
+            profile_resolution = preview_resolution(session).to_dict()
+        f["profile_resolution"] = profile_resolution
         f["budget"] = cost_budget_status(
-            session, file_id, resolve_recording_profile(session, file_id).to_dict()
+            session, file_id, profile_resolution
         )
         f["note_templates"] = [
             {
@@ -1779,6 +1788,7 @@ def settings_page(request: Request):
             "connections": list_connections(session),
             "models": list_models(session),
             "profiles": list_profiles(session),
+            "organization": _organization_summary(session),
             "workers": list_workers(session),
             "webhook_integrations": list_webhook_integrations(session),
             "email_integrations": list_email_integrations(session),
@@ -1791,6 +1801,7 @@ def settings_page(request: Request):
                     "system_prompt": item.system_prompt,
                     "instructions": item.instructions,
                     "is_builtin": item.is_builtin,
+                    "execution_profile_id": item.execution_profile_id,
                 }
                 for item in session.scalars(
                     select(NoteTemplate)
@@ -2329,13 +2340,16 @@ def reprocess(file_id: str, force: bool = False):
 
 
 @app.post("/file/{file_id}/profile")
-def choose_recording_profile(file_id: str, profile_id: int = Form(...)):
-    from ..providers.service import select_recording_override
+def choose_recording_profile(file_id: str, profile_id: str = Form("")):
+    from ..providers.service import clear_recording_override, select_recording_override
 
     with session_scope() as session:
         try:
-            select_recording_override(session, file_id, profile_id)
-        except LookupError:
+            if profile_id:
+                select_recording_override(session, file_id, int(profile_id))
+            else:
+                clear_recording_override(session, file_id)
+        except (LookupError, ValueError):
             return JSONResponse({"error": "recording or profile not found"}, status_code=404)
     return RedirectResponse(f"/file/{file_id}", status_code=303)
 

@@ -60,6 +60,7 @@ def resolve_profile(
     """Merge system -> rule/folder -> template -> recording layers."""
     merged: dict[str, Any] = {"policy": {}, "stages": {}}
     applied: list[str] = []
+    provenance: list[dict[str, Any]] = []
     for layer in layers:
         if not layer:
             continue
@@ -67,6 +68,9 @@ def resolve_profile(
         merged["stages"] = _merge(merged["stages"], layer.get("stages"))
         if layer.get("key"):
             applied.append(str(layer["key"]))
+            provenance.append(
+                dict(layer.get("provenance") or {"kind": "partial", "key": layer["key"]})
+            )
 
     no_egress = bool(merged["policy"].get("no_egress"))
 
@@ -121,5 +125,7 @@ def resolve_profile(
             seen.add(key)
             validate_selection(stage, candidate, f"{stage_name} fallback {index + 1}")
 
+    merged["schema"] = "localplaud-resolved-profile/v2"
     merged["layers"] = applied
+    merged["layer_provenance"] = provenance
     return ResolvedProfile(_freeze(merged))

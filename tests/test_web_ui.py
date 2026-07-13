@@ -271,7 +271,13 @@ def test_metadata_only_plaud_recording_offers_audio_import(monkeypatch, tmp_path
 def test_recording_profile_picker_persists_override(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
-    from localplaud.db.models import ExecutionProfile, RecordingProfileOverride
+    from localplaud.db.models import (
+        ExecutionProfile,
+        ModelCatalogEntry,
+        ProfileStageSelection,
+        ProviderConnection,
+        RecordingProfileOverride,
+    )
     from localplaud.db.session import session_scope
 
     with session_scope() as session:
@@ -280,6 +286,52 @@ def test_recording_profile_picker_persists_override(monkeypatch, tmp_path):
     assert response.status_code == 303
     with session_scope() as session:
         assert session.get(RecordingProfileOverride, "r1").profile_id == profile_id
+    page = c.get("/file/r1")
+    assert "Automatic" in page.text and "Resolved layers" in page.text
+    resolution = c.get("/api/providers/recordings/r1/resolution")
+    assert resolution.status_code == 200
+    assert resolution.json()["resolved"]["schema"] == "localplaud-resolved-profile/v2"
+
+    cleared = c.post(
+        "/file/r1/profile", data={"profile_id": ""}, follow_redirects=False
+    )
+    assert cleared.status_code == 303
+    with session_scope() as session:
+        assert session.get(RecordingProfileOverride, "r1") is None
+
+    with session_scope() as session:
+        connection = ProviderConnection(
+            key="invalid:test",
+            name="Invalid",
+            provider_type="test",
+            execution_target="local",
+            data_egress=False,
+        )
+        session.add(connection)
+        session.flush()
+        model = ModelCatalogEntry(
+            connection_id=connection.id,
+            model_key="invalid",
+            display_name="Invalid",
+            capabilities={"execution_target": "local", "data_egress": False, "stages": []},
+        )
+        profile = ExecutionProfile(key="invalid", name="Invalid", version=1)
+        session.add_all([model, profile])
+        session.flush()
+        session.add(
+            ProfileStageSelection(
+                profile_id=profile.id,
+                stage="summarize",
+                connection_id=connection.id,
+                model_id=model.id,
+            )
+        )
+        session.add(RecordingProfileOverride(file_id="r1", profile_id=profile.id))
+    invalid = c.get("/api/providers/recordings/r1/resolution")
+    assert invalid.status_code == 422
+    degraded = c.get("/file/r1")
+    assert degraded.status_code == 200
+    assert "Profile resolution needs attention" in degraded.text
 
 
 def test_status_page_renders(monkeypatch, tmp_path):

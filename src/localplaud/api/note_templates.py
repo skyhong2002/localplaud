@@ -8,7 +8,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, update
 
-from ..db.models import NoteTemplate, PlaudFile, StageName, StageRun, StageStatus
+from ..db.models import (
+    ExecutionProfile,
+    NoteTemplate,
+    PlaudFile,
+    StageName,
+    StageRun,
+    StageStatus,
+)
 from ..db.session import session_scope
 
 router = APIRouter(prefix="/api", tags=["note-templates"])
@@ -27,6 +34,7 @@ class TemplateBody(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     system_prompt: str = Field(min_length=1, max_length=20_000)
     instructions: str = Field(min_length=1, max_length=20_000)
+    execution_profile_id: int | None = None
 
     @field_validator("key")
     @classmethod
@@ -83,7 +91,13 @@ def _item(row: NoteTemplate) -> dict:
         "author": row.author or catalog.get("author", "Local workspace"),
         "popularity": row.popularity if row.popularity is not None else catalog.get("popularity"),
         "provenance": row.provenance or ("first-party" if row.is_builtin else "personal"),
+        "execution_profile_id": row.execution_profile_id,
     }
+
+
+def _validate_profile(session, profile_id: int | None) -> None:
+    if profile_id is not None and session.get(ExecutionProfile, profile_id) is None:
+        raise HTTPException(status_code=404, detail="execution profile not found")
 
 
 @router.get("/note-templates")
@@ -120,6 +134,7 @@ def copy_note_template(key: str, body: CopyTemplateBody) -> dict:
             author="Local workspace",
             provenance="personal-copy",
             popularity=None,
+            execution_profile_id=source.execution_profile_id,
             is_builtin=False,
             is_active=True,
         )
@@ -133,6 +148,7 @@ def create_note_template(body: TemplateBody) -> dict:
     if body.key is None:
         raise HTTPException(status_code=422, detail="key is required")
     with session_scope() as session:
+        _validate_profile(session, body.execution_profile_id)
         exists = session.scalar(select(NoteTemplate.id).where(NoteTemplate.key == body.key))
         if exists is not None:
             raise HTTPException(status_code=409, detail="template key already exists")
@@ -146,6 +162,7 @@ def create_note_template(body: TemplateBody) -> dict:
             scenario="Workspace",
             author="Local workspace",
             provenance="personal",
+            execution_profile_id=body.execution_profile_id,
             is_builtin=False,
             is_active=True,
         )
@@ -164,6 +181,12 @@ def create_note_template_version(key: str, body: TemplateBody) -> dict:
         )
         if current is None:
             raise HTTPException(status_code=404, detail="template not found")
+        profile_id = (
+            body.execution_profile_id
+            if "execution_profile_id" in body.model_fields_set
+            else current.execution_profile_id
+        )
+        _validate_profile(session, profile_id)
         version = (session.scalar(select(func.max(NoteTemplate.version)).where(NoteTemplate.key == key)) or 0) + 1
         session.execute(
             update(NoteTemplate).where(NoteTemplate.key == key).values(is_active=False)
@@ -180,6 +203,7 @@ def create_note_template_version(key: str, body: TemplateBody) -> dict:
             author=current.author,
             provenance=current.provenance,
             popularity=current.popularity,
+            execution_profile_id=profile_id,
             is_builtin=current.is_builtin,
             is_active=True,
         )
@@ -224,7 +248,7 @@ def select_recording_note_template(file_id: str, body: RecordingTemplateBody) ->
             if exists is None:
                 raise HTTPException(status_code=404, detail="template not found")
         recording.note_template_key = body.key
-        for stage in (StageName.summarize, StageName.mind_map):
+        for stage in (StageName.summarize, StageName.mind_map, StageName.index):
             run = session.scalar(
                 select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
             )
