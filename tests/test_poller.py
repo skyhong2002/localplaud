@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 
@@ -232,6 +233,52 @@ def test_failed_paginated_listing_rolls_back_baseline_and_releases_claim(
         assert session.get(PlaudFile, "partial-page") is None
         assert session.get(KeyValue, "plaud_catalog_baseline_v1") is None
         assert session.get(KeyValue, "plaud_catalog_sync_lock_v1") is None
+
+
+def test_first_poll_neutralizes_old_download_queue_without_fetching(monkeypatch, tmp_path):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import poll_once
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="old-download-error",
+                filename="Old download error",
+                origin="plaud",
+                status=FileStatus.error,
+                error="old failure",
+            )
+        )
+
+    class BaselineClient:
+        downloads = 0
+
+        def iter_files(self, include_trash=False):
+            yield PlaudFileDTO(id="old-download-error", filename="Old download error")
+
+        def download_audio(self, *_args):
+            self.downloads += 1
+            raise AssertionError("the baseline cycle must not download historical audio")
+
+    client = BaselineClient()
+
+    @contextmanager
+    def fake_factory(_config):
+        yield client
+
+    monkeypatch.setattr("localplaud.poller.poll.make_plaud_client", fake_factory)
+    result = poll_once(settings)
+
+    assert result["new"] == 0 and result["downloaded"] == 0
+    assert client.downloads == 0
+    with session_scope() as session:
+        row = session.get(PlaudFile, "old-download-error")
+        assert row.status == FileStatus.metadata_only
+        assert row.error is None
 
 
 def test_stale_catalog_sync_claim_is_recovered(monkeypatch, tmp_path):

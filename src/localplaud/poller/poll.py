@@ -99,6 +99,11 @@ def _release_catalog_sync(token: str) -> None:
             session.delete(row)
 
 
+def _catalog_baseline_complete() -> bool:
+    with session_scope() as session:
+        return session.get(KeyValue, _CATALOG_BASELINE_KEY) is not None
+
+
 def _apply_dto(row: PlaudFile, dto: PlaudFileDTO) -> None:
     """Copy DTO fields onto the row. Only fields the provider actually sent
     are applied (official transports may omit version/md5/trash)."""
@@ -130,6 +135,18 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
         new_count = changed_count = 0
         with session_scope() as session:
             catalog_initialized = session.get(KeyValue, _CATALOG_BASELINE_KEY) is not None
+            if not catalog_initialized:
+                # Upgrade safely from metadata-first deployments: old audio-less
+                # queues and download errors must not become a historical backfill.
+                session.execute(
+                    update(PlaudFile)
+                    .where(
+                        PlaudFile.origin == "plaud",
+                        PlaudFile.audio_path.is_(None),
+                        PlaudFile.status.in_((FileStatus.discovered, FileStatus.error)),
+                    )
+                    .values(status=FileStatus.metadata_only, error=None)
+                )
             for dto in client.iter_files(include_trash=settings.poller.include_trash):
                 row = session.get(PlaudFile, dto.id)
                 if row is None:
@@ -515,11 +532,16 @@ def poll_once(settings: Settings | None = None) -> dict:
     explicit migration mode is enabled)."""
     settings = settings or get_settings()
     reset_inflight()
-    if settings.poller.auto_download:
+    baseline_complete = _catalog_baseline_complete()
+    if settings.poller.auto_download and baseline_complete:
         reset_download_errors()
     with make_plaud_client(settings.plaud) as client:
         new, changed = sync_file_list(client, settings)
-        downloaded = download_pending(client, settings) if settings.poller.auto_download else 0
+        downloaded = (
+            download_pending(client, settings)
+            if settings.poller.auto_download and baseline_complete
+            else 0
+        )
         cloud_artifacts = (
             ingest_cloud_artifacts(client, settings)
             if settings.pipeline.cloud_import_enabled

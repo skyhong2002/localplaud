@@ -92,6 +92,8 @@ migration/debug-only.
   the normal recorder → Plaud App → localplaud path hands-off. A durable expiring
   catalog-sync claim serializes concurrent pollers, and each audio download uses an
   atomic status claim so overlapping CLI/daemon cycles cannot fetch the same file twice.
+  The upgrade baseline neutralizes legacy audio-less queues/errors before automatic
+  download becomes eligible, preventing an accidental historical retry.
 - ✅ Added a read-only `localplaud acceptance-check RECORDING_ID` product gate. It
   verifies local audio/transcript provenance, timestamped speaker output, local notes
   and mind map, Ask-ready local chunks, durable profile snapshots, and

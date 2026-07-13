@@ -234,10 +234,29 @@ def test_existing_catalog_without_marker_gets_one_safe_upgrade_baseline(
                 status=FileStatus.metadata_only,
             )
         )
+        session.add(
+            PlaudFile(
+                id="queued-history",
+                filename="Queued history",
+                origin="plaud",
+                status=FileStatus.discovered,
+            )
+        )
+        session.add(
+            PlaudFile(
+                id="failed-history",
+                filename="Failed history",
+                origin="plaud",
+                status=FileStatus.error,
+                error="old download failure",
+            )
+        )
 
     class FakeClient:
         files = [
             PlaudFileDTO(id="mirrored-history", filename="Mirrored history"),
+            PlaudFileDTO(id="queued-history", filename="Queued history"),
+            PlaudFileDTO(id="failed-history", filename="Failed history"),
             PlaudFileDTO(id="found-during-upgrade", filename="Found during upgrade"),
         ]
 
@@ -248,6 +267,9 @@ def test_existing_catalog_without_marker_gets_one_safe_upgrade_baseline(
     assert sync_file_list(client, settings) == (1, 0)
     with session_scope() as session:
         assert session.get(PlaudFile, "mirrored-history").status == FileStatus.metadata_only
+        assert session.get(PlaudFile, "queued-history").status == FileStatus.metadata_only
+        failed = session.get(PlaudFile, "failed-history")
+        assert failed.status == FileStatus.metadata_only and failed.error is None
         assert session.get(PlaudFile, "found-during-upgrade").status == FileStatus.metadata_only
         assert session.get(KeyValue, "plaud_catalog_baseline_v1") is not None
 
