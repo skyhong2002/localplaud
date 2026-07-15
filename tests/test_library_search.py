@@ -104,7 +104,9 @@ def test_lexical_search_uses_corrected_canonical_transcript(monkeypatch, tmp_pat
     assert hit["start"] == 12.5
     assert lexical_search("delayed") == []
     assert lexical_search("Morgan")[0]["kind"] == "note"
-    assert lexical_search("Riley")[0]["kind"] == "note"
+    # User-owned saved notes report their own kind so results label them
+    # distinctly from generated notes.
+    assert lexical_search("Riley")[0]["kind"] == "saved_note"
     assert lexical_search("Launch meeting")[0]["kind"] == "title"
 
 
@@ -142,7 +144,9 @@ def test_search_page_works_without_embeddings_and_links_timestamp(monkeypatch, t
     assert response.status_code == 200
     assert "Launch meeting" in response.text
     assert "/file/local-recording?t=12.5" in response.text
-    assert "Transcript" in response.text
+    # The playable timestamp is the transcript hit's label; no jargon chip.
+    assert '<span class="search-kind">Transcript</span>' not in response.text
+    assert "0:12" in response.text
     assert "embedding provider isn&#39;t available" not in response.text
 
 
@@ -164,4 +168,6 @@ def test_search_page_applies_filters_to_semantic_hits(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert "Launch meeting" in response.text
     assert "Plaud interview" not in response.text
-    assert "Semantic" in response.text
+    # Semantic blends get a quiet Related label instead of provider jargon.
+    assert ">Related<" in response.text
+    assert ">Semantic<" not in response.text

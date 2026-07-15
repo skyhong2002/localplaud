@@ -35,26 +35,56 @@
 </form>
 
 {% if q and not groups %}
-<div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>No matches for “{{ q }}”.<br>
-  <span class="sub">{{ t('No title, transcript, or note matches within these filters.') }}</span>
+<div class="empty generate-empty">
+  <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>
+  <strong class="empty-title">{{ t('No matches for') }} “{{ q }}”</strong>
+  <span class="sub empty-sub">{{ t('No title, transcript, or note matches within these filters.') }}</span>
+  <div class="search-empty-actions">
+    <a class="btn sec" href="/">{{ t('All files') }}</a>
+    <a class="btn sec" href="/?ask=true#library-ask">{{ t('Ask the library') }}</a>
+  </div>
 </div>
 {% elif groups %}
-<div class="sub" style="margin:6px 2px 14px">{{ groups|length }} recording(s) matched · local keyword results plus semantic matches when available.</div>
+<div class="sub" style="margin:6px 2px 14px">{{ groups|length }} {{ t('recordings matched') }}</div>
 <div class="list">
   {% for g in groups %}
-  <div class="panel" style="padding:14px 16px">
-    <a class="name" style="font-weight:650" href="/file/{{ g.file_id }}">{{ g.filename }}</a>
+  <div class="panel search-group">
+    <a class="search-group-head" href="/file/{{ g.file_id }}">
+      <strong class="home-row-title">{{ g.filename }}</strong>
+      <span class="home-row-meta">{{ g.duration_ms|dur }} · {{ g.start_time_ms|dt }}{% if g.folder %} · {{ g.folder }}{% endif %}</span>
+    </a>
     {% for h in g.hits[:5] %}
-    <a class="seg" href="/file/{{ g.file_id }}{% if h.start is not none %}?t={{ h.start }}{% endif %}" style="text-decoration:none">
-      <div class="ts">{% if h.start is not none %}{{ h.start | mmss }}{% else %}<span class="chip">{{ {'title':'Title','note':'Note','semantic':'Semantic'}.get(h.kind, 'Text') }}</span>{% endif %}</div>
-      <div class="txt sub">{% if h.start is not none %}<span class="chip">{{ 'Semantic' if h.kind == 'semantic' else 'Transcript' }}</span> {% endif %}{% if h.speaker %}<span style="color:var(--accent);font-weight:600">{{ h.speaker }}</span> {% endif %}{{ h.text[:220] }}{% if h.text|length > 220 %}…{% endif %}</div>
+    <a class="search-hit" href="/file/{{ g.file_id }}{% if h.start is not none %}?t={{ h.start }}{% endif %}">
+      <span class="search-hit-ts">{% if h.start is not none %}{{ h.start | mmss }}{% else %}<span class="search-kind">{{ t({'title':'Title','note':'Note','saved_note':'Saved note','semantic':'Related'}.get(h.kind, 'Note')) }}</span>{% endif %}</span>
+      <span class="search-hit-text">{% if h.speaker %}<span class="search-hit-speaker">{{ h.speaker }}</span> {% endif %}{{ h.text[:220] }}{% if h.text|length > 220 %}…{% endif %}{% if h.start is not none and h.kind == 'semantic' %} <span class="search-kind">{{ t('Related') }}</span>{% endif %}</span>
     </a>
     {% endfor %}
   </div>
   {% endfor %}
 </div>
 {% else %}
-<div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>{{ t('Search works locally without an AI provider.') }}<br><span class="sub">{{ t('Find words in titles, transcripts, and notes; semantic results are blended in when configured.') }}</span></div>
+<div class="empty generate-empty">
+  <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>
+  <strong class="empty-title">{{ t('Search your whole library') }}</strong>
+  <span class="sub empty-sub">{{ t('Titles, the corrected transcript, generated notes, and saved notes — all searched on this workspace.') }}</span>
+  <div class="search-empty-actions">
+    <a class="btn sec" href="/">{{ t('All files') }}</a>
+    <a class="btn sec" href="/notes">{{ t('Saved notes') }}</a>
+    <a class="btn sec" href="/?ask=true#library-ask">{{ t('Ask the library') }}</a>
+  </div>
+</div>
 {% endif %}
 </div></div>
 {% endblock %}
+{% block scripts %}<style>
+.search-group { padding:0;margin-bottom:10px;overflow:hidden; }
+.search-group-head { display:grid;gap:2px;padding:11px 14px 9px;text-decoration:none;color:inherit;min-width:0; }
+.search-group-head:hover,.search-group-head:focus-visible { background:var(--panel2); }
+.search-hit { display:flex;gap:11px;align-items:baseline;padding:7px 14px 8px;border-top:1px solid var(--border);text-decoration:none;color:inherit;min-width:0; }
+.search-hit:hover,.search-hit:focus-visible { background:var(--panel2); }
+.search-hit-ts { flex:none;min-width:44px;text-align:right;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums; }
+.search-hit-text { min-width:0;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere; }
+.search-hit-speaker { color:var(--accent);font-weight:600; }
+.search-kind { display:inline-block;padding:0 5px;border:1px solid var(--border);border-radius:5px;font-size:10px;color:var(--faint);white-space:nowrap; }
+.search-empty-actions { display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px; }
+</style>{% endblock %}

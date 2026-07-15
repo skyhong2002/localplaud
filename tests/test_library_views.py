@@ -224,17 +224,18 @@ def test_state_aliases_match_ops_card_buckets_exactly(monkeypatch, tmp_path):
         return {f["id"] for f in c.get(f"/api/files?state={state}").json()["files"]}
 
     # Each aggregate alias filters exactly the statuses its displayed count
-    # sums, so a clicked number always lands on that many rows.
-    assert ids("generating") == {"s-processing", "s-downloading", "s-downloaded"}
+    # sums, so a clicked number always lands on that many rows. discovered is
+    # queued for automatic download, so it is pending work, not manual import.
+    assert ids("generating") == {"s-processing", "s-downloading", "s-downloaded", "s-discovered"}
     assert ids("attention") == {"s-error", "s-partial"}
-    assert ids("cloud") == {"s-discovered", "s-metadata"}
+    assert ids("cloud") == {"s-metadata"}
     assert ids("done") == {"s-done"}
 
     page = c.get("/")
     card = page.text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
-    assert '<a class="ops-stat" href="/?state=generating"><strong>3</strong> generating</a>' in card
+    assert '<a class="ops-stat" href="/?state=generating"><strong>4</strong> generating</a>' in card
     assert '<a class="ops-stat" href="/?state=attention"><strong class="ops-attn">2</strong> need attention</a>' in card
-    assert '<a class="ops-stat" href="/?state=cloud"><strong>2</strong> in cloud</a>' in card
+    assert '<a class="ops-stat" href="/?state=cloud"><strong>1</strong> in cloud</a>' in card
     assert '<a class="ops-stat" href="/?state=done"><strong>1</strong> ready</a>' in card
 
 
@@ -253,3 +254,44 @@ def test_ops_card_cloud_only_is_not_all_caught_up(monkeypatch, tmp_path):
     assert "Cloud-only recordings await import" in card
     assert "All caught up" not in card
     assert '<a class="ops-stat" href="/?state=cloud"><strong>1</strong> in cloud</a>' in card
+
+
+def test_discovered_only_workspace_counts_as_pending_not_manual_import(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="d-only", filename="Just discovered", status=FileStatus.discovered,
+                        duration_ms=1000, start_time_ms=0))
+
+    card = c.get("/").text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
+    # The poller downloads discovered rows automatically: pending, never
+    # presented as awaiting a manual import.
+    assert '<a class="ops-stat" href="/?state=generating"><strong>1</strong> generating</a>' in card
+    assert "in cloud" not in card
+    assert "Cloud-only recordings await import" not in card
+    assert "View system status" in card
+
+
+def test_home_generating_tile_matches_destination_with_trashed_pending_row(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="p-live", filename="Pending live", status=FileStatus.processing,
+                        duration_ms=1000, start_time_ms=0))
+        s.add(PlaudFile(id="p-trash", filename="Pending trashed", status=FileStatus.processing,
+                        duration_ms=1000, start_time_ms=0, is_trash=True))
+
+    destination_rows = len(c.get("/api/files?state=generating").json()["files"])
+    home = c.get("/home").text
+    tile = home.split('class="tile" href="/?state=generating"', 1)[1].split("</a>", 1)[0]
+    import re as _re
+
+    tile_count = int(_re.search(r'class="v">(\d+)<', tile).group(1))
+    # The tile's number equals its linked destination: trashed pending rows
+    # are excluded from both.
+    assert destination_rows == 1
+    assert tile_count == destination_rows

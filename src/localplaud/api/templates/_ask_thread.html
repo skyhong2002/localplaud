@@ -1,7 +1,7 @@
 <div class="ask-thread" data-thread-id="{{ thread.thread_id or '' }}" style="display:flex;flex-direction:column;gap:10px;margin:8px 0 14px">
   {% if not file_id and thread.retrieval_scope %}
   <div class="sub" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:11px">
-    <strong>{{ t('ANSWER SCOPE') }}</strong>
+    <strong>{{ t('Scope') }}</strong>
     {% if thread.retrieval_scope.folder_id %}<span class="chip">{{ t('Folder') }} · {% for item in organization.folders if item.id == thread.retrieval_scope.folder_id %}{{ item.name }}{% else %}#{{ thread.retrieval_scope.folder_id }}{% endfor %}</span>{% endif %}
     {% if thread.retrieval_scope.tag_id %}<span class="chip">{{ t('Tag') }} · {% for item in organization.tags if item.id == thread.retrieval_scope.tag_id %}{{ item.name }}{% else %}#{{ thread.retrieval_scope.tag_id }}{% endfor %}</span>{% endif %}
     {% if thread.retrieval_scope.origin %}<span class="chip">{{ t('Source') }} · {{ thread.retrieval_scope.origin }}</span>{% endif %}
@@ -27,7 +27,7 @@
       {% endif %}
       {% if message.sources %}
       <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:9px">
-        <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:5px">GROUNDED SOURCES</div>
+        <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:5px">{{ t('Sources') }}</div>
         {% for source in message.sources[:6] %}
           {% if file_id %}
           <button type="button" class="seg" data-seek="{{ source.start or 0 }}" style="width:100%;text-align:left;background:none;border:0;padding:5px 8px">

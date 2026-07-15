@@ -494,14 +494,16 @@ def _base_ctx(request: Request, active: str) -> dict:
             "attention": status_counts.get(FileStatus.error, 0)
             + status_counts.get(FileStatus.partial, 0),
             # Matches the workspace's pending vocabulary: actively working plus
-            # audio that is downloaded/downloading and awaiting its pipeline run.
+            # everything queued for it — downloaded/downloading audio and
+            # discovered rows the poller downloads automatically.
             "processing": status_counts.get(FileStatus.processing, 0)
             + status_counts.get(FileStatus.downloading, 0)
-            + status_counts.get(FileStatus.downloaded, 0),
-            # Cloud-only rows are not "caught up" — they simply live in Plaud
-            # until the user imports audio.
-            "cloud": status_counts.get(FileStatus.discovered, 0)
-            + status_counts.get(FileStatus.metadata_only, 0),
+            + status_counts.get(FileStatus.downloaded, 0)
+            + status_counts.get(FileStatus.discovered, 0),
+            # Cloud-only rows are not "caught up" — they stay in Plaud until
+            # the user imports audio; only metadata_only truly awaits a manual
+            # import.
+            "cloud": status_counts.get(FileStatus.metadata_only, 0),
         }
         sidebar_counts = {
             "all": session.scalar(
@@ -585,8 +587,15 @@ _ATTENTION_STATES = {FileStatus.error.value, FileStatus.partial.value}
 # ops-card bucket, resolved onto the same status filtering as single values.
 _STATE_ALIASES = {
     "attention": [FileStatus.error, FileStatus.partial],
-    "generating": [FileStatus.processing, FileStatus.downloading, FileStatus.downloaded],
-    "cloud": [FileStatus.discovered, FileStatus.metadata_only],
+    # discovered is queued for automatic download (download_pending consumes
+    # it), so it belongs to the pending pipeline, not the manual-import bucket.
+    "generating": [
+        FileStatus.processing,
+        FileStatus.downloading,
+        FileStatus.downloaded,
+        FileStatus.discovered,
+    ],
+    "cloud": [FileStatus.metadata_only],
 }
 
 
@@ -1231,10 +1240,15 @@ def _wants_progressive_shell(request: Request) -> bool:
 
 
 def _stats(session) -> dict:
-    total = session.scalar(select(func.count()).select_from(PlaudFile)) or 0
+    # Every count shares the Library's non-trash visibility so a tile's number
+    # always equals its linked destination's rows.
+    visible = PlaudFile.is_trash.is_(False)
+    total = session.scalar(select(func.count()).select_from(PlaudFile).where(visible)) or 0
     done = (
         session.scalar(
-            select(func.count()).select_from(PlaudFile).where(PlaudFile.status == FileStatus.done)
+            select(func.count())
+            .select_from(PlaudFile)
+            .where(visible, PlaudFile.status == FileStatus.done)
         )
         or 0
     )
@@ -1242,17 +1256,18 @@ def _stats(session) -> dict:
         session.scalar(
             select(func.count())
             .select_from(PlaudFile)
-            # Same pending bucket as the Workspace-status card: working plus
-            # downloaded/downloading audio awaiting its pipeline run.
-            .where(
-                PlaudFile.status.in_(
-                    [FileStatus.processing, FileStatus.downloading, FileStatus.downloaded]
-                )
-            )
+            # Same pending bucket as the Workspace-status card and the
+            # state=generating alias.
+            .where(visible, PlaudFile.status.in_(_STATE_ALIASES["generating"]))
         )
         or 0
     )
-    total_ms = session.scalar(select(func.coalesce(func.sum(PlaudFile.duration_ms), 0))) or 0
+    total_ms = (
+        session.scalar(
+            select(func.coalesce(func.sum(PlaudFile.duration_ms), 0)).where(visible)
+        )
+        or 0
+    )
     return {
         "total": total,
         "done": done,
@@ -1521,6 +1536,21 @@ def search(
             )
             g["hits"].append(h)
         groups = sorted(by_file.values(), key=lambda g: -max(x["score"] for x in g["hits"]))
+        if groups:
+            with session_scope() as session:
+                meta_rows = session.scalars(
+                    select(PlaudFile).where(PlaudFile.id.in_([g["file_id"] for g in groups]))
+                )
+                meta = {
+                    row.id: {
+                        "duration_ms": row.duration_ms,
+                        "start_time_ms": row.start_time_ms,
+                        "folder": row.folder.name if row.folder else None,
+                    }
+                    for row in meta_rows
+                }
+            for g in groups:
+                g.update(meta.get(g["file_id"], {}))
     with session_scope() as session:
         organization = _organization_summary(session)
     ctx = _base_ctx(request, "search") | {

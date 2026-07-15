@@ -570,11 +570,12 @@ def test_processing_recording_shows_friendly_progress(monkeypatch, tmp_path):
     assert "const status=typeof data?.status==='string'?data.status:null;" in r.text
     assert "const terminalStates=['done','partial','error'];" in r.text
     assert "statusTimer=setTimeout(tick,7000);" in r.text
-    assert r.text.index("terminalStates.includes(status)") < r.text.index("htmx.ajax('GET',location.pathname+location.search")
-    # Terminal refresh preserves tab and file-list context via an in-place
-    # workspace swap instead of a hard reload when htmx is available.
-    assert "htmx.ajax('GET',location.pathname+location.search,{target:'#app-view',select:'#app-view',swap:'outerHTML'})" in r.text
-    assert "else{location.reload();}" in r.text
+    # Terminal refresh is a one-time hard reload issued only after the abort
+    # re-check: it cannot race an HTMX navigation that detached #app-view the
+    # way an in-flight htmx.ajax swap could, and the URL keeps tab context.
+    assert "htmx.ajax" not in r.text.split("terminalStates.includes(status)", 1)[1].split("}", 3)[0]
+    assert r.text.index("if(cleanupController.signal.aborted)return;") < r.text.index("terminalStates.includes(status)")
+    assert "location.reload();" in r.text.split("terminalStates.includes(status)", 1)[1][:400]
     assert ".generate-progress-icon { animation:generate-spin" in r.text
     assert "@media (prefers-reduced-motion: no-preference)" in r.text
 
@@ -1317,3 +1318,44 @@ def test_home_modules_use_shell_language_and_direct_routes(monkeypatch, tmp_path
     assert 'href="/?state=attention"' in r.text and "View all →" in r.text
     row_err = r.text.split('href="/file/h-err"', 1)[1].split("</a>", 1)[0]
     assert '<span class="st error">' in row_err
+
+
+def test_search_results_are_title_first_with_quiet_kind_labels(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import Folder, PlaudFile, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        folder = Folder(name="跨部門產品營運與客戶成功長期追蹤資料夾")
+        s.add(folder)
+        s.flush()
+        s.get(PlaudFile, "r1").folder_id = folder.id
+        s.add(UserNote(file_id="r1", title="Kept answer",
+                       content_md="hello darkness my old friend", source_type="ask_answer"))
+
+    r = c.get("/search?q=hello")
+    assert r.status_code == 200
+    # Title-first group header with duration · date · folder context.
+    assert '<strong class="home-row-title">Weekly Sync</strong>' in r.text
+    head = r.text.split('class="search-group-head"', 1)[1].split("</a>", 1)[0]
+    assert "10:00 ·" in head and "跨部門產品營運與客戶成功長期追蹤資料夾" in head
+    # Transcript match: the playable timestamp is the label — no jargon chips.
+    assert 'href="/file/r1?t=1.0"' in r.text
+    assert ">Semantic<" not in r.text and ">Transcript<" not in r.text
+    # The saved note is distinguished from generated notes.
+    assert '<span class="search-kind">Saved note</span>' in r.text
+    assert "recordings matched" in r.text
+
+    # Generated-note match keeps the quiet Note label.
+    notes = c.get("/search?q=point")
+    assert '<span class="search-kind">Note</span>' in notes.text
+
+    # No-query and no-match states offer direct next actions, no marketing.
+    empty = c.get("/search")
+    assert "Search your whole library" in empty.text
+    for href, label in (("/", "All files"), ("/notes", "Saved notes"),
+                        ("/?ask=true#library-ask", "Ask the library")):
+        assert f'href="{href}"' in empty.text and label in empty.text
+    missing = c.get("/search?q=zzznotfoundzzz")
+    assert "No matches for" in missing.text and "Ask the library" in missing.text

@@ -167,7 +167,7 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
             ("/discover", "本機自動化"),
             ("/notifications", "目前沒有通知"),
                 ("/", "名稱"),
-            ("/search", "即使沒有 AI 供應商"),
+            ("/search", "搜尋整個錄音庫"),
             ("/notes", "目前沒有已儲存筆記"),
             ("/status", "執行環境"),
         ):

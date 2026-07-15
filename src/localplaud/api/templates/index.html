@@ -116,6 +116,14 @@
   .ask-hero h1 { display:flex;align-items:center;gap:9px;margin:0 0 5px;font-size:22px;letter-spacing:0; }
   .ask-hero .nav-icon { width:21px;height:21px;color:var(--red); }
   .ask-scope { border:1px solid var(--border);border-radius:8px;padding:14px;margin:0 0 14px;background:#FCFCFC; }
+  .ask-scope-details { border:1px solid var(--border);border-radius:8px;margin:0 0 12px;background:#FCFCFC; }
+  .ask-scope-details>summary { display:flex;align-items:center;gap:7px;padding:11px 14px;cursor:pointer;list-style:none;font-size:12.5px;min-width:0;flex-wrap:wrap; }
+  .ask-scope-details>summary::-webkit-details-marker { display:none; }
+  .ask-scope-details>summary:hover { background:var(--panel2); }
+  .ask-scope-details>summary:focus-visible { outline:2px solid var(--blue);outline-offset:-2px;border-radius:8px; }
+  .ask-scope-details[open]>summary { border-bottom:1px solid var(--border); }
+  .ask-scope-details .ask-scope { border:0;margin:0;background:none; }
+  .ask-row-label { font-size:11px;font-weight:700;margin-bottom:6px; }
 
   @media (max-width:820px){
     .library-inner { padding:18px 14px 56px; }
@@ -151,8 +159,13 @@
   {% if active == 'ask' %}
   <section class="ask-surface" id="library-ask">
     <div class="ask-hero"><h1><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Ask localplaud') }}</h1><div class="sub">{{ t('Ask across your library. Answers stay grounded in indexed recordings and cite their sources.') }}</div></div>
+    <details class="ask-scope-details" id="library-ask-scope-details">
+      <summary>
+        <span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg');width:12px;height:12px"></span>
+        <span>{{ t('Scope') }} · <strong id="library-ask-scope-summary">{{ t('Entire library') }}</strong></span>
+        <span class="sub" style="font-size:11px">{{ t('folder, tag, speaker, dates, or specific recordings') }}</span>
+      </summary>
     <fieldset class="ask-scope" id="library-ask-scope">
-      <legend class="sub" style="font-size:11px;font-weight:700;padding:0 5px">{{ t('ANSWER SCOPE') }}</legend>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px">
         <label class="sub" style="font-size:11px">{{ t('Folder') }}<select class="search-input" name="ask_folder_id" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any folder') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}</select></label>
         <label class="sub" style="font-size:11px">{{ t('Tag') }}<select class="search-input" name="ask_tag_id" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any tag') }}</option>{% for tag in organization.tags %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}</select></label>
@@ -163,8 +176,10 @@
         <label class="sub" style="font-size:11px;grid-column:1/-1">{{ t('Recordings (optional)') }}<select class="search-input" name="ask_file_ids" multiple size="5" style="width:100%;margin-top:3px;padding:7px 9px">{% for file in files %}<option value="{{ file.id }}">{{ file.filename }} · {{ file.start_time_ms | dt }}</option>{% endfor %}</select></label>
       </div>
     </fieldset>
+    </details>
+    <div class="ask-row-label sub">{{ t('Suggested') }}</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">{% for chip in ["What decisions were made recently?", "Show action items across recordings", "What themes keep recurring?"] %}<button type="button" class="btn sec library-ask-chip" data-q="{{ t(chip) }}" style="padding:6px 11px;font-size:12px">{{ t(chip) }}</button>{% endfor %}</div>
-    <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:6px">{{ t('QUICK ACTIONS · LIBRARY GROUNDED · READ ONLY') }}</div>
+    <div class="ask-row-label sub">{{ t('Quick actions') }} <span style="font-weight:400">· {{ t('creates an Ask thread; recordings and notes stay unchanged') }}</span></div>
     <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">{% for skill in ask_skills %}<form hx-post="/ask/skill" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" hx-include="#library-ask-scope"><input type="hidden" name="skill_key" value="{{ skill.key }}"><button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px">{{ skill.name }}</button></form>{% endfor %}</div>
     <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" hx-include="#library-ask-scope"><input id="library-ask-q" name="q" placeholder="{{ t('Ask anything about your recordings…') }}" autocomplete="off" required><button class="btn" type="submit">{{ t('Ask') }}</button></form>
     <div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{{ t('thinking…') }}</div>
@@ -329,6 +344,24 @@
     const input = document.getElementById('library-ask-q');
     if (input) { input.value = chip.dataset.q; input.focus(); }
   }));
+
+  const scopeDetails = document.getElementById('library-ask-scope-details');
+  if (scopeDetails) {
+    const tr = window.localplaudT;
+    const summaryLabel = document.getElementById('library-ask-scope-summary');
+    // The summary always states the truthful current boundary: library-wide
+    // until any filter narrows it. Reading it never mutates anything.
+    const updateScopeSummary = () => {
+      const controls = [...scopeDetails.querySelectorAll('#library-ask-scope select,#library-ask-scope input')];
+      const active = controls.reduce((count, el) => {
+        if (el.multiple) return count + (el.selectedOptions.length ? 1 : 0);
+        return count + (el.value ? 1 : 0);
+      }, 0);
+      summaryLabel.textContent = active ? `${tr('Custom scope')} · ${active}` : tr('Entire library');
+    };
+    scopeDetails.addEventListener('change', updateScopeSummary);
+    updateScopeSummary();
+  }
 
   function selected() { return checks.filter(c => c.checked).map(c => c.value); }
   function sync() {

@@ -449,7 +449,7 @@ def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, 
     page = client.get("/?ask=true")
     assert 'hx-post="/ask/skill"' in page.text
     assert "What decisions were made recently?" in page.text
-    assert "LIBRARY GROUNDED" in page.text
+    assert "creates an Ask thread; recordings and notes stay unchanged" in page.text
 
     catalog = client.get("/api/ask/skills?scope=library").json()["skills"]
     assert all(item["scope"] == "library" for item in catalog)
@@ -502,6 +502,17 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
     page = client.get("/?ask=true")
     assert 'id="library-ask-scope"' in page.text
     assert 'hx-include="#library-ask-scope"' in page.text
+    # Scope collapses behind a truthful summary: library-wide until narrowed.
+    assert 'id="library-ask-scope-details"' in page.text
+    assert 'id="library-ask-scope-summary">Entire library</strong>' in page.text
+    assert "ANSWER SCOPE" not in page.text
+    assert "`${tr('Custom scope')} · ${active}`" in page.text
+    # Suggested prompts and quick actions are scannable, and the quick-action
+    # copy states the durable-thread truth rather than claiming read-only.
+    assert '<div class="ask-row-label sub">Suggested</div>' in page.text
+    assert "Quick actions" in page.text
+    assert "creates an Ask thread; recordings and notes stay unchanged" in page.text
+    assert "QUICK ACTIONS" not in page.text
     assert 'name="ask_speaker_name"' in page.text and "Sky · 1" in page.text
     first = client.post(
         "/ask",

@@ -600,12 +600,11 @@
         return;
       }
       if(status&&terminalStates.includes(status)){
-        // Only an explicitly recognized terminal status may replace the view.
-        // Refresh the workspace in place so finished notes/mind map or the
-        // failure alert with Resume become visible; the current URL keeps the
-        // active tab and file-list context, and hx-preserve keeps the list.
-        if(window.htmx){htmx.ajax('GET',location.pathname+location.search,{target:'#app-view',select:'#app-view',swap:'outerHTML'});}
-        else{location.reload();}
+        // Only an explicitly recognized terminal status may replace the view:
+        // a one-time hard reload right after the abort re-check. The URL
+        // already carries the active tab and file-list context, and unlike an
+        // htmx swap this cannot race a navigation that detached #app-view.
+        location.reload();
         return;
       }
       // Non-2xx responses, unparseable bodies, network failures, and

@@ -124,7 +124,9 @@ def lexical_search(
                 hits.append(
                     common
                     | {
-                        "kind": "note",
+                        # User-owned saved notes are a distinct result kind from
+                        # generated notes so results can label them honestly.
+                        "kind": "saved_note",
                         "score": 0.8,
                         "text": _excerpt(text, query),
                         "start": None,
