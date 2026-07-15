@@ -82,13 +82,35 @@ def resolve_profile(
         capability = raw if isinstance(raw, Capability) else Capability.model_validate(raw)
         if capability.for_stage(stage) is None:
             raise ResolutionError(f"model {key[1]} does not support stage {stage.value}")
-        if no_egress and capability.data_egress:
-            raise ResolutionError(f"no-egress profile cannot use {key[0]}/{key[1]}")
         details = (connection_details or {}).get(key[0])
+        execution_target = (
+            details.get("execution_target", capability.execution_target)
+            if details
+            else capability.execution_target
+        )
+        data_egress = (
+            bool(details.get("data_egress", capability.data_egress))
+            if details
+            else capability.data_egress
+        )
+        if (
+            details
+            and details.get("provider_type") == "codex-local"
+            and stage != ProviderStage.correct
+        ):
+            raise ResolutionError(
+                f"codex-local is correction-only and cannot run stage {stage.value}"
+            )
+        if details and details.get("provider_type") == "codex-local" and (
+            execution_target != "cloud" or not data_egress
+        ):
+            raise ResolutionError("codex-local requires cloud execution with data egress")
+        if no_egress and data_egress:
+            raise ResolutionError(f"no-egress profile cannot use {key[0]}/{key[1]}")
         if details:
             selection.update(details)
-        selection["execution_target"] = capability.execution_target
-        selection["data_egress"] = capability.data_egress
+        selection["execution_target"] = execution_target
+        selection["data_egress"] = data_egress
 
     for stage_name, selection in merged["stages"].items():
         try:

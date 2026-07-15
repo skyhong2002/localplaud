@@ -119,9 +119,55 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     r = c.get("/")
     assert r.status_code == 200
     assert "rectable" in r.text  # sortable table present
+    assert ".table-wrap { border:0;overflow:visible; }" in r.text
+    assert ".select-cell input:focus-visible { opacity:1; }" in r.text
     assert "Bravo call" in r.text
     assert "Trash" in r.text  # trash view link
-    assert "Source 1" in r.text  # capture-source facet
+    assert "Capture source 1" in r.text  # capture-source facet
+    assert 'id="app-view" hx-history-elt' in r.text
+    assert 'id="recording-file-list"' not in r.text
+    assert 'href="/file/b?return_to=%2F"' in r.text
+
+
+def test_library_paginates_without_truncating_ask_scope(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add_all(
+            PlaudFile(
+                id=f"bulk-{index:03d}",
+                filename=f"Bulk recording {index:03d}",
+                status=FileStatus.done,
+                start_time_ms=10_000 + index,
+            )
+            for index in range(101)
+        )
+
+    first = c.get("/")
+    second = c.get("/?page=2")
+    ask = c.get("/?ask=true")
+    assert first.text.count('class="row-select"') == 100
+    assert ".quickadd { min-width:0;flex-basis:100%;margin-left:0; }" in first.text
+    assert ".rectable tbody td.name-cell { padding-right:44px; }" in first.text
+    assert "Page 1 / 2" in first.text and "Bulk recording 100" in first.text
+    assert "Alpha meeting" not in first.text
+    assert "Page 2 / 2" in second.text and "Alpha meeting" in second.text
+    assert "Bulk recording 100" in ask.text and "Alpha meeting" in ask.text
+
+    detail = c.get("/file/a", params={"return_to": "/?page=1", "tab": "mindmap"})
+    assert detail.status_code == 200
+    assert detail.text.count('data-recording-id="') == 101
+    assert 'data-recording-id="a"' in detail.text
+    assert "Selected recording" in detail.text
+    assert 'class="card on pinned-recording"' in detail.text
+    assert 'aria-label="Recording list pages"' in detail.text
+    assert '<span class="fl-page-label">1 / 2</span>' in detail.text
+    assert "data-replace-filelist" in detail.text
+    assert "return_to=%2F%3Fpage%3D2&amp;tab=mindmap" in detail.text
+    assert "!trigger?.closest?.('[data-replace-filelist]')" in detail.text
 
 
 def test_index_trash_view_shows_banner(monkeypatch, tmp_path):

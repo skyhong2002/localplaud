@@ -9,7 +9,7 @@ from dataclasses import asdict
 
 from ..asr.base import Segment, Transcript, Word
 from ..config import Settings
-from ..llm.base import LLMError, build_llm
+from ..llm.base import LLMError, LLMOutputInvalid, build_llm
 
 PROMPT_VERSION = "transcript-polish/v1"
 SYSTEM_PROMPT = """You polish ASR transcript segments for downstream notes.
@@ -65,9 +65,9 @@ def _json_completion(value: str) -> dict:
     try:
         result = json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        raise LLMError(f"transcript polish returned invalid JSON: {exc}") from exc
+        raise LLMOutputInvalid(f"transcript polish returned invalid JSON: {exc}") from exc
     if not isinstance(result, dict):
-        raise LLMError("transcript polish response must be a JSON object")
+        raise LLMOutputInvalid("transcript polish response must be a JSON object")
     return result
 
 
@@ -82,7 +82,16 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
     attempts = 0
     split_retries = 0
     output_chars = 0
-    pending = list(_chunks(source, settings.pipeline.polish_chunk_chars))
+    request_input_chars = 0
+    response_output_chars = 0
+    chunk_chars = getattr(provider, "polish_chunk_chars", settings.pipeline.polish_chunk_chars)
+    if (
+        isinstance(chunk_chars, bool)
+        or not isinstance(chunk_chars, int)
+        or not 1_000 <= chunk_chars <= 60_000
+    ):
+        raise LLMError("transcript polish chunk budget must be between 1000 and 60000")
+    pending = list(_chunks(source, chunk_chars))
     while pending:
         start, end = pending.pop(0)
         targets = [
@@ -111,30 +120,33 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
                 for item in source[end : min(len(source), end + 2)]
             ],
         }
+        request_json = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
         attempts += 1
-        raw_response = provider.complete(
-            json.dumps(request, ensure_ascii=False, separators=(",", ":")),
-            system=SYSTEM_PROMPT,
-            temperature=0.1,
-            max_tokens=max(2048, len(targets) * 80),
-            json_schema=RESPONSE_SCHEMA,
-        )
+        request_input_chars += len(SYSTEM_PROMPT) + len(request_json)
         try:
+            raw_response = provider.complete(
+                request_json,
+                system=SYSTEM_PROMPT,
+                temperature=0.1,
+                max_tokens=max(2048, len(targets) * 80),
+                json_schema=RESPONSE_SCHEMA,
+            )
+            response_output_chars += len(raw_response)
             response = _json_completion(raw_response)
             returned = response.get("segments")
             if not isinstance(returned, list):
-                raise LLMError("transcript polish response has no segments array")
+                raise LLMOutputInvalid("transcript polish response has no segments array")
             by_id: dict[int, str] = {}
             for item in returned:
                 if not isinstance(item, dict) or not isinstance(item.get("id"), int):
-                    raise LLMError("transcript polish returned an invalid segment entry")
+                    raise LLMOutputInvalid("transcript polish returned an invalid segment entry")
                 if not isinstance(item.get("text"), str):
-                    raise LLMError("transcript polish segment text must be a string")
+                    raise LLMOutputInvalid("transcript polish segment text must be a string")
                 by_id[item["id"]] = item["text"].strip()
             expected = set(range(start, end))
             if set(by_id) != expected:
-                raise LLMError("transcript polish changed or omitted segment IDs")
-        except LLMError:
+                raise LLMOutputInvalid("transcript polish changed or omitted segment IDs")
+        except LLMOutputInvalid:
             if end - start <= 1:
                 raise
             midpoint = start + (end - start) // 2
@@ -171,11 +183,14 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
         "prompt_version": PROMPT_VERSION,
         "detail": {
             "strategy": "contextual-segment-map",
+            "chunk_chars": chunk_chars,
             "chunks": calls,
             "attempts": attempts,
             "split_retries": split_retries,
             "segments": len(source),
             "input_chars": len(transcript.text),
             "output_chars": output_chars,
+            "request_input_chars": request_input_chars,
+            "response_output_chars": response_output_chars,
         },
     }

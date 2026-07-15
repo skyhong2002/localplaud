@@ -156,3 +156,177 @@ def test_assigns_nearest_turn_when_asr_timestamp_falls_in_vad_gap(monkeypatch):
         "SPEAKER_01",
     ]
     assert result.segments[0].speaker in {"SPEAKER_00", "SPEAKER_01"}
+
+
+def test_group_speaker_segments_merges_consecutive_chinese_speech_and_words():
+    transcript = Transcript(
+        language="zh",
+        provider="fake",
+        model="model",
+        has_speakers=True,
+        segments=[
+            Segment(
+                text="今天先確認。",
+                start=0.0,
+                end=1.0,
+                speaker="SPEAKER_00",
+                words=[Word("今天先確認。", 0.0, 1.0, "SPEAKER_00")],
+            ),
+            Segment(
+                text="接著開始處理。",
+                start=1.4,
+                end=2.5,
+                speaker="SPEAKER_00",
+                words=[Word("接著開始處理。", 1.4, 2.5, "SPEAKER_00")],
+            ),
+        ],
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(transcript)
+
+    assert len(grouped.segments) == 1
+    assert grouped.segments[0].text == "今天先確認。接著開始處理。"
+    assert (grouped.segments[0].start, grouped.segments[0].end) == (0.0, 2.5)
+    assert [(word.start, word.end) for word in grouped.segments[0].words] == [
+        (0.0, 1.0),
+        (1.4, 2.5),
+    ]
+    assert detail["merged_boundaries"] == 1
+    assert detail["output_segments"] == 1
+
+
+def test_group_speaker_segments_splits_word_level_turn_then_merges_next_run():
+    transcript = Transcript(
+        has_speakers=True,
+        segments=[
+            Segment(
+                text="hello yes",
+                start=0.0,
+                end=1.8,
+                speaker="SPEAKER_00",
+                words=[
+                    Word("hello", 0.0, 0.8, "SPEAKER_00"),
+                    Word("yes", 1.0, 1.8, "SPEAKER_01"),
+                ],
+            ),
+            Segment(
+                text="indeed",
+                start=2.0,
+                end=2.7,
+                speaker="SPEAKER_01",
+                words=[Word("indeed", 2.0, 2.7, "SPEAKER_01")],
+            ),
+        ],
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(transcript)
+
+    assert [(segment.speaker, segment.text) for segment in grouped.segments] == [
+        ("SPEAKER_00", "hello"),
+        ("SPEAKER_01", "yes indeed"),
+    ]
+    assert detail["split_boundaries"] == 1
+    assert detail["merged_boundaries"] == 1
+    assert [word.text for word in grouped.segments[1].words] == ["yes", "indeed"]
+
+
+def test_group_speaker_segments_keeps_long_silence_as_a_new_paragraph():
+    transcript = Transcript(
+        has_speakers=True,
+        segments=[
+            Segment(text="first", start=0.0, end=1.0, speaker="SPEAKER_00"),
+            Segment(text="second", start=4.1, end=5.0, speaker="SPEAKER_00"),
+        ],
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(transcript)
+
+    assert [segment.text for segment in grouped.segments] == ["first", "second"]
+    assert detail["merged_boundaries"] == 0
+
+
+def test_group_speaker_segments_preserves_unsafe_mixed_text_as_a_barrier():
+    transcript = Transcript(
+        has_speakers=True,
+        segments=[
+            Segment(
+                text="punctuation must remain!",
+                start=0.0,
+                end=2.0,
+                speaker="SPEAKER_00",
+                words=[
+                    Word("punctuation", 0.0, 0.8, "SPEAKER_00"),
+                    Word("must remain", 1.0, 2.0, "SPEAKER_01"),
+                ],
+            ),
+            Segment(text="next", start=2.1, end=2.5, speaker="SPEAKER_00"),
+        ],
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(transcript)
+
+    assert [segment.text for segment in grouped.segments] == [
+        "punctuation must remain!",
+        "next",
+    ]
+    assert grouped.segments[0].speaker is None
+    assert grouped.has_speakers is False
+    assert detail["unsafe_mixed_segments"] == 1
+    assert detail["merged_boundaries"] == 0
+
+
+def test_group_speaker_segments_is_idempotent():
+    transcript = Transcript(
+        has_speakers=True,
+        segments=[
+            Segment(text="one", start=0.0, end=1.0, speaker="SPEAKER_00"),
+            Segment(text="two", start=1.1, end=2.0, speaker="SPEAKER_00"),
+        ],
+    )
+
+    once, _detail = diarize_module.group_speaker_segments(transcript)
+    twice, _detail = diarize_module.group_speaker_segments(once)
+
+    assert twice == once
+
+
+def test_group_speaker_segments_requires_exact_whitespace_reconstruction():
+    transcript = Transcript(
+        has_speakers=True,
+        segments=[
+            Segment(
+                text="NewYork",
+                start=0.0,
+                end=2.0,
+                speaker="SPEAKER_00",
+                words=[
+                    Word("New", 0.0, 0.8, "SPEAKER_00"),
+                    Word("York", 1.0, 2.0, "SPEAKER_01"),
+                ],
+            )
+        ],
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(transcript)
+
+    assert grouped.segments[0].text == "NewYork"
+    assert grouped.segments[0].speaker is None
+    assert detail["unsafe_mixed_segments"] == 1
+
+
+def test_group_speaker_segments_caps_continuous_monologues():
+    transcript = Transcript(
+        has_speakers=True,
+        segments=[
+            Segment(text="aaaa", start=0.0, end=1.0, speaker="SPEAKER_00"),
+            Segment(text="bbbb", start=1.1, end=2.0, speaker="SPEAKER_00"),
+            Segment(text="cccc", start=2.1, end=3.0, speaker="SPEAKER_00"),
+        ],
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(
+        transcript, max_chars=9, max_duration_seconds=120
+    )
+
+    assert [segment.text for segment in grouped.segments] == ["aaaa bbbb", "cccc"]
+    assert detail["limit_boundaries"] == 1

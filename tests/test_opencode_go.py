@@ -8,7 +8,7 @@ from subprocess import CompletedProcess, TimeoutExpired
 import pytest
 
 from localplaud.config import OpenCodeGoLlmConfig
-from localplaud.llm.base import LLMError
+from localplaud.llm.base import LLMInputTooLarge, LLMQuotaExhausted, LLMTransientError
 from localplaud.llm.opencode_go import OpenCodeGoLLM
 
 
@@ -39,8 +39,54 @@ def test_opencode_go_timeout_is_actionable(monkeypatch):
         lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutExpired("opencode", 30)),
     )
     provider = OpenCodeGoLLM(OpenCodeGoLlmConfig(timeout_seconds=30))
-    with pytest.raises(LLMError, match="timed out after 30s"):
+    with pytest.raises(LLMTransientError, match="timed out after 30s"):
         provider.complete("text")
+
+
+def test_opencode_go_classifies_quota_and_empty_output(monkeypatch):
+    monkeypatch.setattr("localplaud.llm.opencode_go.shutil.which", lambda _name: "/bin/opencode")
+    provider = OpenCodeGoLLM(OpenCodeGoLlmConfig())
+    monkeypatch.setattr(
+        "localplaud.llm.opencode_go.subprocess.run",
+        lambda command, **_kwargs: CompletedProcess(
+            command, 1, stdout="", stderr="GoUsageLimitError: quota exhausted"
+        ),
+    )
+    with pytest.raises(LLMQuotaExhausted, match="usage is exhausted"):
+        provider.complete("text")
+
+    monkeypatch.setattr(
+        "localplaud.llm.opencode_go.subprocess.run",
+        lambda command, **_kwargs: CompletedProcess(command, 0, stdout="", stderr=""),
+    )
+    with pytest.raises(LLMTransientError, match="no text completion"):
+        provider.complete("text")
+
+
+@pytest.mark.parametrize(
+    "detail",
+    ["network retries exhausted", "HTTP 502 bad gateway", "unexpected EOF"],
+)
+def test_opencode_go_transport_exhaustion_is_transient_not_quota(monkeypatch, detail):
+    monkeypatch.setattr("localplaud.llm.opencode_go.shutil.which", lambda _name: "/bin/opencode")
+    monkeypatch.setattr(
+        "localplaud.llm.opencode_go.subprocess.run",
+        lambda command, **_kwargs: CompletedProcess(command, 1, stdout="", stderr=detail),
+    )
+    with pytest.raises(LLMTransientError, match="transport failed"):
+        OpenCodeGoLLM(OpenCodeGoLlmConfig()).complete("text")
+
+
+def test_opencode_go_classifies_context_limit_for_adaptive_split(monkeypatch):
+    monkeypatch.setattr("localplaud.llm.opencode_go.shutil.which", lambda _name: "/bin/opencode")
+    monkeypatch.setattr(
+        "localplaud.llm.opencode_go.subprocess.run",
+        lambda command, **_kwargs: CompletedProcess(
+            command, 1, stdout="", stderr="maximum context length exceeded"
+        ),
+    )
+    with pytest.raises(LLMInputTooLarge, match="exceeded the model context"):
+        OpenCodeGoLLM(OpenCodeGoLlmConfig()).complete("text")
 
 
 def test_opencode_go_health_checks_credential_and_model(monkeypatch):

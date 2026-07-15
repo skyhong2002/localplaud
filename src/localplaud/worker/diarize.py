@@ -9,11 +9,222 @@ speaker who overlaps it most.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
-from ..asr.base import Transcript
+from ..asr.base import Segment, Transcript, Word
 from ..config import DiarizeConfig
 
 log = logging.getLogger(__name__)
+DEFAULT_SPEAKER_GROUP_GAP_SECONDS = 3.0
+DEFAULT_SPEAKER_GROUP_MAX_CHARS = 1_200
+DEFAULT_SPEAKER_GROUP_MAX_DURATION_SECONDS = 120.0
+
+
+def _is_cjk(value: str) -> bool:
+    codepoint = ord(value)
+    return (
+        0x3400 <= codepoint <= 0x4DBF
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+    )
+
+
+def _join_text(left: str, right: str) -> str:
+    left, right = left.rstrip(), right.lstrip()
+    if not left:
+        return right
+    if not right:
+        return left
+    if (
+        right[0] in ",.;:!?%)]}，。！？、；：」』】）》…"
+        or left[-1] in "([{「『【《（-/'"
+        or right[0] in "-/'"
+        or (_is_cjk(left[-1]) and _is_cjk(right[0]))
+        or (
+            left[-1] in "，。！？、；：」』】）》…"
+            and _is_cjk(right[0])
+        )
+    ):
+        return left + right
+    return f"{left} {right}"
+
+
+def _words_text(words: list[Word]) -> str:
+    text = ""
+    for word in words:
+        text = _join_text(text, word.text)
+    return text.strip()
+
+
+@dataclass
+class _SpeakerRun:
+    segment: Segment
+    mergeable: bool = True
+
+
+def _speaker_runs(segment: Segment) -> tuple[list[_SpeakerRun], bool]:
+    """Split a mixed-speaker ASR segment at word-level speaker boundaries."""
+    if not segment.words:
+        return [_SpeakerRun(segment)], False
+    speakers = [word.speaker or segment.speaker for word in segment.words]
+    if len(set(speakers)) <= 1:
+        return (
+            [
+                _SpeakerRun(
+                    Segment(
+                        text=segment.text,
+                        start=segment.start,
+                        end=segment.end,
+                        speaker=speakers[0] if speakers else segment.speaker,
+                        words=list(segment.words),
+                    )
+                )
+            ],
+            False,
+        )
+
+    # If alignment words cannot reproduce the original text, splitting would
+    # silently lose or rewrite content. Keep the mixed segment as a standalone
+    # paragraph instead of merging it under the majority speaker.
+    if _words_text(segment.words) != segment.text.strip():
+        return (
+            [
+                _SpeakerRun(
+                    Segment(
+                        text=segment.text,
+                        start=segment.start,
+                        end=segment.end,
+                        speaker=None,
+                        words=list(segment.words),
+                    ),
+                    mergeable=False,
+                )
+            ],
+            True,
+        )
+
+    runs: list[_SpeakerRun] = []
+    start = 0
+    for index in range(1, len(segment.words) + 1):
+        if index < len(segment.words) and speakers[index] == speakers[start]:
+            continue
+        words = segment.words[start:index]
+        runs.append(
+            _SpeakerRun(
+                Segment(
+                    text=_words_text(words),
+                    start=words[0].start,
+                    end=words[-1].end,
+                    speaker=speakers[start],
+                    words=list(words),
+                )
+            )
+        )
+        start = index
+    return runs, False
+
+
+def group_speaker_segments(
+    transcript: Transcript,
+    *,
+    max_gap_seconds: float = DEFAULT_SPEAKER_GROUP_GAP_SECONDS,
+    max_chars: int = DEFAULT_SPEAKER_GROUP_MAX_CHARS,
+    max_duration_seconds: float = DEFAULT_SPEAKER_GROUP_MAX_DURATION_SECONDS,
+) -> tuple[Transcript, dict]:
+    """Build readable speaker paragraphs without losing word timestamps.
+
+    Word-level speaker changes split an ASR segment first. Consecutive runs are
+    then merged only when the speaker is known, unchanged, and the silence gap
+    does not exceed ``max_gap_seconds``.
+    """
+    if max_gap_seconds < 0:
+        raise ValueError("speaker grouping gap must be non-negative")
+    if max_chars < 1 or max_duration_seconds <= 0:
+        raise ValueError("speaker grouping limits must be positive")
+
+    runs: list[_SpeakerRun] = []
+    split_boundaries = 0
+    unsafe_mixed_segments = 0
+    for segment in transcript.segments:
+        segment_runs, unsafe = _speaker_runs(segment)
+        runs.extend(segment_runs)
+        split_boundaries += max(0, len(segment_runs) - 1)
+        unsafe_mixed_segments += int(unsafe)
+
+    grouped: list[_SpeakerRun] = []
+    merged_boundaries = 0
+    limit_boundaries = 0
+    for run in runs:
+        previous = grouped[-1] if grouped else None
+        segment = run.segment
+        previous_segment = previous.segment if previous is not None else None
+        gap = segment.start - previous_segment.end if previous_segment is not None else None
+        candidate_text = (
+            _join_text(previous_segment.text, segment.text)
+            if previous_segment is not None
+            else segment.text
+        )
+        same_speaker_run = (
+            previous is not None
+            and previous.mergeable
+            and run.mergeable
+            and previous_segment is not None
+            and previous_segment.speaker is not None
+            and previous_segment.speaker == segment.speaker
+            and segment.start >= previous_segment.start
+            and gap is not None
+            and gap <= max_gap_seconds
+        )
+        within_limits = bool(
+            previous_segment is not None
+            and len(candidate_text) <= max_chars
+            and max(previous_segment.end, segment.end) - previous_segment.start
+            <= max_duration_seconds
+        )
+        if same_speaker_run and within_limits:
+            previous_segment.text = candidate_text
+            previous_segment.end = max(previous_segment.end, segment.end)
+            previous_segment.words.extend(segment.words)
+            merged_boundaries += 1
+        else:
+            if same_speaker_run:
+                limit_boundaries += 1
+            grouped.append(
+                _SpeakerRun(
+                    Segment(
+                        text=segment.text,
+                        start=segment.start,
+                        end=segment.end,
+                        speaker=segment.speaker,
+                        words=list(segment.words),
+                    ),
+                    mergeable=run.mergeable,
+                )
+            )
+
+    grouped_segments = [run.segment for run in grouped]
+    result = Transcript(
+        segments=grouped_segments,
+        language=transcript.language,
+        duration=transcript.duration,
+        provider=transcript.provider,
+        model=transcript.model,
+        has_speakers=bool(grouped_segments)
+        and all(segment.speaker for segment in grouped_segments),
+    )
+    return result, {
+        "strategy": "consecutive-speaker-runs",
+        "max_gap_seconds": max_gap_seconds,
+        "max_chars": max_chars,
+        "max_duration_seconds": max_duration_seconds,
+        "input_segments": len(transcript.segments),
+        "speaker_runs": len(runs),
+        "output_segments": len(grouped),
+        "split_boundaries": split_boundaries,
+        "merged_boundaries": merged_boundaries,
+        "limit_boundaries": limit_boundaries,
+        "unsafe_mixed_segments": unsafe_mixed_segments,
+    }
 
 
 class DiarizationError(RuntimeError):

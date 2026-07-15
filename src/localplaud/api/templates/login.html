@@ -1,18 +1,16 @@
 <!doctype html>
-<html lang="{{ workspace_preferences.locale }}"{% if workspace_preferences.theme != 'system' %} data-theme="{{ workspace_preferences.theme }}"{% endif %}>
+<html lang="{{ workspace_preferences.locale }}" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ t('Sign in') }} · localplaud</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <style>
-    :root{color-scheme:light dark;--blue:#007aff;--bg:#f2f4f7;--panel:#fff;--fg:#1f1f1f;--muted:#667085;--border:#d0d5dd;--danger:#b42318}
-    @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161618;--panel:#1e1e21;--fg:#ececee;--muted:#9a9aa2;--border:#3a3a41;--danger:#ff8a80}}
-    :root[data-theme="dark"]{--bg:#161618;--panel:#1e1e21;--fg:#ececee;--muted:#9a9aa2;--border:#3a3a41;--danger:#ff8a80}
+    :root{color-scheme:light;--blue:#007aff;--bg:#f2f4f7;--panel:#fff;--fg:#1f1f1f;--muted:#667085;--border:#d0d5dd;--danger:#b42318}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--fg);font:14px/1.5 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    main{width:min(400px,100%);padding:32px;background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:0 16px 48px rgba(16,24,40,.12)}
-    .brand{font-size:22px;font-weight:750;letter-spacing:-.03em}.brand span{color:var(--blue)}h1{margin:28px 0 6px;font-size:24px;letter-spacing:-.03em}.sub{margin:0 0 24px;color:var(--muted)}
-    label{display:block;margin-bottom:7px;font-weight:600}input{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--fg);font:inherit;outline:none}input:focus{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 18%,transparent)}button{width:100%;margin-top:16px;padding:11px;border:0;border-radius:9px;background:var(--blue);color:#fff;font:inherit;font-weight:700;cursor:pointer}.error{margin:0 0 14px;color:var(--danger)}.foot{margin-top:20px;color:var(--muted);font-size:12px;text-align:center}
+    main{width:min(400px,100%);padding:32px;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 16px 48px rgba(16,24,40,.12)}
+    .brand{font-size:22px;font-weight:750;letter-spacing:0}.brand span{color:var(--blue)}h1{margin:28px 0 6px;font-size:24px;letter-spacing:0}.sub{margin:0 0 24px;color:var(--muted)}
+    label{display:block;margin-bottom:7px;font-weight:600}input{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--fg);font:inherit;outline:none}input:focus{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 18%,transparent)}button{width:100%;margin-top:16px;padding:11px;border:0;border-radius:7px;background:var(--blue);color:#fff;font:inherit;font-weight:700;cursor:pointer}.error{margin:0 0 14px;color:var(--danger)}.foot{margin-top:20px;color:var(--muted);font-size:12px;text-align:center}
   </style>
 </head>
 <body>

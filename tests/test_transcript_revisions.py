@@ -272,8 +272,12 @@ def test_revision_history_preview_and_non_destructive_restore(monkeypatch, tmp_p
     )
     preview = c.get("/file/r1?view=corrected&revision=1")
     assert preview.status_code == 200
-    assert "Revision 1 preview" in preview.text and "first version" in preview.text
-    assert "second version" not in preview.text
+    assert "Revision 1 preview" in preview.text
+    preview_transcript = c.get(
+        "/file/r1/transcript-page?view=corrected&revision=1"
+    ).text
+    assert "first version" in preview_transcript
+    assert "second version" not in preview_transcript
     assert "Revision history · 2" in preview.text
 
     restored = c.post(
@@ -444,25 +448,29 @@ def test_detail_view_toggle_raw_vs_corrected(monkeypatch, tmp_path):
     page = c.get("/file/r1")
     assert page.status_code == 200
     assert "raw ASR" in page.text
-    assert "?view=raw" not in page.text
-    assert 'class="editbtn"' in page.text
+    assert 'href="/file/r1?view=raw"' not in page.text
+    assert 'class="editbtn"' in c.get("/file/r1/transcript-page?view=raw").text
 
     c.post("/file/r1/transcript/segments/0", data={"text": "hello, team!", "base_revision": 0},
            follow_redirects=False)
 
     # default view is now the corrected canonical transcript
     page = c.get("/file/r1")
-    assert "hello, team!" in page.text
+    corrected_transcript = c.get("/file/r1/transcript-page?view=corrected").text
+    assert "hello, team!" in corrected_transcript
     assert "Corrected (rev 1)" in page.text  # labelled current view
-    assert '?view=raw' in page.text  # toggle to the raw artifact
-    assert 'class="editbtn"' in page.text
+    assert (
+        'href="/file/r1?view=raw&amp;return_to=%2F"' in page.text
+    )  # toggle preserves the library return context
+    assert 'class="editbtn"' in corrected_transcript
 
     # explicit raw view shows the untouched ASR output, read-only
     raw = c.get("/file/r1?view=raw")
-    assert "hello team" in raw.text
-    assert "hello, team!" not in raw.text
+    raw_transcript = c.get("/file/r1/transcript-page?view=raw").text
+    assert "hello team" in raw_transcript
+    assert "hello, team!" not in raw_transcript
     assert "?view=corrected" in raw.text
-    assert 'class="editbtn"' not in raw.text  # no edits from the raw view
+    assert 'class="editbtn"' not in raw_transcript  # no edits from the raw view
 
 
 def test_reindex_file_rebuilds_chunks_from_corrected_transcript(monkeypatch, tmp_path):

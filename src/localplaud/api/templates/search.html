@@ -35,7 +35,7 @@
 </form>
 
 {% if q and not groups %}
-<div class="empty"><div class="big">🔍</div>No matches for “{{ q }}”.<br>
+<div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>No matches for “{{ q }}”.<br>
   <span class="sub">{{ t('No title, transcript, or note matches within these filters.') }}</span>
 </div>
 {% elif groups %}
@@ -54,7 +54,7 @@
   {% endfor %}
 </div>
 {% else %}
-<div class="empty"><div class="big">🔎</div>{{ t('Search works locally without an AI provider.') }}<br><span class="sub">{{ t('Find words in titles, transcripts, and notes; semantic results are blended in when configured.') }}</span></div>
+<div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>{{ t('Search works locally without an AI provider.') }}<br><span class="sub">{{ t('Find words in titles, transcripts, and notes; semantic results are blended in when configured.') }}</span></div>
 {% endif %}
 </div></div>
 {% endblock %}

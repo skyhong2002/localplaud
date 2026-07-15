@@ -29,11 +29,12 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
         assert defaults.status_code == 200
         assert defaults.json() == {
             "workspace_name": "localplaud",
-            "theme": "system",
+            "theme": "light",
             "density": "comfortable",
             "timezone": "Asia/Taipei",
             "hour_cycle": "24",
             "locale": "en",
+            "auto_process_new_recordings": True,
         }
 
         invalid = client.put(
@@ -47,11 +48,12 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
             "/api/preferences/workspace",
             json={
                 "workspace_name": "Sky Lab",
-                "theme": "dark",
+                "theme": "light",
                 "density": "compact",
                 "timezone": "UTC",
                 "hour_cycle": "12",
                 "locale": "zh-Hant-TW",
+                "auto_process_new_recordings": False,
             },
         )
         assert updated.status_code == 200
@@ -59,13 +61,18 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
 
         page = client.get("/settings")
         assert page.status_code == 200
-        assert '<html lang="zh-Hant-TW" data-density="compact" data-theme="dark">' in page.text
+        assert '<html lang="zh-Hant-TW" data-density="compact" data-theme="light">' in page.text
+        assert 'name="theme" value="light"' in page.text
+        assert 'option value="dark"' not in page.text
         assert "Sky Lab · 自架服務" in page.text
         assert 'id="workspace-preferences"' in page.text
         assert 'href="#workspace-preferences"' in page.text
         assert 'value="UTC"' in page.text
         assert '<option value="12" selected>12-hour</option>' in page.text
         assert '<option value="zh-Hant-TW" selected>繁體中文（台灣）</option>' in page.text
+        assert 'name="auto_process_new_recordings"' in page.text
+        assert 'name="auto_process_new_recordings" checked' not in page.text
+        assert "自動處理新錄音" in page.text
         assert "工作區偏好設定" in page.text
         for text in (
             "帳號",
@@ -87,6 +94,30 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
         ):
             assert text in page.text
         assert "#workspace-preferences-form{grid-template-columns:1fr!important}" in page.text
+
+
+def test_daemon_processing_respects_workspace_preference(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    calls: list[int] = []
+
+    def fake_process_pending(_settings, *, limit):
+        calls.append(limit)
+        return 1
+
+    monkeypatch.setattr("localplaud.worker.pipeline.process_pending", fake_process_pending)
+    from localplaud.cli import process_automatic_pending
+    from localplaud.config import get_settings
+
+    with client:
+        assert process_automatic_pending(get_settings()) == 1
+        preferences = client.get("/api/preferences/workspace").json()
+        response = client.put(
+            "/api/preferences/workspace",
+            json=preferences | {"auto_process_new_recordings": False},
+        )
+        assert response.status_code == 200
+        assert process_automatic_pending(get_settings()) == 0
+    assert calls == [1]
 
 
 def test_workspace_timezone_and_clock_apply_to_recorded_dates(monkeypatch, tmp_path):
@@ -135,7 +166,7 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
             ("/templates", "結構化筆記"),
             ("/discover", "本機自動化"),
             ("/notifications", "目前沒有通知"),
-            ("/", "你的 Plaud 雲端內容"),
+                ("/", "名稱"),
             ("/search", "即使沒有 AI 供應商"),
             ("/notes", "目前沒有已儲存筆記"),
             ("/status", "執行環境"),

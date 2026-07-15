@@ -233,7 +233,7 @@ def test_rename_endpoint_upsert_clear_and_validation(monkeypatch, tmp_path):
     r = c.post("/file/r1/speakers", data={"key": "SPEAKER_00", "name": "Alice"},
                follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/file/r1"
+    assert r.headers["location"] == "/file/r1?return_to=%2F&tab=transcript"
     assert name_of("SPEAKER_00") == "Alice"
 
     # empty/whitespace clears the name back to the stable key

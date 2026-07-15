@@ -408,11 +408,21 @@ def test_detail_page_renders_mind_map_tab(monkeypatch, tmp_path):
     assert "Mind map" in r.text
     assert 'data-panel="mindmap"' in r.text
     assert 'id="mindmap-src"' in r.text and "Sync topics" in r.text
-    assert "Expand all" in r.text and "Collapse all" in r.text
+    assert 'id="mm-zoom"' in r.text and 'id="mm-fit"' in r.text
+    assert 'id="mm-zoom" type="range" min="15" max="140"' in r.text
+    assert "availableHeight=Math.max(1,viewport.clientHeight-30)" in r.text
+    assert "availableHeight/natural.height*100" in r.text
+    assert (
+        "Math.min(100,availableWidth/natural.width*100,"
+        "availableHeight/natural.height*100)" in r.text
+    )
+    assert "Math.max(60,available/natural*100)" not in r.text
+    assert "height:clamp(360px,58vh,520px)" in r.text
+    assert 'class="mindmap-viewport"' in r.text
     # The mind map is excluded from the generic summary tabs.
     assert "Mind_map" not in r.text
-    assert 'data-panel="sum-0"' in r.text  # the meeting note keeps its tab
-    assert 'data-panel="sum-1"' not in r.text
+    assert 'data-note-panel="sum-0"' in r.text  # the meeting note keeps its tab
+    assert 'data-note-panel="sum-1"' not in r.text
 
 
 def test_export_markdown_includes_mind_map_before_transcript(monkeypatch, tmp_path):

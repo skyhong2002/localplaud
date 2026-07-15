@@ -60,7 +60,7 @@ from ..store.speakers import (
     sync_speakers,
 )
 from . import align, convert, index, mindmap, polish, summarize, summary_templates, transcribe
-from .diarize import DiarizationUnavailable, diarize
+from .diarize import DiarizationUnavailable, diarize, group_speaker_segments
 
 log = logging.getLogger(__name__)
 _PROFILE_SNAPSHOT: ContextVar[dict | None] = ContextVar("resolved_profile_snapshot", default=None)
@@ -80,7 +80,7 @@ def processing_claim_active(row: PlaudFile, *, now: datetime | None = None) -> b
     return lease > (now or datetime.now(UTC))
 
 
-def _claim_processing(file_id: str) -> str:
+def _claim_processing(file_id: str, *, require_audio: bool = True) -> str:
     """Atomically claim one recording so UI and daemon work cannot overlap."""
     token = uuid.uuid4().hex
     now = datetime.now(UTC)
@@ -88,7 +88,7 @@ def _claim_processing(file_id: str) -> str:
         row = session.get(PlaudFile, file_id)
         if row is None:
             raise ValueError(f"unknown file {file_id}")
-        if not row.audio_path or not Path(row.audio_path).exists():
+        if require_audio and (not row.audio_path or not Path(row.audio_path).exists()):
             raise FileNotFoundError(f"audio missing for {file_id}: {row.audio_path}")
         claimed = session.execute(
             update(PlaudFile)
@@ -144,6 +144,8 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
 
     family_config = getattr(resolved, family)
     provider = selected.get("provider_type") or str(selected["connection"]).split(":", 1)[-1]
+    if provider == "codex-local" and stage != "correct":
+        raise ValueError(f"codex-local is correction-only and cannot run stage {stage}")
     family_config.provider = provider
     provider_config = getattr(family_config, provider.replace("-", "_"), None)
     for key, value in selected.get("configuration", {}).items():
@@ -177,6 +179,12 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
             raise ValueError(f"provider secret is unavailable: {secret_ref}")
         if provider_config is not None and hasattr(provider_config, "api_key"):
             provider_config.api_key = secret
+
+    if provider_config is not None:
+        validated_provider = type(provider_config).model_validate(
+            provider_config.model_dump(warnings=False)
+        )
+        setattr(family_config, provider.replace("-", "_"), validated_provider)
 
     if stage == "transcribe":
         # Provider-name fallback is intentionally disabled. Only the validated,
@@ -518,9 +526,7 @@ def _llm_projected_usage(transcript: Transcript, settings: Settings) -> dict:
     reduce_calls = math.ceil(chunks / 8) if chunks > 1 else 0
     requests = chunks + reduce_calls + 1 if chunks > 1 else 1
     reduce_tokens = summarize._reduction_max_tokens(settings.pipeline.summary_chunk_chars)
-    max_output_tokens = (
-        chunks * 1200 + reduce_calls * reduce_tokens + 1500 if chunks > 1 else 1500
-    )
+    max_output_tokens = chunks * 1200 + reduce_calls * reduce_tokens + 1500 if chunks > 1 else 1500
     return {
         "input_chars": math.ceil(chars * (1.5 if chunks > 1 else 1.0)),
         "output_tokens": max_output_tokens,
@@ -571,6 +577,28 @@ def process_file(file_id: str, settings: Settings | None = None, force: bool = F
         _release_processing(file_id, token)
 
 
+def process_derived_artifacts(file_id: str, settings: Settings | None = None) -> None:
+    """Resume notes, mind map, and indexing from the canonical local transcript.
+
+    This path deliberately does not require retained audio. It uses the same
+    durable claim, resolved profiles, fallback policy, cost guard, attempts,
+    provenance, and stage state transitions as the full pipeline.
+    """
+    token = _claim_processing(file_id, require_audio=False)
+    try:
+        _process_derived_artifacts_claimed(file_id, settings=settings)
+    except Exception as exc:
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            if row is not None and row.status == FileStatus.processing:
+                row.status = FileStatus.error
+                row.error = str(exc)[:2000]
+                _schedule_pipeline_retry(row, settings or get_settings())
+        raise
+    finally:
+        _release_processing(file_id, token)
+
+
 def _process_file_claimed(
     file_id: str, settings: Settings | None = None, force: bool = False
 ) -> None:
@@ -588,13 +616,10 @@ def _process_file_claimed(
         audio = Path(row.audio_path)
         existing_wav = row.wav_path
         requested_template_key = row.note_template_key or pcfg.summary_template
-        template_key = "default" if requested_template_key == "auto" else requested_template_key
         snapshot = resolve_recording_profile(
             session, file_id, template_key=requested_template_key
         ).to_dict()
-        align_run = next(
-            (run for run in row.stage_runs if run.stage == StageName.align), None
-        )
+        align_run = next((run for run in row.stage_runs if run.stage == StageName.align), None)
         align_selection = (snapshot.get("stages") or {}).get("align") or {}
         previous_align_selection = (
             ((align_run.resolved_profile_snapshot or {}).get("stages") or {}).get("align") or {}
@@ -613,8 +638,6 @@ def _process_file_claimed(
         )
 
     profile_token = _PROFILE_SNAPSHOT.set(snapshot)
-    derived_profile_token = None
-    derived_snapshot = snapshot
     diarize_settings = _settings_for_stage(settings, snapshot, "diarize")
 
     partial_errors: list[str] = []
@@ -686,12 +709,18 @@ def _process_file_claimed(
                         )
                     else:
                         result = transcribe.run_asr(wav, candidate_settings)
+                    speaker_grouping = None
+                    if result.has_speakers:
+                        result, speaker_grouping = group_speaker_segments(result)
                     _persist_transcript(file_id, result)
+                    detail = {"cost_budget": cost_budget}
+                    if speaker_grouping is not None:
+                        detail["speaker_grouping"] = speaker_grouping
                     return {
                         "value": result,
                         "provider": result.provider,
                         "model": result.model,
-                        "detail": {"cost_budget": cost_budget},
+                        "detail": detail,
                         "usage": {
                             "audio_seconds": _audio_seconds(row, result),
                             "output_chars": len(result.text),
@@ -743,15 +772,17 @@ def _process_file_claimed(
                 }
 
             try:
+
                 def run_align(candidate):
                     selection = alignment_selection(candidate)
                     if _remote_selection(candidate, "align"):
                         raise align.AlignmentUnavailable(
                             "remote-worker protocol v1 does not support alignment jobs"
                         )
-                    provider = selection.get("provider_type") or str(
-                        selection["connection"]
-                    ).split(":", 1)[-1]
+                    provider = (
+                        selection.get("provider_type")
+                        or str(selection["connection"]).split(":", 1)[-1]
+                    )
                     options = dict(selection.get("configuration") or {}) | dict(
                         selection.get("options") or {}
                     )
@@ -789,14 +820,13 @@ def _process_file_claimed(
                         )
                     )
                     failed_snapshot = (
-                        failed_run.resolved_profile_snapshot
-                        if failed_run is not None
-                        else snapshot
+                        failed_run.resolved_profile_snapshot if failed_run is not None else snapshot
                     )
                 failed_selection = alignment_selection(failed_snapshot)
-                failed_provider = failed_selection.get("provider_type") or str(
-                    failed_selection["connection"]
-                ).split(":", 1)[-1]
+                failed_provider = (
+                    failed_selection.get("provider_type")
+                    or str(failed_selection["connection"]).split(":", 1)[-1]
+                )
                 requested_forced = failed_provider == align.WHISPERX_PROVIDER
                 if requested_forced or not isinstance(exc, align.AlignmentUnavailable):
                     partial_errors.append(f"align: {exc}")
@@ -817,19 +847,26 @@ def _process_file_claimed(
                     error=str(exc),
                 )
 
+        # Diarization always derives from the immutable raw lane. A resumed
+        # canonical revision may contain user text and must never be persisted
+        # back over provider output.
+        diarization_input = transcript
+        if transcript is not None and transcript_source == "local":
+            diarization_input = _load_raw_transcript(file_id, settings) or transcript
+
         # --- diarize (downstream/degradable; transcript stays usable) -- #
-        if transcript is None:
+        if diarization_input is None:
             _skip_stage(file_id, StageName.diarize, "no transcript")
         elif not pcfg.diarize:
             _skip_stage(file_id, StageName.diarize, "disabled")
         elif transcript_source != "local":
             _skip_stage(file_id, StageName.diarize, "imported migration artifact")
-        elif transcript.has_speakers:
+        elif diarization_input.has_speakers:
             _finish_stage(
                 file_id,
                 StageName.diarize,
-                provider=transcript.provider,
-                model=transcript.model,
+                provider=diarization_input.provider,
+                model=diarization_input.model,
                 artifact_source=transcript_source,
                 detail={"reused": True, "provided_by_asr": True},
             )
@@ -843,7 +880,7 @@ def _process_file_claimed(
 
                 def run_diarize(candidate):
                     candidate_settings = _settings_for_stage(settings, candidate, "diarize")
-                    source = copy.deepcopy(transcript)
+                    source = copy.deepcopy(diarization_input)
                     if candidate_settings.diarize.provider == "none":
                         raise DiarizationUnavailable("diarization provider disabled")
                     projected_usage = {
@@ -867,6 +904,7 @@ def _process_file_claimed(
                     else:
                         source = diarize(wav, source, candidate_settings.diarize)
                         provider = candidate_settings.diarize.provider
+                    source, speaker_grouping = group_speaker_segments(source)
                     # Legacy system-default snapshots can legitimately have no
                     # explicit stage map.  ``candidate_settings`` already
                     # resolves that case against durable settings.
@@ -879,6 +917,7 @@ def _process_file_claimed(
                         "detail": {
                             "cost_budget": cost_budget,
                             "speaker_reconciliation": speaker_mapping,
+                            "speaker_grouping": speaker_grouping,
                         },
                         "usage": {
                             "audio_seconds": _audio_seconds(row, source),
@@ -916,7 +955,6 @@ def _process_file_claimed(
 
         # Plaud-style contextual cleanup: raw ASR remains immutable while the
         # polished text becomes the canonical revision consumed by notes/index.
-        polish_failed = False
         polish_input = _load_transcript(file_id, settings)
         current_kind = None
         current_provenance_complete = False
@@ -981,9 +1019,14 @@ def _process_file_claimed(
                         "model": result.get("model"),
                         "detail": detail,
                         "usage": {
-                            "input_chars": detail.get("input_chars", len(transcript.text)),
-                            "output_chars": detail.get("output_chars", 0),
-                            "requests": detail.get("chunks", 1),
+                            "input_chars": detail.get(
+                                "request_input_chars",
+                                detail.get("input_chars", len(transcript.text)),
+                            ),
+                            "output_chars": detail.get(
+                                "response_output_chars", detail.get("output_chars", 0)
+                            ),
+                            "requests": detail.get("attempts", detail.get("chunks", 1)),
                         },
                     }
 
@@ -993,38 +1036,111 @@ def _process_file_claimed(
             except Exception as exc:  # noqa: BLE001 - raw transcript remains usable
                 log.exception("Transcript polish failed for %s", file_id)
                 partial_errors.append(f"correct: {exc}")
-                polish_failed = True
 
-        # A force rebuild may replace the raw row while preserving user edits.
-        # Reload the configured canonical lane before all derived stages so notes,
-        # mind maps and the search index never drift from corrected transcript UI.
+        # Reload the configured canonical lane before all derived stages so
+        # notes, maps, and search never drift from corrected transcript UI.
         canonical = _load_transcript(file_id, settings)
-        transcript_lineage = _transcript_lineage(file_id, settings)
         if canonical is not None:
-            transcript, transcript_source = canonical
-        if polish_failed:
-            transcript = None
-        auto_recommendation = None
+            transcript, _transcript_source = canonical
+        partial_errors.extend(
+            _run_derived_stages(
+                file_id,
+                settings,
+                transcript,
+                requested_template_key,
+                snapshot,
+                force=force,
+            )
+        )
+
+        _finish_processing_cycle(file_id, settings, partial_errors)
+        log.info("Pipeline %s for %s", "partial" if partial_errors else "complete", file_id)
+
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Pipeline failed for %s", file_id)
+        with session_scope() as session:
+            r = session.get(PlaudFile, file_id)
+            r.status = FileStatus.error
+            r.error = str(exc)[:2000]
+            _schedule_pipeline_retry(r, settings)
+        raise
+    finally:
+        _PROFILE_SNAPSHOT.reset(profile_token)
+
+
+def _process_derived_artifacts_claimed(file_id: str, settings: Settings | None = None) -> None:
+    settings = settings or get_settings()
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            raise ValueError(f"unknown file {file_id}")
+        requested_template_key = row.note_template_key or settings.pipeline.summary_template
+        snapshot = resolve_recording_profile(
+            session, file_id, template_key=requested_template_key
+        ).to_dict()
+
+    canonical = _load_transcript(file_id, settings)
+    if canonical is None or canonical[1] != "local":
+        raise ValueError(f"canonical local transcript required for {file_id}")
+    transcript, _transcript_source = canonical
+
+    profile_token = _PROFILE_SNAPSHOT.set(snapshot)
+    try:
+        partial_errors = _run_derived_stages(
+            file_id,
+            settings,
+            transcript,
+            requested_template_key,
+            snapshot,
+            force=False,
+        )
+        _finish_processing_cycle(file_id, settings, partial_errors)
+        log.info(
+            "Derived pipeline %s for %s",
+            "partial" if partial_errors else "complete",
+            file_id,
+        )
+    finally:
+        _PROFILE_SNAPSHOT.reset(profile_token)
+
+
+def _run_derived_stages(
+    file_id: str,
+    settings: Settings,
+    transcript: Transcript | None,
+    requested_template_key: str,
+    snapshot: dict,
+    *,
+    force: bool,
+) -> list[str]:
+    """Run transcript-derived stages through the normal durable stage machinery."""
+    pcfg = settings.pipeline
+    partial_errors: list[str] = []
+    transcript_lineage = _transcript_lineage(file_id, settings)
+    template_key = "default" if requested_template_key == "auto" else requested_template_key
+    auto_recommendation = None
+    derived_snapshot = snapshot
+    derived_profile_token = None
+
+    try:
         if requested_template_key == "auto":
             from ..template_auto import recommend_template
 
-            auto_recommendation = recommend_template(
-                title=row.display_title,
-                transcript=transcript.text if transcript is not None else "",
-                duration_ms=row.duration_ms,
-            )
-            template_key = auto_recommendation["key"]
             with session_scope() as session:
+                row = session.get(PlaudFile, file_id)
+                auto_recommendation = recommend_template(
+                    title=row.display_title,
+                    transcript=transcript.text if transcript is not None else "",
+                    duration_ms=row.duration_ms,
+                )
+                template_key = auto_recommendation["key"]
                 derived_snapshot = resolve_recording_profile(
                     session, file_id, template_key=template_key
                 ).to_dict()
             derived_profile_token = _PROFILE_SNAPSHOT.set(derived_snapshot)
 
-        # --- summarize (skip if this template's summary already exists) #
         if pcfg.summarize and transcript is not None:
-            if force or not _has_summary(
-                file_id, template_key, derived_snapshot, "summarize"
-            ):
+            if force or not _has_summary(file_id, template_key, derived_snapshot, "summarize"):
                 try:
 
                     def run_summary(candidate):
@@ -1071,7 +1187,7 @@ def _process_file_claimed(
                             },
                         }
 
-                    _result, _selected_snapshot = _run_fallback_stage(
+                    _run_fallback_stage(
                         file_id,
                         "summarize",
                         StageName.summarize,
@@ -1099,7 +1215,6 @@ def _process_file_claimed(
                 "disabled" if not pcfg.summarize else "no transcript",
             )
 
-        # --- mind map (skip if a local mind map already exists) ------- #
         if pcfg.mind_map and transcript is not None:
             if force or not _has_summary(
                 file_id,
@@ -1158,7 +1273,7 @@ def _process_file_claimed(
                             },
                         }
 
-                    _result, _selected_snapshot = _run_fallback_stage(
+                    _run_fallback_stage(
                         file_id,
                         "mind_map",
                         StageName.mind_map,
@@ -1182,7 +1297,6 @@ def _process_file_claimed(
                 "disabled" if not pcfg.mind_map else "no transcript",
             )
 
-        # --- index (skip if chunks already exist) --------------------- #
         if pcfg.index and transcript is not None:
             if force or not _has_chunks(file_id, derived_snapshot):
                 try:
@@ -1225,7 +1339,7 @@ def _process_file_claimed(
                             },
                         }
 
-                    _model, _selected_snapshot = _run_fallback_stage(
+                    _run_fallback_stage(
                         file_id, "embed", StageName.index, derived_snapshot, run_index
                     )
                 except Exception as exc:  # noqa: BLE001 - notes remain usable
@@ -1244,31 +1358,24 @@ def _process_file_claimed(
                 StageName.index,
                 "disabled" if not pcfg.index else "no transcript",
             )
-
-        with session_scope() as session:
-            row = session.get(PlaudFile, file_id)
-            if partial_errors:
-                row.status = FileStatus.partial
-                row.error = "; ".join(partial_errors)[:2000]
-                _schedule_pipeline_retry(row, settings)
-            else:
-                row.status = FileStatus.done
-                row.error = None
-                reset_pipeline_retry(row)
-        log.info("Pipeline %s for %s", "partial" if partial_errors else "complete", file_id)
-
-    except Exception as exc:  # noqa: BLE001
-        log.exception("Pipeline failed for %s", file_id)
-        with session_scope() as session:
-            r = session.get(PlaudFile, file_id)
-            r.status = FileStatus.error
-            r.error = str(exc)[:2000]
-            _schedule_pipeline_retry(r, settings)
-        raise
     finally:
         if derived_profile_token is not None:
             _PROFILE_SNAPSHOT.reset(derived_profile_token)
-        _PROFILE_SNAPSHOT.reset(profile_token)
+
+    return partial_errors
+
+
+def _finish_processing_cycle(file_id: str, settings: Settings, partial_errors: list[str]) -> None:
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if partial_errors:
+            row.status = FileStatus.partial
+            row.error = "; ".join(partial_errors)[:2000]
+            _schedule_pipeline_retry(row, settings)
+        else:
+            row.status = FileStatus.done
+            row.error = None
+            reset_pipeline_retry(row)
 
 
 def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str] | None:
@@ -1371,8 +1478,7 @@ def _has_summary(
             and (
                 source_template_key is None
                 or (
-                    (s.template_snapshot or {}).get("source_template_key")
-                    == source_template_key
+                    (s.template_snapshot or {}).get("source_template_key") == source_template_key
                     and (s.template_snapshot or {}).get("source_template_version")
                     == source_template_version
                 )
@@ -1424,7 +1530,7 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> dict[str, str]:
             )
         )
         for previous in previous_rows:
-            if previous.has_speakers:
+            if speaker_keys_from_segments(previous.segments or []):
                 capture_speaker_evidence(session, file_id, previous.segments or [])
         if replaced_ids:
             session.execute(
@@ -1434,7 +1540,7 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> dict[str, str]:
             )
             session.execute(delete(TranscriptRow).where(TranscriptRow.id.in_(replaced_ids)))
         segments = [asdict(s) for s in transcript.segments]
-        if transcript.has_speakers:
+        if speaker_keys_from_segments(segments):
             speaker_mapping = reconcile_speaker_labels(session, file_id, segments)
         session.add(
             TranscriptRow(
@@ -1485,9 +1591,7 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
         raw = _select_raw_transcript(row, settings)
         if raw is None or raw.source != "local":
             raise ValueError("AI polish requires a local raw transcript")
-        next_revision = max(
-            (item.revision for item in row.transcript_revisions), default=0
-        ) + 1
+        next_revision = max((item.revision for item in row.transcript_revisions), default=0) + 1
         session.add(
             TranscriptRevision(
                 file_id=file_id,
@@ -1609,28 +1713,29 @@ def process_pending(
     with session_scope() as session:
         due_retry = (
             PlaudFile.status.in_([FileStatus.error, FileStatus.partial])
-            & PlaudFile.audio_path.is_not(None)
             & (PlaudFile.pipeline_retry_count < settings.pipeline.retry_max_attempts)
             & or_(
                 PlaudFile.pipeline_next_retry_at.is_(None),
                 PlaudFile.pipeline_next_retry_at <= now,
             )
         )
-        rows = list(
-            session.execute(
-                select(
-                    PlaudFile.id,
-                    PlaudFile.status,
-                    PlaudFile.start_time_ms,
-                    PlaudFile.created_at,
-                    PlaudFile.pipeline_next_retry_at,
-                    PlaudFile.pipeline_last_failure_at,
-                ).where(
-                    PlaudFile.audio_path.is_not(None),
-                    or_(PlaudFile.status == FileStatus.downloaded, due_retry),
-                )
+        candidate_rows = list(
+            session.scalars(
+                select(PlaudFile).where(or_(PlaudFile.status == FileStatus.downloaded, due_retry))
             )
         )
+        rows = []
+        derived_stages = {StageName.summarize, StageName.mind_map, StageName.index}
+        for row in candidate_rows:
+            derived_only = any(
+                run.stage in derived_stages
+                and bool((run.detail or {}).get("derived_only"))
+                and run.status != StageStatus.completed
+                for run in row.stage_runs
+            )
+            if row.audio_path is None and not derived_only:
+                continue
+            rows.append((row, derived_only))
 
         def timestamp(value: datetime | None) -> float:
             if value is None:
@@ -1640,6 +1745,7 @@ def process_pending(
             return value.timestamp()
 
         def queue_key(item) -> tuple[float, int, str]:
+            item = item[0]
             if item.status == FileStatus.downloaded:
                 event_time = (
                     item.start_time_ms / 1000
@@ -1649,31 +1755,36 @@ def process_pending(
                 fresh_tiebreak = 1
             else:
                 event_time = timestamp(
-                    item.pipeline_next_retry_at
-                    or item.pipeline_last_failure_at
-                    or item.created_at
+                    item.pipeline_next_retry_at or item.pipeline_last_failure_at or item.created_at
                 )
                 fresh_tiebreak = 0
             return event_time, fresh_tiebreak, item.id
 
         rows.sort(key=queue_key, reverse=True)
-        ids = [item.id for item in (rows[:limit] if limit is not None else rows)]
-    if not ids:
+        jobs = [
+            (item.id, derived_only)
+            for item, derived_only in (rows[:limit] if limit is not None else rows)
+        ]
+    if not jobs:
         return 0
 
     workers = max(1, settings.pipeline.concurrency)
 
-    def _run(fid: str) -> bool:
+    def _run(job: tuple[str, bool]) -> bool:
+        fid, derived_only = job
         try:
-            process_file(fid, settings, force=force)
+            if derived_only:
+                process_derived_artifacts(fid, settings)
+            else:
+                process_file(fid, settings, force=force)
             return True
         except Exception:  # noqa: BLE001
             return False  # error already recorded on the row
 
     if workers == 1:
-        return sum(_run(fid) for fid in ids)
+        return sum(_run(job) for job in jobs)
 
     from concurrent.futures import ThreadPoolExecutor
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        return sum(pool.map(_run, ids))
+        return sum(pool.map(_run, jobs))

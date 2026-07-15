@@ -29,6 +29,7 @@ def test_api_auth_gate(monkeypatch, tmp_path):
     assert client.get("/healthz").status_code == 200
     # protected routes require the token
     assert client.get("/api/files").status_code == 401
+
     assert client.get("/api/files", headers={"X-Auth-Token": "wrong"}).status_code == 401
     assert client.get("/api/files", headers={"X-Auth-Token": "s3cret"}).status_code == 200
     assert client.get("/api/files?token=s3cret").status_code == 200
@@ -69,6 +70,13 @@ def test_web_login_session_and_logout(monkeypatch, tmp_path):
     assert '<html lang="en"' in login_page.text
     assert "Sign in to your self-hosted localplaud workspace." in login_page.text
     assert client.get("/api/files").status_code == 401
+    expired_htmx = client.get(
+        "/file/example?workspace=true",
+        headers={"HX-Request": "true"},
+        follow_redirects=False,
+    )
+    assert expired_htmx.status_code == 401
+    assert expired_htmx.headers["HX-Redirect"].startswith("/login?next=")
 
     wrong = client.post(
         "/login", data={"password": "wrong", "next": "/settings"}, follow_redirects=False
@@ -107,6 +115,30 @@ def test_web_login_session_and_logout(monkeypatch, tmp_path):
     ).status_code == 303
     with session_scope() as session:
         assert session.scalar(select(BrowserSession)) is None
+
+
+def test_web_login_can_use_tailnet_only_http_cookie(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("LOCALPLAUD_API__AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("LOCALPLAUD_API__LOGIN_PASSWORD", "tailnet password")
+    monkeypatch.setenv("LOCALPLAUD_API__SESSION_SECRET", "a-long-random-session-secret")
+    monkeypatch.setenv("LOCALPLAUD_API__SESSION_COOKIE_SECURE", "false")
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.api.app import app
+    from localplaud.db.session import init_db
+
+    init_db()
+    client = TestClient(app, base_url="http://tailnet.test")
+    logged_in = client.post(
+        "/login", data={"password": "tailnet password", "next": "/"}, follow_redirects=False
+    )
+    cookie = logged_in.headers["set-cookie"]
+    assert logged_in.status_code == 303
+    assert "localplaud_session=" in cookie
+    assert "HttpOnly" in cookie and "SameSite=lax" in cookie
+    assert "Secure" not in cookie
+    assert client.get("/").status_code == 200
 
 
 def test_session_can_be_listed_and_revoked_remotely(monkeypatch, tmp_path):
@@ -159,7 +191,8 @@ def test_login_page_uses_durable_workspace_locale_and_theme(monkeypatch, tmp_pat
     client = TestClient(app, base_url="https://testserver")
     page = client.get("/login")
     assert page.status_code == 200
-    assert '<html lang="zh-Hant-TW" data-theme="dark">' in page.text
+    assert '<html lang="zh-Hant-TW" data-theme="light">' in page.text
+    assert "prefers-color-scheme:dark" not in page.text
     assert "登入你的自架 localplaud 工作空間。" in page.text
     assert ">密碼<" in page.text
     wrong = client.post("/login", data={"password": "wrong"})

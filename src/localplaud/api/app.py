@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import secrets
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Lock
 from typing import Annotated, Literal
-from urllib.parse import quote
+from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -17,6 +20,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
+from markdown_it import MarkdownIt
+from markupsafe import Markup
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, update
 
@@ -73,6 +78,17 @@ from .vocabulary import router as vocabulary_router
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
+_MARKDOWN = (
+    MarkdownIt("commonmark", {"html": False, "linkify": False})
+    .enable("table")
+    .enable("strikethrough")
+    .disable("image")
+)
+
+
+def _render_markdown(value: str | None) -> Markup:
+    """Render stored Markdown with raw HTML and unsafe link schemes disabled."""
+    return Markup(_MARKDOWN.render(value or ""))
 
 
 @asynccontextmanager
@@ -180,11 +196,15 @@ async def _auth_gate(request: Request, call_next):
         session_ok = bool(browser_session)
         request.state.browser_session_id = browser_session.id if browser_session else None
         if not token_ok and not session_ok:
-            if _is_browser_navigation(request) and login_password:
+            if login_password:
                 next_path = request.url.path
                 if request.url.query:
                     next_path += f"?{request.url.query}"
-                return RedirectResponse(url=f"/login?next={quote(next_path, safe='')}", status_code=303)
+                login_url = f"/login?next={quote(next_path, safe='')}"
+                if request.headers.get("hx-request", "").lower() == "true":
+                    return Response(status_code=401, headers={"HX-Redirect": login_url})
+                if _is_browser_navigation(request):
+                    return RedirectResponse(url=login_url, status_code=303)
             return JSONResponse({"error": "unauthorized"}, status_code=401)
     return await call_next(request)
 
@@ -234,7 +254,7 @@ def login_submit(request: Request, password: Annotated[str, Form()], next: Annot
         token,
         max_age=settings.session_max_age_seconds,
         httponly=True,
-        secure=True,
+        secure=settings.session_cookie_secure,
         samesite="lax",
         path="/",
     )
@@ -253,7 +273,13 @@ def logout(request: Request) -> RedirectResponse:
                 )
             )
     response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie(_SESSION_COOKIE, path="/", httponly=True, secure=True, samesite="lax")
+    response.delete_cookie(
+        _SESSION_COOKIE,
+        path="/",
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+    )
     return response
 
 
@@ -308,6 +334,7 @@ def _mmss(seconds) -> str:
 templates.env.filters["dt"] = _fmt_dt
 templates.env.filters["dur"] = _fmt_dur
 templates.env.filters["mmss"] = _mmss
+templates.env.filters["markdown"] = _render_markdown
 
 
 def _file_summary(r: PlaudFile) -> dict:
@@ -354,7 +381,98 @@ def _file_summary(r: PlaudFile) -> dict:
     }
 
 
+def _file_summaries(session, rows: list[PlaudFile]) -> list[dict]:
+    """Build list rows in bounded queries without loading transcript/summary payloads."""
+    if not rows:
+        return []
+    ids = [row.id for row in rows]
+    transcript_flags: dict[str, dict[str, bool]] = {file_id: {} for file_id in ids}
+    for file_id, source, has_speakers in session.execute(
+        select(Transcript.file_id, Transcript.source, Transcript.has_speakers)
+        .where(Transcript.file_id.in_(ids))
+        .order_by(Transcript.id)
+    ):
+        transcript_flags[file_id][source] = bool(has_speakers)
+
+    summary_sources: dict[str, set[str]] = {file_id: set() for file_id in ids}
+    for file_id, source in session.execute(
+        select(Summary.file_id, Summary.source).where(Summary.file_id.in_(ids))
+    ):
+        summary_sources[file_id].add(source)
+
+    tag_map: dict[str, list[dict]] = {file_id: [] for file_id in ids}
+    for file_id, tag_id, name, color in session.execute(
+        select(recording_tags.c.file_id, Tag.id, Tag.name, Tag.color)
+        .join(Tag, Tag.id == recording_tags.c.tag_id)
+        .where(recording_tags.c.file_id.in_(ids))
+        .order_by(func.lower(Tag.name), Tag.id)
+    ):
+        tag_map[file_id].append({"id": tag_id, "name": name, "color": color})
+
+    folder_ids = {row.folder_id for row in rows if row.folder_id is not None}
+    folder_map = {
+        folder.id: {"id": folder.id, "name": folder.name, "color": folder.color}
+        for folder in session.scalars(select(Folder).where(Folder.id.in_(folder_ids)))
+    }
+    settings = get_settings()
+    independent = settings.pipeline.artifact_mode == "independent"
+    result = []
+    for row in rows:
+        sources = transcript_flags[row.id]
+        local_speakers = sources.get("local")
+        imported_speakers = next(
+            (sources[source] for source in ("plaud", "cloud") if source in sources), None
+        )
+        canonical_speakers = local_speakers if local_speakers is not None else imported_speakers
+        local_summary = "local" in summary_sources[row.id]
+        result.append(
+            {
+                "id": row.id,
+                "filename": row.display_title,
+                "cloud_filename": row.filename,
+                "local_title": row.local_title,
+                "status": row.status.value,
+                "duration_ms": row.duration_ms,
+                "start_time_ms": row.start_time_ms,
+                "scene": row.scene,
+                "scene_label": _scene_label(row.scene),
+                "is_trash": row.is_trash,
+                "needs_attention": row.status.value in _ATTENTION_STATES,
+                "retry": {
+                    "count": row.pipeline_retry_count or 0,
+                    "maximum": settings.pipeline.retry_max_attempts,
+                    "next_at": (
+                        row.pipeline_next_retry_at.isoformat()
+                        if row.pipeline_next_retry_at
+                        else None
+                    ),
+                    "exhausted": (
+                        row.status.value in _ATTENTION_STATES
+                        and (row.pipeline_retry_count or 0)
+                        >= settings.pipeline.retry_max_attempts
+                    ),
+                },
+                "has_transcript": local_speakers is not None
+                if independent
+                else canonical_speakers is not None,
+                "has_imported_transcript": imported_speakers is not None,
+                "has_summary": local_summary,
+                "has_imported_summary": bool(summary_sources[row.id] & {"cloud", "plaud"}),
+                "has_audio": bool(row.audio_path),
+                "origin": row.origin or "plaud",
+                "speakers": bool(canonical_speakers),
+                "folder": folder_map.get(row.folder_id),
+                "tags": tag_map[row.id],
+            }
+        )
+    return result
+
+
 def _base_ctx(request: Request, active: str) -> dict:
+    partial_response = request.headers.get("hx-request", "").lower() == "true" and (
+        request.headers.get("hx-target") == "app-view"
+        or request.headers.get("hx-history-restore-request", "").lower() == "true"
+    )
     with session_scope() as session:
         unread_notifications = session.scalar(
             select(func.count()).select_from(Notification).where(
@@ -362,16 +480,66 @@ def _base_ctx(request: Request, active: str) -> dict:
             )
         ) or 0
         workspace_preferences = get_workspace_preferences(session)
+        organization = _organization_summary(session)
+        visible_filter = PlaudFile.is_trash.is_(False)
+        sidebar_counts = {
+            "all": session.scalar(
+                select(func.count()).select_from(PlaudFile).where(visible_filter)
+            )
+            or 0,
+            "uncategorized": session.scalar(
+                select(func.count())
+                .select_from(PlaudFile)
+                .where(visible_filter, PlaudFile.folder_id.is_(None))
+            )
+            or 0,
+            "trash": session.scalar(
+                select(func.count())
+                .select_from(PlaudFile)
+                .where(PlaudFile.is_trash.is_(True))
+            )
+            or 0,
+            "plaud": session.scalar(
+                select(func.count())
+                .select_from(PlaudFile)
+                .where(
+                    visible_filter,
+                    or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None)),
+                )
+            )
+            or 0,
+            "local": session.scalar(
+                select(func.count())
+                .select_from(PlaudFile)
+                .where(visible_filter, PlaudFile.origin == "local")
+            )
+            or 0,
+        }
+        sidebar_scenes = [
+            {"value": scene, "label": _scene_label(scene), "count": count}
+            for scene, count in session.execute(
+                select(PlaudFile.scene, func.count())
+                .where(visible_filter, PlaudFile.scene.is_not(None))
+                .group_by(PlaudFile.scene)
+                .order_by(PlaudFile.scene)
+            )
+        ]
     return {
         "request": request,
         "active": active,
         "public_url": get_settings().api.public_url,
         "web_login_configured": bool(get_settings().api.login_password),
         "unread_notifications": unread_notifications,
+        "sidebar": {
+            "folders": organization["folders"],
+            "counts": sidebar_counts,
+            "scenes": sidebar_scenes,
+        },
         "workspace_preferences": workspace_preferences,
         "supported_locales": SUPPORTED_LOCALES,
         "t": translator(workspace_preferences["locale"]),
         "translations": catalog(workspace_preferences["locale"]),
+        "partial_response": partial_response,
     }
 
 
@@ -390,8 +558,8 @@ _ATTENTION_STATES = {FileStatus.error.value, FileStatus.partial.value}
 
 def _scene_label(scene: int | None) -> str:
     if scene is None:
-        return "Unknown source"
-    return f"Source {scene}"
+        return "Unknown capture source"
+    return f"Capture source {scene}"
 
 
 def _parse_library_params(
@@ -434,6 +602,111 @@ def _parse_library_params(
         "tag": optional_int(tag),
         "origin": origin if origin in {"plaud", "local"} else None,
     }
+
+
+def _library_return_url(request: Request) -> str:
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in request.query_params.multi_items()
+            if key not in {"workspace", "preserve_filelist"}
+        ]
+    )
+    return f"/{'?' + query if query else ''}"
+
+
+def _validated_library_return_url(value: str | None) -> str:
+    if not value:
+        return "/"
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or parsed.path != "/" or parsed.fragment:
+        return "/"
+    return f"/{'?' + parsed.query if parsed.query else ''}"
+
+
+def _library_state_from_return_url(value: str) -> tuple[dict, int]:
+    """Recover the validated library filters/page used to open a recording."""
+    query = parse_qs(urlsplit(value).query, keep_blank_values=True)
+
+    def first(key: str) -> str | None:
+        values = query.get(key)
+        return values[0] if values else None
+
+    params = _parse_library_params(
+        first("q"),
+        first("sort"),
+        first("dir"),
+        first("state"),
+        first("scene"),
+        first("view"),
+        first("folder"),
+        first("tag"),
+        first("origin"),
+    )
+    try:
+        page = max(1, int(first("page") or 1))
+    except ValueError:
+        page = 1
+    return params, page
+
+
+def _library_return_url_for_page(value: str, page: int) -> str:
+    """Change only the page in a previously validated library return URL."""
+    pairs = [(key, item) for key, item in parse_qsl(urlsplit(value).query) if key != "page"]
+    if page > 1:
+        pairs.append(("page", str(page)))
+    query = urlencode(pairs)
+    return f"/{'?' + query if query else ''}"
+
+
+def _file_workspace_url(
+    file_id: str,
+    return_to: str,
+    *,
+    tab: str,
+    view: str | None = None,
+    ask_thread: str | None = None,
+    revision: int | None = None,
+    note_id: int | None = None,
+) -> str:
+    """Build a side-list link without dropping the open workspace context."""
+    pairs: list[tuple[str, str | int]] = [("return_to", return_to), ("tab", tab)]
+    for key, value in (
+        ("view", view),
+        ("ask_thread", ask_thread),
+        ("revision", revision),
+        ("note_id", note_id),
+    ):
+        if value is not None:
+            pairs.append((key, value))
+    return f"/file/{quote(file_id, safe='')}?{urlencode(pairs)}"
+
+
+def _library_context_title(params: dict, organization: dict) -> str:
+    """Return a concise side-list label for the current library context."""
+    if params["q"]:
+        return "Search results"
+    if params["folder"] is not None:
+        folder = next(
+            (item for item in organization["folders"] if item["id"] == params["folder"]),
+            None,
+        )
+        return folder["name"] if folder is not None else "All files"
+    if params["tag"] is not None:
+        tag = next(
+            (item for item in organization["tags"] if item["id"] == params["tag"]),
+            None,
+        )
+        return tag["name"] if tag is not None else "All files"
+    if params["view"] == "trash":
+        return "Trash"
+    if params["view"] == "uncategorized":
+        return "Uncategorized"
+    if params["origin"] == "plaud":
+        return "Plaud recordings"
+    if params["origin"] == "local":
+        return "Local uploads"
+    return "All files"
 
 
 def _library_query(params: dict):
@@ -507,11 +780,12 @@ def _library_facets(session, params: dict) -> dict:
 
 class WorkspacePreferencesBody(BaseModel):
     workspace_name: str = Field(min_length=1, max_length=80)
-    theme: Literal["system", "light", "dark"] = "system"
+    theme: Literal["light"] = "light"
     density: Literal["comfortable", "compact"] = "comfortable"
     timezone: str = Field(min_length=1, max_length=64)
     hour_cycle: Literal["12", "24"] = "24"
     locale: Literal["en", "zh-Hant-TW"] = "en"
+    auto_process_new_recordings: bool = True
 
     @field_validator("workspace_name")
     @classmethod
@@ -558,8 +832,8 @@ def api_files(
 ) -> JSONResponse:
     params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag, origin)
     with session_scope() as session:
-        rows = session.scalars(_library_query(params).limit(300))
-        data = [_file_summary(r) for r in rows]
+        rows = list(session.scalars(_library_query(params)))
+        data = _file_summaries(session, rows)
     return JSONResponse({"files": data})
 
 
@@ -897,6 +1171,19 @@ def bulk_files(body: BulkFilesBody) -> dict:
 # --------------------------------------------------------------------------- #
 
 
+def _wants_progressive_shell(request: Request) -> bool:
+    """Use a fast shell for real browser navigation while preserving full SSR fallback."""
+    if request.headers.get("hx-history-restore-request", "").lower() == "true":
+        return False
+    return (
+        request.headers.get("sec-fetch-dest", "").lower() == "document"
+        or (
+            request.headers.get("hx-request", "").lower() == "true"
+            and request.headers.get("hx-target") == "app-view"
+        )
+    )
+
+
 def _stats(session) -> dict:
     total = session.scalar(select(func.count()).select_from(PlaudFile)) or 0
     done = (
@@ -966,8 +1253,8 @@ def home(request: Request):
         )
         automation_count = session.scalar(select(func.count()).select_from(AutomationRun)) or 0
         stats = _stats(session)
-        recent_files = [_file_summary(row) for row in recent_rows]
-        attention_files = [_file_summary(row) for row in attention_rows]
+        recent_files = _file_summaries(session, recent_rows)
+        attention_files = _file_summaries(session, attention_rows)
     ctx = _base_ctx(request, "home") | {
         "recent_files": recent_files,
         "attention_files": attention_files,
@@ -1013,11 +1300,51 @@ def index(
     tag: str | None = None,
     ask_thread: str | None = None,
     origin: str | None = None,
+    page: int = 1,
+    workspace: bool = False,
+    preserve_filelist: bool = False,
 ):
+    active_page = (
+        "ask"
+        if request.query_params.get("ask") == "true" or ask_thread is not None
+        else "recordings"
+    )
+    if not workspace and _wants_progressive_shell(request):
+        keep_filelist = (
+            request.headers.get("x-localplaud-preserve-filelist", "").lower() == "true"
+        )
+        workspace_url = request.url.include_query_params(workspace="true")
+        if keep_filelist:
+            workspace_url = workspace_url.include_query_params(preserve_filelist="true")
+        return templates.TemplateResponse(
+            request=request,
+            name="index_loading.html",
+            context=_base_ctx(request, active_page)
+            | {
+                "workspace_url": str(workspace_url),
+                "preserve_filelist": keep_filelist,
+            },
+        )
     params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag, origin)
     with session_scope() as session:
-        rows = list(session.scalars(_library_query(params).limit(300)))
-        files = [_file_summary(r) for r in rows]
+        library_query = _library_query(params)
+        total = (
+            session.scalar(
+                select(func.count()).select_from(library_query.order_by(None).subquery())
+            )
+            or 0
+        )
+        page_size = 100
+        page_count = max(1, (total + page_size - 1) // page_size)
+        page = max(1, min(page, page_count))
+        rows = list(
+            session.scalars(
+                library_query
+                if active_page == "ask"
+                else library_query.offset((page - 1) * page_size).limit(page_size)
+            )
+        )
+        files = _file_summaries(session, rows)
         stats = _stats(session)
         facets = _library_facets(session, params)
         organization = _organization_summary(session)
@@ -1036,7 +1363,7 @@ def index(
         selected_ask_thread_data = (
             thread_to_dict(selected_ask_thread) if selected_ask_thread is not None else None
         )
-    ctx = _base_ctx(request, "recordings") | {
+    ctx = _base_ctx(request, active_page) | {
         "files": files,
         "stats": stats,
         "q": params["q"],
@@ -1049,6 +1376,15 @@ def index(
         "selected_ask_thread": selected_ask_thread_data,
         "ask_skills": list_ask_skills("library"),
         "named_speakers": named_speakers,
+        "pagination": {
+            "page": page,
+            "pages": page_count,
+            "page_size": page_size,
+            "total": total,
+        },
+        "preserve_filelist": preserve_filelist or not workspace,
+        "return_to": _library_return_url(request),
+        "return_to_param": quote(_library_return_url(request), safe=""),
     }
     return templates.TemplateResponse(request=request, name="index.html", context=ctx)
 
@@ -1276,6 +1612,9 @@ def notifications_page(request: Request):
 
 
 _AUDIO_MIME = {"mp3": "audio/mpeg", "opus": "audio/ogg", "wav": "audio/wav", "m4a": "audio/mp4"}
+_waveform_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="localplaud-waveform")
+_waveform_jobs: dict[tuple[str, int, int, int], Future[list[float]]] = {}
+_waveform_jobs_lock = Lock()
 
 
 @app.get("/audio/{file_id}")
@@ -1293,17 +1632,41 @@ def audio(file_id: str):
 def audio_waveform(file_id: str, buckets: int = 180):
     import subprocess
 
-    from ..waveform import waveform_peaks
+    from ..waveform import cached_waveform_peaks, waveform_peaks
 
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
         path = row.audio_path if row else None
     if not path or not Path(path).exists():
         raise HTTPException(status_code=409, detail="recording audio has not been imported")
+    buckets = min(max(int(buckets), 32), 500)
     try:
-        peaks = waveform_peaks(path, buckets=buckets)
+        peaks = cached_waveform_peaks(path, buckets=buckets)
     except (subprocess.SubprocessError, ValueError) as exc:
         raise HTTPException(status_code=500, detail=f"could not build waveform: {exc}") from exc
+    if peaks is not None:
+        return {"file_id": file_id, "buckets": len(peaks), "peaks": peaks}
+    stat = Path(path).stat()
+    job_key = (str(path), buckets, stat.st_size, stat.st_mtime_ns)
+    with _waveform_jobs_lock:
+        future = _waveform_jobs.get(job_key)
+        if future is None:
+            future = _waveform_executor.submit(waveform_peaks, path, buckets=buckets)
+            _waveform_jobs[job_key] = future
+    if not future.done():
+        return JSONResponse(
+            {"file_id": file_id, "status": "processing"},
+            status_code=202,
+            headers={"Retry-After": "1"},
+        )
+    try:
+        peaks = future.result()
+    except (subprocess.SubprocessError, ValueError) as exc:
+        with _waveform_jobs_lock:
+            _waveform_jobs.pop(job_key, None)
+        raise HTTPException(status_code=500, detail=f"could not build waveform: {exc}") from exc
+    with _waveform_jobs_lock:
+        _waveform_jobs.pop(job_key, None)
     return {"file_id": file_id, "buckets": len(peaks), "peaks": peaks}
 
 
@@ -1315,6 +1678,22 @@ def recording_acceptance(file_id: str) -> dict:
         return subscription_independence_report(file_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/file/{file_id}/acceptance-panel", response_class=HTMLResponse)
+def recording_acceptance_panel(request: Request, file_id: str):
+    from ..acceptance import subscription_independence_report
+
+    try:
+        acceptance = subscription_independence_report(file_id)
+    except LookupError:
+        return HTMLResponse("Not found", status_code=404)
+    return templates.TemplateResponse(
+        request=request,
+        name="_acceptance_panel.html",
+        context=_base_ctx(request, "recordings")
+        | {"file_id": file_id, "acceptance": acceptance},
+    )
 
 
 def _canonical_raw_row(r: PlaudFile, settings) -> Transcript | None:
@@ -1332,6 +1711,19 @@ def _canonical_revision(r: PlaudFile, raw_row: Transcript | None):
     return r.corrected_transcript_for_source(source)
 
 
+def _transcript_page_token(row: Transcript) -> str:
+    payload = json.dumps(
+        {
+            "created_at": row.created_at.isoformat(),
+            "segments": row.segments or [],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:24]
+
+
 def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) -> None:
     """Preserve derived rows but make stale artifacts ineligible for reuse/UI."""
     for stage in stages:
@@ -1347,16 +1739,196 @@ def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) ->
         run.detail = dict(run.detail or {}) | {"stale": True}
 
 
+@app.get("/file/{file_id}/transcript-page", response_class=HTMLResponse)
+def recording_transcript_page(
+    request: Request,
+    file_id: str,
+    source: str = "canonical",
+    view: str = "corrected",
+    revision: int | None = None,
+    page_revision: int | None = None,
+    page_transcript_id: int | None = None,
+    page_transcript_token: str | None = None,
+    offset: int = 0,
+    limit: int = 120,
+):
+    settings = get_settings()
+    offset = max(0, offset)
+    limit = min(max(20, limit), 200)
+    if source not in {"canonical", "imported"}:
+        return HTMLResponse("Unknown transcript source", status_code=422)
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            return HTMLResponse("Not found", status_code=404)
+        raw_row = _canonical_raw_row(row, settings)
+        corrected = _canonical_revision(row, raw_row)
+        selected_revision = None
+        pinned_transcript_id = None
+        pinned_transcript_token = None
+        can_edit = False
+        transcript_revision = None
+        if source == "imported":
+            if offset > 0 and (
+                page_transcript_id is None or page_transcript_token is None
+            ):
+                return HTMLResponse("Transcript version is required", status_code=409)
+            transcript_row = (
+                session.get(Transcript, page_transcript_id)
+                if page_transcript_id is not None
+                else row.plaud_transcript
+            )
+            if transcript_row is not None and (
+                transcript_row.file_id != file_id
+                or transcript_row.source not in {"cloud", "plaud"}
+            ):
+                return HTMLResponse("Transcript version not found", status_code=404)
+            if page_transcript_id is not None and transcript_row is None:
+                return HTMLResponse("Transcript version not found", status_code=404)
+            if (
+                transcript_row is not None
+                and page_transcript_token is not None
+                and _transcript_page_token(transcript_row) != page_transcript_token
+            ):
+                return HTMLResponse("Transcript version not found", status_code=404)
+            segments = list(transcript_row.segments or []) if transcript_row else []
+            pinned_transcript_id = transcript_row.id if transcript_row is not None else None
+            pinned_transcript_token = (
+                _transcript_page_token(transcript_row) if transcript_row is not None else None
+            )
+        elif raw_row is None:
+            if offset > 0:
+                return HTMLResponse("Transcript version is required", status_code=409)
+            if page_transcript_id is not None:
+                return HTMLResponse("Transcript version not found", status_code=404)
+            segments = []
+        elif view == "raw" or corrected is None:
+            if offset > 0 and (
+                page_transcript_id is None or page_transcript_token is None
+            ):
+                return HTMLResponse("Transcript version is required", status_code=409)
+            transcript_row = (
+                session.get(Transcript, page_transcript_id)
+                if page_transcript_id is not None
+                else raw_row
+            )
+            if transcript_row is None or (
+                transcript_row.file_id != file_id or transcript_row.source != raw_row.source
+            ):
+                return HTMLResponse("Transcript version not found", status_code=404)
+            if (
+                page_transcript_token is not None
+                and _transcript_page_token(transcript_row) != page_transcript_token
+            ):
+                return HTMLResponse("Transcript version not found", status_code=404)
+            segments = list(transcript_row.segments or [])
+            pinned_transcript_id = transcript_row.id
+            pinned_transcript_token = _transcript_page_token(transcript_row)
+            can_edit = corrected is None
+        else:
+            if offset > 0 and revision is None and page_revision is None:
+                return HTMLResponse("Transcript revision is required", status_code=409)
+            requested_revision = revision if revision is not None else page_revision
+            selected_revision = next(
+                (
+                    item
+                    for item in row.transcript_revisions
+                    if item.source == raw_row.source and item.revision == requested_revision
+                ),
+                None,
+            )
+            if requested_revision is not None and selected_revision is None:
+                return HTMLResponse("Transcript revision not found", status_code=404)
+            selected_revision = selected_revision or corrected
+            segments = list(selected_revision.segments or [])
+            transcript_revision = selected_revision.revision
+            can_edit = revision is None
+        page_segments = segments[offset : offset + limit]
+        next_offset = offset + limit if offset + limit < len(segments) else None
+        speaker_names = display_names(session, file_id)
+    return templates.TemplateResponse(
+        request=request,
+        name="_transcript_page.html",
+        context=_base_ctx(request, "recordings")
+        | {
+            "file_id": file_id,
+            "source": source,
+            "view": view,
+            "revision": revision,
+            "page_revision": (
+                selected_revision.revision
+                if selected_revision is not None and revision is None
+                else None
+            ),
+            "page_transcript_id": pinned_transcript_id,
+            "page_transcript_token": pinned_transcript_token,
+            "offset": offset,
+            "limit": limit,
+            "segments": page_segments,
+            "next_offset": next_offset,
+            "speaker_names": speaker_names,
+            "can_edit": can_edit and source != "imported",
+            "transcript_revision": transcript_revision,
+        },
+    )
+
+
 @app.get("/file/{file_id}", response_class=HTMLResponse)
 def file_detail(
     request: Request,
     file_id: str,
     view: str | None = None,
+    tab: str | None = None,
     ask_thread: str | None = None,
     revision: int | None = None,
     note_id: int | None = None,
+    return_to: str | None = None,
+    workspace: bool = False,
+    preserve_filelist: bool = False,
 ):
     settings = get_settings()
+    return_to = _validated_library_return_url(return_to)
+    return_to_param = quote(return_to, safe="")
+    filelist_params, filelist_page = _library_state_from_return_url(return_to)
+    active_tab = (
+        "notes"
+        if note_id is not None
+        else "ask"
+        if ask_thread is not None
+        else tab
+        if tab in {"transcript", "notes", "mindmap", "ask"}
+        else "transcript"
+    )
+    if not workspace and _wants_progressive_shell(request):
+        keep_filelist = (
+            request.headers.get("x-localplaud-preserve-filelist", "").lower() == "true"
+        )
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            if row is None:
+                return HTMLResponse("Not found", status_code=404)
+            shell_file = {
+                "id": row.id,
+                "filename": row.display_title,
+                "status": row.status.value,
+                "duration_ms": row.duration_ms,
+                "start_time_ms": row.start_time_ms,
+            }
+        workspace_url = request.url.include_query_params(workspace="true")
+        if keep_filelist:
+            workspace_url = workspace_url.include_query_params(preserve_filelist="true")
+        return templates.TemplateResponse(
+            request=request,
+            name="detail_loading.html",
+            context=_base_ctx(request, "recordings")
+            | {
+                "f": shell_file,
+                "workspace_url": str(workspace_url),
+                "preserve_filelist": keep_filelist,
+                "return_to": return_to,
+                "return_to_param": return_to_param,
+            },
+        )
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
         if r is None:
@@ -1471,6 +2043,7 @@ def file_detail(
             "duration_ms": r.duration_ms,
             "start_time_ms": r.start_time_ms,
             "has_audio": bool(r.audio_path and Path(r.audio_path).exists()),
+            "has_local_transcript": r.local_transcript is not None,
             "origin": r.origin or "plaud",
             "transcript": transcript,
             "imported_transcript": imported_transcript,
@@ -1647,22 +2220,83 @@ def file_detail(
         f["selected_ask_thread"] = (
             thread_to_dict(selected_ask_thread) if selected_ask_thread is not None else None
         )
-        files = [
-            _file_summary(x)
-            for x in session.scalars(
-                select(PlaudFile).order_by(PlaudFile.start_time_ms.desc()).limit(300)
-            )
-        ]
         organization = _organization_summary(session)
-    from ..acceptance import subscription_independence_report
-
-    acceptance = subscription_independence_report(file_id)
+        filelist_query = _library_query(filelist_params)
+        filelist_total = (
+            session.scalar(
+                select(func.count()).select_from(filelist_query.order_by(None).subquery())
+            )
+            or 0
+        )
+        filelist_page_size = 100
+        filelist_pages = max(1, (filelist_total + filelist_page_size - 1) // filelist_page_size)
+        filelist_page = min(filelist_page, filelist_pages)
+        file_rows = list(
+            session.scalars(
+                filelist_query.offset((filelist_page - 1) * filelist_page_size).limit(
+                    filelist_page_size
+                )
+            )
+        )
+        active_pinned = all(item.id != file_id for item in file_rows)
+        if active_pinned:
+            file_rows.insert(0, r)
+        files = _file_summaries(session, file_rows)
+        if active_pinned and files:
+            files[0]["pinned"] = True
+        previous_return_to = (
+            _library_return_url_for_page(return_to, filelist_page - 1)
+            if filelist_page > 1
+            else None
+        )
+        next_return_to = (
+            _library_return_url_for_page(return_to, filelist_page + 1)
+            if filelist_page < filelist_pages
+            else None
+        )
+        filelist_context = {
+            "title": _library_context_title(filelist_params, organization),
+            "total": filelist_total,
+            "params": filelist_params,
+            "page": filelist_page,
+            "pages": filelist_pages,
+            "previous_url": (
+                _file_workspace_url(
+                    file_id,
+                    previous_return_to,
+                    tab=active_tab,
+                    view=view,
+                    ask_thread=ask_thread,
+                    revision=revision,
+                    note_id=note_id,
+                )
+                if previous_return_to
+                else None
+            ),
+            "next_url": (
+                _file_workspace_url(
+                    file_id,
+                    next_return_to,
+                    tab=active_tab,
+                    view=view,
+                    ask_thread=ask_thread,
+                    revision=revision,
+                    note_id=note_id,
+                )
+                if next_return_to
+                else None
+            ),
+        }
     ctx = _base_ctx(request, "recordings") | {
         "f": f,
         "files": files,
-        "q": "",
+        "q": filelist_params["q"],
+        "filelist_context": filelist_context,
+        "active_tab": active_tab,
         "organization": organization,
-        "acceptance": acceptance,
+        "preserve_filelist": preserve_filelist or not workspace,
+        "return_to": return_to,
+        "return_to_param": return_to_param,
     }
     return templates.TemplateResponse(request=request, name="detail.html", context=ctx)
 
@@ -1701,6 +2335,9 @@ def status_page(request: Request):
                 func.count(StageAttempt.id),
             )
         ).one()
+        auto_process_new_recordings = get_workspace_preferences(session)[
+            "auto_process_new_recordings"
+        ]
     status_rows = [(st.value, counts.get(st, 0)) for st in FileStatus]
     checks = _health_checks(settings)
     cfg = {
@@ -1715,6 +2352,7 @@ def status_page(request: Request):
             f"{settings.pipeline.retry_base_seconds}s–{settings.pipeline.retry_max_seconds}s"
         ),
         "poll_interval": settings.poller.interval_seconds,
+        "auto_process": "enabled" if auto_process_new_recordings else "paused",
     }
     ctx = _base_ctx(request, "status") | {
         "status_rows": status_rows,
@@ -2339,6 +2977,43 @@ def reprocess(file_id: str, force: bool = False):
     return HTMLResponse('<span style="color:var(--warn)">re-running… refresh in a moment</span>')
 
 
+@app.post("/file/{file_id}/generate-notes", response_class=HTMLResponse)
+def generate_recording_notes(file_id: str):
+    """Regenerate notes, mind map, and index without rerunning completed speech stages."""
+    import threading
+
+    from ..worker.pipeline import (
+        process_derived_artifacts,
+        processing_claim_active,
+        reset_pipeline_retry,
+    )
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, file_id)
+        if recording is None:
+            return HTMLResponse("recording not found", status_code=404)
+        if recording.local_transcript is None:
+            return HTMLResponse("a local transcript is required first", status_code=409)
+        if processing_claim_active(recording):
+            return HTMLResponse("already processing", status_code=409)
+        _mark_derived_stale(
+            session,
+            file_id,
+            (StageName.summarize, StageName.mind_map, StageName.index),
+        )
+        for run in recording.stage_runs:
+            if run.stage in {StageName.summarize, StageName.mind_map, StageName.index}:
+                run.detail = dict(run.detail or {}) | {
+                    "reason": "user requested regeneration",
+                    "derived_only": True,
+                }
+        recording.status = FileStatus.partial
+        reset_pipeline_retry(recording)
+
+    threading.Thread(target=process_derived_artifacts, args=(file_id,), daemon=True).start()
+    return HTMLResponse("notes and mind map queued")
+
+
 @app.post("/file/{file_id}/profile")
 def choose_recording_profile(file_id: str, profile_id: str = Form("")):
     from ..providers.service import clear_recording_override, select_recording_override
@@ -2355,7 +3030,12 @@ def choose_recording_profile(file_id: str, profile_id: str = Form("")):
 
 
 @app.post("/file/{file_id}/speakers")
-def rename_speaker(file_id: str, key: str = Form(...), name: str = Form("")):
+def rename_speaker(
+    file_id: str,
+    key: str = Form(...),
+    name: str = Form(""),
+    return_to: str = Form("/"),
+):
     """Set (or clear, with an empty name) the display name for one stable
     speaker key. The key itself never changes — it is the diarization label
     stored inside the transcript segments."""
@@ -2405,7 +3085,9 @@ def rename_speaker(file_id: str, key: str = Form(...), name: str = Form("")):
         },
         daemon=True,
     ).start()
-    return RedirectResponse(url=f"/file/{file_id}", status_code=303)
+    return_to = _validated_library_return_url(return_to)
+    redirect_url = _file_workspace_url(file_id, return_to, tab="transcript")
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @app.post("/file/{file_id}/transcript/segments/{idx}")

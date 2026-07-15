@@ -46,6 +46,8 @@ def build_chunks(transcript: AsrTranscript, target_chars: int = 700) -> list[dic
         t = seg.text.strip()
         if not t:
             continue
+        if cur and seg.speaker != cur_speaker:
+            flush()
         if cur_start is None:
             cur_start = seg.start
             cur_speaker = seg.speaker

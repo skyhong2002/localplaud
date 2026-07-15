@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 
 import numpy as np
 
@@ -63,9 +64,19 @@ def test_waveform_api_and_custom_player(monkeypatch, tmp_path):
                 segments=[{"text": "hello", "start": 0.0, "end": 1.0}],
             )
         )
-    monkeypatch.setattr("localplaud.waveform.waveform_peaks", lambda path, buckets: [0.2] * buckets)
+    def fake_waveform(path, buckets):
+        time.sleep(0.02)
+        return [0.2] * buckets
+
+    monkeypatch.setattr("localplaud.waveform.waveform_peaks", fake_waveform)
     client = TestClient(app)
     response = client.get("/audio/wave/waveform?buckets=40")
+    assert response.status_code == 202
+    for _ in range(50):
+        response = client.get("/audio/wave/waveform?buckets=40")
+        if response.status_code == 200:
+            break
+        time.sleep(0.01)
     assert response.status_code == 200
     assert response.json()["buckets"] == 40 and len(response.json()["peaks"]) == 40
     page = client.get("/file/wave")

@@ -14,16 +14,16 @@
   {% endif %}
   {% for message in thread.messages %}
     {% if message.role == 'user' %}
-    <div style="align-self:flex-end;max-width:85%;background:var(--blue);color:white;border-radius:14px 14px 4px 14px;padding:8px 12px">{{ message.content }}{% if message.skill_key %}<span style="display:block;font-size:10px;opacity:.8;margin-top:3px">quick action · v{{ message.skill_snapshot.version }}</span>{% endif %}</div>
+    <div class="ask-user-message">{{ message.content }}{% if message.skill_key %}<span style="display:block;font-size:10px;opacity:.8;margin-top:3px">quick action · v{{ message.skill_snapshot.version }}</span>{% endif %}</div>
     {% else %}
     <div class="panel" style="border-color:var(--border2);padding:13px 14px">
-      <div class="md" style="white-space:pre-wrap">{{ message.content }}</div>
+      <div class="md">{{ message.content | markdown }}</div>
       {% if message.provider or message.model or message.estimated_cost_usd %}
-      <div class="sub" style="font-size:11px;margin-top:8px">
+      <details class="sub" style="font-size:11px;margin-top:8px"><summary style="cursor:pointer;width:max-content">{{ t('Response details') }}</summary><div style="margin-top:4px">
         {{ message.provider or 'unknown provider' }}{% if message.model %} · {{ message.model }}{% endif %}
         {% if message.fallback %} · fallback {{ message.fallback.index }}{% endif %}
         {% if message.estimated_cost_usd %} · estimated ${{ '%.4f' | format(message.estimated_cost_usd) }}{% endif %}
-      </div>
+      </div></details>
       {% endif %}
       {% if message.sources %}
       <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:9px">

@@ -5,6 +5,15 @@ from __future__ import annotations
 from sqlalchemy import select
 
 
+def test_llm_transient_quota_and_output_errors_are_fallback_eligible():
+    from localplaud.llm.base import LLMOutputInvalid, LLMQuotaExhausted, LLMTransientError
+    from localplaud.providers.fallback import is_retryable_fallback_error
+
+    assert is_retryable_fallback_error(LLMTransientError("timeout"))
+    assert is_retryable_fallback_error(LLMQuotaExhausted("quota"))
+    assert is_retryable_fallback_error(LLMOutputInvalid("invalid JSON"))
+
+
 def _reset(monkeypatch, tmp_path, *, diarize=False, summarize=True, mind_map=True, index=True):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
@@ -119,6 +128,7 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
     from localplaud.embeddings.base import EmbeddingUnavailable
     from localplaud.llm.base import LLMUnavailable
     from localplaud.providers.contracts import ProviderStage
+
     calls = {"summary": 0, "mind_map": 0, "embed": 0}
 
     with session_scope() as session:
@@ -243,10 +253,7 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
     assert "Used fallback #1 · after" in page.text
     assert "fallback 1" in page.text
     usage = client.get("/api/files/fallback/usage").json()
-    assert any(
-        item["fallback"] and item["fallback"]["index"] == 1
-        for item in usage["attempts"]
-    )
+    assert any(item["fallback"] and item["fallback"]["index"] == 1 for item in usage["attempts"])
     settings_page = client.get("/settings")
     assert "Fallback order" in settings_page.text
     assert 'name="fallback-transcribe"' in settings_page.text

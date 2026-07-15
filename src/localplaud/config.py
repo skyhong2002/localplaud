@@ -21,7 +21,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 # --------------------------------------------------------------------------- #
@@ -117,7 +117,7 @@ class PipelineConfig(BaseModel):
     # Character budget per LLM call. Longer transcripts are covered through
     # hierarchical map/reduce notes instead of being truncated.
     summary_chunk_chars: int = 6_000
-    polish_chunk_chars: int = Field(default=2_500, ge=1_000, le=60_000)
+    polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
     # Which summary template to use (default | meeting | call | lecture |
     # personal — see worker/summary_templates.py).
     summary_template: str = "default"
@@ -240,6 +240,9 @@ class OpenAILlmConfig(BaseModel):
     api_key: str | None = None
     base_url: str | None = None
     model: str = "gpt-4o-mini"
+    # Leave unset for legacy/OpenAI-compatible endpoints. Reasoning models use
+    # max_completion_tokens and do not receive sampling temperature.
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] | None = None
 
 
 class AnthropicLlmConfig(BaseModel):
@@ -256,14 +259,40 @@ class OpenCodeGoLlmConfig(BaseModel):
     # Transcript correction is a long-context generation task.  Production
     # recordings routinely need more than the short interactive CLI timeout.
     timeout_seconds: int = Field(default=900, ge=10, le=1800)
+    polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
+
+
+class CodexLocalLlmConfig(BaseModel):
+    """Trusted single-user Codex CLI boundary; Codex owns its credentials."""
+
+    executable: str = "codex"
+    model: str = "gpt-5.6-luna"
+    codex_home: str = "~/.localplaud/codex"
+    reasoning_effort: Literal["low", "medium"] = "low"
+    timeout_seconds: int = Field(default=900, ge=30, le=1800)
+    # Codex has enough context for large transcript maps. Structural output
+    # failures are bisected by the correction stage, while transport failures
+    # fail immediately instead of multiplying calls.
+    polish_chunk_chars: int = Field(default=48_000, ge=1_000, le=60_000)
+    require_chatgpt_login: bool = True
 
 
 class LlmConfig(BaseModel):
-    provider: Literal["ollama", "openai", "anthropic", "opencode-go"] = "ollama"
+    provider: Literal["ollama", "openai", "anthropic", "opencode-go", "codex-local"] = "ollama"
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     openai: OpenAILlmConfig = Field(default_factory=OpenAILlmConfig)
     anthropic: AnthropicLlmConfig = Field(default_factory=AnthropicLlmConfig)
     opencode_go: OpenCodeGoLlmConfig = Field(default_factory=OpenCodeGoLlmConfig)
+    codex_local: CodexLocalLlmConfig = Field(default_factory=CodexLocalLlmConfig)
+
+    @model_validator(mode="after")
+    def codex_is_profile_scoped(self) -> LlmConfig:
+        if self.provider == "codex-local":
+            raise ValueError(
+                "codex-local is correction-only; select correct:codex-local in an "
+                "execution profile instead of using it as the global LLM provider"
+            )
+        return self
 
 
 # ---- Embeddings (Q&A / search) ------------------------------------------- #
@@ -310,6 +339,10 @@ class ApiConfig(BaseModel):
     # HMAC key for signed browser sessions. Required when login_password is set.
     session_secret: str | None = None
     session_max_age_seconds: int = Field(default=2_592_000, ge=300, le=31_536_000)
+    # Keep enabled for HTTPS deployments. A Tailnet-only HTTP development
+    # service may explicitly disable it because browsers reject Secure cookies
+    # delivered over plain HTTP.
+    session_cookie_secure: bool = True
     # Used to build absolute links behind a reverse proxy; set per machine.
     public_url: str | None = None
 

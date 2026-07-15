@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 
+from sqlalchemy import select
 from typer.testing import CliRunner
 
 
@@ -12,7 +13,7 @@ def _setup(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'gate.db'}")
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'gate.db'}")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
@@ -94,15 +95,16 @@ def _providers(monkeypatch):
         lambda transcript, settings: {
             "transcript": transcript,
             "provider": settings.llm.provider,
-            "model": getattr(
-                settings.llm, settings.llm.provider.replace("-", "_")
-            ).model,
+            "model": getattr(settings.llm, settings.llm.provider.replace("-", "_")).model,
             "prompt_version": "transcript-polish/v1",
             "detail": {
                 "chunks": 1,
+                "attempts": 3,
                 "segments": len(transcript.segments),
                 "input_chars": len(transcript.text),
                 "output_chars": len(transcript.text),
+                "request_input_chars": 333,
+                "response_output_chars": 222,
             },
         },
     )
@@ -115,6 +117,7 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     from localplaud.db.models import (
         FileStatus,
         PlaudFile,
+        StageAttempt,
         StageName,
         StageStatus,
     )
@@ -124,6 +127,7 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     from localplaud.worker.pipeline import process_pending
 
     init_db()
+
     class FakePlaudClient:
         files = [PlaudFileDTO(id="historical", filename="Historical recording")]
         downloads: list[str] = []
@@ -175,6 +179,14 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         correct = next(stage for stage in row.stage_runs if stage.stage.value == "correct")
         assert correct.status.value == "completed"
         assert correct.provider == "ollama"
+        correct_attempt = session.scalar(
+            select(StageAttempt).where(
+                StageAttempt.file_id == "clean", StageAttempt.stage == StageName.correct
+            )
+        )
+        assert correct_attempt.usage["requests"] == 3
+        assert correct_attempt.usage["input_chars"] == 333
+        assert correct_attempt.usage["output_chars"] == 222
 
     report = subscription_independence_report("clean")
     assert report["schema"] == "localplaud-subscription-independence/v1"
@@ -291,13 +303,16 @@ def test_cloud_only_recording_fails_gate_with_actionable_checks(monkeypatch, tmp
     assert {"raw_audio_local", "local_transcript", "required_exports"} <= failed
 
 
-def test_polish_failure_blocks_notes_and_index_but_keeps_raw_transcript(
-    monkeypatch, tmp_path
-):
+def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     from localplaud.acceptance import subscription_independence_report
     from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
     from localplaud.db.session import init_db, session_scope
+    from localplaud.providers.service import (
+        create_profile_version,
+        list_profiles,
+        select_recording_override,
+    )
     from localplaud.worker.pipeline import process_file
 
     init_db()
@@ -323,17 +338,72 @@ def test_polish_failure_blocks_notes_and_index_but_keeps_raw_transcript(
         assert row.status == FileStatus.partial
         assert row.local_transcript is not None
         assert row.corrected_transcript is None
-        assert row.summaries == [] and row.chunks == []
+        assert {summary.template for summary in row.summaries} == {"default", "mind_map"}
+        assert row.chunks
+        assert all(summary.input_transcript_revision == 0 for summary in row.summaries)
+        assert all(summary.input_transcript_source == "local" for summary in row.summaries)
         correct = next(stage for stage in row.stage_runs if stage.stage == StageName.correct)
         assert correct.status == StageStatus.failed
         assert "provider down" in correct.error
+        assert (
+            next(stage for stage in row.stage_runs if stage.stage == StageName.summarize).status
+            == StageStatus.completed
+        )
+        assert (
+            next(stage for stage in row.stage_runs if stage.stage == StageName.mind_map).status
+            == StageStatus.completed
+        )
+        assert (
+            next(stage for stage in row.stage_runs if stage.stage == StageName.index).status
+            == StageStatus.completed
+        )
 
     report = subscription_independence_report("polish-failure")
-    polish_check = next(
-        item for item in report["checks"] if item["name"] == "transcript_polish"
-    )
+    polish_check = next(item for item in report["checks"] if item["name"] == "transcript_polish")
     assert polish_check == {
         "name": "transcript_polish",
         "passed": False,
         "detail": "no local AI-polished transcript revision",
     }
+
+    with session_scope() as session:
+        current = next(profile for profile in list_profiles(session) if profile["is_system_default"])
+        stages = dict(current["stages"])
+        stages["correct"] = {
+            "connection": "correct:codex-local",
+            "model": "gpt-5.6-luna",
+            "options": {},
+        }
+        codex_profile = create_profile_version(
+            session,
+            {
+                "key": "codex-correction",
+                "name": "Codex correction",
+                "privacy_policy": "allow-egress",
+                "no_egress": False,
+                "fallback_policy": {},
+                "stages": stages,
+            },
+        )
+        select_recording_override(session, "polish-failure", codex_profile["id"])
+
+    _providers(monkeypatch)
+    process_file("polish-failure")
+    with session_scope() as session:
+        row = session.get(PlaudFile, "polish-failure")
+        assert row.status == FileStatus.done
+        assert row.corrected_transcript is not None
+        assert row.corrected_transcript.revision == 1
+        assert row.corrected_transcript.provider == "codex-local"
+        assert row.corrected_transcript.model == "gpt-5.6-luna"
+        assert (
+            row.corrected_transcript.resolved_profile_snapshot["stages"]["correct"][
+                "connection"
+            ]
+            == "correct:codex-local"
+        )
+        assert {summary.input_transcript_revision for summary in row.summaries} == {1}
+        assert row.chunks and {chunk.input_transcript_revision for chunk in row.chunks} == {1}
+        stage_runs = {stage.stage: stage for stage in row.stage_runs}
+        assert stage_runs[StageName.transcribe].attempts == 1
+        assert stage_runs[StageName.correct].attempts == 2

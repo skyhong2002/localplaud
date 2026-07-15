@@ -43,6 +43,7 @@ from localplaud.providers.service import (
     preview_resolution,
     resolve_recording_profile,
     save_connection,
+    save_model,
     select_recording_override,
 )
 from localplaud.worker.pipeline import _settings_for_stage
@@ -57,16 +58,29 @@ def _cap(*stages, egress=False):
 
 
 def test_resolution_precedence_partial_merge_and_immutability():
-    catalog = {("local", "one"): _cap(ProviderStage.summarize),
-               ("local", "two"): _cap(ProviderStage.summarize)}
-    resolved = resolve_profile([
-        {"key": "system", "policy": {"no_egress": True, "cost_ceiling": 3},
-         "stages": {"summarize": {"connection": "local", "model": "one",
-                                    "options": {"temperature": 0.1, "language": "zh"}}}},
-        {"key": "folder", "stages": {"summarize": {"options": {"temperature": 0.2}}}},
-        {"key": "template", "policy": {"cost_ceiling": 2}},
-        {"key": "recording", "stages": {"summarize": {"model": "two"}}},
-    ], catalog)
+    catalog = {
+        ("local", "one"): _cap(ProviderStage.summarize),
+        ("local", "two"): _cap(ProviderStage.summarize),
+    }
+    resolved = resolve_profile(
+        [
+            {
+                "key": "system",
+                "policy": {"no_egress": True, "cost_ceiling": 3},
+                "stages": {
+                    "summarize": {
+                        "connection": "local",
+                        "model": "one",
+                        "options": {"temperature": 0.1, "language": "zh"},
+                    }
+                },
+            },
+            {"key": "folder", "stages": {"summarize": {"options": {"temperature": 0.2}}}},
+            {"key": "template", "policy": {"cost_ceiling": 2}},
+            {"key": "recording", "stages": {"summarize": {"model": "two"}}},
+        ],
+        catalog,
+    )
     data = resolved.to_dict()
     assert data["stages"]["summarize"]["model"] == "two"
     assert data["stages"]["summarize"]["options"] == {"temperature": 0.2, "language": "zh"}
@@ -79,8 +93,10 @@ def test_resolution_precedence_partial_merge_and_immutability():
 
 def test_resolution_rejects_egress_and_unsupported_stage():
     cloud = {("cloud", "model"): _cap(ProviderStage.ask, egress=True)}
-    layer = {"policy": {"no_egress": True},
-             "stages": {"ask": {"connection": "cloud", "model": "model"}}}
+    layer = {
+        "policy": {"no_egress": True},
+        "stages": {"ask": {"connection": "cloud", "model": "model"}},
+    }
     with pytest.raises(ResolutionError, match="no-egress"):
         resolve_profile([layer], cloud)
     layer["policy"]["no_egress"] = False
@@ -100,13 +116,21 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
         second = bootstrap_default_profile(session, Settings())
         session.commit()
         assert second.id == first_id
-        assert len(list_connections(session)) == 6
-        assert len(list_models(session)) == 6
+        assert len(list_connections(session)) == 7
+        assert len(list_models(session)) == 7
         forced = next(
             model for model in list_models(session) if model["connection_key"] == "align:whisperx"
         )
         assert forced["model_key"] == "wav2vec2-auto"
         assert forced["capabilities"]["metadata"]["forced_alignment"] is True
+        codex = next(
+            model
+            for model in list_models(session)
+            if model["connection_key"] == "correct:codex-local"
+        )
+        assert codex["model_key"] == "gpt-5.6-luna"
+        assert codex["capabilities"]["metadata"]["trusted_single_user_only"] is True
+        assert [stage["stage"] for stage in codex["capabilities"]["stages"]] == ["correct"]
         profiles = list_profiles(session)
         assert len(profiles) == 1
         assert set(profiles[0]["stages"]) == {stage.value for stage in ProviderStage}
@@ -115,12 +139,158 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
         assert all(connection["secret_ref"] is None for connection in list_connections(session))
         session.add(PlaudFile(id="recording", filename="test"))
         session.flush()
-        selected = select_recording_override(session, "recording", first_id,
-                                             stages={"ask": {"options": {"x": 1}}})
+        selected = select_recording_override(
+            session, "recording", first_id, stages={"ask": {"options": {"x": 1}}}
+        )
         assert selected["profile_id"] == first_id
         resolved = resolve_recording_profile(session, "recording").to_dict()
         assert resolved["stages"]["ask"]["options"] == {"x": 1}
         assert resolved["layers"][-1] == "recording:recording"
+
+
+def test_bootstrap_rejects_codex_as_a_general_llm_provider(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'codex-scope.db'}")
+    Base.metadata.create_all(engine)
+    settings = Settings()
+    settings.llm.provider = "codex-local"
+    with Session(engine) as session, pytest.raises(ValueError, match="correction-only"):
+        bootstrap_default_profile(session, settings)
+
+
+def test_codex_local_is_rejected_outside_correction_at_all_profile_boundaries(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'codex-profile-scope.db'}")
+    Base.metadata.create_all(engine)
+    broad_capability = _cap(
+        ProviderStage.correct, ProviderStage.summarize, egress=True
+    ).model_dump(mode="json")
+    with Session(engine) as session:
+        with pytest.raises(ValueError, match="requires cloud execution with data egress"):
+            save_connection(
+                session,
+                {
+                    "key": "invalid:codex",
+                    "name": "Invalid Codex",
+                    "provider_type": "codex-local",
+                    "execution_target": "local",
+                    "data_egress": False,
+                    "config": {},
+                },
+            )
+        connection = ProviderConnection(
+            key="custom:codex",
+            name="Custom Codex",
+            provider_type="codex-local",
+            execution_target="cloud",
+            data_egress=True,
+        )
+        session.add(connection)
+        session.flush()
+        with pytest.raises(ValueError, match="correction-only.*summarize"):
+            save_model(
+                session,
+                {
+                    "connection_id": connection.id,
+                    "model_key": "gpt-test",
+                    "display_name": "gpt-test",
+                    "capabilities": broad_capability,
+                    "enabled": True,
+                },
+            )
+        correction_only_but_local = _cap(ProviderStage.correct).model_dump(mode="json")
+        with pytest.raises(ValueError, match="requires cloud execution with data egress"):
+            save_model(
+                session,
+                {
+                    "connection_id": connection.id,
+                    "model_key": "gpt-test",
+                    "display_name": "gpt-test",
+                    "capabilities": correction_only_but_local,
+                    "enabled": True,
+                },
+            )
+
+    capability_catalog = {
+        ("custom:codex", "gpt-test"): broad_capability,
+        ("local", "summary"): _cap(ProviderStage.summarize),
+    }
+    connections = {
+        "custom:codex": {
+            "provider_type": "codex-local",
+            "execution_target": "cloud",
+            "data_egress": True,
+        },
+        "local": {
+            "provider_type": "ollama",
+            "execution_target": "local",
+            "data_egress": False,
+        },
+    }
+    primary = {
+        "stages": {
+            "summarize": {"connection": "custom:codex", "model": "gpt-test"}
+        }
+    }
+    with pytest.raises(ResolutionError, match="correction-only.*summarize"):
+        resolve_profile([primary], capability_catalog, connections)
+
+    fallback = {
+        "stages": {"summarize": {"connection": "local", "model": "summary"}},
+        "policy": {
+            "fallback_policy": {
+                "stages": {
+                    "summarize": [
+                        {"connection": "custom:codex", "model": "gpt-test"}
+                    ]
+                }
+            }
+        },
+    }
+    with pytest.raises(ResolutionError, match="correction-only.*summarize"):
+        resolve_profile([fallback], capability_catalog, connections)
+
+    lied_capability = _cap(ProviderStage.correct).model_dump(mode="json")
+    correction = {
+        "policy": {"no_egress": True},
+        "stages": {
+            "correct": {"connection": "custom:codex", "model": "gpt-correction"}
+        },
+    }
+    with pytest.raises(ResolutionError, match="no-egress"):
+        resolve_profile(
+            [correction],
+            {("custom:codex", "gpt-correction"): lied_capability},
+            connections,
+        )
+
+
+def test_runtime_projection_rejects_legacy_codex_non_correction_snapshot():
+    snapshot = {
+        "stages": {
+            "ask": {
+                "connection": "custom:codex",
+                "provider_type": "codex-local",
+                "model": "gpt-test",
+            }
+        }
+    }
+    with pytest.raises(ValueError, match="correction-only.*ask"):
+        _settings_for_stage(Settings(), snapshot, "ask")
+
+
+@pytest.mark.parametrize("invalid_budget", [0, 1_000_000, "bad"])
+def test_runtime_projection_revalidates_provider_chunk_budget(invalid_budget):
+    snapshot = {
+        "stages": {
+            "correct": {
+                "connection": "correct:codex-local",
+                "provider_type": "codex-local",
+                "model": "gpt-test",
+                "configuration": {"polish_chunk_chars": invalid_budget},
+            }
+        }
+    }
+    with pytest.raises(ValueError):
+        _settings_for_stage(Settings(), snapshot, "correct")
 
 
 def test_recording_resolution_layers_provenance_and_reference_guards(tmp_path):
@@ -235,7 +405,8 @@ def test_legacy_provider_profile_schema_rebuild_preserves_ids_and_config(tmp_pat
     engine = create_engine(f"sqlite:///{tmp_path / 'legacy-providers.db'}")
     with engine.begin() as connection:
         connection.exec_driver_sql("PRAGMA foreign_keys=ON")
-        connection.execute(text("""
+        connection.execute(
+            text("""
             CREATE TABLE provider_connections (
                 id INTEGER PRIMARY KEY, name VARCHAR(128) NOT NULL UNIQUE,
                 provider_type VARCHAR(64) NOT NULL, base_url VARCHAR(1024),
@@ -243,16 +414,20 @@ def test_legacy_provider_profile_schema_rebuild_preserves_ids_and_config(tmp_pat
                 enabled BOOLEAN NOT NULL, version INTEGER NOT NULL,
                 created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             CREATE TABLE model_catalog_entries (
                 id INTEGER PRIMARY KEY, connection_id INTEGER NOT NULL,
                 model_key VARCHAR(256) NOT NULL, display_name VARCHAR(256) NOT NULL,
                 capabilities JSON NOT NULL, enabled BOOLEAN NOT NULL,
                 FOREIGN KEY(connection_id) REFERENCES provider_connections(id)
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             CREATE TABLE execution_profiles (
                 id INTEGER PRIMARY KEY, name VARCHAR(128) NOT NULL UNIQUE,
                 description TEXT, stages JSON NOT NULL, policy JSON NOT NULL,
@@ -260,8 +435,10 @@ def test_legacy_provider_profile_schema_rebuild_preserves_ids_and_config(tmp_pat
                 version INTEGER NOT NULL, created_at DATETIME NOT NULL,
                 updated_at DATETIME NOT NULL
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             CREATE TABLE profile_stage_selections (
                 id INTEGER PRIMARY KEY, profile_id INTEGER NOT NULL,
                 stage VARCHAR(32) NOT NULL, connection_id INTEGER NOT NULL,
@@ -270,29 +447,38 @@ def test_legacy_provider_profile_schema_rebuild_preserves_ids_and_config(tmp_pat
                 FOREIGN KEY(connection_id) REFERENCES provider_connections(id),
                 FOREIGN KEY(model_id) REFERENCES model_catalog_entries(id)
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             INSERT INTO provider_connections VALUES (
                 7, 'openai-cloud', 'openai', 'https://api.openai.com/v1',
                 'env:OPENAI_API_KEY', '{"timeout": 45}', 1, 2,
                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             INSERT INTO model_catalog_entries VALUES (
                 11, 7, 'gpt-test', 'GPT Test', '{}', 1
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             INSERT INTO execution_profiles VALUES (
                 3, 'system-default', NULL, '{}',
                 '{"no_egress": false, "cost_ceiling": 2.5}',
                 1, 1, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             INSERT INTO profile_stage_selections VALUES (19, 3, 'ask', 7, 11, '{}')
-        """))
+        """)
+        )
 
     assert migrate_legacy_provider_profile_schema(engine) == [
         "provider_connections",
@@ -393,13 +579,16 @@ def test_partial_default_profile_reuses_deployed_connections_and_fills_all_stage
         assert {item.stage for item in upgraded.stage_selections} == {
             stage.value for stage in ProviderStage
         }
-        assert session.query(ProviderConnection).count() == 5
+        assert session.query(ProviderConnection).count() == 6
         assert {item.connection.key for item in upgraded.stage_selections} == {
             "mlx-whisper",
             "pyannote",
             "ollama",
         }
-        assert bootstrap_default_profile(session, Settings(asr={"provider": "mlx-whisper"})).id == upgraded.id
+        assert (
+            bootstrap_default_profile(session, Settings(asr={"provider": "mlx-whisper"})).id
+            == upgraded.id
+        )
 
 
 def test_profile_key_can_have_multiple_versions(tmp_path):
@@ -568,7 +757,8 @@ def test_legacy_summary_schema_rebuild_preserves_data_and_is_idempotent(tmp_path
     with engine.begin() as connection:
         connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
         connection.execute(text("INSERT INTO plaud_files (id) VALUES ('r1')"))
-        connection.execute(text("""
+        connection.execute(
+            text("""
             CREATE TABLE summaries (
                 id INTEGER PRIMARY KEY,
                 file_id VARCHAR(64) NOT NULL,
@@ -583,24 +773,29 @@ def test_legacy_summary_schema_rebuild_preserves_data_and_is_idempotent(tmp_path
                 profile_snapshot JSON NOT NULL,
                 created_at DATETIME NOT NULL
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             INSERT INTO summaries (
                 id, file_id, template, content_md, source, revision,
                 transcript_revision, profile_snapshot, created_at
             ) VALUES (1, 'r1', 'default', '# Notes', 'local', 3, 2,
                       '{"version": 1}', CURRENT_TIMESTAMP)
-        """))
+        """)
+        )
 
     assert migrate_legacy_summary_schema(engine) == ["summaries"]
     assert migrate_legacy_summary_schema(engine) == []
     columns = {column["name"] for column in inspect(engine).get_columns("summaries")}
     assert not {"revision", "transcript_revision", "profile_snapshot"} & columns
     with engine.connect() as connection:
-        row = connection.execute(text("""
+        row = connection.execute(
+            text("""
             SELECT content_md, input_transcript_revision, resolved_profile_snapshot
             FROM summaries WHERE id = 1
-        """)).one()
+        """)
+        ).one()
     assert row.content_md == "# Notes"
     assert row.input_transcript_revision == 2
     assert '"version": 1' in row.resolved_profile_snapshot
@@ -621,7 +816,7 @@ def test_provider_read_api(monkeypatch, tmp_path):
         assert "transcribe" in preview.json()["resolved"]["stages"]
         settings_page = client.get("/settings")
         assert settings_page.status_code == 200
-        assert "<h1 class=\"page\">Settings</h1>" in settings_page.text
+        assert '<h1 class="page">Settings</h1>' in settings_page.text
         assert 'aria-label="Settings sections"' in settings_page.text
 
 
@@ -646,8 +841,7 @@ def test_profile_resolution_schema_migration_is_additive_and_idempotent(tmp_path
     assert migrate_profile_resolution_schema(engine) == []
     inspector = inspect(engine)
     assignment_columns = {
-        column["name"]
-        for column in inspector.get_columns("recording_rule_profile_assignments")
+        column["name"] for column in inspector.get_columns("recording_rule_profile_assignments")
     }
     assert {
         "file_id",
@@ -663,9 +857,7 @@ def test_profile_resolution_schema_migration_is_additive_and_idempotent(tmp_path
         assert connection.scalar(text("SELECT id FROM note_templates")) == 9
     assert {
         foreign_key["referred_table"]
-        for foreign_key in inspector.get_foreign_keys(
-            "recording_rule_profile_assignments"
-        )
+        for foreign_key in inspector.get_foreign_keys("recording_rule_profile_assignments")
     } == {"plaud_files", "execution_profiles", "automation_runs"}
 
 
@@ -746,6 +938,57 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
         model_health = client.post(f"/api/providers/models/{model.json()['id']}/health")
         assert model_health.json()["status"] == "healthy"
 
+        codex_connection = client.post(
+            "/api/providers/connections",
+            json={
+                "key": "correct:test-codex",
+                "name": "Test Codex",
+                "provider_type": "codex-local",
+                "execution_target": "cloud",
+                "data_egress": True,
+                "config": {},
+            },
+        )
+        assert codex_connection.status_code == 201
+        codex_connection_id = codex_connection.json()["id"]
+        codex_capability = _cap(ProviderStage.correct, egress=True).model_dump(mode="json")
+        codex_model = client.post(
+            "/api/providers/models",
+            json={
+                "connection_id": codex_connection_id,
+                "model_key": "gpt-test",
+                "display_name": "Codex test",
+                "capabilities": codex_capability,
+            },
+        )
+        assert codex_model.status_code == 201
+        invalid_codex_capability = _cap(
+            ProviderStage.correct, ProviderStage.summarize, egress=True
+        ).model_dump(mode="json")
+        rejected_codex_create = client.post(
+            "/api/providers/models",
+            json={
+                "connection_id": codex_connection_id,
+                "model_key": "gpt-invalid",
+                "display_name": "Invalid Codex",
+                "capabilities": invalid_codex_capability,
+            },
+        )
+        assert rejected_codex_create.status_code == 422
+        assert "correction-only" in rejected_codex_create.json()["detail"]
+        rejected_codex_update = client.put(
+            f"/api/providers/models/{codex_model.json()['id']}",
+            json={
+                "connection_id": codex_connection_id,
+                "model_key": "gpt-test",
+                "display_name": "Codex test",
+                "capabilities": invalid_codex_capability,
+                "enabled": True,
+            },
+        )
+        assert rejected_codex_update.status_code == 422
+        assert "correction-only" in rejected_codex_update.json()["detail"]
+
         profile = client.post(
             "/api/providers/profiles",
             json={
@@ -765,17 +1008,19 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
         assert profile.status_code == 201
         profile_id = profile.json()["id"]
         assert client.delete(f"/api/providers/profiles/{profile_id}").status_code == 204
+        assert client.delete(f"/api/providers/models/{codex_model.json()['id']}").status_code == 204
+        assert client.delete(f"/api/providers/connections/{codex_connection_id}").status_code == 204
         assert client.delete(f"/api/providers/models/{model.json()['id']}").status_code == 204
         assert client.delete(f"/api/providers/connections/{connection_id}").status_code == 204
 
 
-def test_remote_worker_connection_health_uses_handshake_and_checks_model(
-    monkeypatch, tmp_path
-):
+def test_remote_worker_connection_health_uses_handshake_and_checks_model(monkeypatch, tmp_path):
     from localplaud.remote.protocol import HandshakeResponse, StageCapability
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'remote-health.db'}")
+    monkeypatch.setenv(
+        "LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'remote-health.db'}"
+    )
     monkeypatch.setenv("TEST_WORKER_TOKEN", "test-secret")
     config.get_settings(reload=True)
     monkeypatch.setattr(db_session, "_engine", None)
@@ -814,9 +1059,7 @@ def test_remote_worker_connection_health_uses_handshake_and_checks_model(
                 "config": {"base_url": "https://worker.example/"},
             },
         ).json()
-        health = client.post(
-            f"/api/providers/connections/{connection['id']}/health"
-        ).json()
+        health = client.post(f"/api/providers/connections/{connection['id']}/health").json()
         assert health["status"] == "healthy"
         assert "gpu-health" in health["detail"]
         assert "transcribe" in health["detail"]
@@ -830,9 +1073,7 @@ def test_remote_worker_connection_health_uses_handshake_and_checks_model(
                 "capabilities": _cap(ProviderStage.transcribe, egress=True).model_dump(mode="json"),
             },
         ).json()
-        available_health = client.post(
-            f"/api/providers/models/{available['id']}/health"
-        ).json()
+        available_health = client.post(f"/api/providers/models/{available['id']}/health").json()
         assert available_health["status"] == "healthy"
         assert available_health["detail"].endswith("stages transcribe")
 
@@ -845,9 +1086,7 @@ def test_remote_worker_connection_health_uses_handshake_and_checks_model(
                 "capabilities": _cap(ProviderStage.transcribe, egress=True).model_dump(mode="json"),
             },
         ).json()
-        missing_health = client.post(
-            f"/api/providers/models/{missing['id']}/health"
-        ).json()
+        missing_health = client.post(f"/api/providers/models/{missing['id']}/health").json()
         assert missing_health["status"] == "degraded"
         assert "not advertised" in missing_health["detail"]
     assert seen == ["handshake", "closed"] * 3
@@ -861,7 +1100,8 @@ def test_stage_run_snapshot_roundtrip(tmp_path):
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(PlaudFile(id="r", filename="r"))
-        session.add(StageRun(file_id="r", stage="transcribe",
-                             resolved_profile_snapshot={"version": 1}))
+        session.add(
+            StageRun(file_id="r", stage="transcribe", resolved_profile_snapshot={"version": 1})
+        )
         session.commit()
         assert session.query(StageRun).one().resolved_profile_snapshot == {"version": 1}

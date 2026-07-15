@@ -140,6 +140,9 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   [llm.openai]
   # api_key via LOCALPLAUD_LLM__OPENAI__API_KEY
   model = "gpt-4o-mini"
+  # Set for OpenAI reasoning models such as gpt-5.4. Leave unset for
+  # OpenAI-compatible endpoints that only support the legacy sampling request.
+  # reasoning_effort = "medium"
 
   [llm.anthropic]
   # api_key via LOCALPLAUD_LLM__ANTHROPIC__API_KEY
@@ -150,6 +153,16 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   model = "qwen3.7-plus"
   agent = "transcript-polish"    # project agent denies every tool
   timeout_seconds = 900
+  polish_chunk_chars = 12000      # conservative CLI batch; structural failures split further
+
+  [llm.codex_local]              # correction-only; select through an execution profile
+  executable = "codex"
+  model = "gpt-5.6-luna"         # clear, repeatable transcript transformations
+  codex_home = "~/.localplaud/codex" # dedicated login; localplaud never reads its tokens
+  reasoning_effort = "low"
+  timeout_seconds = 900
+  polish_chunk_chars = 48000      # large-context first; invalid structured output is bisected
+  require_chatgpt_login = true   # reject API-key auth when subscription usage is intended
 
 # --------------------------------------------------------------------------- #
 # Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.
@@ -180,4 +193,5 @@ port = 8080
 # secrets in environment variables rather than this file:
 # LOCALPLAUD_API__LOGIN_PASSWORD and LOCALPLAUD_API__SESSION_SECRET
 # session_max_age_seconds = 2592000
+# session_cookie_secure = true  # disable only for Tailnet-only HTTP development
 # public_url = "https://plaud.observe.tw"   # set to your domain behind the reverse proxy

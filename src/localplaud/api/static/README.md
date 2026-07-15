@@ -10,3 +10,8 @@
 It is vendored so the self-hosted Web App has no CDN/runtime network dependency.
 When updating it, replace the distribution and license together, update the pinned
 filename and checksum here, then run the Web and Docker test suites.
+
+The `lucide/` directory contains only the navigation and command icons used by the
+Web App, copied without modification from `lucide-static` 1.24.0. Lucide is licensed
+under ISC; the vendored text is in `LUCIDE-LICENSE.txt`. Keeping the SVGs local
+preserves the same offline/private-deployment boundary as HTMX.

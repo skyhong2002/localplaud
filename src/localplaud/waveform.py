@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 
-def waveform_peaks(audio_path: str | Path, *, buckets: int = 180) -> list[float]:
+def cached_waveform_peaks(audio_path: str | Path, *, buckets: int = 180) -> list[float] | None:
     path = Path(audio_path)
     if not path.exists():
         raise FileNotFoundError(path)
@@ -22,6 +22,17 @@ def waveform_peaks(audio_path: str | Path, *, buckets: int = 180) -> list[float]
             return payload["peaks"]
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
+    return None
+
+
+def waveform_peaks(audio_path: str | Path, *, buckets: int = 180) -> list[float]:
+    path = Path(audio_path)
+    cached = cached_waveform_peaks(path, buckets=buckets)
+    if cached is not None:
+        return cached
+    buckets = min(max(int(buckets), 32), 500)
+    cache = path.parent / f"waveform-{buckets}.json"
+    signature = {"size": path.stat().st_size, "mtime_ns": path.stat().st_mtime_ns}
     result = subprocess.run(
         [
             "ffmpeg", "-v", "error", "-i", str(path), "-ac", "1", "-ar", "100",

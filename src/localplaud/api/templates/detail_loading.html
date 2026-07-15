@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ f.filename }} — localplaud{% endblock %}
+{% block body %}
+<div class="shell progressive-shell" aria-busy="true">
+  {% if preserve_filelist %}
+  <nav class="filelist has-active" id="recording-file-list" hx-preserve></nav>
+  {% else %}
+  <nav class="filelist has-active" id="recording-file-list">
+    <div class="fl-top"><div class="fl-title">{{ t('All files') }}</div><div class="skeleton-field"></div></div>
+    <div class="fl-scroll skeleton-list">
+      {% for _ in range(8) %}
+      <div class="skeleton-recording"><span class="skeleton-line w-75"></span><span class="skeleton-line w-45"></span><span class="skeleton-line w-55"></span></div>
+      {% endfor %}
+    </div>
+  </nav>
+  {% endif %}
+  <section class="pane recording-pane"><div class="pane-inner">
+    <a class="backlink" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">← {{ t('All files') }}</a>
+    <header class="recording-header loading-recording-header">
+      <h1 class="page">{{ f.filename }}</h1>
+      <div class="sub">{{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }} · <span class="st {{ f.status }}">{{ t(f.status) }}</span></div>
+    </header>
+    <div class="skeleton-player" aria-label="{{ t('Loading recording…') }}"><span class="skeleton-play"></span><span class="skeleton-wave"></span><span class="skeleton-time"></span></div>
+    <div class="skeleton-tabs"><span></span><span></span><span></span><span></span></div>
+    <div class="skeleton-transcript">
+      {% for width in [85,68,92,74,88,61,80] %}<div><span class="skeleton-avatar"></span><span class="skeleton-line" style="width:{{ width }}%"></span></div>{% endfor %}
+    </div>
+  </div></section>
+</div>
+<div class="progressive-request" data-progressive-loader
+  hx-get="{{ workspace_url }}" hx-trigger="load" hx-target="#app-view" hx-select="#app-view"
+  hx-swap="outerHTML" hx-push-url="false"></div>
+<div class="progressive-error" role="alert"><span>{{ t('Could not load this recording.') }}</span><button class="btn sec" type="button" data-progressive-retry>{{ t('Retry') }}</button></div>
+{% endblock %}

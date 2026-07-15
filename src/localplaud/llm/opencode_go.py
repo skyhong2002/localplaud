@@ -7,7 +7,44 @@ import shutil
 import subprocess
 
 from ..config import OpenCodeGoLlmConfig
-from .base import LLMError, LLMUnavailable
+from .base import (
+    LLMError,
+    LLMInputTooLarge,
+    LLMQuotaExhausted,
+    LLMTransientError,
+    LLMUnavailable,
+)
+
+_QUOTA_MARKERS = (
+    "429",
+    "quota",
+    "rate limit",
+    "usage limit",
+    "usage exhausted",
+    "credits exhausted",
+)
+_TRANSIENT_MARKERS = (
+    "500",
+    "502",
+    "503",
+    "504",
+    "connection",
+    "disconnected",
+    "eof",
+    "internal server error",
+    "network",
+    "peer closed",
+    "stream reset",
+    "timeout",
+    "timed out",
+)
+_CONTEXT_MARKERS = (
+    "context window",
+    "input too large",
+    "maximum context length",
+    "prompt too long",
+    "too many tokens",
+)
 
 
 class OpenCodeGoLLM:
@@ -19,6 +56,10 @@ class OpenCodeGoLLM:
     @property
     def model(self) -> str:
         return self.cfg.model
+
+    @property
+    def polish_chunk_chars(self) -> int:
+        return self.cfg.polish_chunk_chars
 
     def available(self) -> bool:
         return shutil.which(self.cfg.executable) is not None
@@ -87,13 +128,20 @@ class OpenCodeGoLLM:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise LLMError(
+            raise LLMTransientError(
                 f"OpenCode Go timed out after {self.cfg.timeout_seconds}s"
             ) from exc
         except OSError as exc:
             raise LLMUnavailable(f"could not start OpenCode CLI: {exc}") from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "unknown error").strip()[-1000:]
+            normalized = detail.lower()
+            if any(marker in normalized for marker in _CONTEXT_MARKERS):
+                raise LLMInputTooLarge("OpenCode Go input exceeded the model context")
+            if any(marker in normalized for marker in _QUOTA_MARKERS):
+                raise LLMQuotaExhausted("OpenCode Go usage is exhausted")
+            if any(marker in normalized for marker in _TRANSIENT_MARKERS):
+                raise LLMTransientError("OpenCode Go transport failed")
             raise LLMError(f"OpenCode Go failed: {detail}")
 
         parts: list[str] = []
@@ -108,5 +156,5 @@ class OpenCodeGoLLM:
                     parts.append(str(text))
         completion = "".join(parts).strip()
         if not completion:
-            raise LLMError("OpenCode Go returned no text completion")
+            raise LLMTransientError("OpenCode Go returned no text completion")
         return completion

@@ -11,9 +11,9 @@
     <article class="panel notification" data-id="{{ item.id }}" style="padding:14px 16px;display:flex;gap:13px;align-items:flex-start;{% if not item.read_at %}border-left:3px solid var(--blue){% endif %}">
       <button class="read-toggle" type="button" aria-label="{{ 'Mark unread' if item.read_at else 'Mark read' }}" title="{{ 'Mark unread' if item.read_at else 'Mark read' }}" style="border:0;background:none;color:var(--blue);padding:1px;cursor:pointer;font-size:17px">{{ '○' if item.read_at else '●' }}</button>
       <div style="min-width:0;flex:1"><strong>{{ item.title }}</strong><div style="margin-top:3px">{% if item.file_id %}<a href="/file/{{ item.file_id }}">{{ item.detail.recording_title or item.body }}</a>{% else %}{{ item.detail.recording_title or item.body }}{% endif %}</div><div class="sub" style="font-size:11.5px;margin-top:5px">Rule v{{ item.detail.rule_version }} · {{ item.created_at[:16]|replace('T', ' · ') }}</div></div>
-      <button class="dismiss" type="button" aria-label="Dismiss" title="Dismiss" style="border:0;background:none;color:var(--muted);cursor:pointer;font-size:18px">×</button>
+      <button class="dismiss" type="button" aria-label="Dismiss" title="Dismiss" style="width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
     </article>
-    {% else %}<div class="empty"><div class="big">🔔</div>{{ t('No notifications yet. AutoFlows with notifications enabled will appear here.') }}</div>{% endfor %}
+    {% else %}<div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/bell.svg')"></span>{{ t('No notifications yet. AutoFlows with notifications enabled will appear here.') }}</div>{% endfor %}
   </div>
 </div></main>
 {% endblock %}

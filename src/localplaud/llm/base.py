@@ -26,6 +26,22 @@ class LLMUnavailable(LLMError):
     dependency, API key, or unreachable server)."""
 
 
+class LLMTransientError(LLMError):
+    """Raised for transport, timeout, or temporary provider failures."""
+
+
+class LLMQuotaExhausted(LLMTransientError):
+    """Raised when a provider reports an explicit quota or usage limit."""
+
+
+class LLMOutputInvalid(LLMError):
+    """Raised when a provider response cannot satisfy the stage contract."""
+
+
+class LLMInputTooLarge(LLMOutputInvalid):
+    """Raised when a provider rejects a request that must be split smaller."""
+
+
 @runtime_checkable
 class LLMProvider(Protocol):
     """Contract for all LLM providers."""
@@ -73,4 +89,8 @@ def build_llm(cfg: LlmConfig) -> LLMProvider:
         from .opencode_go import OpenCodeGoLLM
 
         return OpenCodeGoLLM(cfg.opencode_go)
+    if cfg.provider == "codex-local":
+        from .codex_local import CodexLocalLLM
+
+        return CodexLocalLLM(cfg.codex_local)
     raise LLMUnavailable(f"unknown LLM provider: {cfg.provider!r}")

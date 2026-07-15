@@ -1,0 +1,27 @@
+{% for seg in segments %}
+<div class="seg {% if seg.speaker %}spk{% endif %}" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
+  <div class="ts">{{ (seg.start or 0) | mmss }}</div>
+  <div class="txt">
+    {% if seg.speaker %}<span class="who"><span class="dot"></span>{{ speaker_names.get(seg.speaker, seg.speaker) }}</span><br>{% endif %}{{ seg.text }}
+    {% if can_edit %}
+    <button class="editbtn" type="button" title="{{ t('Edit this segment') }}" aria-label="{{ t('Edit segment text') }}">✎</button>
+    <form class="segedit" method="post" action="/file/{{ file_id }}/transcript/segments/{{ offset + loop.index0 }}" hidden>
+      <input type="hidden" name="base_revision" value="{{ transcript_revision or 0 }}">
+      <textarea name="text" rows="2">{{ seg.text }}</textarea>
+      <div class="actions">
+        <button class="btn" type="submit">{{ t('Save') }}</button>
+        <button class="btn sec" type="button" data-cancel>{{ t('Cancel') }}</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+{% if next_offset is not none %}
+<div class="transcript-page-loader" hx-get="/file/{{ file_id }}/transcript-page?source={{ source }}&amp;view={{ view }}{% if revision is not none %}&amp;revision={{ revision }}{% elif page_revision is not none %}&amp;page_revision={{ page_revision }}{% endif %}{% if page_transcript_id is not none %}&amp;page_transcript_id={{ page_transcript_id }}&amp;page_transcript_token={{ page_transcript_token }}{% endif %}&amp;offset={{ next_offset }}&amp;limit={{ limit }}"
+  hx-trigger="intersect once threshold:0.1" hx-target="this" hx-swap="outerHTML" aria-label="{{ t('Loading more transcript…') }}">
+  <div class="skeleton-transcript">
+    {% for width in [72,88,65] %}<div><span class="skeleton-avatar"></span><span class="skeleton-line" style="width:{{ width }}%"></span></div>{% endfor %}
+  </div>
+</div>
+{% endif %}

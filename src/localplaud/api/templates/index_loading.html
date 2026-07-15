@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}localplaud{% endblock %}
+{% block body %}
+<div class="library-page progressive-shell" aria-busy="true">
+  <div class="library-inner" aria-label="{{ t('Loading library…') }}">
+    <div class="loading-library-head">
+      <div class="skeleton-stack" style="width:min(260px,55%)"><span class="skeleton-line skeleton-title w-65"></span><span class="skeleton-line w-45"></span></div>
+      <div class="loading-library-actions"><span class="skeleton-field"></span><span class="skeleton-field"></span></div>
+    </div>
+    <div class="loading-library-toolbar"><span class="skeleton-field"></span><span class="skeleton-field"></span></div>
+    <div class="table-wrap skeleton-list">
+      {% for _ in range(8) %}<span class="skeleton-table-row"></span>{% endfor %}
+    </div>
+  </div>
+</div>
+<div class="progressive-request" data-progressive-loader
+  hx-get="{{ workspace_url }}" hx-trigger="load" hx-target="#app-view" hx-select="#app-view"
+  hx-swap="outerHTML" hx-push-url="false"></div>
+<div class="progressive-error" role="alert"><span>{{ t('Could not load this page.') }}</span><button class="btn sec" type="button" data-progressive-retry>{{ t('Retry') }}</button></div>
+{% endblock %}

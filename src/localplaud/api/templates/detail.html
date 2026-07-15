@@ -4,42 +4,48 @@
 <div class="shell">
   {% set active_id = f.id %}
   {% include "_filelist.html" %}
-  <section class="pane"><div class="pane-inner">
-    <a class="backlink" href="/">← {{ t('All files') }}</a>
-    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap">
-      <div>
-        <form id="recording-title-form" style="display:flex;align-items:center;gap:7px;max-width:min(680px,80vw)">
-          <input id="recording-title" value="{{ f.filename }}" maxlength="512" aria-label="{{ t('Recording title') }}" style="font:inherit;font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--fg);background:transparent;border:1px solid transparent;border-radius:6px;padding:3px 5px;min-width:180px;flex:1">
-          <button class="btn sec" type="submit" style="padding:6px 9px">{{ t('Save title') }}</button>
-          {% if f.local_title %}<button class="btn sec" id="clear-local-title" type="button" style="padding:6px 9px">{{ t('Use Plaud title') }}</button>{% endif %}
+  <section class="pane recording-pane{% if f.has_audio %} has-player{% endif %}"><div class="pane-inner">
+    <a class="backlink" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">← {{ t('All files') }}</a>
+    <div class="recording-header">
+      <div class="recording-heading">
+        <div class="recording-title-row" id="recording-title-display-row">
+          <h1 id="recording-title-display">{{ f.filename }}</h1>
+          <button class="title-edit" id="edit-recording-title" type="button" aria-label="{{ t('Edit title') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></button>
+        </div>
+        <form id="recording-title-form" class="recording-title-row" hidden>
+          <input id="recording-title" value="{{ f.filename }}" maxlength="512" aria-label="{{ t('Recording title') }}">
+          <button class="icon-action icon-only" type="submit" aria-label="{{ t('Save title') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></span></button>
+          <button class="icon-action icon-only" id="cancel-recording-title" type="button" aria-label="{{ t('Cancel') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
         </form>
         {% if f.local_title %}<div class="sub" style="font-size:11.5px;margin:2px 5px">{{ t('Plaud title') }}: {{ f.cloud_filename or t('Untitled') }}</div>{% endif %}
-        <div class="sub" style="margin-top:2px">
-          {{ f.start_time_ms | dt }} · {{ f.duration_ms | dur }}
-          {% if f.transcript %} · {{ f.transcript.provider }}{% if f.transcript.language %} ({{ f.transcript.language }}){% endif %} · {{ f.transcript.kind }}{% if f.transcript.revision %} rev {{ f.transcript.revision }}{% endif %}{% endif %}
-          · <span class="st {{ f.status }}">{{ f.status }}</span>
+        <div class="recording-meta">
+          <span>{{ f.start_time_ms | dt }}</span><span>·</span><span>{{ f.duration_ms | dur }}</span>
+          {% if f.status != 'done' %}<span>·</span><span class="st {{ f.status }}">{{ t(f.status) }}</span>{% endif %}
         </div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:7px">
-          {% if f.folder %}<a class="chip on" href="/?folder={{ f.folder.id }}">▰ {{ f.folder.name }}</a>{% endif %}
-          {% for tag in f.tags %}<a class="chip" href="/?tag={{ tag.id }}">● {{ tag.name }}</a>{% endfor %}
+        <div class="recording-org">
+          {% if f.folder %}<a class="chip on" href="/?folder={{ f.folder.id }}">{{ f.folder.name }}</a>{% endif %}
+          {% for tag in f.tags %}<a class="chip" href="/?tag={{ tag.id }}">{{ tag.name }}</a>{% endfor %}
           <button type="button" id="edit-recording-metadata" style="border:0;background:none;color:var(--blue);cursor:pointer;font-size:11.5px;padding:2px 4px">{% if f.folder or f.tags %}{{ t('Edit metadata') }}{% else %}{{ t('Add folder or tags') }}{% endif %}</button>
         </div>
       </div>
-      <div style="display:flex; gap:7px">
-        {% if not f.has_audio and f.origin == 'plaud' %}<button class="btn" id="import-recording-audio" type="button" style="padding:8px 12px;font-size:13px">☁ {{ t('Import audio') }}</button>{% endif %}
-        {% if f.transcript or f.summaries or f.has_audio %}<button class="btn sec" id="open-export" type="button" style="padding:8px 12px; font-size:13px">{{ t('Export') }}</button>{% endif %}
-        {% if f.has_audio %}
-        <button class="btn sec" style="padding:8px 12px; font-size:13px"
-          hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML"
-          hx-confirm="Resume failed or missing processing stages?">{{ t('Resume') }}</button>
-        <button class="btn sec" style="padding:8px 12px; font-size:13px"
-          hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML"
-          hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>
-        {% endif %}
+      <div class="recording-actions">
+        {% if not f.has_audio and f.origin == 'plaud' %}<button class="icon-action" id="import-recording-audio" type="button" aria-label="{{ t('Import audio') }}" title="{{ t('Import audio') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span><span class="action-label">{{ t('Import audio') }}</span></button>{% endif %}
+        <button class="icon-action" id="open-share" type="button" aria-label="{{ t('Share') }}" title="{{ t('Share') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span><span class="action-label">{{ t('Share') }}</span></button>
+        {% if f.transcript or f.summaries or f.has_audio %}<button class="icon-action" id="open-export" type="button" aria-label="{{ t('Export') }}" title="{{ t('Export') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span><span class="action-label">{{ t('Export') }}</span></button>{% endif %}
+        <details class="recording-more"><summary class="icon-action icon-only" aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></summary><div class="recording-menu">
+          {% if f.local_title %}<button id="clear-local-title" type="button">{{ t('Use Plaud title') }}</button>{% endif %}
+          <button id="menu-edit-recording-metadata" type="button">{{ t('Folder and tags') }}</button>
+          {% if f.has_audio %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>{% endif %}
+          <button id="menu-processing-details" type="button">{{ t('Processing details') }}</button>
+        </div></details>
       </div>
     </div>
-    <div id="reprocess-msg" class="sub" style="margin:6px 0; font-size:13px">{% if not f.has_audio and f.origin == 'plaud' %}{{ t('Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.') }}{% endif %}</div>
+    <div id="reprocess-msg" class="sub" aria-live="polite" style="margin:6px 0; font-size:13px">{% if not f.has_audio and f.origin == 'plaud' %}{{ t('Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.') }}{% endif %}</div>
+    {% if f.error %}<div class="recording-alert"><span class="nav-icon" style="--nav-icon:url('/static/lucide/triangle-alert.svg')"></span><div class="recording-alert-body"><strong>{{ t('Processing paused') }}</strong><div class="sub" style="font-size:11.5px;margin-top:3px">{% if f.retry.exhausted %}{{ t('Resume with the active AI profile and a fresh retry budget.') }}{% elif f.retry.next_at %}{{ t('Automatic retry scheduled for') }} {{ f.retry.next_at }}.{% else %}{{ t('Resume the missing or failed stages when ready.') }}{% endif %}</div><details class="technical-error"><summary>{{ t('Technical details') }}</summary><div>{{ f.error }}</div></details></div>{% if f.has_audio %}<div class="recording-alert-actions"><button class="icon-action" hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML">{{ t('Resume') }}</button></div>{% endif %}</div>{% endif %}
 
+    <details class="recording-advanced" id="recording-advanced">
+      <summary>{{ t('Processing details') }}</summary>
+      <div class="recording-advanced-body">
     <details class="panel" style="margin-top:10px;padding:10px 12px">
       <summary style="cursor:pointer;font-weight:650">{{ t('Local data') }}</summary>
       <div class="sub" style="font-size:12px;margin-top:9px">Audio {{ (f.local_data.audio_bytes / 1048576) | round(1) }} MB · {{ f.local_data.transcripts }} local transcript · {{ f.local_data.revisions }} corrections · {{ f.local_data.notes }} generated notes · {{ f.local_data.chunks }} search chunks</div>
@@ -51,16 +57,14 @@
       <div id="local-data-result" class="sub" style="font-size:12px;margin-top:6px"></div>
     </details>
 
-    <details class="panel" style="margin-top:10px;padding:10px 12px" id="subscription-independence">
-      <summary style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px">
-        <strong>{{ t('Subscription independence') }}</strong>
-        <span class="st {{ 'done' if acceptance.passed else 'partial' }}">{{ t('Passed') if acceptance.passed else t('Not ready') }}</span>
-      </summary>
-      <p class="sub" style="font-size:12px;margin:9px 0">{{ t('This recording is fully usable from raw audio without Plaud Intelligence artifacts.') if acceptance.passed else t('Complete the failed or missing local stages below; Plaud-generated transcript or summary never satisfies this gate.') }}</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:7px">
-        {% for item in acceptance.checks %}<div class="tile" style="padding:9px 11px"><div style="display:flex;justify-content:space-between;gap:8px"><strong style="font-size:12px">{{ t(item.name) }}</strong><span style="color:{{ 'var(--ok)' if item.passed else 'var(--red)' }};font-weight:750">{{ '✓' if item.passed else '✗' }}</span></div><div class="sub" style="font-size:10.5px;margin-top:3px">{{ item.detail }}</div></div>{% endfor %}
+    <details class="panel" style="margin-top:10px;padding:10px 12px" id="subscription-independence"
+      hx-get="/file/{{ f.id }}/acceptance-panel" hx-trigger="toggle once" hx-target=".acceptance-panel" hx-swap="innerHTML">
+      <summary style="cursor:pointer;font-weight:650">{{ t('Subscription independence') }}</summary>
+      <div class="acceptance-panel" aria-live="polite">
+        <div class="skeleton-stack" style="margin-top:10px" aria-label="{{ t('Loading recording…') }}">
+          <span class="skeleton-line w-55"></span><span class="skeleton-line"></span><span class="skeleton-line w-75"></span>
+        </div>
       </div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:9px"><a class="sub" style="font-size:11.5px;color:var(--blue)" href="/api/files/{{ f.id }}/acceptance">{{ t('JSON evidence') }} ↗</a></div>
     </details>
 
     {% if f.profiles %}
@@ -84,33 +88,9 @@
     </form>
     {% endif %}
 
-    <div class="panel" style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px">
-      <label for="note-template-select" style="font-weight:650">{{ t('Note template') }}</label>
-      <select id="note-template-select" class="search-input" style="flex:1;min-width:220px;padding:7px 10px">
-        <option value="auto" {% if f.note_template_key == 'auto' %}selected{% endif %}>{{ t('Auto · choose from recording') }}</option>
-        {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
-      </select>
-      <button class="btn sec" type="button" id="save-note-template" style="padding:8px 12px">{{ t('Use template') }}</button>
-      <span id="note-template-result" class="sub" style="font-size:12px">{{ t('Resume updates derived stages. Rebuild is required for completed speech stages.') }}</span>
-    </div>
-
-    {% if f.has_audio %}
-    <section id="persistent-player" class="panel" style="position:sticky;top:8px;z-index:12;margin:12px 0;padding:10px 12px;box-shadow:0 8px 24px rgba(15,23,42,.09)">
-      <audio id="player" preload="metadata" src="/audio/{{ f.id }}"></audio>
-      <div style="display:grid;grid-template-columns:auto auto minmax(180px,1fr) auto auto;gap:9px;align-items:center">
-        <button class="btn" id="player-toggle" type="button" aria-label="{{ t('Play') }}" style="width:38px;height:34px;padding:0">▶</button>
-        <div style="display:flex;gap:3px"><button class="btn sec" id="player-back" type="button" title="{{ t('Back 10 seconds') }}" style="padding:6px 8px">−10</button><button class="btn sec" id="player-forward" type="button" title="{{ t('Forward 30 seconds') }}" style="padding:6px 8px">+30</button></div>
-        <div style="min-width:0"><canvas id="waveform" height="42" style="display:block;width:100%;height:42px;cursor:pointer" aria-label="{{ t('Audio waveform') }}"></canvas><input id="player-progress" type="range" min="0" max="1000" value="0" aria-label="{{ t('Playback position') }}" style="width:100%;height:4px;margin:0;display:block"></div>
-        <span id="player-clock" class="sub" style="font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap">0:00 / 0:00</span>
-        <select id="player-speed" class="search-input" aria-label="{{ t('Playback speed') }}" style="padding:6px 7px;width:72px"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
-      </div>
-      <div class="sub" style="font-size:10.5px;margin-top:5px">{{ t('Space play/pause · ←/→ 5 seconds · Shift+←/→ 30 seconds') }}</div>
-    </section>
-    {% endif %}
-    {% if f.error %}<div class="panel" style="border-color:var(--red); color:var(--red); margin-top:12px">⚠ {{ f.error }}<div style="font-size:11.5px;margin-top:5px">{% if f.retry.exhausted %}{{ t('Automatic retries exhausted after') }} {{ f.retry.count }} {{ t('failed cycles.') }} {{ t('Resume retries immediately and resets the budget.') }}{% elif f.retry.next_at %}{{ t('Automatic retry') }} {{ f.retry.count + 1 }} {{ t('of') }} {{ f.retry.maximum }} {{ t('scheduled for') }} {{ f.retry.next_at }}.{% else %}{{ t('Resume retries immediately.') }}{% endif %}</div></div>{% endif %}
     {% if f.stages %}
-    <details class="panel" style="margin-top:12px">
-      <summary style="cursor:pointer;font-weight:650">{{ t('Processing details') }} <span class="sub" style="font-size:11px">· {{ f.usage.attempts|length }} {{ t('attempts') }} · {{ (f.usage.latency_ms / 1000)|round(1) }}s{% if f.usage.estimated_cost_usd %} · ~$ {{ f.usage.estimated_cost_usd }}{% endif %}</span></summary>
+    <div class="panel" style="margin-top:10px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><strong>{{ t('Processing details') }}</strong><span class="sub" style="font-size:11px">{{ f.usage.attempts|length }} {{ t('attempts') }} · {{ (f.usage.latency_ms / 1000)|round(1) }}s{% if f.usage.estimated_cost_usd %} · ~$ {{ f.usage.estimated_cost_usd }}{% endif %}</span></div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
         {% for stage in f.stages %}
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
@@ -129,141 +109,113 @@
         {% endfor %}
       </div>
       {% if f.usage.attempts %}<details style="margin-top:12px;border-top:1px solid var(--border);padding-top:9px"><summary class="sub" style="cursor:pointer">{{ t('Attempt usage ledger') }}</summary><div style="display:grid;gap:7px;margin-top:8px">{% for attempt in f.usage.attempts[:12] %}<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px"><span>{{ t(attempt.stage) }} #{{ attempt.attempt }} · {{ attempt.provider or 'local' }}{% if attempt.model %}:{{ attempt.model }}{% endif %}{% if attempt.fallback and not attempt.fallback.primary %} · {{ t('fallback') }} {{ attempt.fallback.index }}{% endif %}</span><span class="sub">{{ ((attempt.latency_ms or 0) / 1000)|round(2) }}s{% if attempt.usage.audio_seconds %} · {{ attempt.usage.audio_seconds|round(1) }} {{ t('audio seconds') }}{% endif %}{% if attempt.usage.input_tokens %} · {{ attempt.usage.input_tokens }} {{ t('input tokens') }}{% endif %}{% if attempt.usage.output_tokens %} / {{ attempt.usage.output_tokens }} {{ t('output tokens') }}{% endif %}{% if attempt.estimated_cost_usd %} · ~$ {{ attempt.estimated_cost_usd }}{% endif %}</span></div>{% endfor %}</div></details>{% endif %}
-    </details>
+    </div>
     {% endif %}
+      </div>
+    </details>
 
+    {% if f.has_audio %}
+    <section id="persistent-player" class="panel" style="position:sticky;top:8px;z-index:12;margin:12px 0;padding:10px 12px;box-shadow:0 8px 24px rgba(15,23,42,.09)">
+      <audio id="player" preload="metadata" src="/audio/{{ f.id }}"></audio>
+      <div style="display:grid;grid-template-columns:auto auto minmax(180px,1fr) auto auto;gap:9px;align-items:center">
+        <button class="icon-action icon-only" id="player-toggle" type="button" aria-label="{{ t('Play') }}"><span id="player-toggle-icon" class="nav-icon" style="--nav-icon:url('/static/lucide/play.svg')"></span></button>
+        <div style="display:flex;gap:3px"><button class="btn sec" id="player-back" type="button" title="{{ t('Back 10 seconds') }}" style="padding:6px 8px">−10</button><button class="btn sec" id="player-forward" type="button" title="{{ t('Forward 30 seconds') }}" style="padding:6px 8px">+30</button></div>
+        <div style="min-width:0"><canvas id="waveform" height="42" style="display:block;width:100%;height:42px;cursor:pointer" aria-label="{{ t('Audio waveform') }}"></canvas><input id="player-progress" type="range" min="0" max="1000" value="0" aria-label="{{ t('Playback position') }}" style="width:100%;height:4px;margin:0;display:block"></div>
+        <span id="player-clock" class="sub" style="font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap">0:00 / 0:00</span>
+        <select id="player-speed" class="search-input" aria-label="{{ t('Playback speed') }}" style="padding:6px 7px;width:72px"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+      </div>
+    </section>
+    {% endif %}
     {% set mindmaps = f.summaries | selectattr('template', 'equalto', 'mind_map') | list %}
     {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
-    <div class="tabs">
-      {% if f.transcript %}<button data-panel="transcript" class="on">{{ t('Transcript') }}</button>{% endif %}
-      {% if f.imported_transcript %}<button data-panel="imported" class="{% if not f.transcript and not f.summaries %}on{% endif %}">Plaud import ☁</button>{% endif %}
-      {% for s in notes %}<button data-panel="sum-{{ loop.index0 }}" class="{% if not f.transcript and loop.first %}on{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.source=='cloud' %} ☁{% endif %}</button>{% endfor %}
-      {% for note in f.user_notes %}<button data-panel="saved-{{ note.id }}">{{ note.title }}</button>{% endfor %}
-      {% if mindmaps %}<button data-panel="mindmap" class="{% if not f.transcript and not notes %}on{% endif %}">{{ t('Mind map') }}</button>{% endif %}
-      <button data-panel="ask" class="{% if not f.transcript and not f.imported_transcript and not f.summaries and not f.user_notes %}on{% endif %}">{{ t('Ask') }}</button>
+    <div class="tabs" role="tablist" aria-label="{{ t('Recording workspace') }}">
+      <button id="recording-tab-transcript" role="tab" aria-controls="recording-panel-transcript" aria-selected="{{ 'true' if active_tab == 'transcript' else 'false' }}" tabindex="{{ '0' if active_tab == 'transcript' else '-1' }}" data-panel="transcript" class="{% if active_tab == 'transcript' %}on{% endif %}">{{ t('Transcript') }}</button>
+      <button id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' else '-1' }}" data-panel="notes" class="{% if active_tab == 'notes' %}on{% endif %}">{{ t('Notes') }}</button>
+      <button id="recording-tab-mindmap" role="tab" aria-controls="recording-panel-mindmap" aria-selected="{{ 'true' if active_tab == 'mindmap' else 'false' }}" tabindex="{{ '0' if active_tab == 'mindmap' else '-1' }}" data-panel="mindmap" class="{% if active_tab == 'mindmap' %}on{% endif %}">{{ t('Mind map') }}</button>
+      <button id="recording-tab-ask" role="tab" aria-controls="recording-panel-ask" aria-selected="{{ 'true' if active_tab == 'ask' else 'false' }}" tabindex="{{ '0' if active_tab == 'ask' else '-1' }}" data-panel="ask" class="{% if active_tab == 'ask' %}on{% endif %}">{{ t('Ask') }}</button>
     </div>
 
-    {% if f.transcript %}
-    <div class="tabpanel" data-panel="transcript">
-      {% if f.has_corrected %}
-      <div class="viewswitch sub" style="margin:2px 0 10px; font-size:12.5px">
-        View:
-        {% if f.transcript.kind == 'history' %}
-        <strong>Revision {{ f.transcript.revision }} preview</strong>
-        · <a href="/file/{{ f.id }}?view=corrected">Current revision {{ f.corrected_revision }}</a>
-        · <a href="/file/{{ f.id }}?view=raw">Raw ASR</a>
-        {% elif f.transcript.kind == 'corrected' %}
-        <strong>{{ 'AI polished' if f.transcript.revision_kind == 'ai_polish' else 'Corrected' }} (rev {{ f.transcript.revision }})</strong>
-        {% if f.transcript.revision_kind == 'ai_polish' %}<span class="chip on">{{ f.transcript.provider }}{% if f.transcript.model %} · {{ f.transcript.model }}{% endif %}</span>{% endif %}
-        · <a href="/file/{{ f.id }}?view=raw">Raw ASR</a>
-        {% else %}
-        <a href="/file/{{ f.id }}?view=corrected">Corrected (rev {{ f.corrected_revision }})</a>
-        · <strong>Raw ASR</strong> — read-only; edits apply to the corrected transcript
+    <div class="tabpanel" id="recording-panel-transcript" role="tabpanel" aria-labelledby="recording-tab-transcript" data-panel="transcript" {% if active_tab != 'transcript' %}hidden{% endif %}>
+      {% if f.transcript or f.imported_transcript %}
+      {% if f.transcript %}
+      <div class="transcript-toolbar">
+        {% if f.has_corrected %}
+        <div class="transcript-view-switch" aria-label="{{ t('Transcript view') }}">
+          <a class="{% if f.transcript.kind != 'raw ASR' %}on{% endif %}" href="/file/{{ f.id }}?view=corrected&amp;return_to={{ return_to_param }}">{{ t('Polished') }}<span class="visually-hidden">Corrected (rev {{ f.corrected_revision }})</span></a><a class="{% if f.transcript.kind == 'raw ASR' %}on{% endif %}" href="/file/{{ f.id }}?view=raw&amp;return_to={{ return_to_param }}">{{ t('Raw') }}<span class="visually-hidden">raw ASR</span></a>
+        </div>
+        {% else %}<span class="visually-hidden">raw ASR</span>
         {% endif %}
-      </div>
-      {% endif %}
-      {% if f.revisions %}
-      <details class="panel" style="padding:9px 11px;margin:4px 0 12px" {% if f.preview_revision %}open{% endif %}>
-        <summary style="cursor:pointer;font-weight:650">Revision history · {{ f.revisions | length }}</summary>
-        <div style="display:flex;flex-direction:column;gap:7px;margin-top:9px">
-          {% for revision in f.revisions %}
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px solid var(--border)">
-            <div><a href="/file/{{ f.id }}?view=corrected&revision={{ revision.revision }}"><strong>Revision {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">Current</span>{% endif %}{% if revision.kind == 'ai_polish' %} <span class="chip">AI polished</span>{% endif %}<div class="sub" style="font-size:11.5px;margin-top:2px">{{ revision.note }}{% if revision.prompt_version %} · {{ revision.prompt_version }}{% endif %} · {{ revision.created_at }}</div></div>
-            {% if not revision.current %}<form method="post" action="/file/{{ f.id }}/transcript/revisions/{{ revision.revision }}/restore" onsubmit="return confirm({{ t('Restore this revision as a new revision? Current history will be preserved.')|tojson }})"><input type="hidden" name="base_revision" value="{{ f.corrected_revision }}"><button class="btn sec" type="submit" style="padding:6px 9px">{{ t('Restore') }}</button></form>{% endif %}
-          </div>
-          {% endfor %}
+        {% if f.preview_revision %}<span class="chip">Revision {{ f.preview_revision }} preview</span>{% endif %}
+        <div class="transcript-tools">
+          <details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Find in transcript') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span></summary><div class="transcript-popover search-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
+            <div style="display:flex;gap:7px;align-items:center"><input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript') }}"><button class="icon-action icon-only" id="find-previous" type="button" aria-label="{{ t('Previous') }}">↑</button><button class="icon-action icon-only" id="find-next" type="button" aria-label="{{ t('Next') }}">↓</button></div><span id="find-count" class="sub" style="font-size:11px">0 {{ t('results') }}</span>
+            {% if f.can_edit %}<div id="replace-row" style="display:grid;gap:7px;margin-top:8px" hidden><input id="transcript-replace" class="search-input" type="text" placeholder="{{ t('Replace with') }}"><label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> {{ t('Match case') }}</label><div><button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">{{ t('Replace all') }}</button> <span id="replace-result" class="sub" style="font-size:12px"></span></div></div><button type="button" id="toggle-replace" class="text-action">{{ t('Replace') }}</button>{% endif %}
+          </div></details>
+          {% if f.revisions %}<details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Revision history') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span></summary><div class="transcript-popover history-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button><strong>{{ t('Revision history') }} · {{ f.revisions | length }}</strong>{% for revision in f.revisions %}<div class="revision-row"><div><a href="/file/{{ f.id }}?view=corrected&amp;revision={{ revision.revision }}&amp;tab=transcript&amp;return_to={{ return_to_param }}"><strong>{{ t('Revision') }} {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">{{ t('Current') }}</span>{% endif %}<div class="sub" style="font-size:11px">{{ revision.note }} · {{ revision.created_at }}</div></div>{% if not revision.current %}<form method="post" action="/file/{{ f.id }}/transcript/revisions/{{ revision.revision }}/restore" onsubmit="return confirm({{ t('Restore this revision as a new revision? Current history will be preserved.')|tojson }})"><input type="hidden" name="base_revision" value="{{ f.corrected_revision }}"><button class="icon-action" type="submit">{{ t('Restore') }}</button></form>{% endif %}</div>{% endfor %}</div></details>{% endif %}
         </div>
-      </details>
-      {% endif %}
-      <div class="panel" style="padding:9px 10px;margin:5px 0 12px">
-        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-          <input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript') }}" style="flex:1;min-width:180px;padding:7px 9px">
-          <button class="btn sec" id="find-previous" type="button" style="padding:7px 10px">↑</button>
-          <button class="btn sec" id="find-next" type="button" style="padding:7px 10px">↓</button>
-          <span id="find-count" class="sub" style="font-size:12px;min-width:48px">0 {{ t('results') }}</span>
-        </div>
-        {% if f.can_edit %}
-        <div id="replace-row" style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:8px" hidden>
-          <input id="transcript-replace" class="search-input" type="text" placeholder="{{ t('Replace with') }}" style="flex:1;min-width:180px;padding:7px 9px">
-          <label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> {{ t('Match case') }}</label>
-          <button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">{{ t('Replace all') }}</button>
-          <span id="replace-result" class="sub" style="font-size:12px"></span>
-        </div>
-        <button type="button" id="toggle-replace" style="border:0;background:none;color:var(--blue);padding:6px 0 0;cursor:pointer;font-size:12px">{{ t('Replace') }}</button>
-        {% endif %}
       </div>
       {% if f.speakers %}
       <div class="legend" id="legend">
         {% for sp in f.speakers %}
-        <form class="item" method="post" action="/file/{{ f.id }}/speakers">
-          <span class="swatch" data-spk="{{ sp.key }}"></span>
-          <input type="hidden" name="key" value="{{ sp.key }}">
-          <input class="spk-name" type="text" name="name" value="{{ sp.name or '' }}"
-                 placeholder="{{ sp.key }}" aria-label="Display name for {{ sp.key }}">
-          <button class="spk-save" type="submit">{{ t('Save') }}</button>
-        </form>
+        <details class="speaker-pill"><summary><span class="swatch" data-spk="{{ sp.key }}"></span><span>{{ sp.name or sp.key }}</span><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></summary><form class="speaker-editor" method="post" action="/file/{{ f.id }}/speakers"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button><input type="hidden" name="key" value="{{ sp.key }}"><input type="hidden" name="return_to" value="{{ return_to }}"><label class="sub">{{ t('Speaker name') }}<input class="spk-name" type="text" name="name" value="{{ sp.name or '' }}" placeholder="{{ sp.key }}" aria-label="{{ t('Display name for') }} {{ sp.key }}"></label><button class="btn" type="submit">{{ t('Save') }}</button></form></details>
         {% endfor %}
       </div>
       {% endif %}
-      <div id="transcript">
-        {% for seg in f.transcript.segments %}
-        <div class="seg {% if seg.speaker %}spk{% endif %}" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
-          <div class="ts">{{ (seg.start or 0) | mmss }}</div>
-          <div class="txt">
-            {% if seg.speaker %}<span class="who"><span class="dot"></span>{{ f.speaker_names.get(seg.speaker, seg.speaker) }}</span><br>{% endif %}{{ seg.text }}
-            {% if f.can_edit %}
-            <button class="editbtn" type="button" title="{{ t('Edit this segment') }}" aria-label="{{ t('Edit segment text') }}">✎</button>
-            <form class="segedit" method="post" action="/file/{{ f.id }}/transcript/segments/{{ loop.index0 }}" hidden>
-              <input type="hidden" name="base_revision" value="{{ f.transcript.revision or 0 }}">
-              <textarea name="text" rows="2">{{ seg.text }}</textarea>
-              <div class="actions">
-                <button class="btn" type="submit">{{ t('Save') }}</button>
-                <button class="btn sec" type="button" data-cancel>{{ t('Cancel') }}</button>
-              </div>
-            </form>
-            {% endif %}
-          </div>
+      <div id="transcript" hx-get="/file/{{ f.id }}/transcript-page?view={{ 'raw' if f.transcript.kind == 'raw ASR' else 'corrected' }}{% if f.preview_revision %}&amp;revision={{ f.preview_revision }}{% endif %}"
+        hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+        <div class="skeleton-transcript" aria-label="{{ t('Loading transcript…') }}">
+          {% for width in [85,68,92,74,88] %}<div><span class="skeleton-avatar"></span><span class="skeleton-line" style="width:{{ width }}%"></span></div>{% endfor %}
         </div>
-        {% endfor %}
       </div>
-    </div>
-    {% endif %}
-
-    {% if f.imported_transcript %}
-    <div class="tabpanel" data-panel="imported" {% if f.transcript or f.summaries %}hidden{% endif %}>
-      <div class="panel sub" style="margin:8px 0 14px">
-        {{ t('Imported from Plaud for migration/comparison. Independent processing does not use this transcript as its canonical result.') }}
-      </div>
-      <div class="transcript-import">
-        {% for seg in f.imported_transcript.segments %}
-        <div class="seg" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}">
-          <div class="ts">{{ (seg.start or 0) | mmss }}</div>
-          <div class="txt">
-            {% if seg.speaker %}<span class="who">{{ seg.speaker }}</span><br>{% endif %}{{ seg.text }}
-          </div>
+      {% endif %}
+      {% if f.imported_transcript %}
+      <details class="panel" style="margin:12px 0 0;padding:10px 12px" {% if not f.transcript %}open{% endif %}>
+        <summary style="cursor:pointer;font-weight:650">{{ t('Plaud import') }} <span class="sub" style="font-size:11px">· {{ t('migration and comparison only') }}</span></summary>
+        <div class="sub" style="margin:9px 0 12px">{{ t('Imported from Plaud for migration/comparison. Independent processing does not use this transcript as its canonical result.') }}</div>
+        <div class="transcript-import" data-imported-transcript-loader hx-get="/file/{{ f.id }}/transcript-page?source=imported" hx-trigger="{{ 'load' if not f.transcript else 'load-imported once' }}" hx-target="this" hx-swap="innerHTML">
+          <div class="skeleton-transcript" aria-label="{{ t('Loading transcript…') }}">{% for width in [76,91,64,83] %}<div><span class="skeleton-avatar"></span><span class="skeleton-line" style="width:{{ width }}%"></span></div>{% endfor %}</div>
         </div>
-        {% endfor %}
-      </div>
+      </details>
+      {% endif %}
+      {% else %}
+      <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/audio-lines.svg')"></span>{{ t('Transcript is not available yet.') }}</div>
+      {% endif %}
     </div>
-    {% endif %}
 
+    <div class="tabpanel" id="recording-panel-notes" role="tabpanel" aria-labelledby="recording-tab-notes" data-panel="notes" {% if active_tab != 'notes' %}hidden{% endif %}>
+      <div class="notes-toolbar">
+        <div class="notes-template-control">
+          <label for="note-template-select">{{ t('Note template') }}</label>
+          <select id="note-template-select" class="search-input">
+            <option value="auto" {% if f.note_template_key == 'auto' %}selected{% endif %}>{{ t('Auto · choose from recording') }}</option>
+            {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
+          </select>
+        </div>
+        <button class="btn" type="button" id="generate-notes" {% if not f.has_local_transcript %}disabled{% endif %}><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Regenerate notes') if notes else t('Generate notes') }}</button>
+        <span id="note-template-result" class="notes-status sub">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% endif %}</span>
+      </div>
+      {% if notes or f.user_notes %}
+      <div class="note-tabs">
+        {% for s in notes %}<button type="button" data-note-target="sum-{{ loop.index0 }}" class="{% if loop.first %}on{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}</button>{% endfor %}
+        {% for note in f.user_notes %}<button type="button" data-note-target="saved-{{ note.id }}" class="{% if not notes and loop.first %}on{% endif %}">{{ note.title }}</button>{% endfor %}
+      </div>
     {% for s in notes %}
-    <div class="tabpanel" data-panel="sum-{{ loop.index0 }}" {% if f.transcript or not loop.first %}hidden{% endif %}>
+    <div class="note-panel" data-note-panel="sum-{{ loop.index0 }}" {% if not loop.first %}hidden{% endif %}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0">
         <div class="sub" style="font-size:11.5px">Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}</div>
         <button class="btn sec" type="button" data-summary-copy="{{ s.id }}" style="padding:6px 9px">{{ t('Edit a copy') }}</button>
       </div>
-      <div class="md" data-md>{{ s.content_md }}</div>
+      <div class="md">{{ s.content_md | markdown }}</div>
     </div>
     {% endfor %}
 
     {% for note in f.user_notes %}
-    <div class="tabpanel" data-panel="saved-{{ note.id }}" hidden>
+    <div class="note-panel" data-note-panel="saved-{{ note.id }}" {% if notes or not loop.first %}hidden{% endif %}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
         <div class="sub" style="font-size:12px">{{ t('Editable note') }} · {{ note.source_type }}</div>
         <button class="btn sec" type="button" data-note-edit="{{ note.id }}" style="padding:6px 9px">{{ t('Edit here') }}</button>
       </div>
-      <div class="md" data-md data-workspace-note-body>{{ note.content_md }}</div>
+      <div class="md" data-workspace-note-body>{{ note.content_md | markdown }}</div>
       <form data-workspace-note-form="{{ note.id }}" hidden style="display:grid;gap:8px;margin-top:10px">
         <input class="search-input" name="title" value="{{ note.title }}" maxlength="200" required>
         <textarea class="search-input" name="content_md" rows="12" maxlength="200000" required style="width:100%;resize:vertical">{{ note.content_md }}</textarea>
@@ -272,65 +224,60 @@
       {% if note.citations %}<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px">{% for citation in note.citations %}<a class="chip" href="/file/{{ citation.file_id }}{% if citation.start is not none %}?t={{ citation.start }}{% endif %}">{{ citation.start | mmss }}</a>{% endfor %}</div>{% endif %}
     </div>
     {% endfor %}
+      {% else %}
+      <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span>{{ t('No notes yet.') }}</div>
+      {% endif %}
+    </div>
 
-    {% if mindmaps %}
-    <div class="tabpanel" data-panel="mindmap" {% if f.transcript or notes %}hidden{% endif %}>
-      <style>
-        .mindmap { margin-top: 10px; }
-        .mindmap details { margin-left: 14px; padding-left: 10px; border-left: 1px solid var(--border); }
-        .mindmap > details { margin-left: 0; padding-left: 0; border-left: none; }
-        .mindmap summary { cursor: pointer; font-weight: 600; padding: 3px 0; }
-        .mindmap > details > summary { font-size: 16px; font-weight: 700; }
-        .mindmap .mm-leaf { margin-left: 14px; padding: 2px 0 2px 10px; border-left: 1px solid var(--border); color: var(--fg); }
-      </style>
-      <div style="display:flex; gap:7px; margin-top:10px">
-        <button type="button" class="btn sec" id="mm-expand" style="padding:6px 10px; font-size:12px">{{ t('Expand all') }}</button>
-        <button type="button" class="btn sec" id="mm-collapse" style="padding:6px 10px; font-size:12px">{{ t('Collapse all') }}</button>
+    <div class="tabpanel" id="recording-panel-mindmap" role="tabpanel" aria-labelledby="recording-tab-mindmap" data-panel="mindmap" {% if active_tab != 'mindmap' %}hidden{% endif %}>
+      {% if mindmaps %}
+      <div class="mindmap-toolbar">
+        <div><strong>{{ t('Mind map') }}</strong><div class="sub" style="font-size:11.5px">{{ t('Generated from') }} {{ mindmaps[-1].lineage_label }}</div></div>
+        <div class="mindmap-zoom">
+          <button class="icon-action icon-only" id="mm-zoom-out" type="button" aria-label="{{ t('Zoom out') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/minus.svg')"></span></button>
+          <input id="mm-zoom" type="range" min="15" max="140" value="100" aria-label="{{ t('Mind map zoom') }}">
+          <button class="icon-action icon-only" id="mm-zoom-in" type="button" aria-label="{{ t('Zoom in') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span></button>
+          <button class="icon-action" id="mm-fit" type="button">{{ t('Fit') }}</button>
+          <a class="icon-action" href="/file/{{ f.id }}/export/mind-map.png"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>{{ t('Export') }}</a>
+        </div>
       </div>
       <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
-      <div class="sub" style="font-size:11.5px;margin-top:8px">Generated from {{ mindmaps[-1].lineage_label }}{% if mindmaps[-1].input_transcript_source %} · {{ mindmaps[-1].input_transcript_source }}{% endif %}</div>
-      <div id="mindmap-tree" class="mindmap"></div>
+      <div id="mindmap-viewport" class="mindmap-viewport"><div id="mindmap-tree" class="mindmap-tree"></div></div>
+      {% else %}
+      <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Mind map is not available yet.') }}</div>
+      {% endif %}
     </div>
-    {% endif %}
 
-    <div class="tabpanel" data-panel="ask" {% if f.transcript or f.imported_transcript or f.summaries %}hidden{% endif %}>
-      <div class="sub" style="margin:12px 0 8px; font-size:13px">
-        {{ t('Ask about this recording. Answers stay grounded in its transcript and cite playable moments.') }}
-      </div>
+    <div class="tabpanel" id="recording-panel-ask" role="tabpanel" aria-labelledby="recording-tab-ask" data-panel="ask" {% if active_tab != 'ask' %}hidden{% endif %}>
+      <form class="ask" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-swap="innerHTML"
+            hx-indicator="#file-ask-spin">
+        <input type="text" name="q" id="ask-q" placeholder="{{ t('Ask a question about this recording…') }}"
+          autocomplete="off" required {% if not f.has_local_transcript %}disabled{% endif %}>
+        <button class="btn" type="submit" {% if not f.has_local_transcript %}disabled{% endif %}>{{ t('Ask') }}</button>
+      </form>
+      <div id="file-ask-spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% else %}{{ t('thinking…') }}{% endif %}</div>
       <div id="ask-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:11px">
         {% for chip in ["What was decided?", "List action items with owners", "What are the key topics?"] %}
         <button type="button" class="btn sec ask-chip" data-q="{{ t(chip) }}"
-          style="padding:5px 11px; font-size:12px">{{ t(chip) }}</button>
+          style="padding:5px 11px; font-size:12px" {% if not f.has_local_transcript %}disabled{% endif %}>{{ t(chip) }}</button>
         {% endfor %}
       </div>
-      <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:6px">{{ t('QUICK ACTIONS · GROUNDED · READ ONLY') }}</div>
       <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">
         {% for skill in f.ask_skills %}
         <form hx-post="/file/{{ f.id }}/ask/skill" hx-target="#file-answer" hx-swap="innerHTML" hx-indicator="#file-ask-spin">
           <input type="hidden" name="skill_key" value="{{ skill.key }}">
-          <button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px">{{ skill.name }}</button>
+          <button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px" {% if not f.has_local_transcript %}disabled{% endif %}>{{ skill.name }}</button>
         </form>
         {% endfor %}
       </div>
-      <form class="ask" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-swap="innerHTML"
-            hx-indicator="#file-ask-spin">
-        <input type="text" name="q" id="ask-q" placeholder="{{ t('Ask a question about this recording…') }}"
-          autocomplete="off" required>
-        <button class="btn" type="submit">{{ t('Ask') }}</button>
-      </form>
-      <div id="file-ask-spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{{ t('thinking…') }}</div>
-      {% if f.ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 10px"><span class="sub" style="font-size:11px">Recent threads</span>{% for thread in f.ask_threads %}<a class="chip {% if f.selected_ask_thread and f.selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/file/{{ f.id }}?ask_thread={{ thread.id }}">{{ thread.title | truncate(34) }}</a>{% endfor %}</div>{% endif %}
+      {% if f.ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 10px"><span class="sub" style="font-size:11px">{{ t('Recent threads') }}</span>{% for thread in f.ask_threads %}<a class="chip {% if f.selected_ask_thread and f.selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/file/{{ f.id }}?tab=ask&amp;ask_thread={{ thread.id }}&amp;return_to={{ return_to_param }}">{{ thread.title | truncate(34) }}</a>{% endfor %}</div>{% endif %}
       <div id="file-answer">{% if f.selected_ask_thread %}{% set thread=f.selected_ask_thread %}{% set file_id=f.id %}{% set target='file-answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
     </div>
-
-    {% if not f.transcript and not f.imported_transcript and not f.summaries %}
-    <div class="empty"><div class="big">📝</div>{{ t('Not processed yet — no transcript or notes.') }}</div>
-    {% endif %}
   </div></section>
 </div>
 <div class="import-backdrop" id="metadata-backdrop" hidden>
   <section class="import-modal" style="width:min(520px,100%);min-height:0" role="dialog" aria-modal="true" aria-labelledby="metadata-title">
-    <div class="import-head"><span id="metadata-title">{{ t('Folder and tags') }}</span><button class="import-close" id="metadata-close" type="button">×</button></div>
+    <div class="import-head"><span id="metadata-title">{{ t('Folder and tags') }}</span><button class="import-close" id="metadata-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
     <form id="metadata-form" class="import-body" style="gap:14px">
       <label><strong>{{ t('Folder') }}</strong><select class="search-input" name="folder_id" style="width:100%;margin-top:6px"><option value="">{{ t('No folder') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}" {% if f.folder and f.folder.id==folder.id %}selected{% endif %}>{{ folder.name }} · {{ folder.count }} {{ t('recordings') }}</option>{% endfor %}</select></label>
       <fieldset style="border:1px solid var(--border);border-radius:8px;padding:11px"><legend><strong>{{ t('Tags') }}</strong></legend><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">{% for tag in organization.tags %}<label style="font-size:13px"><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag.id in (f.tags|map(attribute='id')|list) %}checked{% endif %}> {{ tag.name }} <span class="sub">({{ tag.count }})</span></label>{% else %}<span class="sub">{{ t('No tags yet. Create tags from the Library organization panel.') }}</span>{% endfor %}</div></fieldset>
@@ -339,10 +286,22 @@
     </form>
   </section>
 </div>
+<div class="import-backdrop" id="share-backdrop" hidden>
+  <section class="import-modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title">
+    <div class="import-head"><span id="share-title">{{ t('Share recording') }}</span><button class="import-close" id="share-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="import-body share-body">
+      <div class="share-icon"><span class="nav-icon" style="--nav-icon:url('/static/lucide/link.svg')"></span></div>
+      <div><strong>{{ t('Workspace link') }}</strong><div class="sub" style="font-size:12px;margin-top:2px">{{ t('Available only to people who can sign in to this localplaud workspace.') }}</div></div>
+      <div class="share-link-row"><input id="share-link" class="search-input" readonly value=""><button class="btn" id="copy-share-link" type="button">{{ t('Copy link') }}</button></div>
+      <button class="btn sec" id="system-share" type="button" hidden><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span>{{ t('Share with…') }}</button>
+      <div id="share-result" class="sub" role="status"></div>
+    </div>
+  </section>
+</div>
 {% if f.transcript or f.summaries or f.has_audio %}
 <div class="import-backdrop" id="export-backdrop" hidden>
   <section class="import-modal" style="min-height:0;width:min(560px,100%)" role="dialog" aria-modal="true" aria-labelledby="export-title">
-    <div class="import-head"><span id="export-title">{{ t('Export recording') }}</span><button class="import-close" id="export-close" type="button" aria-label="{{ t('Close') }}">×</button></div>
+    <div class="import-head"><span id="export-title">{{ t('Export recording') }}</span><button class="import-close" id="export-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
     <div class="import-body" style="gap:18px">
       {% if f.transcript %}
       <section>
@@ -388,71 +347,129 @@
 
 {% block scripts %}
 <script>
+(()=>{
+  const cleanupController=new AbortController(),appView=document.getElementById('app-view');
+  appView?.addEventListener('htmx:beforeCleanupElement',event=>{
+    if(event.target===appView)cleanupController.abort();
+  });
   const tr=window.localplaudT;
   async function deleteLocalData(kind,message){if(!confirm(message))return;const output=document.getElementById('local-data-result');output.textContent=tr('Removing local data…');const response=await fetch(`/api/files/{{ f.id }}/${kind}`,{method:'DELETE'}),data=await response.json();if(response.ok){output.textContent=tr('Removed. Reloading…');location.reload();}else output.textContent=data.detail||tr('Could not remove local data');}
   document.getElementById('delete-local-processing')?.addEventListener('click',()=>deleteLocalData('local-processing',tr('Delete local transcript, corrections, generated notes, mind map, search index, and processing history? Saved notes and Plaud imports will remain.')));
   document.getElementById('delete-local-audio')?.addEventListener('click',()=>deleteLocalData('local-audio',tr('Remove this downloaded audio and waveform from this host? It can be imported again from Plaud later.')));
+  const recordingShell=document.querySelector('.shell');let activeDialog=null,dialogOpener=null;
+  const dialogFocusables=dialog=>[...dialog.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(item=>!item.hidden);
+  function openDialog(backdrop,opener){if(!backdrop)return;activeDialog=backdrop;dialogOpener=opener?.closest('details')?.querySelector(':scope>summary')||opener||document.activeElement;backdrop.hidden=false;recordingShell.inert=true;document.body.classList.add('dialog-open');requestAnimationFrame(()=>dialogFocusables(backdrop)[0]?.focus());}
+  function closeDialog(backdrop,{restoreFocus=true}={}){if(!backdrop)return;backdrop.hidden=true;recordingShell.inert=false;document.body.classList.remove('dialog-open');if(activeDialog===backdrop)activeDialog=null;if(restoreFocus)dialogOpener?.focus();dialogOpener=null;}
+  document.addEventListener('keydown',event=>{if(!activeDialog)return;if(event.key==='Escape'){event.preventDefault();closeDialog(activeDialog);return;}if(event.key!=='Tab')return;const items=dialogFocusables(activeDialog);if(!items.length){event.preventDefault();return;}const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}},{signal:cleanupController.signal});
+  cleanupController.signal.addEventListener('abort',()=>{if(activeDialog)closeDialog(activeDialog,{restoreFocus:false});},{once:true});
+  const workspacePopovers=[...document.querySelectorAll('.transcript-tool,.speaker-pill')];
+  function closeWorkspacePopover(details,{restoreFocus=true}={}){if(!details?.open)return;details.open=false;if(restoreFocus)details.querySelector(':scope>summary')?.focus();}
+  workspacePopovers.forEach(details=>{details.addEventListener('toggle',()=>{if(!details.open)return;workspacePopovers.forEach(other=>{if(other!==details)closeWorkspacePopover(other,{restoreFocus:false});});const panel=details.querySelector('.transcript-popover,.speaker-editor');requestAnimationFrame(()=>{(panel?.querySelector('input:not([type="hidden"]),textarea,select,button:not([data-close-popover]),a[href]')||panel?.querySelector('[data-close-popover]'))?.focus();});});details.querySelector('[data-close-popover]')?.addEventListener('click',()=>closeWorkspacePopover(details));});
+  document.addEventListener('pointerdown',event=>{workspacePopovers.forEach(details=>{if(details.open&&!details.contains(event.target))closeWorkspacePopover(details,{restoreFocus:false});});},{signal:cleanupController.signal});
+  document.addEventListener('keydown',event=>{if(activeDialog||event.key!=='Escape')return;const open=workspacePopovers.find(details=>details.open);if(open){event.preventDefault();closeWorkspacePopover(open);}},{signal:cleanupController.signal});
   const metadataBackdrop=document.getElementById('metadata-backdrop'),currentTagIds={{ f.tags|map(attribute='id')|list|tojson }};
-  document.getElementById('edit-recording-metadata').onclick=()=>{metadataBackdrop.hidden=false;};
-  const closeMetadata=()=>{metadataBackdrop.hidden=true;};document.getElementById('metadata-close').onclick=closeMetadata;document.getElementById('metadata-cancel').onclick=closeMetadata;metadataBackdrop.addEventListener('click',event=>{if(event.target===metadataBackdrop)closeMetadata();});
+  document.getElementById('edit-recording-metadata').onclick=event=>openDialog(metadataBackdrop,event.currentTarget);
+  document.getElementById('menu-edit-recording-metadata')?.addEventListener('click',event=>{event.currentTarget.closest('details')?.removeAttribute('open');openDialog(metadataBackdrop,event.currentTarget);});
+  document.getElementById('menu-processing-details')?.addEventListener('click',event=>{event.currentTarget.closest('details')?.removeAttribute('open');const details=document.getElementById('recording-advanced');if(details){details.open=true;details.scrollIntoView({behavior:'smooth',block:'start'});requestAnimationFrame(()=>details.querySelector('summary')?.focus());}});
+  const closeMetadata=()=>closeDialog(metadataBackdrop);document.getElementById('metadata-close').onclick=closeMetadata;document.getElementById('metadata-cancel').onclick=closeMetadata;metadataBackdrop.addEventListener('click',event=>{if(event.target===metadataBackdrop)closeMetadata();});
   async function saveMetadata(folderId,tagIds){const current=new Set(currentTagIds),selected=new Set(tagIds),body={file_ids:['{{ f.id }}'],folder_id:folderId,add_tag_ids:[...selected].filter(id=>!current.has(id)),remove_tag_ids:[...current].filter(id=>!selected.has(id))};const response=await fetch('/api/files/organize',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await response.json();if(response.ok){location.reload();return;}document.getElementById('metadata-status').textContent=data.detail||tr('Could not save metadata');}
   document.getElementById('metadata-form').addEventListener('submit',event=>{event.preventDefault();const data=new FormData(event.currentTarget),folder=data.get('folder_id');saveMetadata(folder?+folder:null,data.getAll('tag_ids').map(Number));});document.getElementById('clear-recording-metadata').onclick=()=>saveMetadata(null,[]);
-  document.getElementById('recording-title-form')?.addEventListener('submit',async event=>{event.preventDefault();const input=document.getElementById('recording-title'),button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:input.value})}),data=await response.json();if(response.ok)location.reload();else{button.disabled=false;button.textContent=data.detail||tr('Save failed');}});
+  const titleDisplayRow=document.getElementById('recording-title-display-row'),titleForm=document.getElementById('recording-title-form'),titleInput=document.getElementById('recording-title');
+  const editTitle=()=>{titleDisplayRow.hidden=true;titleForm.hidden=false;titleInput.focus();titleInput.select();};
+  const cancelTitle=()=>{titleInput.value={{ f.filename|tojson }};titleForm.hidden=true;titleDisplayRow.hidden=false;};
+  document.getElementById('edit-recording-title')?.addEventListener('click',editTitle);
+  document.getElementById('cancel-recording-title')?.addEventListener('click',cancelTitle);
+  titleInput?.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();cancelTitle();}});
+  titleForm?.addEventListener('submit',async event=>{event.preventDefault();const button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:titleInput.value})}),data=await response.json();if(response.ok)location.reload();else{button.disabled=false;document.getElementById('reprocess-msg').textContent=data.detail||tr('Save failed');}});
   document.getElementById('clear-local-title')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:null})});if(response.ok)location.reload();else event.currentTarget.disabled=false;});
+  const vars=['--sp0','--sp1','--sp2','--sp3','--sp4','--sp5','--sp6','--sp7'];
+  const colorSegments=root=>{const segments=[];if(root?.matches?.('.seg[data-spk]'))segments.push(root);root?.querySelectorAll?.('.seg[data-spk]').forEach(seg=>segments.push(seg));segments.forEach(seg=>{const i=window.spkColor(seg.dataset.spk);seg.style.setProperty('--c',`var(${vars[i]})`);});};
   const findInput=document.getElementById('transcript-find');
   if(findInput){
-    const segments=[...document.querySelectorAll('#transcript .seg')],count=document.getElementById('find-count');let matches=[],position=-1;
+    const transcript=document.getElementById('transcript'),transcriptSegments=()=>[...transcript.querySelectorAll('.seg')],count=document.getElementById('find-count');
+    let matches=[],position=-1,lastQuery='',focusPending=false,drainController=null,drainPromise=null;
     const focusMatch=next=>{if(!matches.length)return;position=(position+next+matches.length)%matches.length;matches.forEach((segment,index)=>segment.style.outline=index===position?'2px solid var(--blue)':'');matches[position].scrollIntoView({behavior:'smooth',block:'center'});count.textContent=`${position+1} / ${matches.length}`;};
-    const search=()=>{segments.forEach(segment=>segment.style.outline='');const query=findInput.value.trim().toLocaleLowerCase();matches=query?segments.filter(segment=>segment.querySelector('.txt')?.textContent.toLocaleLowerCase().includes(query)):[];position=-1;count.textContent=`${matches.length} ${tr('results')}`;if(matches.length)focusMatch(1);};
+    const updateMatches=()=>{const segments=transcriptSegments(),query=findInput.value.trim().toLocaleLowerCase(),previous=matches[position];segments.forEach(segment=>segment.style.outline='');if(query!==lastQuery){position=-1;lastQuery=query;}matches=query?segments.filter(segment=>segment.querySelector('.txt')?.textContent.toLocaleLowerCase().includes(query)):[];if(previous&&matches.includes(previous))position=matches.indexOf(previous);count.textContent=`${matches.length} ${tr('results')}`;if(position>=0){matches[position].style.outline='2px solid var(--blue)';count.textContent=`${position+1} / ${matches.length}`;}else if(focusPending&&matches.length){focusPending=false;focusMatch(1);}};
+    const restoreLazyLoader=loader=>{if(loader?.isConnected&&loader.hasAttribute('hx-get')&&!loader.classList.contains('htmx-request'))window.htmx.process(loader);};
+    const drainTranscript=()=>{
+      if(drainPromise||!findInput.value.trim())return drainPromise;
+      const pendingLoader=transcript.querySelector('.transcript-page-loader');
+      if(pendingLoader?.classList.contains('htmx-request'))return null;
+      const controller=new AbortController(),seen=new Set();drainController=controller;
+      drainPromise=(async()=>{
+        while(findInput.value.trim()&&!controller.signal.aborted){
+          const loader=transcript.querySelector('.transcript-page-loader');
+          if(!loader)return;
+          if(loader.classList.contains('htmx-request'))return;
+          const rawUrl=loader.getAttribute('hx-get');
+          if(!rawUrl)return;
+          const url=new URL(rawUrl,location.href);url.searchParams.set('limit','200');
+          if(seen.has(url.href))return;seen.add(url.href);
+          const placeholder=loader.cloneNode(true);placeholder.removeAttribute('hx-get');placeholder.removeAttribute('hx-trigger');placeholder.removeAttribute('hx-target');placeholder.removeAttribute('hx-swap');
+          loader.before(placeholder);window.htmx.remove(loader);
+          try{
+            const response=await fetch(url,{signal:controller.signal,credentials:'same-origin',headers:{'HX-Request':'true'}});
+            const redirect=response.headers.get('HX-Redirect');if(redirect){location.href=redirect;return;}
+            if(!response.ok)throw new Error(`transcript page ${response.status}`);
+            const template=document.createElement('template');template.innerHTML=await response.text();
+            if(controller.signal.aborted||!placeholder.isConnected)return;
+            const nextLoader=template.content.querySelector('.transcript-page-loader');nextLoader?.remove();
+            const inserted=[...template.content.children];placeholder.before(template.content);
+            inserted.forEach(node=>{window.htmx.process(node);colorSegments(node);});updateMatches();
+            if(nextLoader)placeholder.replaceWith(nextLoader);else placeholder.remove();
+          }catch(error){
+            if(placeholder.isConnected)placeholder.replaceWith(loader);
+            if(error.name!=='AbortError')return;
+          }
+        }
+      })().finally(()=>{
+        const current=transcript.querySelector('.transcript-page-loader');restoreLazyLoader(current);
+        if(drainController===controller)drainController=null;drainPromise=null;
+        if(controller.signal.aborted&&current&&findInput.value.trim()&&!cleanupController.signal.aborted)queueMicrotask(drainTranscript);
+      });
+      return drainPromise;
+    };
+    const search=()=>{focusPending=true;updateMatches();if(findInput.value.trim())drainTranscript();else{focusPending=false;drainController?.abort();}};
     findInput.addEventListener('input',search);document.getElementById('find-next').onclick=()=>focusMatch(1);document.getElementById('find-previous').onclick=()=>focusMatch(-1);
+    document.addEventListener('htmx:afterSwap',()=>{if(!findInput.value.trim())return;updateMatches();queueMicrotask(drainTranscript);},{signal:cleanupController.signal});
+    cleanupController.signal.addEventListener('abort',()=>drainController?.abort(),{once:true});
     findInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();focusMatch(event.shiftKey?-1:1);}});
     document.getElementById('toggle-replace')?.addEventListener('click',()=>{const row=document.getElementById('replace-row');row.hidden=!row.hidden;if(!row.hidden)document.getElementById('transcript-replace').focus();});
     document.getElementById('replace-all')?.addEventListener('click',async()=>{const output=document.getElementById('replace-result'),button=document.getElementById('replace-all');if(!findInput.value.trim()){output.textContent=tr('Enter text to find');return;}button.disabled=true;output.textContent=tr('Replacing…');const body=new FormData();body.set('find',findInput.value);body.set('replace',document.getElementById('transcript-replace').value);body.set('base_revision','{{ f.transcript.revision if f.transcript else 0 }}');body.set('case_sensitive',document.getElementById('replace-case').checked?'true':'false');const response=await fetch('/file/{{ f.id }}/transcript/replace',{method:'POST',body}),data=await response.json();if(response.ok&&data.replacements){output.textContent=`${tr('Replaced')} ${data.replacements}. ${tr('Reloading…')}`;location.href='/file/{{ f.id }}?view=corrected';return;}output.textContent=response.ok?tr('No matches'):(data.error||tr('Replace failed'));button.disabled=false;});
   }
   const exportBackdrop=document.getElementById('export-backdrop');
-  document.getElementById('open-export')?.addEventListener('click',()=>{exportBackdrop.hidden=false;});
-  document.getElementById('export-close')?.addEventListener('click',()=>{exportBackdrop.hidden=true;});
-  exportBackdrop?.addEventListener('click',event=>{if(event.target===exportBackdrop)exportBackdrop.hidden=true;});
+  document.getElementById('open-export')?.addEventListener('click',event=>openDialog(exportBackdrop,event.currentTarget));
+  document.getElementById('export-close')?.addEventListener('click',()=>closeDialog(exportBackdrop));
+  exportBackdrop?.addEventListener('click',event=>{if(event.target===exportBackdrop)closeDialog(exportBackdrop);});
+  const shareBackdrop=document.getElementById('share-backdrop'),shareInput=document.getElementById('share-link'),shareResult=document.getElementById('share-result'),systemShare=document.getElementById('system-share');
+  const recordingUrl=()=>{const url=new URL(location.href);url.searchParams.delete('workspace');url.searchParams.delete('preserve_filelist');url.searchParams.delete('return_to');url.hash='';return url.href;};
+  document.getElementById('open-share')?.addEventListener('click',event=>{shareInput.value=recordingUrl();systemShare.hidden=!navigator.share;openDialog(shareBackdrop,event.currentTarget);});
+  document.getElementById('share-close')?.addEventListener('click',()=>{closeDialog(shareBackdrop);shareResult.textContent='';});
+  shareBackdrop?.addEventListener('click',event=>{if(event.target===shareBackdrop)document.getElementById('share-close').click();});
+  document.getElementById('copy-share-link')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(shareInput.value);}catch(_error){shareInput.select();document.execCommand('copy');}shareResult.textContent=tr('Copied');});
+  systemShare?.addEventListener('click',async()=>{try{await navigator.share({title:{{ f.filename|tojson }},url:shareInput.value});}catch(error){if(error.name!=='AbortError')shareResult.textContent=tr('Share failed');}});
   document.querySelectorAll('[data-export-group="transcript"] a').forEach(link=>link.addEventListener('click',event=>{
     event.preventDefault();const timestamps=document.getElementById('export-timestamps').checked;
     const speakers=document.getElementById('export-speakers').checked;
     location.href=`/file/{{ f.id }}/export/transcript.${link.dataset.fmt}?timestamps=${timestamps}&speakers=${speakers}`;
   }));
   document.getElementById('import-recording-audio')?.addEventListener('click',async()=>{
-    const button=document.getElementById('import-recording-audio'),out=document.getElementById('reprocess-msg');button.disabled=true;button.textContent=tr('Importing…');
-    const response=await fetch('/api/imports/plaud/files/{{ f.id }}/audio',{method:'POST'}),data=await response.json();
-    if(!response.ok){out.textContent=data.detail||tr('Could not start audio import');button.disabled=false;button.textContent=`☁ ${tr('Import audio')}`;return;}
-    const poll=async()=>{const status=await fetch('/api/imports/plaud/files/{{ f.id }}/audio/status').then(r=>r.json());
-      if(status.has_audio){out.textContent=tr('Audio imported. Reloading…');location.reload();return;}
-      if(status.status==='error'){out.textContent=status.error||tr('Audio import failed');button.disabled=false;button.textContent=tr('Retry audio import');return;}
-      out.textContent=tr('Downloading this recording from Plaud…');setTimeout(poll,1000);};poll();
-  });
-  document.getElementById('save-note-template')?.addEventListener('click', async () => {
-    const button=document.getElementById('save-note-template');
-    const out=document.getElementById('note-template-result');
-    button.disabled=true;out.textContent=tr('Saving…');
-    const key=document.getElementById('note-template-select').value;
-    const response=await fetch('/api/files/{{ f.id }}/note-template',{
-      method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({key})
-    });
-    const data=await response.json();
-    if(response.ok)out.textContent=tr('Saved. Resume to regenerate notes with this template.');
-    else{out.textContent=data.detail||tr('Could not save template');button.disabled=false;}
+    const button=document.getElementById('import-recording-audio'),label=button.querySelector('.action-label'),out=document.getElementById('reprocess-msg');button.disabled=true;if(label)label.textContent=tr('Importing…');
+    let response,data;try{response=await fetch('/api/imports/plaud/files/{{ f.id }}/audio',{method:'POST',signal:cleanupController.signal});data=await response.json();}catch(error){if(error.name!=='AbortError'){out.textContent=tr('Could not start audio import');button.disabled=false;if(label)label.textContent=tr('Import audio');}return;}
+    if(!response.ok){out.textContent=data.detail||tr('Could not start audio import');button.disabled=false;if(label)label.textContent=tr('Import audio');return;}
+    let importTimer=null;cleanupController.signal.addEventListener('abort',()=>{if(importTimer)clearTimeout(importTimer);},{once:true});
+    const poll=async()=>{if(cleanupController.signal.aborted)return;let status;try{status=await fetch('/api/imports/plaud/files/{{ f.id }}/audio/status',{signal:cleanupController.signal}).then(r=>r.json());}catch(error){if(error.name!=='AbortError')out.textContent=tr('Audio import failed');return;}
+      if(status.has_audio){if(!cleanupController.signal.aborted){out.textContent=tr('Audio imported. Reloading…');location.reload();}return;}
+      if(status.status==='error'){out.textContent=status.error||tr('Audio import failed');button.disabled=false;if(label)label.textContent=tr('Retry audio import');return;}
+      out.textContent=tr('Downloading this recording from Plaud…');importTimer=setTimeout(poll,1000);};poll();
   });
   const noteTemplateSelect=document.getElementById('note-template-select');
   function renderResolvedStages(resolved){const list=document.getElementById('resolved-stage-list');if(!list||!resolved?.stages)return;list.replaceChildren();for(const [stage,choice] of Object.entries(resolved.stages)){const chip=document.createElement('span');chip.className='chip';chip.textContent=`${tr(stage)} · ${choice.connection}:${choice.model}`;list.append(chip);}}
   async function previewTemplateResolution(key){const response=await fetch(`/api/providers/recordings/{{ f.id }}/resolution?template_key=${encodeURIComponent(key)}`),data=await response.json();if(response.ok)renderResolvedStages(data.resolved);}
   async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent=tr('Checking recording signals…');const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`${tr('Auto suggests')} ${data.template?.name||data.key} · ${data.confidence} ${tr('confidence')} · ${reason}`;previewTemplateResolution(data.key);}else out.textContent=data.detail||tr('Could not preview Auto selection');}
-  noteTemplateSelect?.addEventListener('change',()=>{if(noteTemplateSelect.value==='auto')previewAutoTemplate();else{document.getElementById('note-template-result').textContent=tr('Resume updates derived stages. Rebuild is required for completed speech stages.');previewTemplateResolution(noteTemplateSelect.value);}});
-  if(noteTemplateSelect?.value==='auto')previewAutoTemplate();
-  const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  document.querySelectorAll('[data-md]').forEach(el => {
-    el.innerHTML = esc(el.textContent.trim())
-      .replace(/^#{1,2} (.*)$/gm,'<h3>$1</h3>').replace(/^#{3,} (.*)$/gm,'<h4>$1</h4>')
-      .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-      .replace(/^\s*[-*] (.*)$/gm,'• $1<br>').replace(/\n{2,}/g,'<br><br>');
-  });
-  // mind map: render the Markdown outline as a collapsible tree
+  noteTemplateSelect?.addEventListener('change',()=>{if(noteTemplateSelect.value==='auto')previewAutoTemplate();else{document.getElementById('note-template-result').textContent=tr('Ready to generate with this template.');previewTemplateResolution(noteTemplateSelect.value);}});
+  document.getElementById('generate-notes')?.addEventListener('click',async event=>{const button=event.currentTarget,out=document.getElementById('note-template-result'),key=noteTemplateSelect.value;button.disabled=true;out.textContent=tr('Saving template…');const saved=await fetch('/api/files/{{ f.id }}/note-template',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({key})});if(!saved.ok){const data=await saved.json();out.textContent=data.detail||tr('Could not save template');button.disabled=false;return;}out.textContent=tr('Queueing notes and mind map…');const generated=await fetch('/file/{{ f.id }}/generate-notes',{method:'POST'});if(!generated.ok){out.textContent=await generated.text()||tr('Could not start generation');button.disabled=false;return;}out.textContent=tr('Notes and mind map are queued.');setTimeout(()=>location.href='/file/{{ f.id }}?tab=notes',900);});
+  // Mind map workspace: render the Markdown outline as a visual hierarchy.
   const mmSrc = document.getElementById('mindmap-src');
   if (mmSrc) {
     let rootLabel = 'Mind map';
@@ -467,71 +484,59 @@
       (depth === 0 ? roots : stack[depth - 1].children).push(node);
       stack.length = depth; stack.push(node);
     }
-    const render = node => {
-      if (!node.children.length) {
-        const leaf = document.createElement('div');
-        leaf.className = 'mm-leaf'; leaf.textContent = node.text;
-        return leaf;
-      }
-      const det = document.createElement('details'); det.open = true;
-      const sum = document.createElement('summary'); sum.textContent = node.text;
-      det.appendChild(sum);
-      node.children.forEach(c => det.appendChild(render(c)));
-      return det;
-    };
+    const render = (node,isRoot=false) => {const wrap=document.createElement('div');wrap.className=`mm-node${isRoot?' mm-root':''}`;const label=document.createElement('div');label.className='mm-label';label.textContent=node.text;wrap.appendChild(label);if(node.children.length){const children=document.createElement('div');children.className='mm-children';node.children.forEach(child=>{const item=document.createElement('div');item.className='mm-child';item.appendChild(render(child));children.appendChild(item);});wrap.appendChild(children);}return wrap;};
     const tree = document.getElementById('mindmap-tree');
-    tree.appendChild(render({ text: rootLabel, children: roots }));
-    const setAll = open => tree.querySelectorAll('details').forEach(d => { d.open = open; });
-    document.getElementById('mm-expand').onclick = () => setAll(true);
-    document.getElementById('mm-collapse').onclick = () => setAll(false);
+    tree.appendChild(render({ text: rootLabel, children: roots },true));
+    const viewport=document.getElementById('mindmap-viewport'),zoom=document.getElementById('mm-zoom');
+    const setZoom=value=>{value=Math.max(+zoom.min,Math.min(+zoom.max,+value));zoom.value=value;tree.style.setProperty('--mm-scale',value/100);};
+    const naturalSize=()=>{const prior=zoom.value;setZoom(100);const size={width:Math.max(1,tree.scrollWidth),height:Math.max(1,tree.scrollHeight)};setZoom(prior);return size;};
+    zoom.addEventListener('input',()=>setZoom(zoom.value));document.getElementById('mm-zoom-out').onclick=()=>setZoom(+zoom.value-10);document.getElementById('mm-zoom-in').onclick=()=>setZoom(+zoom.value+10);document.getElementById('mm-fit').onclick=()=>{const natural=naturalSize(),availableWidth=Math.max(1,viewport.clientWidth-30),availableHeight=Math.max(1,viewport.clientHeight-30);setZoom(Math.min(100,availableWidth/natural.width*100,availableHeight/natural.height*100));viewport.scrollTo({left:0,top:0,behavior:'smooth'});};
+    let dragging=false,startX=0,startY=0,left=0,top=0;viewport.addEventListener('pointerdown',event=>{if(event.target.closest('button,a,input'))return;dragging=true;startX=event.clientX;startY=event.clientY;left=viewport.scrollLeft;top=viewport.scrollTop;viewport.classList.add('dragging');viewport.setPointerCapture(event.pointerId);});viewport.addEventListener('pointermove',event=>{if(dragging){viewport.scrollLeft=left-(event.clientX-startX);viewport.scrollTop=top-(event.clientY-startY);}});const stopDrag=()=>{dragging=false;viewport.classList.remove('dragging');};viewport.addEventListener('pointerup',stopDrag);viewport.addEventListener('pointercancel',stopDrag);
   }
   // tabs
   const panels = document.querySelectorAll('.tabpanel');
-  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
-    document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
-    panels.forEach(p => p.hidden = p.dataset.panel !== b.dataset.panel);
-  });
+  const activatePanel=(name,push=false)=>{const button=document.querySelector(`.tabs>button[data-panel="${name}"]`);if(!button)return;document.querySelectorAll('.tabs>button').forEach(item=>{const active=item===button;item.classList.toggle('on',active);item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;});panels.forEach(panel=>panel.hidden=panel.dataset.panel!==name);if(push){const url=new URL(location.href);if(name==='transcript')url.searchParams.delete('tab');else url.searchParams.set('tab',name);history.pushState({localplaudTab:name},'',url);}};
+  document.querySelectorAll('.tabs>button').forEach(button=>button.onclick=()=>activatePanel(button.dataset.panel,true));
+  window.addEventListener('popstate',()=>{const requested=new URLSearchParams(location.search).get('tab')||'transcript';activatePanel(['transcript','notes','mindmap','ask'].includes(requested)?requested:'transcript');},{signal:cleanupController.signal});
+  document.querySelector('details:has([data-imported-transcript-loader])')?.addEventListener('toggle',event=>{if(event.currentTarget.open){const loader=event.currentTarget.querySelector('[data-imported-transcript-loader]');if(loader)window.htmx.trigger(loader,'load-imported');}});
+  document.querySelectorAll('[data-note-target]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-note-target]').forEach(item=>item.classList.remove('on'));button.classList.add('on');document.querySelectorAll('[data-note-panel]').forEach(panel=>panel.hidden=panel.dataset.notePanel!==button.dataset.noteTarget);}));
   const selectedNoteId={{ f.selected_note_id|tojson }};
-  if(selectedNoteId)document.querySelector(`.tabs button[data-panel="saved-${selectedNoteId}"]`)?.click();
-  document.querySelectorAll('[data-summary-copy]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;button.textContent={{ t('Creating editable copy…')|tojson }};const response=await fetch(`/api/files/{{ f.id }}/summaries/${button.dataset.summaryCopy}/editable-copy`,{method:'POST'}),data=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?note_id=${data.id}`;return;}button.disabled=false;button.textContent=data.detail||{{ t('Could not create editable copy')|tojson }};}));
-  document.querySelectorAll('[data-note-edit]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.tabpanel');panel.querySelector('[data-workspace-note-body]').hidden=true;panel.querySelector('[data-workspace-note-form]').hidden=false;button.hidden=true;}));
-  document.querySelectorAll('[data-note-cancel]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.tabpanel');panel.querySelector('[data-workspace-note-body]').hidden=false;panel.querySelector('[data-workspace-note-form]').hidden=true;panel.querySelector('[data-note-edit]').hidden=false;}));
-  document.querySelectorAll('[data-workspace-note-form]').forEach(form=>form.addEventListener('submit',async event=>{event.preventDefault();const id=form.dataset.workspaceNoteForm,data=new FormData(form),status=form.querySelector('[data-note-status]');status.textContent={{ t('Saving…')|tojson }};const response=await fetch(`/api/notes/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:data.get('title'),content_md:data.get('content_md')})}),result=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?note_id=${id}`;return;}status.textContent=result.detail||{{ t('Could not save')|tojson }};}));
+  if(selectedNoteId){activatePanel('notes');document.querySelector(`[data-note-target="saved-${selectedNoteId}"]`)?.click();}
+  document.querySelectorAll('[data-summary-copy]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;button.textContent={{ t('Creating editable copy…')|tojson }};const response=await fetch(`/api/files/{{ f.id }}/summaries/${button.dataset.summaryCopy}/editable-copy`,{method:'POST'}),data=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?tab=notes&note_id=${data.id}`;return;}button.disabled=false;button.textContent=data.detail||{{ t('Could not create editable copy')|tojson }};}));
+  document.querySelectorAll('[data-note-edit]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.note-panel');panel.querySelector('[data-workspace-note-body]').hidden=true;panel.querySelector('[data-workspace-note-form]').hidden=false;button.hidden=true;}));
+  document.querySelectorAll('[data-note-cancel]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.note-panel');panel.querySelector('[data-workspace-note-body]').hidden=false;panel.querySelector('[data-workspace-note-form]').hidden=true;panel.querySelector('[data-note-edit]').hidden=false;}));
+  document.querySelectorAll('[data-workspace-note-form]').forEach(form=>form.addEventListener('submit',async event=>{event.preventDefault();const id=form.dataset.workspaceNoteForm,data=new FormData(form),status=form.querySelector('[data-note-status]');status.textContent={{ t('Saving…')|tojson }};const response=await fetch(`/api/notes/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:data.get('title'),content_md:data.get('content_md')})}),result=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?tab=notes&note_id=${id}`;return;}status.textContent=result.detail||{{ t('Could not save')|tojson }};}));
   // speaker colors — segments first (keeps first-appearance ordering), then
   // the server-rendered legend swatches share the same mapping
-  const vars=['--sp0','--sp1','--sp2','--sp3','--sp4','--sp5','--sp6','--sp7'];
-  document.querySelectorAll('.seg[data-spk]').forEach(seg=>{ const i=window.spkColor(seg.dataset.spk);
-    seg.style.setProperty('--c',`var(${vars[i]})`); });
+  colorSegments(document);
+  document.addEventListener('htmx:afterSwap',event=>colorSegments(event.target),{signal:cleanupController.signal});
   document.querySelectorAll('.legend .swatch[data-spk]').forEach(sw=>{ const i=window.spkColor(sw.dataset.spk);
     sw.style.background=`var(${vars[i]})`; });
   // click-to-seek + red active segment synced to audio (Plaud-style)
-  const player=document.getElementById('player'), segs=[...document.querySelectorAll('.seg[data-start]')];
-  segs.forEach(seg=>seg.onclick=()=>{ if(player){ player.currentTime=parseFloat(seg.dataset.start)||0; player.play(); }});
+  const player=document.getElementById('player'),playableSegments=()=>[...document.querySelectorAll('.seg[data-start]')];
+  document.addEventListener('click',event=>{const seg=event.target.closest('.seg[data-start]');if(!seg||event.target.closest('button,input,textarea,select,form'))return;if(player){player.currentTime=parseFloat(seg.dataset.start)||0;player.play();}},{signal:cleanupController.signal});
   if(player){
-    const toggle=document.getElementById('player-toggle'),progress=document.getElementById('player-progress'),clock=document.getElementById('player-clock'),speed=document.getElementById('player-speed'),canvas=document.getElementById('waveform'),ctx=canvas.getContext('2d');let peaks=[];
+    const toggle=document.getElementById('player-toggle'),toggleIcon=document.getElementById('player-toggle-icon'),progress=document.getElementById('player-progress'),clock=document.getElementById('player-clock'),speed=document.getElementById('player-speed'),canvas=document.getElementById('waveform'),ctx=canvas.getContext('2d');let peaks=[];
     const stamp=seconds=>{seconds=Math.max(0,Math.floor(seconds||0));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;};
     const draw=()=>{const ratio=devicePixelRatio||1,width=Math.max(1,canvas.clientWidth),height=canvas.clientHeight;canvas.width=width*ratio;canvas.height=height*ratio;ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,width,height);const played=player.duration?player.currentTime/player.duration:0,bar=Math.max(1,width/(peaks.length||1)*.62);(peaks.length?peaks:Array(90).fill(.18)).forEach((peak,index)=>{const x=index*width/(peaks.length||90),h=Math.max(3,peak*(height-4));ctx.fillStyle=x/width<=played?'#2563eb':'#cbd5e1';ctx.fillRect(x,(height-h)/2,bar,h);});};
-    const sync=()=>{const t=player.currentTime,d=player.duration||0;progress.value=d?Math.round(t/d*1000):0;clock.textContent=`${stamp(t)} / ${stamp(d)}`;toggle.textContent=player.paused?'▶':'❚❚';toggle.setAttribute('aria-label',player.paused?'Play':'Pause');segs.forEach(s=>s.classList.toggle('active',t>=parseFloat(s.dataset.start)&&t<parseFloat(s.dataset.end||1e9)));draw();};
-    toggle.onclick=()=>player.paused?player.play():player.pause();document.getElementById('player-back').onclick=()=>player.currentTime=Math.max(0,player.currentTime-10);document.getElementById('player-forward').onclick=()=>player.currentTime=Math.min(player.duration||Infinity,player.currentTime+30);speed.onchange=()=>player.playbackRate=+speed.value;progress.oninput=()=>{if(player.duration)player.currentTime=+progress.value/1000*player.duration;};canvas.onclick=event=>{if(player.duration)player.currentTime=event.offsetX/canvas.clientWidth*player.duration;};['loadedmetadata','timeupdate','play','pause','ratechange','ended'].forEach(name=>player.addEventListener(name,sync));new ResizeObserver(draw).observe(canvas);fetch('/audio/{{ f.id }}/waveform').then(response=>response.ok?response.json():null).then(data=>{if(data){peaks=data.peaks;draw();}}).catch(()=>{});
-    document.addEventListener('keydown',event=>{const target=event.target;if(target.matches('input,textarea,select,button')||target.isContentEditable)return;if(event.code==='Space'){event.preventDefault();player.paused?player.play():player.pause();}else if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const direction=event.key==='ArrowRight'?1:-1,amount=event.shiftKey?30:5;player.currentTime=Math.max(0,Math.min(player.duration||Infinity,player.currentTime+direction*amount));}});
+    const sync=()=>{const t=player.currentTime,d=player.duration||0;progress.value=d?Math.round(t/d*1000):0;clock.textContent=`${stamp(t)} / ${stamp(d)}`;toggleIcon.style.setProperty('--nav-icon',`url('/static/lucide/${player.paused?'play':'pause'}.svg')`);toggle.setAttribute('aria-label',player.paused?'Play':'Pause');playableSegments().forEach(s=>s.classList.toggle('active',t>=parseFloat(s.dataset.start)&&t<parseFloat(s.dataset.end||1e9)));draw();};
+    toggle.onclick=()=>player.paused?player.play():player.pause();document.getElementById('player-back').onclick=()=>player.currentTime=Math.max(0,player.currentTime-10);document.getElementById('player-forward').onclick=()=>player.currentTime=Math.min(player.duration||Infinity,player.currentTime+30);speed.onchange=()=>player.playbackRate=+speed.value;progress.oninput=()=>{if(player.duration)player.currentTime=+progress.value/1000*player.duration;};canvas.onclick=event=>{if(player.duration)player.currentTime=event.offsetX/canvas.clientWidth*player.duration;};['loadedmetadata','timeupdate','play','pause','ratechange','ended'].forEach(name=>player.addEventListener(name,sync));const resizeObserver=new ResizeObserver(draw);resizeObserver.observe(canvas);let waveformTimer=null;cleanupController.signal.addEventListener('abort',()=>{resizeObserver.disconnect();if(waveformTimer)clearTimeout(waveformTimer);},{once:true});const loadWaveform=async()=>{if(cleanupController.signal.aborted)return;try{const response=await fetch('/audio/{{ f.id }}/waveform',{signal:cleanupController.signal});if(response.status===202){waveformTimer=setTimeout(loadWaveform,1000);return;}if(!response.ok)return;const data=await response.json();if(Array.isArray(data.peaks)){peaks=data.peaks;draw();}}catch(_error){}};loadWaveform();
+    document.addEventListener('keydown',event=>{const target=event.target;if(target.matches('input,textarea,select,button')||target.isContentEditable)return;if(event.code==='Space'){event.preventDefault();player.paused?player.play():player.pause();}else if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const direction=event.key==='ArrowRight'?1:-1,amount=event.shiftKey?30:5;player.currentTime=Math.max(0,Math.min(player.duration||Infinity,player.currentTime+direction*amount));}},{signal:cleanupController.signal});
   }
   // single-file Ask: suggested-question chips fill the input (grounded, non-mutating)
   document.querySelectorAll('.ask-chip').forEach(chip=>chip.onclick=()=>{
     const q=document.getElementById('ask-q'); if(q){ q.value=chip.dataset.q; q.focus(); }});
   // delegated [data-seek] handler so HTMX-swapped Ask citations stay playable
   document.addEventListener('click', e=>{ const el=e.target.closest('[data-seek]'); if(!el) return;
-    e.preventDefault(); if(player){ player.currentTime=parseFloat(el.dataset.seek)||0; player.play(); }});
+    e.preventDefault(); if(player){ player.currentTime=parseFloat(el.dataset.seek)||0; player.play(); }},{signal:cleanupController.signal});
   // deep-link: /file/{id}?t={seconds} seeks the player on load (no autoplay)
   (function(){ const t=new URLSearchParams(location.search).get('t');
     if(t!==null && player){ const s=parseFloat(t); if(!isNaN(s)){
       const seek=()=>{ player.currentTime=s; }; if(player.readyState>=1) seek();
       else player.addEventListener('loadedmetadata', seek, {once:true}); player.load(); }}})();
   // inline segment editing — never let the edit UI trigger click-to-seek
-  document.querySelectorAll('.seg .editbtn').forEach(btn=>btn.onclick=e=>{ e.stopPropagation();
-    const form=btn.parentElement.querySelector('.segedit'); form.hidden=!form.hidden;
-    if(!form.hidden) form.querySelector('textarea').focus(); });
-  document.querySelectorAll('.seg .segedit').forEach(form=>{ form.onclick=e=>e.stopPropagation();
-    const cancel=form.querySelector('[data-cancel]');
-    if(cancel) cancel.onclick=e=>{ e.stopPropagation(); form.hidden=true; }; });
+  document.addEventListener('click',event=>{const button=event.target.closest('.seg .editbtn');if(!button)return;event.stopPropagation();const form=button.parentElement.querySelector('.segedit');form.hidden=!form.hidden;if(!form.hidden)form.querySelector('textarea').focus();},{signal:cleanupController.signal});
+  document.addEventListener('click',event=>{const cancel=event.target.closest('.seg .segedit [data-cancel]');if(!cancel)return;event.stopPropagation();cancel.closest('.segedit').hidden=true;},{signal:cleanupController.signal});
+})();
 </script>
 {% endblock %}

@@ -173,6 +173,8 @@ def create_model(body: ModelRequest):
             return save_model(session, body.model_dump(exclude_none=True))
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.put("/models/{model_id}")
@@ -182,6 +184,8 @@ def update_model(model_id: int, body: ModelRequest):
             return save_model(session, body.model_dump(exclude_none=True), model_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/models/{model_id}/health")

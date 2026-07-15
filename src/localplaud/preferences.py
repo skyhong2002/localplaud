@@ -12,11 +12,12 @@ from .i18n import SUPPORTED_LOCALES
 PREFERENCES_KEY = "workspace_preferences"
 DEFAULT_WORKSPACE_PREFERENCES = {
     "workspace_name": "localplaud",
-    "theme": "system",
+    "theme": "light",
     "density": "comfortable",
     "timezone": "Asia/Taipei",
     "hour_cycle": "24",
     "locale": "en",
+    "auto_process_new_recordings": True,
 }
 
 
@@ -34,13 +35,16 @@ def validate_timezone(value: str) -> str:
 def get_workspace_preferences(session: Session) -> dict:
     row = session.get(KeyValue, PREFERENCES_KEY)
     stored = row.value if row and isinstance(row.value, dict) else {}
-    return DEFAULT_WORKSPACE_PREFERENCES | {
+    preferences = DEFAULT_WORKSPACE_PREFERENCES | {
         key: stored[key] for key in DEFAULT_WORKSPACE_PREFERENCES if key in stored
     }
+    preferences["theme"] = "light"
+    return preferences
 
 
 def save_workspace_preferences(session: Session, values: dict) -> dict:
     preferences = DEFAULT_WORKSPACE_PREFERENCES | values
+    preferences["theme"] = "light"
     preferences["timezone"] = validate_timezone(str(preferences["timezone"]))
     if preferences["locale"] not in SUPPORTED_LOCALES:
         raise ValueError("Interface language is not supported")

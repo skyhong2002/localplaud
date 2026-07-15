@@ -50,7 +50,14 @@ _CREDENTIAL_CONFIG_KEYS = {
 
 
 def _is_cloud(name: str) -> bool:
-    return name in {"openai", "deepgram", "assemblyai", "anthropic", "opencode-go"}
+    return name in {
+        "openai",
+        "deepgram",
+        "assemblyai",
+        "anthropic",
+        "opencode-go",
+        "codex-local",
+    }
 
 
 def _credential_config_key(key: object) -> bool:
@@ -99,7 +106,9 @@ def _capability(stages: list[ProviderStage], *, cloud: bool) -> dict:
         stages=tuple(
             StageCapabilities(
                 stage=stage,
-                timestamps="word" if stage in {ProviderStage.transcribe, ProviderStage.align} else "none",
+                timestamps="word"
+                if stage in {ProviderStage.transcribe, ProviderStage.align}
+                else "none",
                 speaker_output=stage == ProviderStage.diarize,
                 hardware_requirement=None if cloud else "configured local runtime",
             )
@@ -109,38 +118,53 @@ def _capability(stages: list[ProviderStage], *, cloud: bool) -> dict:
 
 
 def _settings_specs(settings: Settings):
+    if settings.llm.provider == "codex-local":
+        raise ValueError(
+            "codex-local is correction-only and cannot bootstrap a general LLM connection"
+        )
     return [
-        ("asr", settings.asr.provider, _model_for(settings, "asr", settings.asr.provider),
-         [ProviderStage.transcribe, ProviderStage.align]),
-        ("diarize", settings.diarize.provider, settings.diarize.model,
-         [ProviderStage.diarize]),
-        ("correct", settings.llm.provider,
-         _model_for(settings, "llm", settings.llm.provider),
-         [ProviderStage.correct]),
-        ("llm", settings.llm.provider, _model_for(settings, "llm", settings.llm.provider),
-         [ProviderStage.summarize, ProviderStage.mind_map, ProviderStage.ask]),
-        ("embeddings", settings.embeddings.provider,
-         _model_for(settings, "embeddings", settings.embeddings.provider),
-         [ProviderStage.embed]),
+        (
+            "asr",
+            settings.asr.provider,
+            _model_for(settings, "asr", settings.asr.provider),
+            [ProviderStage.transcribe, ProviderStage.align],
+        ),
+        ("diarize", settings.diarize.provider, settings.diarize.model, [ProviderStage.diarize]),
+        (
+            "correct",
+            settings.llm.provider,
+            _model_for(settings, "llm", settings.llm.provider),
+            [ProviderStage.correct],
+        ),
+        (
+            "llm",
+            settings.llm.provider,
+            _model_for(settings, "llm", settings.llm.provider),
+            [ProviderStage.summarize, ProviderStage.mind_map, ProviderStage.ask],
+        ),
+        (
+            "embeddings",
+            settings.embeddings.provider,
+            _model_for(settings, "embeddings", settings.embeddings.provider),
+            [ProviderStage.embed],
+        ),
     ]
 
 
 def _settings_connection_config(settings: Settings, family: str, provider: str) -> dict:
     """Snapshot non-secret Settings fields needed to dispatch this connection."""
     config_family = "llm" if family == "correct" else family
-    provider_config = getattr(
-        getattr(settings, config_family), provider.replace("-", "_"), None
-    )
+    provider_config = getattr(getattr(settings, config_family), provider.replace("-", "_"), None)
     if provider_config is None:
         return {}
     values = provider_config.model_dump(mode="json", exclude={"api_key", "hf_token"})
     values.pop("model", None)
+    if values.get("reasoning_effort") is None:
+        values.pop("reasoning_effort", None)
     return values
 
 
-def _with_required_capabilities(
-    raw: dict, stages: list[ProviderStage], *, cloud: bool
-) -> dict:
+def _with_required_capabilities(raw: dict, stages: list[ProviderStage], *, cloud: bool) -> dict:
     """Repair old Settings catalog rows while preserving valid custom metadata."""
     try:
         capability = Capability.model_validate(raw)
@@ -266,6 +290,68 @@ def _ensure_forced_alignment_entry(
     return connection, model
 
 
+def _ensure_codex_entry(
+    session: Session, settings: Settings
+) -> tuple[ProviderConnection, ModelCatalogEntry]:
+    """Catalog the opt-in Codex CLI correction path without selecting it."""
+    config = settings.llm.codex_local
+    connection = session.scalar(
+        select(ProviderConnection).where(ProviderConnection.key == "correct:codex-local")
+    )
+    snapshot = config.model_dump(mode="json", exclude={"model"})
+    if connection is None:
+        connection = ProviderConnection(
+            key="correct:codex-local",
+            name="Codex CLI (experimental)",
+            provider_type="codex-local",
+            execution_target="cloud",
+            data_egress=True,
+            secret_ref=None,
+            config=snapshot,
+            health={
+                "status": "unknown",
+                "detail": "requires an explicit trusted-single-user ChatGPT login",
+            },
+        )
+        session.add(connection)
+        session.flush()
+    model = session.scalar(
+        select(ModelCatalogEntry).where(
+            ModelCatalogEntry.connection_id == connection.id,
+            ModelCatalogEntry.model_key == config.model,
+        )
+    )
+    if model is None:
+        model = ModelCatalogEntry(
+            connection_id=connection.id,
+            model_key=config.model,
+            display_name=f"Codex {config.model} (experimental)",
+            capabilities=Capability(
+                execution_target="cloud",
+                data_egress=True,
+                health=Health(
+                    status="unknown",
+                    detail="requires an explicit trusted-single-user ChatGPT login",
+                ),
+                stages=(
+                    StageCapabilities(
+                        stage=ProviderStage.correct,
+                        hardware_requirement="local Codex CLI; cloud inference",
+                    ),
+                ),
+                metadata={
+                    "experimental": True,
+                    "trusted_single_user_only": True,
+                    "auth_owner": "codex-cli",
+                    "billing": "Codex entitlement or configured Codex authentication",
+                },
+            ).model_dump(mode="json"),
+        )
+        session.add(model)
+        session.flush()
+    return connection, model
+
+
 def _profile_is_complete(session: Session, profile: ExecutionProfile) -> bool:
     by_stage = {selection.stage: selection for selection in profile.stage_selections}
     if set(by_stage) != set(_STAGE_FAMILY):
@@ -287,6 +373,7 @@ def _profile_is_complete(session: Session, profile: ExecutionProfile) -> bool:
 def bootstrap_default_profile(session: Session, settings: Settings) -> ExecutionProfile:
     """Create a Settings-equivalent profile once, without changing runtime dispatch."""
     _ensure_forced_alignment_entry(session)
+    _ensure_codex_entry(session, settings)
     existing = session.scalar(
         select(ExecutionProfile)
         .where(ExecutionProfile.key == DEFAULT_PROFILE_KEY)
@@ -302,17 +389,26 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
 
     cloud = any(connection.data_egress for connection, _ in entries.values())
     profile = ExecutionProfile(
-        key=DEFAULT_PROFILE_KEY, name="Current Settings", version=1, is_system_default=True,
-        privacy_policy="allow-egress" if cloud else "local-only", no_egress=not cloud,
+        key=DEFAULT_PROFILE_KEY,
+        name="Current Settings",
+        version=1,
+        is_system_default=True,
+        privacy_policy="allow-egress" if cloud else "local-only",
+        no_egress=not cloud,
         fallback_policy={"stages": {}},
     )
     session.add(profile)
     session.flush()
     for stage, family in _STAGE_FAMILY.items():
         connection, entry = entries[family]
-        profile.stage_selections.append(ProfileStageSelection(
-            stage=stage, connection_id=connection.id, model_id=entry.id, options={},
-        ))
+        profile.stage_selections.append(
+            ProfileStageSelection(
+                stage=stage,
+                connection_id=connection.id,
+                model_id=entry.id,
+                options={},
+            )
+        )
     session.flush()
     return profile
 
@@ -361,35 +457,61 @@ def _upgrade_default_profile(
                 model_id=selection.model_id,
                 options=selection.options,
             )
-        upgraded.stage_selections.append(
-            selection
-        )
+        upgraded.stage_selections.append(selection)
     session.flush()
     return upgraded
 
 
 def list_connections(session: Session) -> list[dict[str, Any]]:
-    return [{"id": r.id, "key": r.key, "name": r.name, "provider_type": r.provider_type,
-             "execution_target": r.execution_target, "data_egress": r.data_egress,
-             "secret_ref": r.secret_ref, "config": r.config, "health": r.health} for r in session.scalars(
-                 select(ProviderConnection).order_by(ProviderConnection.id))]
+    return [
+        {
+            "id": r.id,
+            "key": r.key,
+            "name": r.name,
+            "provider_type": r.provider_type,
+            "execution_target": r.execution_target,
+            "data_egress": r.data_egress,
+            "secret_ref": r.secret_ref,
+            "config": r.config,
+            "health": r.health,
+        }
+        for r in session.scalars(select(ProviderConnection).order_by(ProviderConnection.id))
+    ]
 
 
 def list_models(session: Session) -> list[dict[str, Any]]:
-    return [{"id": r.id, "connection_id": r.connection_id,
-             "connection_key": session.get(ProviderConnection, r.connection_id).key,
-             "model_key": r.model_key,
-             "display_name": r.display_name, "capabilities": r.capabilities,
-             "enabled": r.enabled} for r in session.scalars(
-                 select(ModelCatalogEntry).order_by(ModelCatalogEntry.id))]
+    return [
+        {
+            "id": r.id,
+            "connection_id": r.connection_id,
+            "connection_key": session.get(ProviderConnection, r.connection_id).key,
+            "model_key": r.model_key,
+            "display_name": r.display_name,
+            "capabilities": r.capabilities,
+            "enabled": r.enabled,
+        }
+        for r in session.scalars(select(ModelCatalogEntry).order_by(ModelCatalogEntry.id))
+    ]
 
 
 def _profile_layer(profile: ExecutionProfile) -> dict[str, Any]:
-    return {"key": profile.key, "policy": {"privacy_policy": profile.privacy_policy,
-            "no_egress": profile.no_egress, "cost_ceiling": profile.cost_ceiling,
-            "fallback_policy": profile.fallback_policy}, "stages": {
-                row.stage: {"connection": row.connection.key, "model": row.model_entry.model_key,
-                            "options": row.options} for row in profile.stage_selections}}
+    return {
+        "key": profile.key,
+        "policy": {
+            "privacy_policy": profile.privacy_policy,
+            "no_egress": profile.no_egress,
+            "cost_ceiling": profile.cost_ceiling,
+            "fallback_policy": profile.fallback_policy,
+        },
+        "stages": {
+            row.stage: {
+                "connection": row.connection.key,
+                "model": row.model_entry.model_key,
+                "options": row.options,
+            }
+            for row in profile.stage_selections
+        },
+    }
 
 
 def _profile_query():
@@ -417,6 +539,8 @@ def _connection_catalog(session: Session) -> dict[str, dict[str, Any]]:
     return {
         connection.key: {
             "provider_type": connection.provider_type,
+            "execution_target": connection.execution_target,
+            "data_egress": connection.data_egress,
             "configuration": _snapshot_connection_config(connection.config or {}),
             "secret_ref": connection.secret_ref,
         }
@@ -426,8 +550,16 @@ def _connection_catalog(session: Session) -> dict[str, dict[str, Any]]:
 
 def list_profiles(session: Session) -> list[dict[str, Any]]:
     rows = session.scalars(_profile_query().order_by(ExecutionProfile.id))
-    return [{"id": row.id, "name": row.name, "version": row.version,
-             "is_system_default": row.is_system_default, **_profile_layer(row)} for row in rows]
+    return [
+        {
+            "id": row.id,
+            "name": row.name,
+            "version": row.version,
+            "is_system_default": row.is_system_default,
+            **_profile_layer(row),
+        }
+        for row in rows
+    ]
 
 
 def preview_resolution(session: Session, *partial_layers: dict | None) -> ResolvedProfile:
@@ -535,7 +667,9 @@ def resolve_recording_profile(
 
     selected_template_key = template_key
     if selected_template_key is None:
-        selected_template_key = recording.note_template_key or get_settings().pipeline.summary_template
+        selected_template_key = (
+            recording.note_template_key or get_settings().pipeline.summary_template
+        )
     if selected_template_key != "auto":
         template = session.scalar(
             select(NoteTemplate)
@@ -578,13 +712,17 @@ def resolve_recording_profile(
                 "provenance": {"kind": "recording_patch", "file_id": file_id},
             }
         )
-    return resolve_profile(
-        layers, _capability_catalog(session), _connection_catalog(session)
-    )
+    return resolve_profile(layers, _capability_catalog(session), _connection_catalog(session))
 
 
-def select_recording_override(session: Session, file_id: str, profile_id: int,
-                              *, stages: dict | None = None, policy: dict | None = None) -> dict:
+def select_recording_override(
+    session: Session,
+    file_id: str,
+    profile_id: int,
+    *,
+    stages: dict | None = None,
+    policy: dict | None = None,
+) -> dict:
     if session.get(PlaudFile, file_id) is None or session.get(ExecutionProfile, profile_id) is None:
         raise LookupError("recording or profile not found")
     row = session.get(RecordingProfileOverride, file_id)
@@ -595,8 +733,12 @@ def select_recording_override(session: Session, file_id: str, profile_id: int,
     row.stage_overrides = stages or {}
     row.policy_overrides = policy or {}
     session.flush()
-    return {"file_id": file_id, "profile_id": profile_id,
-            "stages": row.stage_overrides, "policy": row.policy_overrides}
+    return {
+        "file_id": file_id,
+        "profile_id": profile_id,
+        "stages": row.stage_overrides,
+        "policy": row.policy_overrides,
+    }
 
 
 def clear_recording_override(session: Session, file_id: str) -> dict:
@@ -608,9 +750,7 @@ def clear_recording_override(session: Session, file_id: str) -> dict:
     return {"file_id": file_id, "profile_id": None}
 
 
-def select_folder_profile(
-    session: Session, folder_id: int, profile_id: int | None
-) -> dict:
+def select_folder_profile(session: Session, folder_id: int, profile_id: int | None) -> dict:
     folder = session.get(Folder, folder_id)
     if folder is None:
         raise LookupError("folder not found")
@@ -629,15 +769,34 @@ def save_connection(session: Session, data: dict, connection_id: int | None = No
     row = session.get(ProviderConnection, connection_id) if connection_id else None
     if connection_id and row is None:
         raise LookupError("provider connection not found")
+    provider_type = data.get("provider_type", getattr(row, "provider_type", None))
+    execution_target = data.get("execution_target", getattr(row, "execution_target", None))
+    data_egress = data.get("data_egress", getattr(row, "data_egress", None))
+    if provider_type == "codex-local" and (
+        execution_target != "cloud" or data_egress is not True
+    ):
+        raise ValueError("codex-local requires cloud execution with data egress")
     if row is None:
-        row = ProviderConnection(key=data["key"], name=data["name"], provider_type=data["provider_type"])
+        row = ProviderConnection(
+            key=data["key"], name=data["name"], provider_type=data["provider_type"]
+        )
         session.add(row)
-    for field in ("key", "name", "provider_type", "execution_target", "data_egress", "secret_ref", "config"):
+    for field in (
+        "key",
+        "name",
+        "provider_type",
+        "execution_target",
+        "data_egress",
+        "secret_ref",
+        "config",
+    ):
         if field in data:
             setattr(row, field, data[field])
     session.flush()
-    return list_connections(session)[-1] if connection_id is None else next(
-        item for item in list_connections(session) if item["id"] == row.id
+    return (
+        list_connections(session)[-1]
+        if connection_id is None
+        else next(item for item in list_connections(session) if item["id"] == row.id)
     )
 
 
@@ -803,8 +962,29 @@ def save_model(session: Session, data: dict, model_id: int | None = None) -> dic
     row = session.get(ModelCatalogEntry, model_id) if model_id else None
     if model_id and row is None:
         raise LookupError("model not found")
-    if session.get(ProviderConnection, data.get("connection_id", getattr(row, "connection_id", None))) is None:
+    connection = session.get(
+        ProviderConnection, data.get("connection_id", getattr(row, "connection_id", None))
+    )
+    if connection is None:
         raise LookupError("provider connection not found")
+    capabilities = data.get("capabilities", getattr(row, "capabilities", {}))
+    if connection.provider_type == "codex-local":
+        codex_capability = Capability.model_validate(capabilities)
+        if (
+            codex_capability.execution_target != "cloud"
+            or not codex_capability.data_egress
+        ):
+            raise ValueError("codex-local requires cloud execution with data egress")
+        invalid_stages = [
+            item.stage.value
+            for item in codex_capability.stages
+            if item.stage != ProviderStage.correct
+        ]
+        if invalid_stages:
+            raise ValueError(
+                "codex-local is correction-only; unsupported stages: "
+                + ", ".join(invalid_stages)
+            )
     if row is None:
         row = ModelCatalogEntry(
             connection_id=data["connection_id"],
@@ -833,11 +1013,20 @@ def delete_model(session: Session, model_id: int) -> None:
 def create_profile_version(session: Session, data: dict) -> dict:
     """Create an immutable profile version and its validated stage selections."""
     key = data["key"]
-    version = data.get("version") or (
-        session.scalar(select(func.max(ExecutionProfile.version)).where(ExecutionProfile.key == key)) or 0
-    ) + 1
+    version = (
+        data.get("version")
+        or (
+            session.scalar(
+                select(func.max(ExecutionProfile.version)).where(ExecutionProfile.key == key)
+            )
+            or 0
+        )
+        + 1
+    )
     if data.get("is_system_default"):
-        for current in session.scalars(select(ExecutionProfile).where(ExecutionProfile.is_system_default)):
+        for current in session.scalars(
+            select(ExecutionProfile).where(ExecutionProfile.is_system_default)
+        ):
             current.is_system_default = False
     row = ExecutionProfile(
         key=key,
@@ -888,7 +1077,9 @@ def delete_profile(session: Session, profile_id: int) -> None:
     if row.is_system_default:
         raise ValueError("cannot delete the system default profile")
     if session.scalar(
-        select(RecordingProfileOverride.file_id).where(RecordingProfileOverride.profile_id == profile_id)
+        select(RecordingProfileOverride.file_id).where(
+            RecordingProfileOverride.profile_id == profile_id
+        )
     ):
         raise ValueError("profile is selected by a recording")
     if session.scalar(select(Folder.id).where(Folder.execution_profile_id == profile_id)):

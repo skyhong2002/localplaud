@@ -13,8 +13,7 @@
 {%- macro sorth(col, label) -%}
   {%- set active = lib.sort == col -%}
   {%- set nxt = ('desc' if (active and lib.dir == 'asc') else ('asc' if active else ('asc' if col == 'name' else 'desc'))) -%}
-  <a class="sorth {% if active %}on{% endif %}" href="{{ liburl(col, nxt, lib.state, lib.scene, lib.view) }}"
-     aria-sort="{{ 'ascending' if (active and lib.dir=='asc') else ('descending' if active else 'none') }}">
+  <a class="sorth {% if active %}on{% endif %}" href="{{ liburl(col, nxt, lib.state, lib.scene, lib.view) }}">
     {{ label }}{% if active %}<span class="arr">{{ '▲' if lib.dir == 'asc' else '▼' }}</span>{% endif %}
   </a>
 {%- endmacro -%}
@@ -23,8 +22,8 @@
 <style>
   .libbar { display:flex; flex-direction:column; gap:10px; margin:14px 0 12px; }
   .filtrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .filtrow .lbl { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--faint); margin-right:2px; }
-  .fchip { font-size:11.5px; font-weight:600; border-radius:999px; padding:3px 10px; border:1px solid var(--border2);
+  .filtrow .lbl { font-size:11px; font-weight:700; letter-spacing:0; text-transform:uppercase; color:var(--faint); margin-right:2px; }
+  .fchip { font-size:11.5px; font-weight:600; border-radius:5px; padding:3px 10px; border:1px solid var(--border2);
            color:var(--muted); background:var(--panel); cursor:pointer; white-space:nowrap; }
   .fchip:hover { border-color:var(--blue-br); }
   .fchip.on { color:var(--blue); border-color:var(--blue-br); background:var(--blue-soft); }
@@ -33,25 +32,36 @@
 
   .rectable { width:100%; border-collapse:collapse; margin-top:4px; }
   .rectable thead th { text-align:left; padding:6px 10px; border-bottom:1px solid var(--border);
-    font-size:11px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; color:var(--faint); white-space:nowrap; }
+    font-size:11px; font-weight:500; letter-spacing:0; color:var(--faint); white-space:nowrap; }
   .rectable thead th.num { text-align:right; }
   .sorth { display:inline-flex; align-items:center; gap:4px; color:var(--faint); }
   .sorth.on { color:var(--fg); }
   .sorth:hover { color:var(--blue); }
   .sorth .arr { font-size:9px; }
-  .rectable tbody td { padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  .rectable tbody td { padding:12px 10px; border-bottom:1px solid #F4F4F5; vertical-align:middle; }
   .rectable tbody tr:hover { background:var(--panel2); }
-  .rectable tbody tr.attn td { box-shadow:inset 3px 0 0 var(--warn); }
-  .rectable .nm { font-weight:600; letter-spacing:-.01em; color:var(--fg); display:block;
+  .rectable tbody tr.attn td { box-shadow:none; }
+  .rectable .nm { font-weight:500; letter-spacing:0; color:var(--fg); display:block;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:340px; }
   .rectable .src, .rectable .num { color:var(--muted); font-size:12.5px; white-space:nowrap; }
   .rectable .num { text-align:right; font-variant-numeric:tabular-nums; }
-  .attn-dot { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; margin-left:6px;
-    border-radius:50%; background:var(--warn); color:#fff; font-size:10px; font-weight:800; vertical-align:middle; }
-  .select-cell { width:34px; text-align:center !important; }
-  .select-cell input { width:15px; height:15px; accent-color:var(--blue); cursor:pointer; }
+  .file-subline { display:flex;align-items:center;gap:5px;margin-top:3px;color:var(--faint);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+  .file-subline .nav-icon { width:12px;height:12px; }
+  .attn-dot { display:inline-block;width:6px;height:6px;margin-left:7px;border-radius:50%;background:var(--warn);vertical-align:middle; }
+  .select-cell { width:0!important;padding:0!important;text-align:center!important;position:relative;overflow:visible; }
+  .select-cell input { position:absolute;left:-24px;top:50%;width:15px;height:15px;margin:0;transform:translateY(-50%);accent-color:var(--blue);cursor:pointer;opacity:0;transition:opacity .12s; }
+  .rectable:hover thead .select-cell input,.rectable tbody tr:hover .select-cell input,.select-cell input:checked,.select-cell input:focus-visible { opacity:1; }
+  .name-cell { padding-left:0!important; }
+  .row-menu-cell { width:42px;text-align:right;position:relative; }
+  .row-menu { position:relative;display:inline-block; }
+  .row-menu>summary { list-style:none;width:28px;height:28px;display:grid;place-items:center;border-radius:5px;color:var(--muted);cursor:pointer; }
+  .row-menu>summary::-webkit-details-marker { display:none; }
+  .row-menu>summary:hover,.row-menu[open]>summary { background:var(--panel2);color:var(--fg); }
+  .row-menu-popover { position:absolute;right:0;top:32px;z-index:15;width:160px;padding:5px;border:1px solid var(--border2);border-radius:7px;background:var(--panel);box-shadow:var(--shadow);text-align:left; }
+  .row-menu-popover a { display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:5px;font-size:12px;font-weight:600; }
+  .row-menu-popover a:hover { background:var(--panel2); }
   .orgline { display:flex; gap:5px; flex-wrap:wrap; margin-top:5px; }
-  .orgpill { display:inline-flex; align-items:center; gap:4px; max-width:150px; padding:1px 6px; border-radius:999px;
+  .orgpill { display:inline-flex; align-items:center; gap:4px; max-width:150px; padding:1px 6px; border-radius:5px;
     border:1px solid var(--border2); color:var(--muted); font-size:10.5px; font-weight:600; }
   .orgpill.folder::before { content:'▰'; color:var(--c,var(--blue)); }
   .orgpill.tag::before { content:'•'; color:var(--c,var(--purple)); font-size:16px; line-height:8px; }
@@ -63,12 +73,12 @@
   .quickadd summary { list-style:none; cursor:pointer; color:var(--blue); font-size:11.5px; font-weight:650; }
   .quickadd summary::-webkit-details-marker { display:none; }
   .quickadd form { position:absolute; right:0; top:24px; z-index:5; display:flex; gap:6px; width:260px; padding:9px;
-    border:1px solid var(--border2); border-radius:10px; background:var(--panel); box-shadow:var(--shadow); }
+    border:1px solid var(--border2); border-radius:8px; background:var(--panel); box-shadow:var(--shadow); }
   .quickadd input { min-width:0; flex:1; border:1px solid var(--border2); border-radius:7px; padding:7px 9px;
     background:var(--panel); color:var(--fg); }
   .quickadd button { padding:7px 10px; border:0; border-radius:7px; background:var(--blue); color:white; font-weight:650; cursor:pointer; }
   .bulkbar { position:sticky; top:-1px; z-index:4; display:none; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0 8px;
-    padding:9px 11px; border:1px solid var(--blue-br); border-radius:10px; background:var(--blue-soft); box-shadow:var(--shadow); }
+    padding:9px 11px; border:1px solid var(--blue-br); border-radius:8px; background:var(--blue-soft); box-shadow:var(--shadow); }
   .bulkbar.on { display:flex; }
   .bulkbar strong { color:var(--blue); margin-right:auto; }
   .bulkbar select { max-width:180px; border:1px solid var(--border2); border-radius:7px; padding:7px 9px;
@@ -82,84 +92,93 @@
     padding:11px 14px; margin:12px 0; font-size:13px; color:var(--muted); }
   .banner.trash { border-color:var(--red); background:var(--red-soft); color:var(--fg); }
   .banner strong { color:var(--fg); }
+  .library-page { flex:1;min-width:0;background:var(--panel);overflow-y:auto; }
+  .library-inner { position:relative;width:min(100%,760px);margin:0 auto;padding:30px 32px 72px; }
+  .library-head { display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px; }
+  .library-head h1 { margin:0;font-size:22px;letter-spacing:0; }
+  .library-actions { display:flex;align-items:center;gap:8px; }
+  .library-toolbar { position:absolute;top:30px;right:32px;display:flex;align-items:center;gap:8px; }
+  .library-search { display:none; }
+  .library-search .nav-icon { position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--faint); }
+  .library-search input { width:100%;height:38px;padding:0 12px 0 36px;border:1px solid var(--border2);border-radius:7px;background:var(--panel);font:inherit;outline:none; }
+  .library-search input:focus { border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft); }
+  .filter-menu { position:relative; }
+  .filter-menu>summary { list-style:none;width:36px;height:36px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--border2);border-radius:6px;background:var(--panel);font-size:0;cursor:pointer; }
+  .filter-menu>summary::-webkit-details-marker { display:none; }
+  .filter-menu[open]>summary { background:var(--panel2); }
+  .filter-popover { position:absolute;right:0;top:45px;z-index:20;width:min(680px,calc(100vw - 40px));max-height:70vh;overflow:auto;padding:14px;background:var(--panel);border:1px solid var(--border2);border-radius:8px;box-shadow:var(--shadow); }
+  .filter-popover .orgbox { margin:0;border:0;padding:0;background:transparent; }
+  .table-wrap { border:0;overflow:visible; }
+  .table-wrap .rectable { margin:0; }
+  .table-wrap .rectable tbody tr:last-child td { border-bottom:0; }
+  .ask-surface { max-width:900px;margin:0 auto;padding:8px 0 60px; }
+  .ask-hero { padding:20px 0 18px;border-bottom:1px solid var(--border);margin-bottom:18px; }
+  .ask-hero h1 { display:flex;align-items:center;gap:9px;margin:0 0 5px;font-size:22px;letter-spacing:0; }
+  .ask-hero .nav-icon { width:21px;height:21px;color:var(--red); }
+  .ask-scope { border:1px solid var(--border);border-radius:8px;padding:14px;margin:0 0 14px;background:#FCFCFC; }
 
   @media (max-width:820px){
+    .library-inner { padding:18px 14px 56px; }
+    .library-head { min-width:0;align-items:flex-start;margin-bottom:15px;padding-right:48px; }
+    .library-head h1 { overflow-wrap:anywhere; }
+    .library-actions .btn.sec { display:none; }
+    .library-toolbar { top:18px;right:14px; }
+    .filter-popover { position:fixed;left:10px;right:10px;top:64px;width:auto;max-height:calc(100vh - 74px); }
+    .table-wrap { border:0;overflow:visible; }
     .rectable thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
     .rectable, .rectable tbody, .rectable tr, .rectable td { display:block; width:100%; }
     .rectable tbody tr { border:1px solid var(--border); border-radius:var(--radius); margin-bottom:8px; padding:4px 2px; }
     .rectable tbody td { border:0; padding:5px 12px; display:flex; justify-content:space-between; gap:12px; }
     .rectable tbody td::before { content:attr(data-label); font-size:11px; font-weight:700; text-transform:uppercase;
-      letter-spacing:.03em; color:var(--faint); flex:none; }
+      letter-spacing:0; color:var(--faint); flex:none; }
     .rectable .nm { max-width:none; text-align:right; }
     .rectable .num { text-align:right; }
-    .rectable tbody tr.attn td:first-child { box-shadow:inset 3px 0 0 var(--warn); }
+    .rectable tbody tr.attn td:first-child { box-shadow:none; }
     .rectable tbody td.select-cell { justify-content:flex-start; }
     .rectable tbody td.select-cell::before { display:none; }
-    .quickadd { margin-left:0; }
+    .select-cell { width:100%!important;padding:5px 12px!important; }
+    .select-cell input { position:static;transform:none;opacity:1; }
+    .rectable tbody td.row-menu-cell { position:absolute;right:7px;top:5px;width:auto;padding:0; }
+    .rectable tbody td.row-menu-cell::before { display:none; }
+    .rectable tbody tr { position:relative; }
+    .rectable tbody td.name-cell { padding-right:44px; }
+    .quickadd { min-width:0;flex-basis:100%;margin-left:0; }
+    .quickadd form { left:0;right:auto;width:min(260px,100%); }
   }
 </style>
-<div class="shell">
-  {% set active_id = None %}
-  {% include "_filelist.html" %}
-  <section class="pane"><div class="pane-inner">
-    <h1 class="page">{{ t('Recordings') }}</h1>
-    <div class="sub">{{ t('Your Plaud cloud, mirrored locally.') }}</div>
-
-    <div class="stats">
-      <div class="tile"><div class="k">{{ t('Files') }}</div><div class="v">{{ stats.total }}</div></div>
-      <div class="tile"><div class="k">{{ t('Processed') }}</div><div class="v">{{ stats.done }}</div></div>
-      <div class="tile"><div class="k">{{ t('In progress') }}</div><div class="v">{{ stats.processing }}</div></div>
-      <div class="tile"><div class="k">{{ t('Total audio') }}</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
-    </div>
-
-    <div class="sub" style="margin:2px 0 8px;font-size:13px">{{ t('Ask across your library. Answers stay grounded in indexed recordings and cite their sources.') }}</div>
-    <fieldset id="library-ask-scope" style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:0 0 10px">
+<div class="library-page"><div class="library-inner">
+  {% if active == 'ask' %}
+  <section class="ask-surface" id="library-ask">
+    <div class="ask-hero"><h1><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Ask localplaud') }}</h1><div class="sub">{{ t('Ask across your library. Answers stay grounded in indexed recordings and cite their sources.') }}</div></div>
+    <fieldset class="ask-scope" id="library-ask-scope">
       <legend class="sub" style="font-size:11px;font-weight:700;padding:0 5px">{{ t('ANSWER SCOPE') }}</legend>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px">
-        <label class="sub" style="font-size:11px">{{ t('Folder') }}
-          <select class="search-input" name="ask_folder_id" style="width:100%;margin-top:3px;padding:7px 9px">
-            <option value="">{{ t('Any folder') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}
-          </select>
-        </label>
-        <label class="sub" style="font-size:11px">{{ t('Tag') }}
-          <select class="search-input" name="ask_tag_id" style="width:100%;margin-top:3px;padding:7px 9px">
-            <option value="">{{ t('Any tag') }}</option>{% for tag in organization.tags %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}
-          </select>
-        </label>
-        <label class="sub" style="font-size:11px">{{ t('Source') }}
-          <select class="search-input" name="ask_origin" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any source') }}</option><option value="plaud">Plaud</option><option value="local">{{ t('Local') }}</option></select>
-        </label>
-        <label class="sub" style="font-size:11px">{{ t('Named speaker') }}
-          <select class="search-input" name="ask_speaker_name" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any named speaker') }}</option>{% for speaker in named_speakers %}<option value="{{ speaker.name }}">{{ speaker.name }} · {{ speaker.recording_count }}</option>{% endfor %}</select>
-        </label>
+        <label class="sub" style="font-size:11px">{{ t('Folder') }}<select class="search-input" name="ask_folder_id" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any folder') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}</select></label>
+        <label class="sub" style="font-size:11px">{{ t('Tag') }}<select class="search-input" name="ask_tag_id" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any tag') }}</option>{% for tag in organization.tags %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}</select></label>
+        <label class="sub" style="font-size:11px">{{ t('Source') }}<select class="search-input" name="ask_origin" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any source') }}</option><option value="plaud">Plaud</option><option value="local">{{ t('Local') }}</option></select></label>
+        <label class="sub" style="font-size:11px">{{ t('Named speaker') }}<select class="search-input" name="ask_speaker_name" style="width:100%;margin-top:3px;padding:7px 9px"><option value="">{{ t('Any named speaker') }}</option>{% for speaker in named_speakers %}<option value="{{ speaker.name }}">{{ speaker.name }} · {{ speaker.recording_count }}</option>{% endfor %}</select></label>
         <label class="sub" style="font-size:11px">{{ t('From') }}<input class="search-input" type="date" name="ask_date_from" style="width:100%;margin-top:3px;padding:7px 9px"></label>
         <label class="sub" style="font-size:11px">{{ t('To') }}<input class="search-input" type="date" name="ask_date_to" style="width:100%;margin-top:3px;padding:7px 9px"></label>
+        <label class="sub" style="font-size:11px;grid-column:1/-1">{{ t('Recordings (optional)') }}<select class="search-input" name="ask_file_ids" multiple size="5" style="width:100%;margin-top:3px;padding:7px 9px">{% for file in files %}<option value="{{ file.id }}">{{ file.filename }} · {{ file.start_time_ms | dt }}</option>{% endfor %}</select></label>
       </div>
-      <label class="sub" style="display:flex;align-items:center;gap:7px;font-size:11px;margin-top:8px"><input id="ask-use-selected" type="checkbox" disabled> {{ t('Only selected recordings') }} · <span id="ask-selected-count">0</span></label>
-      <div id="ask-selected-inputs"></div>
     </fieldset>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
-      {% for chip in ["What decisions were made recently?", "Show action items across recordings", "What themes keep recurring?"] %}
-      <button type="button" class="btn sec library-ask-chip" data-q="{{ t(chip) }}" style="padding:5px 11px;font-size:12px">{{ t(chip) }}</button>
-      {% endfor %}
-    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">{% for chip in ["What decisions were made recently?", "Show action items across recordings", "What themes keep recurring?"] %}<button type="button" class="btn sec library-ask-chip" data-q="{{ t(chip) }}" style="padding:6px 11px;font-size:12px">{{ t(chip) }}</button>{% endfor %}</div>
     <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:6px">{{ t('QUICK ACTIONS · LIBRARY GROUNDED · READ ONLY') }}</div>
-    <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">
-      {% for skill in ask_skills %}
-      <form hx-post="/ask/skill" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" hx-include="#library-ask-scope">
-        <input type="hidden" name="skill_key" value="{{ skill.key }}">
-        <button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px">{{ skill.name }}</button>
-      </form>
-      {% endfor %}
-    </div>
-    <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" hx-include="#library-ask-scope">
-      <input id="library-ask-q" name="q" placeholder="{{ t('Ask Plaud anything about your recordings…') }}" autocomplete="off" required>
-      <button class="btn" type="submit">{{ t('Ask') }}</button>
-    </form>
+    <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">{% for skill in ask_skills %}<form hx-post="/ask/skill" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" hx-include="#library-ask-scope"><input type="hidden" name="skill_key" value="{{ skill.key }}"><button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px">{{ skill.name }}</button></form>{% endfor %}</div>
+    <form class="ask" hx-post="/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" hx-include="#library-ask-scope"><input id="library-ask-q" name="q" placeholder="{{ t('Ask anything about your recordings…') }}" autocomplete="off" required><button class="btn" type="submit">{{ t('Ask') }}</button></form>
     <div id="spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{{ t('thinking…') }}</div>
-    {% if ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-5px 0 10px"><span class="sub" style="font-size:11px">Recent Ask</span>{% for thread in ask_threads %}<a class="chip {% if selected_ask_thread and selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/?ask_thread={{ thread.id }}">{{ thread.title | truncate(38) }}</a>{% endfor %}</div>{% endif %}
+    {% if ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-5px 0 10px"><span class="sub" style="font-size:11px">{{ t('Recent Ask') }}</span>{% for thread in ask_threads %}<a class="chip {% if selected_ask_thread and selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/?ask=true&amp;ask_thread={{ thread.id }}#library-ask">{{ thread.title | truncate(38) }}</a>{% endfor %}</div>{% endif %}
     <div id="answer">{% if selected_ask_thread %}{% set thread=selected_ask_thread %}{% set file_id=None %}{% set target='answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
-
+  </section>
+  {% else %}
+  {% set active_folder = organization.folders | selectattr('id', 'equalto', lib.folder) | first %}
+  <div class="library-head">
+    <div><h1>{% if lib.view == 'trash' %}{{ t('Trash') }}{% elif lib.view == 'uncategorized' %}{{ t('Uncategorized') }}{% elif active_folder %}{{ active_folder.name }}{% elif lib.origin == 'plaud' %}{{ t('Plaud recordings') }}{% elif lib.origin == 'local' %}{{ t('Local uploads') }}{% else %}{{ t('All files') }}{% endif %}</h1></div>
+    <div class="library-actions"></div>
+  </div>
+  <div class="library-toolbar">
+    <form class="library-search" method="get" action="/"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span><input name="q" value="{{ q }}" placeholder="{{ t('Search files') }}"><input type="hidden" name="view" value="{{ lib.view }}">{% for name, value in [('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin), ('state', lib.state), ('scene', lib.scene), ('sort', lib.sort), ('dir', lib.dir)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}</form>
+    <details class="filter-menu"><summary aria-label="{{ t('Filter and organize') }}" title="{{ t('Filter and organize') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg')"></span>{{ t('Filter and organize') }}</summary><div class="filter-popover">
     <div class="orgbox" aria-label="Library organization">
       <div class="orgrow">
         <span class="lbl">{{ t('Folders') }}</span>
@@ -186,7 +205,6 @@
         </details>
       </div>
     </div>
-
     <div class="libbar">
       <div class="filtrow">
         <span class="lbl">{{ t('State') }}</span>
@@ -222,9 +240,11 @@
         <a class="fchip {% if lib.view == 'uncategorized' %}on{% endif %}"
            href="/?view=uncategorized">{{ t('Uncategorized') }}</a>
         <a class="fchip trash {% if lib.view == 'trash' %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'trash') }}">🗑 {{ t('Trash') }} <span class="n">{{ facets.trash_count }}</span></a>
+           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'trash') }}">{{ t('Trash') }} <span class="n">{{ facets.trash_count }}</span></a>
       </div>
     </div>
+    </div></details>
+  </div>
 
     {% if lib.view == 'trash' %}
     <div class="banner trash">
@@ -233,7 +253,7 @@
     {% endif %}
 
     {% if not files %}
-    <div class="empty"><div class="big">🎙️</div>
+    <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/audio-lines.svg')"></span>
       {% if lib.view == 'trash' %}
         {{ t('Nothing in trash.') }}
       {% elif lib.q or lib.state or lib.scene is not none or lib.folder is not none or lib.tag is not none or lib.origin or lib.view == 'uncategorized' %}
@@ -259,39 +279,34 @@
       <div class="bulkmsg" id="bulk-message" role="status"></div>
     </div>
     {% endif %}
-    <table class="rectable">
+    <div class="table-wrap"><table class="rectable">
       <thead>
         <tr>
           {% if lib.view != 'trash' %}<th class="select-cell"><input id="select-all" type="checkbox" aria-label="Select all visible recordings"></th>{% endif %}
-          <th>{{ sorth('name', t('Name')) }}</th>
-          <th>{{ t('Source') }}</th>
-          <th>{{ t('State') }}</th>
-          <th class="num">{{ sorth('duration', t('Duration')) }}</th>
-          <th class="num">{{ sorth('recorded', t('Recorded')) }}</th>
+          <th class="name-cell" aria-sort="{{ 'ascending' if lib.sort=='name' and lib.dir=='asc' else ('descending' if lib.sort=='name' else 'none') }}">{{ sorth('name', t('Name')) }}</th>
+          <th class="num" aria-sort="{{ 'ascending' if lib.sort=='duration' and lib.dir=='asc' else ('descending' if lib.sort=='duration' else 'none') }}">{{ sorth('duration', t('Duration')) }}</th>
+          <th class="num" aria-sort="{{ 'ascending' if lib.sort=='recorded' and lib.dir=='asc' else ('descending' if lib.sort=='recorded' else 'none') }}">{{ sorth('recorded', t('Recorded')) }}</th>
+          <th class="row-menu-cell"><span class="visually-hidden">{{ t('Actions') }}</span></th>
         </tr>
       </thead>
       <tbody>
         {% for f in files %}
         <tr class="{% if f.needs_attention %}attn{% endif %}">
           {% if lib.view != 'trash' %}<td class="select-cell"><input class="row-select" type="checkbox" value="{{ f.id }}" aria-label="Select {{ f.filename }}"></td>{% endif %}
-          <td data-label="Name">
-            <a class="nm" href="/file/{{ f.id }}">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="Needs attention — {{ f.status }}">!</span>{% endif %}</a>
-            {% if f.folder or f.tags %}<div class="orgline">
-              {% if f.folder %}<span class="orgpill folder" style="--c:{{ f.folder.color or 'var(--blue)' }}">{{ f.folder.name }}</span>{% endif %}
-              {% for tag in f.tags %}<span class="orgpill tag" style="--c:{{ tag.color or 'var(--purple)' }}">{{ tag.name }}</span>{% endfor %}
-            </div>{% endif %}
+          <td class="name-cell" data-label="Name">
+            <a class="nm" href="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-get="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="Needs attention — {{ f.status }}" aria-label="Needs attention"></span>{% endif %}</a>
           </td>
-          <td data-label="Source" class="src">{{ 'Plaud cloud' if f.origin == 'plaud' else 'Local import' }}<br><span style="font-size:10.5px">{{ f.scene_label }}</span></td>
-          <td data-label="State"><span class="st {{ f.status }}">{{ f.status | replace('_',' ') }}</span></td>
           <td data-label="Duration" class="num">{{ f.duration_ms | dur }}</td>
           <td data-label="Recorded" class="num">{{ f.start_time_ms | dt }}</td>
+          <td class="row-menu-cell"><details class="row-menu"><summary aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg');width:15px;height:15px"></span></summary><div class="row-menu-popover"><div class="sub" style="padding:5px 9px 7px;font-size:10.5px">{{ t('Plaud cloud') if f.origin == 'plaud' else t('Local import') }}{% if f.folder %} · {{ f.folder.name }}{% endif %}{% if f.status != 'done' %} · {{ t(f.status) }}{% endif %}</div><a href="/file/{{ f.id }}?return_to={{ return_to_param }}">{{ t('Open recording') }}</a>{% if f.has_transcript or f.has_summary %}<a href="/file/{{ f.id }}/export.md" data-no-partial>{{ t('Export') }}</a>{% endif %}</div></details></td>
         </tr>
         {% endfor %}
       </tbody>
-    </table>
+    </table></div>
+    {% if pagination.pages > 1 %}<nav aria-label="{{ t('Library pages') }}" style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:14px">{% if pagination.page > 1 %}<a class="btn sec" style="padding:7px 11px" href="{{ request.url.include_query_params(page=pagination.page - 1) }}">{{ t('Previous') }}</a>{% else %}<span class="btn sec" aria-disabled="true" style="padding:7px 11px;opacity:.45">{{ t('Previous') }}</span>{% endif %}<span class="sub" style="font-size:12px">{{ t('Page') }} {{ pagination.page }} / {{ pagination.pages }}</span>{% if pagination.page < pagination.pages %}<a class="btn sec" style="padding:7px 11px" href="{{ request.url.include_query_params(page=pagination.page + 1) }}">{{ t('Next') }}</a>{% else %}<span class="btn sec" aria-disabled="true" style="padding:7px 11px;opacity:.45">{{ t('Next') }}</span>{% endif %}</nav>{% endif %}
     {% endif %}
-  </div></section>
-</div>
+  {% endif %}
+</div></div>
 {% endblock %}
 
 {% block scripts %}
@@ -308,9 +323,6 @@
   const apply = document.getElementById('bulk-apply');
   const clear = document.getElementById('bulk-clear');
   const message = document.getElementById('bulk-message');
-  const askUseSelected = document.getElementById('ask-use-selected');
-  const askSelectedCount = document.getElementById('ask-selected-count');
-  const askSelectedInputs = document.getElementById('ask-selected-inputs');
 
   document.querySelectorAll('.library-ask-chip').forEach(chip => chip.addEventListener('click', () => {
     const input = document.getElementById('library-ask-q');
@@ -318,26 +330,11 @@
   }));
 
   function selected() { return checks.filter(c => c.checked).map(c => c.value); }
-  function syncAskSelection() {
-    const ids = selected();
-    if (askSelectedCount) askSelectedCount.textContent = String(ids.length);
-    if (askUseSelected) {
-      askUseSelected.disabled = ids.length === 0;
-      if (!ids.length) askUseSelected.checked = false;
-    }
-    if (askSelectedInputs) {
-      askSelectedInputs.replaceChildren();
-      if (askUseSelected?.checked) ids.forEach(id => {
-        const input = document.createElement('input'); input.type='hidden'; input.name='ask_file_ids'; input.value=id; askSelectedInputs.appendChild(input);
-      });
-    }
-  }
   function sync() {
     const n = selected().length;
     if (count) count.textContent = n;
     if (bar) bar.classList.toggle('on', n > 0);
     if (all) { all.checked = n > 0 && n === checks.length; all.indeterminate = n > 0 && n < checks.length; }
-    syncAskSelection();
   }
   function targets() {
     if (!target || !action) return;
@@ -361,7 +358,6 @@
   checks.forEach(c => c.addEventListener('change', sync));
   all?.addEventListener('change', () => { checks.forEach(c => c.checked = all.checked); sync(); });
   clear?.addEventListener('click', () => { checks.forEach(c => c.checked = false); sync(); });
-  askUseSelected?.addEventListener('change', syncAskSelection);
   action?.addEventListener('change', targets);
   targets();
   sync();

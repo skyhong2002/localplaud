@@ -2,6 +2,9 @@
 
 import os
 
+import pytest
+from pydantic import ValidationError
+
 from localplaud.config import Settings
 
 
@@ -54,8 +57,17 @@ def test_defaults_without_env(monkeypatch, tmp_path):
     assert s.pipeline.transcribe is True
     assert s.pipeline.artifact_mode == "independent"
     assert s.pipeline.cloud_import_enabled is False
+    assert s.pipeline.polish_chunk_chars == 12_000
+    assert s.llm.codex_local.polish_chunk_chars == 48_000
     assert s.diarize.provider == "pyannote"
     assert s.diarize.model == "pyannote/speaker-diarization-community-1"
+
+
+def test_codex_local_cannot_become_the_global_llm_provider(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_LLM__PROVIDER", "codex-local")
+    with pytest.raises(ValidationError, match="correction-only"):
+        Settings()
 
 
 def test_cloud_import_requires_explicit_migration_mode(monkeypatch, tmp_path):

@@ -216,7 +216,7 @@ def export(
 
 @app.command()
 def run():
-    """Run everything: poll on a schedule, process continuously, serve the UI."""
+    """Poll on a schedule, process when enabled, and serve the Web App."""
     import threading
     from datetime import datetime
 
@@ -224,7 +224,6 @@ def run():
 
     from .db.session import init_db
     from .poller.poll import poll_once, reset_inflight
-    from .worker.pipeline import process_pending
 
     settings = get_settings()
     init_db()
@@ -240,7 +239,7 @@ def run():
             return
         try:
             poll_once(settings)
-            process_pending(settings, limit=settings.pipeline.files_per_cycle)
+            process_automatic_pending(settings)
         except Exception as exc:  # noqa: BLE001
             console.print(f"[yellow]cycle error:[/] {exc}")
         finally:
@@ -259,8 +258,22 @@ def run():
         next_run_time=datetime.now(),
     )
     scheduler.start()
-    console.print("[green]✓[/] poller + worker running; starting web UI…")
+    console.print("[green]✓[/] poller + worker ready; starting web UI…")
     _serve(settings)
+
+
+def process_automatic_pending(settings=None) -> int:
+    """Process the daemon queue only when the durable workspace preference allows it."""
+    from .db.session import session_scope
+    from .preferences import get_workspace_preferences
+    from .worker.pipeline import process_pending
+
+    settings = settings or get_settings()
+    with session_scope() as session:
+        enabled = get_workspace_preferences(session)["auto_process_new_recordings"]
+    if not enabled:
+        return 0
+    return process_pending(settings, limit=settings.pipeline.files_per_cycle)
 
 
 # --------------------------------------------------------------------------- #
@@ -422,6 +435,14 @@ def doctor():
             row("correct:opencode-go", ok, detail)
         except Exception as exc:  # noqa: BLE001
             row("correct:opencode-go", False, str(exc)[:60])
+
+        try:
+            from .llm.codex_local import CodexLocalLLM
+
+            ok, detail = CodexLocalLLM(settings.llm.codex_local).health()
+            row("correct:codex-local", ok, detail)
+        except Exception as exc:  # noqa: BLE001
+            row("correct:codex-local", False, str(exc)[:60])
 
     try:
         from .embeddings.base import build_embedder

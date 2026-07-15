@@ -1,28 +1,27 @@
-<nav class="filelist {% if active_id %}has-active{% endif %}">
+<nav class="filelist {% if active_id %}has-active{% endif %}" id="recording-file-list"{% if preserve_filelist %} hx-preserve{% endif %}>
   <div class="fl-top">
-    <div class="fl-title">{{ t('All files') }}</div>
-    <form method="get" action="/" style="margin-top:10px">
-      <input class="fl-search" name="q" value="{{ q or '' }}" placeholder="{{ t('Search files…') }}" autocomplete="off">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><div class="fl-title">{{ t(filelist_context.title) }}</div><span class="sub" style="font-size:11px">{{ filelist_context.total }}</span></div>
+    <form method="get" action="/" class="fl-search-wrap">
+      <span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span><input class="fl-search" name="q" value="{{ q or '' }}" placeholder="{{ t('Search files…') }}" autocomplete="off">
+      {% for name, value in [('view', filelist_context.params.view), ('folder', filelist_context.params.folder), ('tag', filelist_context.params.tag), ('origin', filelist_context.params.origin), ('state', filelist_context.params.state), ('scene', filelist_context.params.scene), ('sort', filelist_context.params.sort), ('dir', filelist_context.params.dir)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
     </form>
   </div>
   <div class="fl-scroll">
     {% for f in files %}
-    <a class="card {% if f.id == active_id %}on{% endif %}" href="/file/{{ f.id }}">
-      <div class="ct">{{ f.filename }}</div>
+    <a class="card {% if f.id == active_id %}on{% endif %} {% if f.pinned %}pinned-recording{% endif %}" href="/file/{{ f.id }}?return_to={{ return_to_param }}{% if active_tab is defined and active_tab != 'transcript' %}&amp;tab={{ active_tab }}{% endif %}" data-recording-id="{{ f.id }}"
+      hx-get="/file/{{ f.id }}?return_to={{ return_to_param }}{% if active_tab is defined and active_tab != 'transcript' %}&amp;tab={{ active_tab }}{% endif %}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">
+      <div class="card-top"><div class="ct">{{ f.filename }}</div>{% if f.needs_attention %}<span class="card-alert" title="{{ t('Needs attention') }}"></span>{% endif %}</div>
       <div class="cm">
         <span>{{ f.start_time_ms | dt }}</span><span>·</span><span>{{ f.duration_ms | dur }}</span>
       </div>
       <div class="tags">
-        {% if f.has_transcript %}<span class="chip on">{{ t('transcript') }}</span>{% endif %}
-        {% if f.has_summary %}<span class="chip on">{{ t('notes') }}</span>{% endif %}
-        {% if not f.has_transcript and f.has_imported_transcript %}<span class="chip">{{ t('Plaud import') }}</span>{% endif %}
-        {% if not f.has_summary and f.has_imported_summary %}<span class="chip">{{ t('Plaud notes') }}</span>{% endif %}
-        {% if not f.has_audio and f.origin == 'plaud' %}<span class="chip">☁ {{ t('metadata only') }}</span>{% endif %}
-        <span class="st {{ f.status }}">{{ t(f.status) }}</span>
+        <span class="card-context">{% if f.pinned %}{{ t('Selected recording') }} · {% endif %}{% if f.folder %}{{ f.folder.name }}{% elif f.origin == 'local' %}{{ t('Local upload') }}{% elif not f.has_audio %}{{ t('Plaud · metadata only') }}{% else %}Plaud{% endif %}{% if f.needs_attention %} · {{ t('Needs attention') }}{% elif f.retry.next_at %} · {{ t('Retry scheduled') }}{% endif %}</span>
+        {% if f.status != 'done' %}<span class="st {{ f.status }}">{{ t(f.status) }}</span>{% elif f.has_summary %}<span class="nav-icon" title="{{ t('Notes') }}" style="--nav-icon:url('/static/lucide/sticky-note.svg');width:13px;height:13px;color:var(--faint)"></span>{% endif %}
       </div>
     </a>
     {% else %}
-    <div class="empty" style="padding:40px 12px"><div class="big">🎙️</div>{{ t('No recordings yet.') }}</div>
+    <div class="empty" style="padding:40px 12px"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/audio-lines.svg')"></span>{{ t('No recordings yet.') }}</div>
     {% endfor %}
   </div>
+  {% if filelist_context.pages > 1 %}<div class="fl-pagination" aria-label="{{ t('Recording list pages') }}">{% if filelist_context.previous_url %}<a href="{{ filelist_context.previous_url }}" data-replace-filelist aria-label="{{ t('Previous') }}">‹</a>{% else %}<span aria-disabled="true">‹</span>{% endif %}<span class="fl-page-label">{{ filelist_context.page }} / {{ filelist_context.pages }}</span>{% if filelist_context.next_url %}<a href="{{ filelist_context.next_url }}" data-replace-filelist aria-label="{{ t('Next') }}">›</a>{% else %}<span aria-disabled="true">›</span>{% endif %}</div>{% endif %}
 </nav>

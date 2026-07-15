@@ -56,6 +56,7 @@
 {% endblock %}
 {% block scripts %}
 <script>
+(()=>{
 const tr=window.localplaudT;
 const TEMPLATE_ITEMS={{ template_items|tojson }},byKey=Object.fromEntries(TEMPLATE_ITEMS.map(item=>[item.key,item]));
 const backdrop=document.getElementById('template-backdrop'),form=document.getElementById('template-form'),title=document.getElementById('template-modal-title'),status=document.getElementById('template-form-status');let mode='create',sourceKey=null;
@@ -63,5 +64,6 @@ function openTemplate(nextMode,key=null){mode=nextMode;sourceKey=key;form.reset(
 document.getElementById('new-template').onclick=()=>openTemplate('create');document.querySelectorAll('.template-view').forEach(button=>button.onclick=()=>openTemplate('view',button.dataset.key));document.querySelectorAll('.template-copy').forEach(button=>button.onclick=()=>openTemplate('copy',button.dataset.key));document.querySelectorAll('.template-edit').forEach(button=>button.onclick=()=>openTemplate('edit',button.dataset.key));
 function closeTemplate(){backdrop.hidden=true;}document.getElementById('template-close').onclick=closeTemplate;document.getElementById('template-cancel').onclick=closeTemplate;backdrop.addEventListener('click',event=>{if(event.target===backdrop)closeTemplate();});
 form.addEventListener('submit',async event=>{event.preventDefault();const data=new FormData(form),body={key:data.get('key'),name:data.get('name'),system_prompt:data.get('system_prompt'),instructions:data.get('instructions')};let url='/api/note-templates',method='POST';if(mode==='edit'){url=`/api/note-templates/${sourceKey}`;method='PUT';delete body.key;}if(mode==='copy'){url=`/api/note-templates/${sourceKey}/copy`;body={key:body.key,name:body.name};}const response=await fetch(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)}),result=await response.json();if(response.ok){status.textContent=tr('Saved. Reloading…');location.href='/templates?tab=my';}else status.textContent=tr(result.detail?.[0]?.msg||result.detail||'Could not save template');});
+})();
 </script>
 {% endblock %}

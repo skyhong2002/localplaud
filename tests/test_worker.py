@@ -10,7 +10,12 @@ from localplaud.worker.index import build_chunks
 
 def _transcript(n: int, chars_each: int = 300) -> Transcript:
     segs = [
-        Segment(text="word " * (chars_each // 5), start=float(i), end=float(i + 1), speaker=f"SPEAKER_0{i % 2}")
+        Segment(
+            text="word " * (chars_each // 5),
+            start=float(i),
+            end=float(i + 1),
+            speaker="SPEAKER_00",
+        )
         for i in range(n)
     ]
     return Transcript(segments=segs)
@@ -32,6 +37,28 @@ def test_build_chunks_skips_empty_segments():
     chunks = build_chunks(t)
     assert len(chunks) == 1
     assert chunks[0]["text"] == "hi"
+
+
+def test_build_chunks_never_crosses_speaker_boundaries():
+    transcript = Transcript(
+        segments=[
+            Segment(text="alpha", start=0.0, end=1.0, speaker="SPEAKER_00"),
+            Segment(text="beta", start=1.0, end=2.0, speaker="SPEAKER_01"),
+            Segment(text="gamma", start=2.0, end=3.0, speaker="SPEAKER_01"),
+        ]
+    )
+
+    chunks = build_chunks(transcript, target_chars=700)
+
+    assert chunks == [
+        {"text": "alpha", "start": 0.0, "end": 1.0, "speaker": "SPEAKER_00"},
+        {
+            "text": "beta gamma",
+            "start": 1.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_01",
+        },
+    ]
 
 
 def test_retrieve_ranks_by_cosine(monkeypatch, tmp_path):

@@ -210,6 +210,32 @@ def test_single_recording_followup_persists_history_and_sources(monkeypatch, tmp
     ).status_code == 409
 
 
+def test_ask_answers_render_safe_markdown(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    monkeypatch.setattr(
+        "localplaud.worker.qa.answer",
+        lambda query, **kwargs: {
+            "answer": (
+                "## Decision\n\n- Ship\n  - Friday\n\n"
+                "| Owner | Task |\n| --- | --- |\n| Alex | Review |\n\n"
+                "<script>alert('x')</script> [bad](javascript:alert(1))"
+            ),
+            "sources": [],
+        },
+    )
+
+    long_query = "unbroken" * 20
+    response = client.post("/file/r1/ask", data={"q": long_query})
+    assert response.status_code == 200
+    assert 'class="ask-user-message"' in response.text and long_query in response.text
+    assert "<h2>Decision</h2>" in response.text
+    assert "<table>" in response.text
+    assert "&lt;script&gt;alert('x')&lt;/script&gt;" in response.text
+    assert "<script>alert('x')</script>" not in response.text
+    assert 'href="javascript:' not in response.text
+
+
 def test_save_answer_is_idempotent_editable_and_visible(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed()
@@ -246,7 +272,18 @@ def test_save_answer_is_idempotent_editable_and_visible(monkeypatch, tmp_path):
     assert "Weekly Sync" in notes_page.text
     detail = client.get("/file/r1")
     assert "What was decided?" in detail.text
-    assert f'data-panel="saved-{note_id}"' in detail.text
+    assert f'data-note-panel="saved-{note_id}"' in detail.text
+
+    long_title = "L" * 200
+    assert client.put(
+        f"/api/notes/{note_id}",
+        json={"title": long_title, "content_md": "Still grounded."},
+    ).status_code == 200
+    long_notes_page = client.get("/notes")
+    assert long_title in long_notes_page.text
+    assert 'class="saved-note-head"' in long_notes_page.text
+    assert 'class="saved-note-title"' in long_notes_page.text
+    assert 'class="saved-note-actions"' in long_notes_page.text
 
     changed = client.put(
         f"/api/notes/{note_id}",
@@ -409,7 +446,7 @@ def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, 
         }
 
     monkeypatch.setattr("localplaud.worker.qa.answer", fake_answer)
-    page = client.get("/")
+    page = client.get("/?ask=true")
     assert 'hx-post="/ask/skill"' in page.text
     assert "What decisions were made recently?" in page.text
     assert "LIBRARY GROUNDED" in page.text
@@ -462,7 +499,7 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
         return {"answer": f"Scoped: {query}", "sources": []}
 
     monkeypatch.setattr("localplaud.worker.qa.answer", fake_answer)
-    page = client.get("/")
+    page = client.get("/?ask=true")
     assert 'id="library-ask-scope"' in page.text
     assert 'hx-include="#library-ask-scope"' in page.text
     assert 'name="ask_speaker_name"' in page.text and "Sky · 1" in page.text

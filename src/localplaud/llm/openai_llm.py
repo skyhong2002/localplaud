@@ -49,12 +49,16 @@ class OpenAILLM:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        request = {
+        request: dict[str, object] = {
             "model": self.cfg.model,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
         }
+        if self.cfg.reasoning_effort is not None:
+            request["reasoning_effort"] = self.cfg.reasoning_effort
+            request["max_completion_tokens"] = max_tokens
+        else:
+            request["temperature"] = temperature
+            request["max_tokens"] = max_tokens
         if json_schema is not None:
             request["response_format"] = {
                 "type": "json_schema",
