@@ -493,8 +493,15 @@ def _base_ctx(request: Request, active: str) -> dict:
             "ready": status_counts.get(FileStatus.done, 0),
             "attention": status_counts.get(FileStatus.error, 0)
             + status_counts.get(FileStatus.partial, 0),
+            # Matches the workspace's pending vocabulary: actively working plus
+            # audio that is downloaded/downloading and awaiting its pipeline run.
             "processing": status_counts.get(FileStatus.processing, 0)
-            + status_counts.get(FileStatus.downloading, 0),
+            + status_counts.get(FileStatus.downloading, 0)
+            + status_counts.get(FileStatus.downloaded, 0),
+            # Cloud-only rows are not "caught up" — they simply live in Plaud
+            # until the user imports audio.
+            "cloud": status_counts.get(FileStatus.discovered, 0)
+            + status_counts.get(FileStatus.metadata_only, 0),
         }
         sidebar_counts = {
             "all": session.scalar(
@@ -574,6 +581,13 @@ _SORT_COLUMNS = {
 }
 _STATE_VALUES = {s.value for s in FileStatus}
 _ATTENTION_STATES = {FileStatus.error.value, FileStatus.partial.value}
+# Aggregate filters matching the Workspace-status vocabulary: one URL per
+# ops-card bucket, resolved onto the same status filtering as single values.
+_STATE_ALIASES = {
+    "attention": [FileStatus.error, FileStatus.partial],
+    "generating": [FileStatus.processing, FileStatus.downloading, FileStatus.downloaded],
+    "cloud": [FileStatus.discovered, FileStatus.metadata_only],
+}
 
 
 def _scene_label(scene: int | None) -> str:
@@ -604,7 +618,7 @@ def _parse_library_params(
     """Normalize library query params, falling back to defaults on bad input."""
     sort_key = sort if sort in _SORT_COLUMNS else "recorded"
     direction = dir if dir in {"asc", "desc"} else "desc"
-    state_val = state if state in _STATE_VALUES else None
+    state_val = state if state in _STATE_VALUES or state in _STATE_ALIASES else None
     scene_val: int | None = None
     if scene not in (None, ""):
         try:
@@ -752,7 +766,11 @@ def _library_query(params: dict):
             or_(PlaudFile.local_title.ilike(pattern), PlaudFile.filename.ilike(pattern))
         )
     if params["state"] is not None:
-        stmt = stmt.where(PlaudFile.status == params["state"])
+        alias_states = _STATE_ALIASES.get(params["state"])
+        if alias_states is not None:
+            stmt = stmt.where(PlaudFile.status.in_(alias_states))
+        else:
+            stmt = stmt.where(PlaudFile.status == params["state"])
     if params["scene"] is not None:
         stmt = stmt.where(PlaudFile.scene == params["scene"])
     if params["folder"] is not None:
@@ -1224,7 +1242,13 @@ def _stats(session) -> dict:
         session.scalar(
             select(func.count())
             .select_from(PlaudFile)
-            .where(PlaudFile.status.in_([FileStatus.processing, FileStatus.downloading]))
+            # Same pending bucket as the Workspace-status card: working plus
+            # downloaded/downloading audio awaiting its pipeline run.
+            .where(
+                PlaudFile.status.in_(
+                    [FileStatus.processing, FileStatus.downloading, FileStatus.downloaded]
+                )
+            )
         )
         or 0
     )

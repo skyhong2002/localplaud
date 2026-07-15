@@ -431,3 +431,19 @@ def test_acceptance_check_json_stays_ansi_free_under_force_color(monkeypatch, tm
     report = json.loads(result.stdout)
     assert report["passed"] is False
     assert report["schema"].startswith("localplaud-subscription-independence/")
+
+
+def test_acceptance_check_json_reports_missing_recording_as_json(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    from localplaud.cli import app
+    from localplaud.db.session import init_db
+
+    init_db()
+    monkeypatch.setenv("FORCE_COLOR", "3")
+    result = CliRunner().invoke(app, ["acceptance-check", "does-not-exist", "--json"])
+    assert result.exit_code == 1
+    assert "\x1b" not in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["passed"] is False
+    assert payload["file_id"] == "does-not-exist"
+    assert payload["error"]

@@ -78,7 +78,23 @@ def acceptance_check(
     try:
         report = subscription_independence_report(file_id)
     except LookupError as exc:
-        console.print(f"[red]✗[/] {exc}")
+        if json_output:
+            # The --json contract holds even for a missing recording:
+            # machine-readable stdout, never human prose.
+            typer.echo(
+                json.dumps(
+                    {
+                        "schema": "localplaud-subscription-independence/v1",
+                        "file_id": file_id,
+                        "passed": False,
+                        "error": str(exc),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            console.print(f"[red]✗[/] {exc}")
         raise typer.Exit(1) from exc
     if json_output:
         # Plain stdout, never Rich: automation parses this even when the

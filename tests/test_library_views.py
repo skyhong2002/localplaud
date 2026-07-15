@@ -198,3 +198,58 @@ def test_index_invalid_params_ok(monkeypatch, tmp_path):
     _seed()
     r = c.get("/?sort=xyz&dir=nope&state=bad&scene=notint&view=??")
     assert r.status_code == 200
+
+
+def test_state_aliases_match_ops_card_buckets_exactly(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    statuses = {
+        "s-done": FileStatus.done,
+        "s-error": FileStatus.error,
+        "s-partial": FileStatus.partial,
+        "s-processing": FileStatus.processing,
+        "s-downloading": FileStatus.downloading,
+        "s-downloaded": FileStatus.downloaded,
+        "s-discovered": FileStatus.discovered,
+        "s-metadata": FileStatus.metadata_only,
+    }
+    with session_scope() as s:
+        for rid, status in statuses.items():
+            s.add(PlaudFile(id=rid, filename=rid, status=status,
+                            duration_ms=1000, start_time_ms=0))
+
+    def ids(state):
+        return {f["id"] for f in c.get(f"/api/files?state={state}").json()["files"]}
+
+    # Each aggregate alias filters exactly the statuses its displayed count
+    # sums, so a clicked number always lands on that many rows.
+    assert ids("generating") == {"s-processing", "s-downloading", "s-downloaded"}
+    assert ids("attention") == {"s-error", "s-partial"}
+    assert ids("cloud") == {"s-discovered", "s-metadata"}
+    assert ids("done") == {"s-done"}
+
+    page = c.get("/")
+    card = page.text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
+    assert '<a class="ops-stat" href="/?state=generating"><strong>3</strong> generating</a>' in card
+    assert '<a class="ops-stat" href="/?state=attention"><strong class="ops-attn">2</strong> need attention</a>' in card
+    assert '<a class="ops-stat" href="/?state=cloud"><strong>2</strong> in cloud</a>' in card
+    assert '<a class="ops-stat" href="/?state=done"><strong>1</strong> ready</a>' in card
+
+
+def test_ops_card_cloud_only_is_not_all_caught_up(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="c-done", filename="Done", status=FileStatus.done,
+                        duration_ms=1000, start_time_ms=0))
+        s.add(PlaudFile(id="c-cloud", filename="Cloud", status=FileStatus.metadata_only,
+                        duration_ms=1000, start_time_ms=0))
+
+    card = c.get("/").text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
+    assert "Cloud-only recordings await import" in card
+    assert "All caught up" not in card
+    assert '<a class="ops-stat" href="/?state=cloud"><strong>1</strong> in cloud</a>' in card

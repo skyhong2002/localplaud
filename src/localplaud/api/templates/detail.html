@@ -576,6 +576,7 @@
     const progressEmpty=document.querySelector('[data-generation-progress]');
     const stateLabel=document.getElementById('recording-state-label');
     const pendingStates=['processing','downloaded','downloading'];
+    const terminalStates=['done','partial','error'];
     const initiallyProcessing={{ (f.status == 'processing') | tojson }};
     if(!progressEmpty&&!initiallyProcessing)return;
     let statusTimer=null;
@@ -583,17 +584,34 @@
     const friendly=status=>status==='processing'?tr('Generating…'):tr('Queued for generation');
     const tick=async()=>{
       if(cleanupController.signal.aborted)return;
-      let data;
-      try{data=await fetch('/api/imports/plaud/files/{{ f.id }}/audio/status',{signal:cleanupController.signal}).then(r=>r.json());}
-      catch(error){if(error.name!=='AbortError')statusTimer=setTimeout(tick,5000);return;}
-      if(pendingStates.includes(data.status)){
-        if(progressEmpty)document.getElementById('generation-progress-title').textContent=friendly(data.status);
-        if(stateLabel)stateLabel.textContent=friendly(data.status);
+      let data=null;
+      try{
+        const response=await fetch('/api/imports/plaud/files/{{ f.id }}/audio/status',{signal:cleanupController.signal});
+        if(response.ok)data=await response.json();
+      }catch(error){if(error.name==='AbortError')return;}
+      // An HTMX navigation may have torn this workspace down while the fetch
+      // or JSON body was resolving: never touch the DOM or refresh after that.
+      if(cleanupController.signal.aborted)return;
+      const status=typeof data?.status==='string'?data.status:null;
+      if(status&&pendingStates.includes(status)){
+        if(progressEmpty)document.getElementById('generation-progress-title').textContent=friendly(status);
+        if(stateLabel)stateLabel.textContent=friendly(status);
         statusTimer=setTimeout(tick,2500);
         return;
       }
-      if(progressEmpty){location.reload();return;}
-      if(stateLabel)stateLabel.textContent=tr(data.status);
+      if(status&&terminalStates.includes(status)){
+        // Only an explicitly recognized terminal status may replace the view.
+        // Refresh the workspace in place so finished notes/mind map or the
+        // failure alert with Resume become visible; the current URL keeps the
+        // active tab and file-list context, and hx-preserve keeps the list.
+        if(window.htmx){htmx.ajax('GET',location.pathname+location.search,{target:'#app-view',select:'#app-view',swap:'outerHTML'});}
+        else{location.reload();}
+        return;
+      }
+      // Non-2xx responses, unparseable bodies, network failures, and
+      // unrecognized statuses are uncertainty, never completion: keep the
+      // friendly state and retry at a calmer bounded interval.
+      statusTimer=setTimeout(tick,7000);
     };
     statusTimer=setTimeout(tick,2500);
   })();

@@ -563,6 +563,18 @@ def test_processing_recording_shows_friendly_progress(monkeypatch, tmp_path):
     # The poller reuses the existing read-only status endpoint with cleanup.
     assert "/api/imports/plaud/files/r7/audio/status" in r.text
     assert "if(statusTimer)clearTimeout(statusTimer)" in r.text
+    # Hardened terminal detection: only a 2xx body with a recognized string
+    # status may refresh the view; anything else retries calmly, never reloads.
+    assert "if(response.ok)data=await response.json();" in r.text
+    assert "if(cleanupController.signal.aborted)return;" in r.text
+    assert "const status=typeof data?.status==='string'?data.status:null;" in r.text
+    assert "const terminalStates=['done','partial','error'];" in r.text
+    assert "statusTimer=setTimeout(tick,7000);" in r.text
+    assert r.text.index("terminalStates.includes(status)") < r.text.index("htmx.ajax('GET',location.pathname+location.search")
+    # Terminal refresh preserves tab and file-list context via an in-place
+    # workspace swap instead of a hard reload when htmx is available.
+    assert "htmx.ajax('GET',location.pathname+location.search,{target:'#app-view',select:'#app-view',swap:'outerHTML'})" in r.text
+    assert "else{location.reload();}" in r.text
     assert ".generate-progress-icon { animation:generate-spin" in r.text
     assert "@media (prefers-reduced-motion: no-preference)" in r.text
 
@@ -625,13 +637,15 @@ def test_sidebar_ops_card_summarizes_workspace(monkeypatch, tmp_path):
                         duration_ms=1000, start_time_ms=0, audio_path=str(audio)))
 
     r = c.get("/")
-    assert 'class="ops-card" href="/status"' in r.text
     assert "Workspace status" in r.text
-    card = r.text.split('data-testid="ops-card"', 1)[1].split("</a>", 1)[0]
-    assert "<strong>1</strong> generating" in card
-    assert '<strong class="ops-attn">1</strong> need attention' in card
-    assert "<strong>1</strong> ready" in card
-    assert "View system status" in card
+    card = r.text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
+    # Each count is an individually reachable link into the Library filters,
+    # plus a single System status destination.
+    assert '<a class="ops-stat" href="/?state=generating"><strong>1</strong> generating</a>' in card
+    assert '<a class="ops-stat" href="/?state=attention"><strong class="ops-attn">1</strong> need attention</a>' in card
+    assert '<a class="ops-stat" href="/?state=done"><strong>1</strong> ready</a>' in card
+    assert '<a class="ops-sub" href="/status">View system status</a>' in card
+    assert ".ops-stat:focus-visible,.ops-card .ops-sub:focus-visible { outline:2px solid var(--blue)" in r.text
 
 
 def test_sidebar_ops_card_all_caught_up(monkeypatch, tmp_path):
@@ -641,9 +655,9 @@ def test_sidebar_ops_card_all_caught_up(monkeypatch, tmp_path):
     _seed(str(audio))  # only r1, status done
 
     r = c.get("/")
-    card = r.text.split('data-testid="ops-card"', 1)[1].split("</a>", 1)[0]
+    card = r.text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
     assert "All caught up" in card
-    assert "generating" not in card and "need attention" not in card
+    assert "generating" not in card and "need attention" not in card and "in cloud" not in card
 
 
 def test_detail_page_renders(monkeypatch, tmp_path):
@@ -1268,3 +1282,38 @@ def test_independent_ui_labels_imported_transcript_without_treating_it_as_local(
         f"&page_transcript_token={transcript_token}&offset=120"
     )
     assert mutated.status_code == 404
+
+
+def test_home_modules_use_shell_language_and_direct_routes(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()  # r1 done
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    long_title = "二○二六 Q3 跨部門客戶訪談與後續追蹤決議（含負責人與驗收條件）extended weekly review"
+    with session_scope() as s:
+        s.add(PlaudFile(id="h-gen", filename=long_title, status=FileStatus.processing,
+                        duration_ms=90000, start_time_ms=1783582838000, scene=1))
+        s.add(PlaudFile(id="h-err", filename="Failed import", status=FileStatus.error,
+                        duration_ms=30000, start_time_ms=1783582839000, scene=1))
+
+    r = c.get("/home")
+    assert r.status_code == 200
+    # Ops vocabulary and the aggregate filter route replace the old tile.
+    assert ">Generating</div>" in r.text
+    assert 'href="/?state=generating"' in r.text
+    assert "Processing now" not in r.text and "Durable local stages" not in r.text
+    # Title-first rows with one muted meta line and direct recording routes.
+    assert 'class="home-row" href="/file/h-gen"' in r.text
+    assert f'<strong class="home-row-title">{long_title}</strong>' in r.text
+    assert ".home-row-title { font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }" in r.text
+    # Friendly status chips: quiet done rows, Generating… while working.
+    row_gen = r.text.split('href="/file/h-gen"', 1)[1].split("</a>", 1)[0]
+    assert "Generating…" in row_gen
+    row_done = r.text.split('href="/file/r1"', 1)[1].split("</a>", 1)[0]
+    assert '<span class="st' not in row_done
+    # Needs attention: translated heading, aggregate route, friendly chip.
+    assert "Needs attention" in r.text
+    assert 'href="/?state=attention"' in r.text and "View all →" in r.text
+    row_err = r.text.split('href="/file/h-err"', 1)[1].split("</a>", 1)[0]
+    assert '<span class="st error">' in row_err
