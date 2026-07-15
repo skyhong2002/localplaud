@@ -356,6 +356,84 @@ def test_transcript_page_wraps_speaker_name_for_one_line_clamp(monkeypatch, tmp_
     assert f'<span class="who-name">{long_name}</span>' in page.text
 
 
+def test_ready_to_generate_empty_state_offers_method_dialog(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="r2", filename="Fresh recording", status=FileStatus.downloaded,
+                        duration_ms=120000, start_time_ms=1783582737000, scene=1,
+                        audio_path=str(audio)))
+
+    r = c.get("/file/r2")
+    assert r.status_code == 200
+    # Guided empty state leads the reading flow instead of a bare status line.
+    assert "Ready to generate" in r.text
+    assert "The transcript, notes, and mind map will appear here after generation." in r.text
+    assert "data-open-generate" in r.text
+    assert "Transcript is not available yet." not in r.text
+    # Select-generation-method dialog: accessible, method radios, custom rows.
+    assert 'id="generate-backdrop"' in r.text
+    assert 'role="dialog" aria-modal="true" aria-labelledby="generate-title"' in r.text
+    assert "Select generation method" in r.text
+    assert "Auto generation" in r.text and "Custom generation" in r.text
+    assert 'name="generate-method" value="auto" checked' in r.text
+    assert 'id="generate-template"' in r.text
+    assert 'id="generate-start"' in r.text and "Start generation" in r.text
+    assert 'id="generate-cancel"' in r.text and 'id="generate-close"' in r.text
+    assert "The original audio and your edits are never replaced." in r.text
+    # The guided empty state stays free of technical pipeline vocabulary.
+    empty_block = r.text.split('class="empty generate-empty"', 1)[1].split("</div>", 1)[0]
+    for term in ("diarize", "align", "embed", "ASR", "pipeline"):
+        assert term not in empty_block
+    # No-notes guidance for a recording without a local transcript.
+    assert "Notes are generated from the local transcript. Generate the transcript first." in r.text
+
+
+def test_metadata_only_recording_guides_audio_import(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="r3", filename="Cloud only", status=FileStatus.metadata_only,
+                        duration_ms=90000, start_time_ms=1783582737000, scene=1,
+                        audio_path=None))
+
+    r = c.get("/file/r3")
+    assert r.status_code == 200
+    assert "Audio not imported yet" in r.text
+    assert "generation then runs in this workspace with your configured providers" in r.text
+    assert "data-import-audio" in r.text
+    # Without local audio there is nothing to generate from yet.
+    assert 'id="generate-backdrop"' not in r.text
+
+
+def test_notes_empty_state_guides_template_generation(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    from localplaud.db.models import FileStatus, PlaudFile, Transcript
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="r4", filename="Transcribed only", status=FileStatus.partial,
+                        duration_ms=90000, start_time_ms=1783582737000, scene=1,
+                        audio_path=str(audio)))
+        s.add(Transcript(file_id="r4", provider="mlx-whisper", language="zh", text="你好",
+                         segments=[{"text": "你好", "start": 0.0, "end": 1.0}]))
+
+    r = c.get("/file/r4?tab=notes")
+    assert r.status_code == 200
+    assert "No notes yet." in r.text
+    assert "Pick a template above and generate notes" in r.text
+    # A local transcript already exists, so the pre-generation dialog is gone.
+    assert 'id="generate-backdrop"' not in r.text
+
+
 def test_detail_page_renders(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     audio = tmp_path / "audio.mp3"
@@ -467,6 +545,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'id="open-share"' in r.text and 'id="share-backdrop" hidden' in r.text
     assert 'id="generate-notes"' in r.text
     assert "Choose a template, then generate notes and mind map." not in r.text
+    assert 'id="generate-backdrop"' not in r.text  # transcript exists — no pre-generation dialog
     assert '<details class="speaker-pill">' in r.text
     assert '<form class="speaker-editor" method="post" action="/file/r1/speakers">' in r.text
     assert '<h1>Sync</h1>' in r.text

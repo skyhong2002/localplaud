@@ -29,7 +29,7 @@
         </div>
       </div>
       <div class="recording-actions">
-        {% if not f.has_audio and f.origin == 'plaud' %}<button class="icon-action" id="import-recording-audio" type="button" aria-label="{{ t('Import audio') }}" title="{{ t('Import audio') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span><span class="action-label">{{ t('Import audio') }}</span></button>{% endif %}
+        {% if not f.has_audio and f.origin == 'plaud' %}<button class="icon-action" id="import-recording-audio" type="button" data-import-audio aria-label="{{ t('Import audio') }}" title="{{ t('Import audio') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span><span class="action-label">{{ t('Import audio') }}</span></button>{% endif %}
         <button class="icon-action" id="open-share" type="button" aria-label="{{ t('Share') }}" title="{{ t('Share') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span><span class="action-label">{{ t('Share') }}</span></button>
         {% if f.transcript or f.summaries or f.has_audio %}<button class="icon-action" id="open-export" type="button" aria-label="{{ t('Export') }}" title="{{ t('Export') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span><span class="action-label">{{ t('Export') }}</span></button>{% endif %}
         <details class="recording-more"><summary class="icon-action icon-only" aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></summary><div class="recording-menu">
@@ -178,7 +178,23 @@
       </details>
       {% endif %}
       {% else %}
+      {% if f.has_audio %}
+      <div class="empty generate-empty">
+        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>
+        <strong class="empty-title">{{ t('Ready to generate') }}</strong>
+        <span class="sub empty-sub">{{ t('The transcript, notes, and mind map will appear here after generation.') }}</span>
+        <button class="btn generate-cta" type="button" data-open-generate><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Generate') }}</button>
+      </div>
+      {% elif f.origin == 'plaud' %}
+      <div class="empty generate-empty">
+        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>
+        <strong class="empty-title">{{ t('Audio not imported yet') }}</strong>
+        <span class="sub empty-sub">{{ t('Import the original audio from Plaud first; generation then runs in this workspace with your configured providers.') }}</span>
+        <button class="btn generate-cta" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span><span class="action-label">{{ t('Import audio') }}</span></button>
+      </div>
+      {% else %}
       <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/audio-lines.svg')"></span>{{ t('Transcript is not available yet.') }}</div>
+      {% endif %}
       {% endif %}
     </div>
 
@@ -225,7 +241,11 @@
     </div>
     {% endfor %}
       {% else %}
-      <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span>{{ t('No notes yet.') }}</div>
+      <div class="empty generate-empty">
+        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span>
+        <strong class="empty-title">{{ t('No notes yet.') }}</strong>
+        <span class="sub empty-sub">{% if f.has_local_transcript %}{{ t('Pick a template above and generate notes — the transcript stays untouched and every generated version is kept.') }}{% else %}{{ t('Notes are generated from the local transcript. Generate the transcript first.') }}{% endif %}</span>
+      </div>
       {% endif %}
     </div>
 
@@ -275,6 +295,47 @@
     </div>
   </div></section>
 </div>
+{% if f.has_audio and not f.transcript %}
+<div class="import-backdrop" id="generate-backdrop" hidden>
+  <section class="import-modal" style="min-height:0;width:min(520px,100%)" role="dialog" aria-modal="true" aria-labelledby="generate-title">
+    <div class="import-head"><span id="generate-title">{{ t('Select generation method') }}</span><button class="import-close" id="generate-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="import-body" style="gap:13px">
+      <label class="generate-option">
+        <input type="radio" name="generate-method" value="auto" checked>
+        <span class="generate-option-body"><strong>{{ t('Auto generation') }}</strong>
+        <span class="sub">{{ t('localplaud picks a note template from the recording and uses the resolved execution profile.') }}</span></span>
+      </label>
+      <label class="generate-option">
+        <input type="radio" name="generate-method" value="custom">
+        <span class="generate-option-body"><strong>{{ t('Custom generation') }}</strong>
+        <span class="sub">{{ t('Choose the note template and execution profile before starting.') }}</span></span>
+      </label>
+      <div id="generate-custom" class="generate-custom" hidden>
+        <label>{{ t('Note template') }}
+          <select id="generate-template" class="search-input">
+            <option value="auto" {% if f.note_template_key == 'auto' %}selected{% endif %}>{{ t('Auto · choose from recording') }}</option>
+            {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
+          </select>
+        </label>
+        {% if f.profiles %}
+        <label>{{ t('Execution profile') }}
+          <select id="generate-profile" class="search-input" data-current="{{ f.profile_id or '' }}">
+            <option value="" {% if f.profile_id is none %}selected{% endif %}>{{ t('Automatic') }} · {{ t('resolved from workspace rules') }}</option>
+            {% for profile in f.profiles %}<option value="{{ profile.id }}" {% if profile.id == f.profile_id %}selected{% endif %}>{{ profile.label }}</option>{% endfor %}
+          </select>
+        </label>
+        {% endif %}
+      </div>
+      <div class="sub" style="font-size:11.5px">{{ t('Generation runs with your configured providers. The original audio and your edits are never replaced.') }}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn sec" type="button" id="generate-cancel">{{ t('Cancel') }}</button>
+        <button class="btn" type="button" id="generate-start"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Start generation') }}</button>
+      </div>
+      <span id="generate-result" class="sub" aria-live="polite" style="font-size:12px"></span>
+    </div>
+  </section>
+</div>
+{% endif %}
 <div class="import-backdrop" id="metadata-backdrop" hidden>
   <section class="import-modal" style="width:min(520px,100%);min-height:0" role="dialog" aria-modal="true" aria-labelledby="metadata-title">
     <div class="import-head"><span id="metadata-title">{{ t('Folder and tags') }}</span><button class="import-close" id="metadata-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
@@ -440,6 +501,37 @@
   const exportBackdrop=document.getElementById('export-backdrop');
   document.getElementById('open-export')?.addEventListener('click',event=>openDialog(exportBackdrop,event.currentTarget));
   document.getElementById('export-close')?.addEventListener('click',()=>closeDialog(exportBackdrop));
+  const generateBackdrop=document.getElementById('generate-backdrop');
+  if(generateBackdrop){
+    document.querySelectorAll('[data-open-generate]').forEach(button=>button.addEventListener('click',event=>openDialog(generateBackdrop,event.currentTarget)));
+    const closeGenerate=()=>closeDialog(generateBackdrop);
+    document.getElementById('generate-close').onclick=closeGenerate;document.getElementById('generate-cancel').onclick=closeGenerate;
+    generateBackdrop.addEventListener('click',event=>{if(event.target===generateBackdrop)closeGenerate();});
+    const customPanel=document.getElementById('generate-custom');
+    generateBackdrop.querySelectorAll('input[name="generate-method"]').forEach(radio=>radio.addEventListener('change',()=>{customPanel.hidden=generateBackdrop.querySelector('input[name="generate-method"]:checked').value!=='custom';}));
+    document.getElementById('generate-start').addEventListener('click',async event=>{
+      const button=event.currentTarget,out=document.getElementById('generate-result');
+      const custom=generateBackdrop.querySelector('input[name="generate-method"]:checked').value==='custom';
+      button.disabled=true;out.textContent=tr('Starting generation…');
+      try{
+        if(custom){
+          const key=document.getElementById('generate-template').value;
+          const saved=await fetch('/api/files/{{ f.id }}/note-template',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({key})});
+          if(!saved.ok){const data=await saved.json();out.textContent=data.detail||tr('Could not save template');button.disabled=false;return;}
+          const profileSelect=document.getElementById('generate-profile');
+          if(profileSelect&&profileSelect.value!==profileSelect.dataset.current){
+            const body=new URLSearchParams();body.append('profile_id',profileSelect.value);
+            const applied=await fetch('/file/{{ f.id }}/profile',{method:'POST',body});
+            if(!applied.ok){out.textContent=tr('Could not apply the execution profile');button.disabled=false;return;}
+          }
+        }
+        const queued=await fetch('/file/{{ f.id }}/reprocess',{method:'POST'});
+        if(!queued.ok){out.textContent=(await queued.text())||tr('Could not start generation');button.disabled=false;return;}
+        out.textContent=tr('Generation queued. Stages complete in the background.');
+        setTimeout(()=>location.reload(),1200);
+      }catch(_error){out.textContent=tr('Could not start generation');button.disabled=false;}
+    });
+  }
   exportBackdrop?.addEventListener('click',event=>{if(event.target===exportBackdrop)closeDialog(exportBackdrop);});
   const shareBackdrop=document.getElementById('share-backdrop'),shareInput=document.getElementById('share-link'),shareResult=document.getElementById('share-result'),systemShare=document.getElementById('system-share');
   const recordingUrl=()=>{const url=new URL(location.href);url.searchParams.delete('workspace');url.searchParams.delete('preserve_filelist');url.searchParams.delete('return_to');url.hash='';return url.href;};
@@ -453,8 +545,8 @@
     const speakers=document.getElementById('export-speakers').checked;
     location.href=`/file/{{ f.id }}/export/transcript.${link.dataset.fmt}?timestamps=${timestamps}&speakers=${speakers}`;
   }));
-  document.getElementById('import-recording-audio')?.addEventListener('click',async()=>{
-    const button=document.getElementById('import-recording-audio'),label=button.querySelector('.action-label'),out=document.getElementById('reprocess-msg');button.disabled=true;if(label)label.textContent=tr('Importing…');
+  document.querySelectorAll('[data-import-audio]').forEach(button=>button.addEventListener('click',async()=>{
+    const label=button.querySelector('.action-label'),out=document.getElementById('reprocess-msg');button.disabled=true;if(label)label.textContent=tr('Importing…');
     let response,data;try{response=await fetch('/api/imports/plaud/files/{{ f.id }}/audio',{method:'POST',signal:cleanupController.signal});data=await response.json();}catch(error){if(error.name!=='AbortError'){out.textContent=tr('Could not start audio import');button.disabled=false;if(label)label.textContent=tr('Import audio');}return;}
     if(!response.ok){out.textContent=data.detail||tr('Could not start audio import');button.disabled=false;if(label)label.textContent=tr('Import audio');return;}
     let importTimer=null;cleanupController.signal.addEventListener('abort',()=>{if(importTimer)clearTimeout(importTimer);},{once:true});
@@ -462,7 +554,7 @@
       if(status.has_audio){if(!cleanupController.signal.aborted){out.textContent=tr('Audio imported. Reloading…');location.reload();}return;}
       if(status.status==='error'){out.textContent=status.error||tr('Audio import failed');button.disabled=false;if(label)label.textContent=tr('Retry audio import');return;}
       out.textContent=tr('Downloading this recording from Plaud…');importTimer=setTimeout(poll,1000);};poll();
-  });
+  }));
   const noteTemplateSelect=document.getElementById('note-template-select');
   function renderResolvedStages(resolved){const list=document.getElementById('resolved-stage-list');if(!list||!resolved?.stages)return;list.replaceChildren();for(const [stage,choice] of Object.entries(resolved.stages)){const chip=document.createElement('span');chip.className='chip';chip.textContent=`${tr(stage)} · ${choice.connection}:${choice.model}`;list.append(chip);}}
   async function previewTemplateResolution(key){const response=await fetch(`/api/providers/recordings/{{ f.id }}/resolution?template_key=${encodeURIComponent(key)}`),data=await response.json();if(response.ok)renderResolvedStages(data.resolved);}
