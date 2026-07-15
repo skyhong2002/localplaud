@@ -241,6 +241,11 @@ class PlaudFile(Base):
         cascade="all, delete-orphan",
         order_by="TranscriptRevision.revision",
     )
+    summary_revisions: Mapped[list[SummaryRevision]] = relationship(
+        back_populates="file",
+        cascade="all, delete-orphan",
+        order_by="SummaryRevision.revision",
+    )
     user_notes: Mapped[list[UserNote]] = relationship(
         back_populates="file", cascade="all, delete-orphan", order_by="UserNote.id"
     )
@@ -405,9 +410,64 @@ class Summary(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
+    # Set only by an explicit history restore; a fresh generation inserts a new
+    # row, so it naturally clears back to NULL.
+    restored_from_revision: Mapped[int | None] = mapped_column(Integer, default=None)
+
     file: Mapped[PlaudFile] = relationship(back_populates="summaries")
 
     __table_args__ = (UniqueConstraint("file_id", "template", name="uq_summary_file_template"),)
+
+
+class SummaryRevision(Base):
+    """Immutable archived version of a generated note (one Summary output).
+
+    Rows are written when a live Summary is displaced — by regeneration or by
+    restoring an older version — never edited afterwards. Attribute names
+    mirror ``Summary`` so snapshots copy field-for-field; the two explicit
+    column names (``transcript_revision``, ``profile_snapshot``) preserve the
+    pre-existing ``summary_revisions`` table layout in deployed libraries.
+    """
+
+    __tablename__ = "summary_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"))
+    template: Mapped[str] = mapped_column(String(64))
+    revision: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str | None] = mapped_column(String(512), default=None)
+    content_md: Mapped[str] = mapped_column(Text, default="")
+    llm_provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    source: Mapped[str] = mapped_column(String(16), default="local")
+    template_version: Mapped[int | None] = mapped_column(Integer, default=None)
+    template_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
+    input_transcript_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    input_transcript_revision: Mapped[int | None] = mapped_column(
+        "transcript_revision", Integer, default=None
+    )
+    input_transcript_source: Mapped[str | None] = mapped_column(String(16), default=None)
+    resolved_profile_snapshot: Mapped[dict] = mapped_column(
+        "profile_snapshot", JSON, default=dict
+    )
+    # When the content was originally generated (copied from the live row).
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # When and why the version left the live slot.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=_now
+    )
+    archive_reason: Mapped[str | None] = mapped_column(String(32), default=None)
+
+    file: Mapped[PlaudFile] = relationship(back_populates="summary_revisions")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "file_id",
+            "template",
+            "revision",
+            name="uq_summary_revision_file_template_revision",
+        ),
+    )
 
 
 class NoteTemplate(Base):
@@ -496,6 +556,10 @@ class UserNote(Base):
     source_summary_id: Mapped[int | None] = mapped_column(
         ForeignKey("summaries.id", ondelete="SET NULL"), unique=True, default=None
     )
+    # Immutable copy-time provenance (template, model, creation time, content
+    # fingerprint). source_summary_id tracks the live output slot, which a
+    # history restore rewrites in place; this records which version was copied.
+    source_summary_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
     citations: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(

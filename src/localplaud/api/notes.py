@@ -10,6 +10,7 @@ from sqlalchemy import select
 from ..ask_threads import note_to_dict, save_answer_as_note
 from ..db.models import Summary, UserNote
 from ..db.session import session_scope
+from ..note_history import source_summary_provenance
 
 router = APIRouter(prefix="/api", tags=["notes"])
 
@@ -76,6 +77,9 @@ def copy_generated_summary(file_id: str, summary_id: int) -> dict:
             content_md=summary.content_md,
             source_type="generated_summary",
             source_summary_id=summary.id,
+            # The id tracks the live output slot, which a history restore
+            # rewrites in place; the snapshot pins the exact copied version.
+            source_summary_snapshot=source_summary_provenance(summary),
             citations=[],
         )
         session.add(note)

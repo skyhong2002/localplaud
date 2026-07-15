@@ -24,6 +24,7 @@ from markdown_it import MarkdownIt
 from markupsafe import Markup
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.orm import aliased
 
 from ..ask_skills import get_ask_skill, list_ask_skills
 from ..ask_threads import thread_to_dict
@@ -47,6 +48,7 @@ from ..db.models import (
     StageRun,
     StageStatus,
     Summary,
+    SummaryRevision,
     Tag,
     Transcript,
     TranscriptRevision,
@@ -57,6 +59,7 @@ from ..db.models import (
 from ..db.session import init_db, session_scope
 from ..error_redaction import sanitize_error
 from ..i18n import SUPPORTED_LOCALES, catalog, translator
+from ..note_history import content_fingerprint, restore_summary_version
 from ..preferences import (
     get_workspace_preferences,
     save_workspace_preferences,
@@ -1955,6 +1958,46 @@ def recording_transcript_page(
     )
 
 
+def _lineage_label(input_transcript_revision: int | None) -> str:
+    if input_transcript_revision == 0:
+        return "raw ASR"
+    if input_transcript_revision is not None:
+        return f"transcript rev {input_transcript_revision}"
+    return "legacy / unknown transcript"
+
+
+def _fmt_history_time(value: datetime | None) -> str | None:
+    return value.strftime("%b %d, %Y · %H:%M") if value else None
+
+
+_NOTE_HISTORY_PREVIEW_LIMIT = 20
+
+
+def _note_history_entries(
+    rows: list[SummaryRevision],
+    live_fingerprint: str,
+    limit: int = _NOTE_HISTORY_PREVIEW_LIMIT,
+) -> list[dict]:
+    """Newest-first archived versions of one generated output, bounded for UI."""
+    return [
+        {
+            "revision": item.revision,
+            "title": item.title,
+            "content_md": item.content_md,
+            "template_version": item.template_version,
+            "llm_provider": item.llm_provider,
+            "model": item.model,
+            "created_at": _fmt_history_time(item.created_at),
+            "archived_at": _fmt_history_time(item.archived_at),
+            "archive_reason": item.archive_reason,
+            "lineage_label": _lineage_label(item.input_transcript_revision),
+            "input_transcript_source": item.input_transcript_source,
+            "is_current": content_fingerprint(item) == live_fingerprint,
+        }
+        for item in rows[:limit]
+    ]
+
+
 @app.get("/file/{file_id}", response_class=HTMLResponse)
 def file_detail(
     request: Request,
@@ -2017,6 +2060,42 @@ def file_detail(
             return HTMLResponse("Not found", status_code=404)
         # Default template first, then the rest.
         stale_stages = {run.stage for run in r.stage_runs if (run.detail or {}).get("stale")}
+        # A locally generated mind map hidden by staleness is out of date, not
+        # missing — the mind-map tab reports that truthfully.
+        mind_map_out_of_date = StageName.mind_map in stale_stages and any(
+            s.template == "mind_map" and s.source == "local" for s in r.summaries
+        )
+        # History is bounded at the query: per template, only the newest
+        # _NOTE_HISTORY_PREVIEW_LIMIT archived bodies are loaded; totals come
+        # from a count, never from materializing every version.
+        history_counts = dict(
+            session.execute(
+                select(SummaryRevision.template, func.count())
+                .where(SummaryRevision.file_id == file_id)
+                .group_by(SummaryRevision.template)
+            ).all()
+        )
+        history_rank = (
+            func.row_number()
+            .over(
+                partition_by=SummaryRevision.template,
+                order_by=SummaryRevision.revision.desc(),
+            )
+            .label("history_rank")
+        )
+        ranked_history = (
+            select(SummaryRevision, history_rank)
+            .where(SummaryRevision.file_id == file_id)
+            .subquery()
+        )
+        recent_revision = aliased(SummaryRevision, ranked_history)
+        history_by_template: dict[str, list[SummaryRevision]] = {}
+        for item in session.scalars(
+            select(recent_revision)
+            .where(ranked_history.c.history_rank <= _NOTE_HISTORY_PREVIEW_LIMIT)
+            .order_by(recent_revision.template, recent_revision.revision.desc())
+        ):
+            history_by_template.setdefault(item.template, []).append(item)
         summaries = sorted(
             [
                 {
@@ -2027,20 +2106,21 @@ def file_detail(
                     "template_name": (s.template_snapshot or {}).get("name")
                     or s.template.replace("-", " ").title(),
                     "template_version": s.template_version,
-                    "created_at": (
-                        s.created_at.strftime("%b %d, %Y · %H:%M") if s.created_at else None
-                    ),
+                    "created_at": _fmt_history_time(s.created_at),
                     "source": s.source,
                     "input_transcript_revision": s.input_transcript_revision,
                     "input_transcript_source": s.input_transcript_source,
-                    "lineage_label": (
-                        "raw ASR"
-                        if s.input_transcript_revision == 0
-                        else (
-                            f"transcript rev {s.input_transcript_revision}"
-                            if s.input_transcript_revision is not None
-                            else "legacy / unknown transcript"
+                    "lineage_label": _lineage_label(s.input_transcript_revision),
+                    "restored_from_revision": s.restored_from_revision,
+                    "version_count": history_counts.get(s.template, 0)
+                    if s.source == "local"
+                    else 0,
+                    "versions": (
+                        _note_history_entries(
+                            history_by_template.get(s.template, []), content_fingerprint(s)
                         )
+                        if s.source == "local"
+                        else []
                     ),
                 }
                 for s in r.summaries
@@ -2159,6 +2239,7 @@ def file_detail(
                 and (corrected is None or show_corrected)
             ),
             "summaries": summaries,
+            "mind_map_out_of_date": mind_map_out_of_date,
             "error": r.error,
             "retry": {
                 "count": r.pipeline_retry_count or 0,
@@ -3007,9 +3088,20 @@ def export_mind_map_png(file_id: str):
             )
             .order_by(Summary.id.desc())
         )
+        mind_map_stale = any(
+            run.stage == StageName.mind_map and (run.detail or {}).get("stale")
+            for run in recording.stage_runs
+        )
         title = recording.display_title
     if mind_map is None:
         raise HTTPException(status_code=409, detail="local mind map is not ready")
+    if mind_map_stale:
+        # The saved artifact no longer reflects its inputs (notes, transcript,
+        # or vocabulary changed); exporting it as current would be untruthful.
+        raise HTTPException(
+            status_code=409,
+            detail="mind map is out of date; regenerate notes to rebuild it",
+        )
     try:
         content = render_mind_map_png(mind_map.content_md, title=title)
     except ValueError as exc:
@@ -3404,3 +3496,96 @@ def restore_transcript_revision(
         daemon=True,
     ).start()
     return RedirectResponse(f"/file/{file_id}?view=corrected", status_code=303)
+
+
+@app.get("/api/files/{file_id}/summaries/{summary_id}/history")
+def summary_history(file_id: str, summary_id: int, limit: int = 50):
+    """Archived versions of one generated output, newest first.
+
+    Bounded at the query: only ``limit`` archived bodies are ever loaded;
+    the total comes from a count, not from materializing every version.
+    """
+    limit = max(1, min(limit, 200))
+    with session_scope() as session:
+        row = session.get(Summary, summary_id)
+        if row is None or row.file_id != file_id:
+            raise HTTPException(status_code=404, detail="summary not found")
+        chain = (
+            SummaryRevision.file_id == file_id,
+            SummaryRevision.template == row.template,
+        )
+        version_count = session.scalar(
+            select(func.count()).select_from(SummaryRevision).where(*chain)
+        )
+        rows = list(
+            session.scalars(
+                select(SummaryRevision)
+                .where(*chain)
+                .order_by(SummaryRevision.revision.desc())
+                .limit(limit)
+            )
+        )
+        return {
+            "file_id": file_id,
+            "summary_id": row.id,
+            "template": row.template,
+            "source": row.source,
+            "current": {
+                "title": row.title,
+                "template_version": row.template_version,
+                "llm_provider": row.llm_provider,
+                "model": row.model,
+                "created_at": _fmt_history_time(row.created_at),
+                "restored_from_revision": row.restored_from_revision,
+                "lineage_label": _lineage_label(row.input_transcript_revision),
+            },
+            "version_count": version_count or 0,
+            "versions": _note_history_entries(
+                rows, content_fingerprint(row), limit=limit
+            ),
+        }
+
+
+@app.post("/file/{file_id}/summaries/{summary_id}/versions/{revision}/restore")
+def restore_summary_version_route(
+    file_id: str,
+    summary_id: int,
+    revision: int,
+    tab: str = Form("notes"),
+):
+    """Make an archived version live again; the displaced current is archived first.
+
+    A content swap on the existing Summary row: nothing is queued and no
+    stage is rerun. The transcript and search index stay as they are (built
+    from the transcript, which this does not change). A mind map sourced
+    from the restored note output is marked out of date — its input just
+    changed — but the artifact is preserved and not regenerated.
+    """
+    with session_scope() as session:
+        row = session.get(Summary, summary_id)
+        if row is None or row.file_id != file_id:
+            # The live output was regenerated (new row id) or removed since render.
+            return JSONResponse(
+                {"error": "notes changed; reload before restoring"}, status_code=409
+            )
+        if row.source != "local":
+            return JSONResponse(
+                {"error": "only locally generated notes keep version history"},
+                status_code=400,
+            )
+        target = session.scalar(
+            select(SummaryRevision).where(
+                SummaryRevision.file_id == file_id,
+                SummaryRevision.template == row.template,
+                SummaryRevision.revision == revision,
+            )
+        )
+        if target is None:
+            return JSONResponse({"error": "version not found"}, status_code=404)
+        restore_summary_version(session, row, target)
+    safe_tab = tab if tab in {"notes", "mindmap"} else "notes"
+    # Land back on the note output that was just restored, not the first one.
+    note_param = f"&note=sum-{summary_id}" if safe_tab == "notes" else ""
+    return RedirectResponse(
+        f"/file/{file_id}?tab={safe_tab}{note_param}", status_code=303
+    )

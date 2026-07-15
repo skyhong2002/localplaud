@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import delete, inspect, select, text
-from sqlalchemy.engine import Engine
+from sqlalchemy import JSON, DateTime, Integer, String, delete, inspect, select, text
+from sqlalchemy.engine import Dialect, Engine
 from sqlalchemy.orm import Session
+from sqlalchemy.types import TypeEngine
 
 from ..error_redaction import sanitize_error
 from .models import Chunk, FileStatus, KeyValue, PlaudFile, Transcript
@@ -628,6 +629,65 @@ def migrate_artifact_lineage_columns(engine: Engine) -> list[str]:
     return migrated
 
 
+_SUMMARY_HISTORY_COLUMNS: tuple[tuple[str, str, TypeEngine], ...] = (
+    ("summary_revisions", "template_snapshot", JSON()),
+    ("summary_revisions", "input_transcript_id", Integer()),
+    ("summary_revisions", "input_transcript_source", String(16)),
+    ("summary_revisions", "archived_at", DateTime(timezone=True)),
+    ("summary_revisions", "archive_reason", String(32)),
+    ("summaries", "restored_from_revision", Integer()),
+)
+
+
+def summary_history_migration_statements(
+    existing_columns: dict[str, set[str]], dialect: Dialect
+) -> list[tuple[str, str]]:
+    """DDL that brings an existing library up to the note-history layout.
+
+    Pure so the PostgreSQL path is testable without a server: pass the
+    inspected ``{table: column names}`` map and the target dialect, get back
+    ``(qualified column, ALTER statement)`` pairs for the missing columns.
+    Tables absent from the map (fresh databases build them whole through
+    ``create_all``) are skipped.
+    """
+    statements: list[tuple[str, str]] = []
+    for table, column, type_ in _SUMMARY_HISTORY_COLUMNS:
+        if table not in existing_columns or column in existing_columns[table]:
+            continue
+        rendered = type_.compile(dialect=dialect)
+        statements.append(
+            (f"{table}.{column}", f"ALTER TABLE {table} ADD COLUMN {column} {rendered}")
+        )
+    return statements
+
+
+def migrate_summary_revision_schema(engine: Engine) -> list[str]:
+    """Extend note version history for archival provenance and restore.
+
+    Deployed libraries — SQLite or PostgreSQL — may carry ``summaries`` and
+    ``summary_revisions`` tables that predate these columns. ``create_all``
+    never alters an existing table, and ORM queries fail while the mapped
+    columns are missing, so the addition must run on every dialect. Fresh
+    databases get the full layout from ``create_all``. All additions are
+    nullable and additive.
+    """
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    existing = {
+        table: {item["name"] for item in inspector.get_columns(table)}
+        for table in tables & {"summary_revisions", "summaries"}
+    }
+    statements = summary_history_migration_statements(existing, engine.dialect)
+    if not statements:
+        return []
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for label, statement in statements:
+            connection.execute(text(statement))
+            migrated.append(label)
+    return migrated
+
+
 def migrate_import_schema(engine: Engine) -> list[str]:
     """Add recording origin to existing SQLite libraries."""
     if engine.dialect.name != "sqlite":
@@ -971,6 +1031,77 @@ def migrate_editable_note_source_schema(engine: Engine) -> list[str]:
             WHERE source_summary_id IS NOT NULL
         """))
     return ["user_notes.source_summary_id"]
+
+
+def migrate_editable_note_provenance_schema(engine: Engine) -> list[str]:
+    """Pin copy-time provenance onto existing editable copies.
+
+    Adds ``user_notes.source_summary_snapshot`` on any dialect, then
+    backfills copies whose exact source version can still be proven: an
+    unedited copy's content equals the live summary or one of its archived
+    versions, so that version's provenance is recorded. Copies edited since
+    they were made stay NULL — an unknown source version is reported as
+    unknown, never guessed. Note content itself is never touched.
+    """
+    inspector = inspect(engine)
+    if "user_notes" not in set(inspector.get_table_names()):
+        return []
+    columns = {item["name"] for item in inspector.get_columns("user_notes")}
+    migrated: list[str] = []
+    if "source_summary_snapshot" not in columns:
+        if "source_summary_id" not in columns:
+            # Pre-editable-copy library on a dialect the source-id migration
+            # does not cover; there is nothing to pin provenance to yet.
+            return []
+        rendered = JSON().compile(dialect=engine.dialect)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE user_notes ADD COLUMN "
+                    f"source_summary_snapshot {rendered}"
+                )
+            )
+        migrated.append("user_notes.source_summary_snapshot")
+    _backfill_editable_note_provenance(engine)
+    return migrated
+
+
+def _backfill_editable_note_provenance(engine: Engine) -> int:
+    from ..note_history import source_summary_provenance
+    from .models import Summary, SummaryRevision, UserNote
+
+    changed = 0
+    with Session(engine) as session:
+        notes = session.scalars(
+            select(UserNote).where(
+                UserNote.source_summary_id.is_not(None),
+                UserNote.source_summary_snapshot.is_(None),
+            )
+        ).all()
+        for note in notes:
+            summary = session.get(Summary, note.source_summary_id)
+            if summary is None:
+                continue
+            source: Summary | SummaryRevision | None = None
+            if summary.content_md == note.content_md:
+                source = summary
+            else:
+                source = session.scalars(
+                    select(SummaryRevision)
+                    .where(
+                        SummaryRevision.file_id == summary.file_id,
+                        SummaryRevision.template == summary.template,
+                        SummaryRevision.content_md == note.content_md,
+                    )
+                    .order_by(SummaryRevision.revision.desc())
+                    .limit(1)
+                ).first()
+            if source is None:
+                continue
+            note.source_summary_snapshot = source_summary_provenance(source)
+            changed += 1
+        session.commit()
+    return changed
 
 
 def migrate_speaker_timeline_schema(engine: Engine) -> list[str]:

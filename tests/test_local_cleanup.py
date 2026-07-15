@@ -24,6 +24,7 @@ def _client(monkeypatch, tmp_path):
         StageName,
         StageRun,
         Summary,
+        SummaryRevision,
         Transcript,
         TranscriptRevision,
         UserNote,
@@ -66,6 +67,13 @@ def _client(monkeypatch, tmp_path):
                 Summary(
                     file_id="clean", template="plaud", source="cloud", content_md="cloud"
                 ),
+                SummaryRevision(
+                    file_id="clean",
+                    template="default",
+                    revision=1,
+                    source="local",
+                    content_md="older local note",
+                ),
                 Chunk(file_id="clean", idx=0, text="chunk"),
                 StageRun(file_id="clean", stage=StageName.index),
                 UserNote(file_id="clean", title="Keep me", content_md="user-authored"),
@@ -85,6 +93,7 @@ def test_delete_processing_preserves_cloud_and_user_data(monkeypatch, tmp_path):
         "revisions": 1,
         "transcripts": 1,
         "notes": 1,
+        "note_versions": 1,
         "chunks": 1,
         "stages": 1,
         "attempts": 0,
@@ -99,6 +108,7 @@ def test_delete_processing_preserves_cloud_and_user_data(monkeypatch, tmp_path):
         assert [item.source for item in row.transcripts] == ["cloud"]
         assert [item.source for item in row.transcript_revisions] == ["cloud"]
         assert [item.source for item in row.summaries] == ["cloud"]
+        assert row.summary_revisions == []
         assert len(row.user_notes) == 1 and row.user_notes[0].title == "Keep me"
 
 

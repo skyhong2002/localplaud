@@ -151,7 +151,7 @@
             <div style="display:flex;gap:7px;align-items:center"><input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript') }}"><button class="icon-action icon-only" id="find-previous" type="button" aria-label="{{ t('Previous') }}">↑</button><button class="icon-action icon-only" id="find-next" type="button" aria-label="{{ t('Next') }}">↓</button></div><span id="find-count" class="sub" style="font-size:11px">0 {{ t('results') }}</span>
             {% if f.can_edit %}<div id="replace-row" style="display:grid;gap:7px;margin-top:8px" hidden><input id="transcript-replace" class="search-input" type="text" placeholder="{{ t('Replace with') }}"><label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> {{ t('Match case') }}</label><div><button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">{{ t('Replace all') }}</button> <span id="replace-result" class="sub" style="font-size:12px"></span></div></div><button type="button" id="toggle-replace" class="text-action">{{ t('Replace') }}</button>{% endif %}
           </div></details>
-          {% if f.revisions %}<details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Revision history') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span></summary><div class="transcript-popover history-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button><strong>{{ t('Revision history') }} · {{ f.revisions | length }}</strong>{% for revision in f.revisions %}<div class="revision-row"><div><a href="/file/{{ f.id }}?view=corrected&amp;revision={{ revision.revision }}&amp;tab=transcript&amp;return_to={{ return_to_param }}"><strong>{{ t('Revision') }} {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">{{ t('Current') }}</span>{% endif %}<div class="sub" style="font-size:11px">{{ revision.note }} · {{ revision.created_at }}</div></div>{% if not revision.current %}<form method="post" action="/file/{{ f.id }}/transcript/revisions/{{ revision.revision }}/restore" onsubmit="return confirm({{ t('Restore this revision as a new revision? Current history will be preserved.')|tojson }})"><input type="hidden" name="base_revision" value="{{ f.corrected_revision }}"><button class="icon-action" type="submit">{{ t('Restore') }}</button></form>{% endif %}</div>{% endfor %}</div></details>{% endif %}
+          {% if f.revisions %}<details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Revision history') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span></summary><div class="transcript-popover history-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button><strong>{{ t('Revision history') }} · {{ f.revisions | length }}</strong>{% for revision in f.revisions %}<div class="revision-row"><div><a href="/file/{{ f.id }}?view=corrected&amp;revision={{ revision.revision }}&amp;tab=transcript&amp;return_to={{ return_to_param }}"><strong>{{ t('Revision') }} {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">{{ t('Current') }}</span>{% endif %}<div class="sub" style="font-size:11px">{{ revision.note }} · {{ revision.created_at }}</div></div>{% if not revision.current %}<form method="post" action="/file/{{ f.id }}/transcript/revisions/{{ revision.revision }}/restore" onsubmit="return confirm({{ t('Restore this revision as a new revision? Current history will be preserved.')|tojson|forceescape }})"><input type="hidden" name="base_revision" value="{{ f.corrected_revision }}"><button class="icon-action" type="submit">{{ t('Restore') }}</button></form>{% endif %}</div>{% endfor %}</div></details>{% endif %}
         </div>
       </div>
       {% if f.speakers %}
@@ -229,8 +229,11 @@
     {% for s in notes %}
     <div class="note-panel" data-note-panel="sum-{{ s.id }}" {% if ('sum-' ~ s.id) != active_note_target %}hidden{% endif %}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0">
-        <div class="sub" style="font-size:11.5px">{% if s.template_version %}v{{ s.template_version }} · {% endif %}{% if s.created_at %}{{ s.created_at }} · {% endif %}Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}</div>
-        <button class="btn sec" type="button" data-summary-copy="{{ s.id }}" style="padding:6px 9px">{{ t('Edit a copy') }}</button>
+        <div class="sub" style="font-size:11.5px">{% if s.template_version %}v{{ s.template_version }} · {% endif %}{% if s.created_at %}{{ s.created_at }} · {% endif %}Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}{% if s.restored_from_revision %} · {{ t('restored from version') }} {{ s.restored_from_revision }}{% endif %}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex:none">
+          {% set history_summary = s %}{% set history_tab = 'notes' %}{% include '_note_history.html' %}
+          <button class="btn sec" type="button" data-summary-copy="{{ s.id }}" style="padding:6px 9px">{{ t('Edit a copy') }}</button>
+        </div>
       </div>
       <div class="md">{{ s.content_md | markdown }}</div>
     </div>
@@ -263,17 +266,24 @@
     <div class="tabpanel" id="recording-panel-mindmap" role="tabpanel" aria-labelledby="recording-tab-mindmap" data-panel="mindmap" {% if active_tab != 'mindmap' %}hidden{% endif %}>
       {% if mindmaps %}
       <div class="mindmap-toolbar">
-        <div><strong>{{ t('Mind map') }}</strong><div class="sub" style="font-size:11.5px">{{ t('Generated from') }} {{ mindmaps[-1].lineage_label }}</div></div>
+        <div><strong>{{ t('Mind map') }}</strong><div class="sub" style="font-size:11.5px">{{ t('Generated from') }} {{ mindmaps[-1].lineage_label }}{% if mindmaps[-1].restored_from_revision %} · {{ t('restored from version') }} {{ mindmaps[-1].restored_from_revision }}{% endif %}</div></div>
         <div class="mindmap-zoom">
           <button class="icon-action icon-only" id="mm-zoom-out" type="button" aria-label="{{ t('Zoom out') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/minus.svg')"></span></button>
           <input id="mm-zoom" type="range" min="15" max="140" value="100" aria-label="{{ t('Mind map zoom') }}">
           <button class="icon-action icon-only" id="mm-zoom-in" type="button" aria-label="{{ t('Zoom in') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span></button>
           <button class="icon-action" id="mm-fit" type="button">{{ t('Fit') }}</button>
           <a class="icon-action" href="/file/{{ f.id }}/export/mind-map.png"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>{{ t('Export') }}</a>
+          {% set history_summary = mindmaps[-1] %}{% set history_tab = 'mindmap' %}{% include '_note_history.html' %}
         </div>
       </div>
       <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
       <div id="mindmap-viewport" class="mindmap-viewport"><div id="mindmap-tree" class="mindmap-tree"></div></div>
+      {% elif f.mind_map_out_of_date %}
+      <div class="empty generate-empty">
+        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>
+        <strong class="empty-title">{{ t('Mind map is out of date.') }}</strong>
+        <span class="sub empty-sub">{{ t('The notes or transcript it was built from have changed. Regenerate notes to rebuild it; the previous mind map stays in version history.') }}</span>
+      </div>
       {% else %}
       <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Mind map is not available yet.') }}</div>
       {% endif %}
@@ -657,6 +667,9 @@
   });
   const selectedNoteId={{ f.selected_note_id|tojson }};
   if(selectedNoteId){activatePanel('notes');document.querySelector(`[data-note-target="saved-${selectedNoteId}"]`)?.click();}
+  const requestedNoteTarget=new URLSearchParams(location.search).get('note');
+  if(requestedNoteTarget&&!selectedNoteId)document.querySelector(`[data-note-target="${CSS.escape(requestedNoteTarget)}"]`)?.click();
+  document.querySelectorAll('[data-version-preview]').forEach(button=>button.addEventListener('click',()=>{const preview=button.closest('[data-version-row]')?.querySelector('.note-version-preview');if(!preview)return;const show=preview.hidden;preview.hidden=!show;button.setAttribute('aria-expanded',String(show));button.textContent=show?tr('Hide preview'):tr('Preview');}));
   document.querySelectorAll('[data-summary-copy]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;button.textContent={{ t('Creating editable copy…')|tojson }};const response=await fetch(`/api/files/{{ f.id }}/summaries/${button.dataset.summaryCopy}/editable-copy`,{method:'POST'}),data=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?tab=notes&note_id=${data.id}`;return;}button.disabled=false;button.textContent=data.detail||{{ t('Could not create editable copy')|tojson }};}));
   document.querySelectorAll('[data-note-edit]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.note-panel');panel.querySelector('[data-workspace-note-body]').hidden=true;panel.querySelector('[data-workspace-note-form]').hidden=false;button.hidden=true;}));
   document.querySelectorAll('[data-note-cancel]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.note-panel');panel.querySelector('[data-workspace-note-body]').hidden=false;panel.querySelector('[data-workspace-note-form]').hidden=true;panel.querySelector('[data-note-edit]').hidden=false;}));

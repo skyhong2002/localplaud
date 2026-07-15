@@ -1614,30 +1614,44 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
 
 
 def _persist_summary(file_id: str, result: dict, lineage: dict | None = None) -> None:
+    from ..note_history import archive_summary, content_fingerprint
+
     template = result.get("template", "default")
     with session_scope() as session:
-        session.execute(
-            delete(SummaryRow).where(
+        replacement = SummaryRow(
+            file_id=file_id,
+            template=template,
+            template_version=result.get("template_version"),
+            template_snapshot=result.get("template_snapshot"),
+            title=result.get("title"),
+            content_md=result.get("content_md", ""),
+            llm_provider=result.get("provider"),
+            model=result.get("model"),
+            source="local",
+            **(lineage or {}),
+            resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
+        )
+        displaced = session.scalars(
+            select(SummaryRow).where(
                 SummaryRow.file_id == file_id,
                 SummaryRow.template == template,
                 SummaryRow.source == "local",
             )
-        )
-        session.add(
-            SummaryRow(
-                file_id=file_id,
-                template=template,
-                template_version=result.get("template_version"),
-                template_snapshot=result.get("template_snapshot"),
-                title=result.get("title"),
-                content_md=result.get("content_md", ""),
-                llm_provider=result.get("provider"),
-                model=result.get("model"),
-                source="local",
-                **(lineage or {}),
-                resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
+        ).all()
+        replacement_fingerprint = content_fingerprint(replacement)
+        for row in displaced:
+            # Preserve the outgoing version before it leaves the live slot.
+            archive_summary(
+                session,
+                row,
+                reason="regenerated",
+                replacement_fingerprint=replacement_fingerprint,
             )
-        )
+            session.delete(row)
+        # Two-step flush keeps the delete ahead of the insert so the
+        # one-live-row-per-template constraint never trips mid-transaction.
+        session.flush()
+        session.add(replacement)
 
 
 def _persist_chunks(

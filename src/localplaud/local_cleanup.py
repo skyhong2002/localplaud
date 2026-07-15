@@ -13,6 +13,7 @@ from .db.models import (
     StageAttempt,
     StageRun,
     Summary,
+    SummaryRevision,
     Transcript,
     TranscriptRevision,
     UserNote,
@@ -116,6 +117,12 @@ def delete_local_processing_many(file_ids: list[str]) -> dict:
             "notes": session.execute(
                 delete(Summary).where(
                     Summary.file_id.in_(unique_ids), Summary.source == "local"
+                )
+            ).rowcount,
+            "note_versions": session.execute(
+                delete(SummaryRevision).where(
+                    SummaryRevision.file_id.in_(unique_ids),
+                    SummaryRevision.source == "local",
                 )
             ).rowcount,
             "chunks": session.execute(

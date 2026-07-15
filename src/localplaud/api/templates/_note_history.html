@@ -1,0 +1,44 @@
+{# Compact per-output version history control for one generated note/mind map.
+   Context: f (file), history_summary (summary dict with .versions), history_tab
+   ('notes' | 'mindmap' — the tab to return to after a restore). Participates in
+   the shared workspace-popover behavior (visible close, Escape, outside click,
+   focus restoration) through the transcript-tool class. #}
+{% if history_summary.versions %}
+{# Restoring a note output changes the mind map's source content, so that
+   consequence is stated up front; the mind map itself has no dependents. #}
+{% if history_tab == 'notes' %}
+{% set restore_confirm = t('Restore this version? The current version is preserved in history first. Nothing is queued or regenerated. A mind map built from these notes will be marked out of date.') %}
+{% set restore_note = t('Restoring replaces this output and preserves the displaced version in history. Nothing is queued or regenerated. A mind map built from these notes will be marked out of date.') %}
+{% else %}
+{% set restore_confirm = t('Restore this version? The current version is preserved in history first. Nothing is queued or regenerated.') %}
+{% set restore_note = t('Restoring replaces this output and preserves the displaced version in history. Nothing is queued or regenerated.') %}
+{% endif %}
+<details class="transcript-tool note-history-tool">
+  <summary class="icon-action" aria-label="{{ t('Version history') }} · {{ history_summary.version_count }}" title="{{ t('Version history') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span><span>{{ history_summary.version_count }}</span></summary>
+  <div class="transcript-popover history-popover note-history-popover">
+    <button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
+    <strong>{{ t('Version history') }} · {{ history_summary.version_count }}</strong>
+    <div class="sub" style="font-size:11px;margin-top:4px">{{ restore_note }}</div>
+    {% for v in history_summary.versions %}
+    <div class="revision-row note-version-row" data-version-row>
+      <div>
+        <strong>{{ t('Version') }} {{ v.revision }}</strong>{% if v.is_current %} <span class="chip on">{{ t('Current') }}</span>{% endif %}
+        <div class="sub" style="font-size:11px">{% if v.created_at %}{{ v.created_at }} · {% endif %}{{ v.llm_provider or 'local' }}{% if v.model %}:{{ v.model }}{% endif %}{% if v.template_version %} · {{ t('template') }} v{{ v.template_version }}{% endif %} · {{ v.lineage_label }}</div>
+        {% if v.archived_at %}<div class="sub" style="font-size:11px">{{ t('Archived') }} {{ v.archived_at }}{% if v.archive_reason == 'regenerated' %} · {{ t('replaced by regeneration') }}{% elif v.archive_reason == 'restore' %} · {{ t('displaced by restore') }}{% endif %}</div>{% endif %}
+        <button class="text-action" type="button" data-version-preview aria-expanded="false">{{ t('Preview') }}</button>
+        <div class="note-version-preview md" hidden>{{ v.content_md | markdown }}</div>
+      </div>
+      {% if not v.is_current %}
+      <form method="post" action="/file/{{ f.id }}/summaries/{{ history_summary.id }}/versions/{{ v.revision }}/restore" onsubmit="return confirm({{ restore_confirm|tojson|forceescape }})">
+        <input type="hidden" name="tab" value="{{ history_tab }}">
+        <button class="icon-action" type="submit">{{ t('Restore') }}</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% if history_summary.version_count > history_summary.versions|length %}
+    <div class="sub" style="font-size:11px;margin-top:8px">{{ t('Older versions are kept and available through the API.') }}</div>
+    {% endif %}
+  </div>
+</details>
+{% endif %}

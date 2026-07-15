@@ -235,5 +235,6 @@ def note_to_dict(row: UserNote) -> dict:
         "source_type": row.source_type,
         "ask_message_id": row.ask_message_id,
         "source_summary_id": row.source_summary_id,
+        "source_summary_snapshot": row.source_summary_snapshot,
         "citations": row.citations or [],
     }

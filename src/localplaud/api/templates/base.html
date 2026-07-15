@@ -284,6 +284,12 @@
     .revision-row { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--border); }
     .revision-row>div { min-width:0;overflow-wrap:anywhere; }
     .revision-row:first-of-type { margin-top:8px; }
+    .note-history-tool { display:inline-flex; }
+    .note-history-popover { width:min(560px,calc(100vw - 40px)); }
+    .note-version-row { align-items:flex-start; }
+    .note-version-row form { flex:none; }
+    .note-version-row>div { flex:1; }
+    .note-version-preview { margin-top:8px;max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--panel2);font-size:12px; }
     .text-action { border:0;background:transparent;color:var(--blue);padding:6px 0 0;font:inherit;font-size:11.5px;cursor:pointer; }
     /* Wrapping (not hidden horizontal scroll) keeps every output reachable and
        lets the version popover escape the strip without being clipped. */
