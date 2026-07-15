@@ -99,6 +99,13 @@ accessibility require a different design.
 - Transcript tab: click-to-seek, active-segment tracking, timestamps, speaker colors,
   speaker rename, inline correction, search/find-replace within the recording, and a
   clearly labelled switch between raw ASR and the corrected canonical transcript.
+- After word alignment and diarization, mixed-speaker ASR segments are split only
+  when their timed words can reproduce the source text without loss. Consecutive
+  runs from the same speaker are stored as one readable paragraph when separated by
+  no more than three seconds; speaker changes, unsafe text reconstruction, and longer
+  silence always start a new paragraph. Paragraphs are capped at 120 seconds or 1,200
+  characters so correction, editing, and subtitle export remain bounded. Word
+  timestamps and confidence remain intact.
 - Notes: multiple generated or user-authored note tabs, inline editing, generation
   provenance, template/model selection, and safe regeneration.
 - Mind map: navigable hierarchy generated from the canonical corrected transcript
@@ -261,8 +268,10 @@ translation helper. Provider/runtime diagnostic detail remains verbatim rather t
 being mistranslated or hidden.
 
 Workspace display preferences are durable local data rather than browser-only state:
-the chosen workspace name, system/light/dark theme, comfortable/compact density,
-IANA timezone, and 12/24-hour clock apply to every browser using the instance. Invalid
+the chosen workspace name, comfortable/compact density, IANA timezone, and
+12/24-hour clock apply to every browser using the instance. The redesigned shell
+uses one deliberate light theme; the stored theme preference is pinned to `light`
+and Settings does not offer a theme selector. Invalid
 timezones are rejected before persistence. Interface-language selection remains
 unavailable until the corresponding translations exist.
 
@@ -284,7 +293,7 @@ and that reverse-proxy authentication is external. The Web login creates durable
 expiring browser sessions using opaque cookies and peppered token hashes. Settings
 enumerates them, marks the current browser, and supports immediate remote revocation.
 The pre-authentication login surface follows the workspace's durable interface locale
-and explicit light/dark preference, while keeping Plaud OAuth visibly separate.
+and the light visual theme, while keeping Plaud OAuth visibly separate.
 Support & About exposes package/build/runtime identity and a downloadable, no-store
 diagnostics document containing only aggregate counts and non-secret switches. Tests
 prove that recording identity/content, paths, URLs/addresses, errors, environment

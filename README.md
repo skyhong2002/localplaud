@@ -130,6 +130,10 @@ Or run everything as a daemon (poll on a schedule + process continuously):
 localplaud run
 ```
 
+Automatic processing is a durable workspace preference under **Settings → Workspace**.
+When it is paused, the daemon continues polling and downloading new raw audio, while
+recordings wait for an explicit Resume/Reprocess action before any AI provider is used.
+
 ### Commands
 
 | Command | What it does |
@@ -183,11 +187,42 @@ command; embedding uses Ollama's batch `/api/embed` endpoint when available.
 Transcript correction is an explicit stage-scoped LLM selection. The initial profile
 uses the configured `[llm]` provider, while later profile versions may select any
 catalog model that advertises the `correct` capability, including Ollama, OpenAI,
-Anthropic, or OpenCode Go. The resolved connection, model, non-secret configuration,
+Anthropic, OpenCode Go, or the experimental Codex CLI adapter. The resolved connection,
+model, non-secret configuration,
 privacy boundary, and secret reference are persisted before dispatch; unavailable
 providers fail visibly unless the profile declares an allowed fallback. For OpenCode
 Go, the tracked `transcript-polish` agent denies every tool and OpenCode continues to
-own its credential.
+own its credential. Correction batching is provider-aware: conservative runtimes use
+bounded requests, while large-context Codex starts with a larger batch and bisects only
+when the returned segment structure is incomplete. Transport and quota failures are
+never converted into additional split calls.
+
+The `codex-local` adapter is an explicit trusted-single-user option for transcript
+correction. It invokes `codex exec` through stdin in an ephemeral, read-only,
+temporary workspace with strict, fail-closed flags that disable the supported shell,
+browser, computer-use, app, plugin, multi-agent, and workspace tools. localplaud never
+reads or copies Codex credentials. Its
+dedicated `CODEX_HOME` must be signed in normally with ChatGPT before the provider is
+healthy; API-key login is rejected by default so the UI cannot misrepresent API
+billing as included Codex subscription usage. It is cloud inference and must not be
+used as an unattended public or multi-user default.
+
+Set up that isolated login interactively on the trusted local host:
+
+```bash
+mkdir -p ~/.localplaud/codex
+CODEX_HOME=~/.localplaud/codex codex login
+CODEX_HOME=~/.localplaud/codex codex login status
+.venv/bin/localplaud doctor
+```
+
+The health check confirms that the dedicated home uses ChatGPT or an approved access
+token; it does not spend usage to probe the model and therefore does not claim that
+the selected model or remaining allowance is currently available. Create a new
+immutable execution-profile version and select `correct:codex-local` only for the
+`correct` stage. `codex-local` is intentionally rejected as the global `[llm]`
+provider, so summaries, mind maps, and Ask cannot be moved across this experimental
+boundary accidentally.
 
 ## ASR providers
 

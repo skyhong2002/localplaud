@@ -216,6 +216,10 @@ Implement this P0 in the following order:
    or scrape ChatGPT/Codex auth tokens, never present it as a generic
    OpenAI-compatible endpoint, and never enable it by default on a public or
    multi-user deployment.
+   The experimental `codex-local` correction adapter and catalog entry are now
+   implemented with a dedicated `CODEX_HOME`, ChatGPT-login health gate, stdin-only
+   payloads, ephemeral read-only execution, and disabled tools. Production profile
+   selection and real subscription-auth runtime proof remain explicit operator work.
 6. **Remote GPU worker.** Define a versioned `localplaud-worker` protocol with
    capability handshake, authenticated job submission, input transfer or signed
    fetch, progress, cancellation, retry/idempotency, checksummed artifacts, and
@@ -286,6 +290,10 @@ embedding raw provider credentials or model settings in each rule.
   labels against the previous speech timeline with one-to-one overlap matching;
   ambiguous/new voices receive a fresh unnamed identity rather than inheriting a
   user's display name. The mapping is retained in stage-attempt provenance.
+- ✅ Added durable Plaud-style speaker paragraphs after alignment and diarization:
+  losslessly split mixed-speaker word runs, merge consecutive same-speaker speech
+  across short pauses, preserve every word timestamp/confidence, and prevent Ask
+  chunks from crossing speaker boundaries.
 - ✅ Added a durable custom vocabulary/correction layer for names, specialist terms,
   Taiwan Mandarin, and Mandarin/English code-switching. Rules support language and
   case scope, longest non-overlapping matching, Settings CRUD, and explicit library
@@ -342,6 +350,20 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Vendored the pinned HTMX 1.9.12 runtime, upstream Zero-Clause BSD license,
   and SHA-256 manifest. The packaged Web App has no CDN dependency for daily
   interaction and remains functional on offline/private deployments.
+- ✅ Completed a screenshot-led Plaud Web fidelity pass for the core desktop shell
+  and recording workspace: original localplaud branding now uses the observed
+  compact dark utility rail plus workspace sidebar, the All Files table matches the
+  sparse Name/Duration/Recorded/More hierarchy and row rhythm, and a selected
+  recording preserves the exact library search/filter/sort/page context in its side
+  list. Recording title editing is reading-first, technical retry/provider details
+  are progressive disclosure, Transcript tools are compact, Notes exposes template
+  selection plus derived-only Generate/Regenerate, Share provides an authenticated
+  workspace link/system share sheet, Mind Map is a pannable/zoomable hierarchy, and
+  tab state is deep-linkable. Synthetic-data Chrome checks cover 1405px desktop,
+  1024px compact Mac, and 390px mobile with no horizontal overflow or page errors.
+  Remaining visual acceptance still requires a fresh read-only official Plaud
+  selected-recording/mobile comparison; no proprietary assets or private recording
+  content are stored in the repository.
 - Implement `docs/product-workflow.md`: library filters/folders/tags, responsive
   split panes, persistent player, waveform/progress, transcript editing, speaker
   naming, notes, mind map, Ask, processing UI, and actionable recovery.
@@ -352,9 +374,9 @@ embedding raw provider credentials or model settings in each rule.
   operational library/audio/processing counts, metadata-only visibility, Plaud mirror
   progress, AutoFlow activity, attention queue, and direct Add/Import actions.
 - ✅ Added sortable library columns (name, duration, recorded date) with direction
-  indicators, processing-state and capture-source filters, an always-visible per-row
-  processing state, error/partial attention indicators, and a read-only trash mirror
-  view with count (localplaud never deletes cloud data). `/` and `/api/files` share
+  indicators, processing-state and capture-source filters, quiet completed rows,
+  error/partial attention indicators, and a read-only trash mirror view with count
+  (localplaud never deletes cloud data). `/` and `/api/files` share
   the sort/state/scene/view params and fall back safely on bad input.
 - ✅ Added local folders and tags with additive legacy-DB migration, guarded CRUD,
   counts and filters, a true uncategorized view, deterministic metadata in the JSON
@@ -487,8 +509,9 @@ embedding raw provider credentials or model settings in each rule.
   profile setup, remote workers, authorized webhooks/email, and system health. The
   desktop section rail remains visible while scrolling and becomes a contained
   horizontal section list on mobile. Durable workspace preferences now apply the
-  workspace name, system/light/dark theme, comfortable/compact density, IANA
-  timezone, and 12/24-hour clock across browsers. Private workspace backup now uses
+  workspace name, comfortable/compact density, IANA timezone, and 12/24-hour
+  clock across browsers; the redesigned shell ships one deliberate light theme,
+  so the stored theme preference is pinned to `light` and no selector is shown. Private workspace backup now uses
   SQLite's online backup API and produces a manifest plus SHA-256, with an explicit
   optional media scope; secrets/config/OAuth tokens and media symlinks are excluded,
   downloads are cataloged, and offline restore is documented. Authorized private
@@ -510,7 +533,7 @@ embedding raw provider credentials or model settings in each rule.
   security now reports the built-in Web login, durable hashed browser sessions,
   current-session state, immediate revocation, and the separate API-token/reverse-
   proxy boundary. The pre-authentication `/login` page follows the durable workspace
-  locale and light/dark preference, including localized error states; Support & About shows
+  locale and the light visual theme, including localized error states; Support & About shows
   runtime/build identity and downloads a tested redacted diagnostics bundle with no
   recording identifiers/content, paths, URLs, errors, environment variables, or
   credentials.
