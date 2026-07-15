@@ -270,10 +270,14 @@
     .revision-row>div { min-width:0;overflow-wrap:anywhere; }
     .revision-row:first-of-type { margin-top:8px; }
     .text-action { border:0;background:transparent;color:var(--blue);padding:6px 0 0;font:inherit;font-size:11.5px;cursor:pointer; }
-    .note-tabs { display:flex;align-items:center;gap:5px;overflow-x:auto;padding:2px 0 12px;margin-bottom:12px;border-bottom:1px solid var(--border);scrollbar-width:none; }
-    .note-tabs::-webkit-scrollbar { display:none; }
+    /* Wrapping (not hidden horizontal scroll) keeps every output reachable and
+       lets the version popover escape the strip without being clipped. */
+    .note-tabs { display:flex;align-items:center;gap:5px;flex-wrap:wrap;overflow:visible;padding:2px 0 12px;margin-bottom:12px;border-bottom:1px solid var(--border); }
     .note-tabs button { flex:none;max-width:min(260px,80vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--border2);border-radius:6px;background:var(--panel);color:var(--muted);padding:6px 10px;font:inherit;font-size:12px;font-weight:600;cursor:pointer; }
     .note-tabs button.on { background:var(--panel2);color:var(--fg);border-color:var(--border2); }
+    .note-tabs .saved-note-tab,.note-tabs .note-add-tab { display:inline-flex;align-items:center;gap:5px; }
+    .note-tabs .saved-note-tab .nav-icon,.note-tabs .note-add-tab .nav-icon { flex:none; }
+    .note-tabs .note-add-tab { padding:6px 8px;color:var(--faint); }
     .notes-toolbar { display:grid;grid-template-columns:minmax(220px,1fr) auto;align-items:end;gap:9px;margin:2px 0 15px;padding:12px;border:1px solid var(--border);border-radius:7px;background:#FAFAFA; }
     .notes-template-control { display:grid;grid-template-columns:auto minmax(180px,1fr);align-items:center;gap:9px; }
     .notes-template-control label { font-size:12px;font-weight:650;white-space:nowrap; }

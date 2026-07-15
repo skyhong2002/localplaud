@@ -189,7 +189,7 @@
       <div class="empty generate-empty">
         <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>
         <strong class="empty-title">{{ t('Audio not imported yet') }}</strong>
-        <span class="sub empty-sub">{{ t('Import the original audio from Plaud first; generation then runs in this workspace with your configured providers.') }}</span>
+        <span class="sub empty-sub">{{ t('Import the original audio from Plaud first — everything else is generated here afterwards.') }}</span>
         <button class="btn generate-cta" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span><span class="action-label">{{ t('Import audio') }}</span></button>
       </div>
       {% else %}
@@ -211,14 +211,18 @@
         <span id="note-template-result" class="notes-status sub">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% endif %}</span>
       </div>
       {% if notes or f.user_notes %}
+      {# One shared active target keeps the highlighted tab and the initially
+         visible panel in lockstep even if either list's ordering changes. #}
+      {% set active_note_target = ('sum-' ~ notes[0].id) if notes else ('saved-' ~ f.user_notes[0].id) %}
       <div class="note-tabs">
-        {% for s in notes %}<button type="button" data-note-target="sum-{{ loop.index0 }}" class="{% if loop.first %}on{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}</button>{% endfor %}
-        {% for note in f.user_notes %}<button type="button" data-note-target="saved-{{ note.id }}" class="{% if not notes and loop.first %}on{% endif %}">{{ note.title }}</button>{% endfor %}
+        {% for s in notes %}<button type="button" data-note-target="sum-{{ s.id }}" class="note-tab {% if ('sum-' ~ s.id) == active_note_target %}on{% endif %}" title="{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.created_at %} · {{ s.created_at }}{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}</button>{% endfor %}
+        {% for note in f.user_notes %}<button type="button" data-note-target="saved-{{ note.id }}" class="note-tab saved-note-tab {% if ('saved-' ~ note.id) == active_note_target %}on{% endif %}" title="{{ t('Editable note') }} · {{ note.title }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg');width:11px;height:11px"></span>{{ note.title }}</button>{% endfor %}
+        <button type="button" class="note-tab note-add-tab" data-note-add aria-label="{{ t('Generate another note output') }}" title="{{ t('Generate another note output') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg');width:12px;height:12px"></span></button>
       </div>
     {% for s in notes %}
-    <div class="note-panel" data-note-panel="sum-{{ loop.index0 }}" {% if not loop.first %}hidden{% endif %}>
+    <div class="note-panel" data-note-panel="sum-{{ s.id }}" {% if ('sum-' ~ s.id) != active_note_target %}hidden{% endif %}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0">
-        <div class="sub" style="font-size:11.5px">Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}</div>
+        <div class="sub" style="font-size:11.5px">{% if s.template_version %}v{{ s.template_version }} · {% endif %}{% if s.created_at %}{{ s.created_at }} · {% endif %}Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}</div>
         <button class="btn sec" type="button" data-summary-copy="{{ s.id }}" style="padding:6px 9px">{{ t('Edit a copy') }}</button>
       </div>
       <div class="md">{{ s.content_md | markdown }}</div>
@@ -226,7 +230,7 @@
     {% endfor %}
 
     {% for note in f.user_notes %}
-    <div class="note-panel" data-note-panel="saved-{{ note.id }}" {% if notes or not loop.first %}hidden{% endif %}>
+    <div class="note-panel" data-note-panel="saved-{{ note.id }}" {% if ('saved-' ~ note.id) != active_note_target %}hidden{% endif %}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
         <div class="sub" style="font-size:12px">{{ t('Editable note') }} · {{ note.source_type }}</div>
         <button class="btn sec" type="button" data-note-edit="{{ note.id }}" style="padding:6px 9px">{{ t('Edit here') }}</button>
@@ -514,10 +518,12 @@
       const custom=generateBackdrop.querySelector('input[name="generate-method"]:checked').value==='custom';
       button.disabled=true;out.textContent=tr('Starting generation…');
       try{
+        // Auto must persist key "auto" so the automatic template engine really
+        // runs; otherwise a prior per-recording custom choice is silently kept.
+        const key=custom?document.getElementById('generate-template').value:'auto';
+        const saved=await fetch('/api/files/{{ f.id }}/note-template',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({key})});
+        if(!saved.ok){const data=await saved.json();out.textContent=data.detail||tr('Could not save template');button.disabled=false;return;}
         if(custom){
-          const key=document.getElementById('generate-template').value;
-          const saved=await fetch('/api/files/{{ f.id }}/note-template',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({key})});
-          if(!saved.ok){const data=await saved.json();out.textContent=data.detail||tr('Could not save template');button.disabled=false;return;}
           const profileSelect=document.getElementById('generate-profile');
           if(profileSelect&&profileSelect.value!==profileSelect.dataset.current){
             const body=new URLSearchParams();body.append('profile_id',profileSelect.value);
@@ -592,6 +598,10 @@
   window.addEventListener('popstate',()=>{const requested=new URLSearchParams(location.search).get('tab')||'transcript';activatePanel(['transcript','notes','mindmap','ask'].includes(requested)?requested:'transcript');},{signal:cleanupController.signal});
   document.querySelector('details:has([data-imported-transcript-loader])')?.addEventListener('toggle',event=>{if(event.currentTarget.open){const loader=event.currentTarget.querySelector('[data-imported-transcript-loader]');if(loader)window.htmx.trigger(loader,'load-imported');}});
   document.querySelectorAll('[data-note-target]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-note-target]').forEach(item=>item.classList.remove('on'));button.classList.add('on');document.querySelectorAll('[data-note-panel]').forEach(panel=>panel.hidden=panel.dataset.notePanel!==button.dataset.noteTarget);}));
+  document.querySelector('[data-note-add]')?.addEventListener('click',()=>{
+    document.querySelector('.notes-toolbar')?.scrollIntoView({behavior:'smooth',block:'center'});
+    document.getElementById('note-template-select')?.focus();
+  });
   const selectedNoteId={{ f.selected_note_id|tojson }};
   if(selectedNoteId){activatePanel('notes');document.querySelector(`[data-note-target="saved-${selectedNoteId}"]`)?.click();}
   document.querySelectorAll('[data-summary-copy]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;button.textContent={{ t('Creating editable copy…')|tojson }};const response=await fetch(`/api/files/{{ f.id }}/summaries/${button.dataset.summaryCopy}/editable-copy`,{method:'POST'}),data=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?tab=notes&note_id=${data.id}`;return;}button.disabled=false;button.textContent=data.detail||{{ t('Could not create editable copy')|tojson }};}));

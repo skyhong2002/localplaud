@@ -1958,6 +1958,9 @@ def file_detail(
                     "template_name": (s.template_snapshot or {}).get("name")
                     or s.template.replace("-", " ").title(),
                     "template_version": s.template_version,
+                    "created_at": (
+                        s.created_at.strftime("%b %d, %Y · %H:%M") if s.created_at else None
+                    ),
                     "source": s.source,
                     "input_transcript_revision": s.input_transcript_revision,
                     "input_transcript_source": s.input_transcript_source,

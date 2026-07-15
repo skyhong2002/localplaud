@@ -421,8 +421,9 @@ def test_detail_page_renders_mind_map_tab(monkeypatch, tmp_path):
     assert 'class="mindmap-viewport"' in r.text
     # The mind map is excluded from the generic summary tabs.
     assert "Mind_map" not in r.text
-    assert 'data-note-panel="sum-0"' in r.text  # the meeting note keeps its tab
-    assert 'data-note-panel="sum-1"' not in r.text
+    # Panels are keyed by summary id; exactly one generated-note panel exists
+    # (the meeting note) and the mind map never becomes a note tab.
+    assert r.text.count('data-note-panel="sum-') == 1
 
 
 def test_export_markdown_includes_mind_map_before_transcript(monkeypatch, tmp_path):

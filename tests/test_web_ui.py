@@ -406,7 +406,9 @@ def test_metadata_only_recording_guides_audio_import(monkeypatch, tmp_path):
     r = c.get("/file/r3")
     assert r.status_code == 200
     assert "Audio not imported yet" in r.text
-    assert "generation then runs in this workspace with your configured providers" in r.text
+    # Primary reading hierarchy stays free of technical provider language.
+    assert "Import the original audio from Plaud first — everything else is generated here afterwards." in r.text
+    assert "configured providers" not in r.text.split("Audio not imported yet", 1)[1].split("</div>", 2)[0]
     assert "data-import-audio" in r.text
     # Without local audio there is nothing to generate from yet.
     assert 'id="generate-backdrop"' not in r.text
@@ -432,6 +434,103 @@ def test_notes_empty_state_guides_template_generation(monkeypatch, tmp_path):
     assert "Pick a template above and generate notes" in r.text
     # A local transcript already exists, so the pre-generation dialog is gone.
     assert 'id="generate-backdrop"' not in r.text
+
+
+def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    _seed(str(audio))
+    from localplaud.db.models import Summary, UserNote
+    from localplaud.db.session import session_scope
+
+    long_title = "跨部門季度回顧與客戶成功追蹤 — extended saved answer about renewals and onboarding blockers"
+    with session_scope() as s:
+        # A second template output coexists with the seeded meeting note; the
+        # data model keeps exactly one current generated output per template.
+        s.add(Summary(file_id="r1", template="insights", title="Insights",
+                      content_md="# Insights", template_version=3))
+        s.add(UserNote(file_id="r1", title=long_title, content_md="body",
+                       source_type="ask_answer"))
+
+    r = c.get("/file/r1?tab=notes")
+    assert r.status_code == 200
+    # One tab per generated template output, keyed by summary id (not index),
+    # with version and generation time preserved in the tab title.
+    assert r.text.count('class="note-tab ') >= 3  # two generated + one saved
+    assert "Insights · v3" in r.text
+    import re as _re
+
+    panel_keys = _re.findall(r'data-note-panel="(sum-\d+)"', r.text)
+    assert len(panel_keys) == 2 and len(set(panel_keys)) == 2
+    for key in panel_keys:
+        assert f'data-note-target="{key}"' in r.text
+    hidden_panels = _re.findall(r'data-note-panel="sum-\d+" hidden', r.text)
+    assert len(hidden_panels) == 1  # only the active output is shown
+    # Editable copies are visually distinct (pencil icon, Editable note title)
+    # and long titles stay inside the clamped tab with full text on the title.
+    assert 'class="note-tab saved-note-tab' in r.text
+    assert f'title="Editable note · {long_title}"' in r.text
+    saved_tab = r.text.split('class="note-tab saved-note-tab', 1)[1].split("</button>", 1)[0]
+    assert "pencil.svg" in saved_tab
+    # The "+" affordance guides to the generation controls without generating.
+    assert "data-note-add" in r.text
+    assert 'aria-label="Generate another note output"' in r.text
+    assert "document.querySelector('.notes-toolbar')?.scrollIntoView" in r.text
+    # Generated-note provenance now carries version and creation time.
+    assert _re.search(r"v3 · [A-Z][a-z]{2} \d{2}, \d{4} · \d{2}:\d{2} · Generated from", r.text)
+    # Lockstep invariant: the highlighted tab's target is exactly the one
+    # panel rendered visible, independent of either list's ordering.
+    active_target = _re.search(
+        r'data-note-target="((?:sum|saved)-\d+)" class="note-tab on"', r.text
+    ).group(1)
+    assert f'data-note-panel="{active_target}" hidden' not in r.text
+    assert f'data-note-panel="{active_target}"' in r.text
+    for other in set(panel_keys) - {active_target}:
+        assert f'data-note-panel="{other}" hidden' in r.text
+
+
+def test_saved_only_recording_activates_saved_tab_and_panel(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="r6", filename="Saved only", status=FileStatus.metadata_only,
+                        duration_ms=30000, start_time_ms=1783582737000, scene=1,
+                        audio_path=None))
+        s.add(UserNote(file_id="r6", title="Kept answer", content_md="body",
+                       source_type="ask_answer"))
+
+    r = c.get("/file/r6?tab=notes")
+    assert r.status_code == 200
+    import re as _re
+
+    saved_id = _re.search(r'data-note-target="(saved-\d+)"', r.text).group(1)
+    # With no generated notes, the saved tab is active and its panel visible.
+    assert f'data-note-target="{saved_id}" class="note-tab saved-note-tab on"' in r.text
+    assert f'data-note-panel="{saved_id}" hidden' not in r.text
+    assert f'data-note-panel="{saved_id}"' in r.text
+
+
+def test_generate_dialog_auto_persists_auto_template_choice(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="r5", filename="Untranscribed", status=FileStatus.downloaded,
+                        duration_ms=60000, start_time_ms=1783582737000, scene=1,
+                        audio_path=str(audio)))
+
+    r = c.get("/file/r5")
+    # Auto must persist note-template key "auto" before queueing, so a prior
+    # per-recording custom template cannot be silently reused under the Auto
+    # label; Custom persists the picked key through the same call.
+    assert "const key=custom?document.getElementById('generate-template').value:'auto';" in r.text
+    assert r.text.index("const key=custom?") < r.text.index("/reprocess',{method:'POST'}")
 
 
 def test_detail_page_renders(monkeypatch, tmp_path):
