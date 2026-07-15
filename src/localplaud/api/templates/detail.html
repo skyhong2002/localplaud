@@ -20,7 +20,7 @@
         {% if f.local_title %}<div class="sub" style="font-size:11.5px;margin:2px 5px">{{ t('Plaud title') }}: {{ f.cloud_filename or t('Untitled') }}</div>{% endif %}
         <div class="recording-meta">
           <span>{{ f.start_time_ms | dt }}</span><span>·</span><span>{{ f.duration_ms | dur }}</span>
-          {% if f.status != 'done' %}<span>·</span><span class="st {{ f.status }}">{{ t(f.status) }}</span>{% endif %}
+          {% if f.status != 'done' %}<span>·</span><span class="st {{ f.status }}" id="recording-state-label" aria-live="polite">{{ t('Generating…') if f.status == 'processing' else t(f.status) }}</span>{% endif %}
         </div>
         <div class="recording-org">
           {% if f.folder %}<a class="chip on" href="/?folder={{ f.folder.id }}">{{ f.folder.name }}</a>{% endif %}
@@ -178,7 +178,14 @@
       </details>
       {% endif %}
       {% else %}
-      {% if f.has_audio %}
+      {% set generation_pending = f.has_audio and (f.status == 'processing' or (request.query_params.get('queued') and f.status in ('downloaded', 'downloading', 'processing'))) %}
+      {% if generation_pending %}
+      <div class="empty generate-empty" data-generation-progress>
+        <span class="nav-icon empty-icon generate-progress-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>
+        <strong class="empty-title" id="generation-progress-title">{{ t('Generating…') if f.status == 'processing' else t('Queued for generation') }}</strong>
+        <span class="sub empty-sub" aria-live="polite" id="generation-progress-note">{{ t('This page updates automatically when results are ready.') }}</span>
+      </div>
+      {% elif f.has_audio %}
       <div class="empty generate-empty">
         <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>
         <strong class="empty-title">{{ t('Ready to generate') }}</strong>
@@ -534,7 +541,8 @@
         const queued=await fetch('/file/{{ f.id }}/reprocess',{method:'POST'});
         if(!queued.ok){out.textContent=(await queued.text())||tr('Could not start generation');button.disabled=false;return;}
         out.textContent=tr('Generation queued. Stages complete in the background.');
-        setTimeout(()=>location.reload(),1200);
+        const queuedUrl=new URL(location.href);queuedUrl.searchParams.set('queued','1');
+        setTimeout(()=>location.assign(queuedUrl),1200);
       }catch(_error){out.textContent=tr('Could not start generation');button.disabled=false;}
     });
   }
@@ -561,6 +569,34 @@
       if(status.status==='error'){out.textContent=status.error||tr('Audio import failed');button.disabled=false;if(label)label.textContent=tr('Retry audio import');return;}
       out.textContent=tr('Downloading this recording from Plaud…');importTimer=setTimeout(poll,1000);};poll();
   }));
+  // Friendly generation progress: reuse the read-only per-recording status
+  // endpoint. The empty state reloads once work reaches a terminal state;
+  // when usable content is already on screen only the header label updates.
+  (()=>{
+    const progressEmpty=document.querySelector('[data-generation-progress]');
+    const stateLabel=document.getElementById('recording-state-label');
+    const pendingStates=['processing','downloaded','downloading'];
+    const initiallyProcessing={{ (f.status == 'processing') | tojson }};
+    if(!progressEmpty&&!initiallyProcessing)return;
+    let statusTimer=null;
+    cleanupController.signal.addEventListener('abort',()=>{if(statusTimer)clearTimeout(statusTimer);},{once:true});
+    const friendly=status=>status==='processing'?tr('Generating…'):tr('Queued for generation');
+    const tick=async()=>{
+      if(cleanupController.signal.aborted)return;
+      let data;
+      try{data=await fetch('/api/imports/plaud/files/{{ f.id }}/audio/status',{signal:cleanupController.signal}).then(r=>r.json());}
+      catch(error){if(error.name!=='AbortError')statusTimer=setTimeout(tick,5000);return;}
+      if(pendingStates.includes(data.status)){
+        if(progressEmpty)document.getElementById('generation-progress-title').textContent=friendly(data.status);
+        if(stateLabel)stateLabel.textContent=friendly(data.status);
+        statusTimer=setTimeout(tick,2500);
+        return;
+      }
+      if(progressEmpty){location.reload();return;}
+      if(stateLabel)stateLabel.textContent=tr(data.status);
+    };
+    statusTimer=setTimeout(tick,2500);
+  })();
   const noteTemplateSelect=document.getElementById('note-template-select');
   function renderResolvedStages(resolved){const list=document.getElementById('resolved-stage-list');if(!list||!resolved?.stages)return;list.replaceChildren();for(const [stage,choice] of Object.entries(resolved.stages)){const chip=document.createElement('span');chip.className='chip';chip.textContent=`${tr(stage)} · ${choice.connection}:${choice.model}`;list.append(chip);}}
   async function previewTemplateResolution(key){const response=await fetch(`/api/providers/recordings/{{ f.id }}/resolution?template_key=${encodeURIComponent(key)}`),data=await response.json();if(response.ok)renderResolvedStages(data.resolved);}

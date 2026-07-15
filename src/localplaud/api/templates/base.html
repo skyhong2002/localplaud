@@ -79,6 +79,13 @@
     .add-menu button { width:100%;display:flex;align-items:center;gap:9px;padding:9px 10px;border:0;border-radius:7px;background:none;color:var(--fg);font:inherit;text-align:left;cursor:pointer; }
     .add-menu button:hover { background:var(--panel2); }
     .sidebar-footer { border-top:1px solid var(--border);padding:7px 2px 0; }
+    .ops-card { display:block;margin:3px 6px 8px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--muted);text-decoration:none;font-size:11.5px;line-height:1.5; }
+    .ops-card:hover,.ops-card:focus-visible { background:var(--panel2);border-color:var(--border2); }
+    .ops-title { display:block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin-bottom:2px; }
+    .ops-line { display:block;overflow-wrap:anywhere; }
+    .ops-line strong { color:var(--fg);font-variant-numeric:tabular-nums; }
+    .ops-line .ops-attn { color:var(--warn); }
+    .ops-sub { display:block;margin-top:2px;font-size:10.5px;color:var(--faint); }
     .sidebar .foot { padding:7px 9px 2px;font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
     .nav-close { display:none; }
     .mobile-bar,.nav-scrim { display:none; }
@@ -182,6 +189,10 @@
     .generate-empty .empty-title { font-size:16.5px;font-weight:700;color:var(--fg); }
     .generate-empty .empty-sub { max-width:420px;font-size:12.5px;line-height:1.55; }
     .generate-empty .generate-cta { margin-top:12px;padding:10px 24px;border-radius:999px; }
+    @media (prefers-reduced-motion: no-preference){
+      .generate-progress-icon { animation:generate-spin 1.6s linear infinite; }
+      @keyframes generate-spin { to { transform:rotate(360deg); } }
+    }
     .generate-option { display:flex;gap:10px;align-items:flex-start;padding:11px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer; }
     .generate-option:has(input:checked) { border-color:var(--fg);background:var(--panel2); }
     .generate-option input { margin-top:3px;accent-color:var(--blue);flex:none; }
@@ -518,6 +529,11 @@
       </nav>
     </div>
     <div class="sidebar-footer">
+      <a class="ops-card" href="/status" data-testid="ops-card">
+        <span class="ops-title">{{ t('Workspace status') }}</span>
+        <span class="ops-line">{% if sidebar.ops.processing %}<strong>{{ sidebar.ops.processing }}</strong> {{ t('generating') }} · {% endif %}{% if sidebar.ops.attention %}<strong class="ops-attn">{{ sidebar.ops.attention }}</strong> {{ t('need attention') }} · {% endif %}<strong>{{ sidebar.ops.ready }}</strong> {{ t('ready') }}</span>
+        <span class="ops-sub">{{ t('All caught up') if not sidebar.ops.attention and not sidebar.ops.processing else t('View system status') }}</span>
+      </a>
       <a class="navi {% if active=='status' %}on{% endif %}" href="/status"><span class="nav-icon" style="--nav-icon:url('/static/lucide/activity.svg')"></span><span>{{ t('System status') }}</span></a>
       <a class="navi {% if active=='settings' %}on{% endif %}" href="/settings"><span class="nav-icon" style="--nav-icon:url('/static/lucide/settings.svg')"></span><span>{{ t('Settings') }}</span></a>
       {% if web_login_configured %}<form method="post" action="/logout"><button class="navi" type="submit" style="width:100%;border:0;background:transparent;font:inherit;text-align:left;cursor:pointer"><span class="nav-icon" style="--nav-icon:url('/static/lucide/log-out.svg')"></span><span>{{ t('Log out') }}</span></button></form>{% endif %}

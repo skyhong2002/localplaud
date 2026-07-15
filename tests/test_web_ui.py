@@ -533,6 +533,119 @@ def test_generate_dialog_auto_persists_auto_template_choice(monkeypatch, tmp_pat
     assert r.text.index("const key=custom?") < r.text.index("/reprocess',{method:'POST'}")
 
 
+def test_processing_recording_shows_friendly_progress(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="r7", filename="Being generated", status=FileStatus.processing,
+                        duration_ms=60000, start_time_ms=1783582737000, scene=1,
+                        audio_path=str(audio)))
+
+    r = c.get("/file/r7")
+    assert r.status_code == 200
+    # Friendly in-progress state without stage jargon, updating politely.
+    assert '<div class="empty generate-empty" data-generation-progress>' in r.text
+    assert 'id="generation-progress-title">Generating…' in r.text
+    assert 'aria-live="polite" id="generation-progress-note"' in r.text
+    assert "This page updates automatically when results are ready." in r.text
+    progress_block = r.text.split(
+        '<div class="empty generate-empty" data-generation-progress>', 1
+    )[1].split("</div>", 1)[0]
+    for term in ("diarize", "align", "embed", "ASR", "pipeline", "stage"):
+        assert term not in progress_block
+    # No Generate CTA while work is pending, and the header label is live.
+    assert 'data-open-generate><span' not in r.text
+    assert 'id="recording-state-label" aria-live="polite">Generating…' in r.text
+    # The poller reuses the existing read-only status endpoint with cleanup.
+    assert "/api/imports/plaud/files/r7/audio/status" in r.text
+    assert "if(statusTimer)clearTimeout(statusTimer)" in r.text
+    assert ".generate-progress-icon { animation:generate-spin" in r.text
+    assert "@media (prefers-reduced-motion: no-preference)" in r.text
+
+
+def test_queued_flag_shows_queued_state_only_when_pending(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="r8", filename="Just queued", status=FileStatus.downloaded,
+                        duration_ms=60000, start_time_ms=1783582737000, scene=1,
+                        audio_path=str(audio)))
+
+    queued = c.get("/file/r8?queued=1")
+    assert "Queued for generation" in queued.text
+    assert '<div class="empty generate-empty" data-generation-progress>' in queued.text
+    plain = c.get("/file/r8")
+    assert '<div class="empty generate-empty" data-generation-progress>' not in plain.text
+    assert "Ready to generate" in plain.text
+    assert 'data-open-generate><span' in plain.text
+
+
+def test_error_recording_keeps_usable_content_visible(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    from localplaud.db.models import FileStatus, PlaudFile, Transcript
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="r9", filename="Failed later stage", status=FileStatus.error,
+                        duration_ms=60000, start_time_ms=1783582737000, scene=1,
+                        audio_path=str(audio), error="embedding model unavailable"))
+        s.add(Transcript(file_id="r9", provider="mlx-whisper", language="zh", text="内容",
+                         segments=[{"text": "内容", "start": 0.0, "end": 1.0}]))
+
+    r = c.get("/file/r9")
+    # The transcript stays first-class; the failure shows as the existing
+    # actionable alert, never as a progress state that hides content.
+    assert '<div class="empty generate-empty" data-generation-progress>' not in r.text
+    assert "Processing paused" in r.text
+    assert 'id="transcript"' in r.text and "/file/r9/transcript-page" in r.text
+
+
+def test_sidebar_ops_card_summarizes_workspace(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    _seed(str(audio))  # r1 done
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="ra", filename="Working", status=FileStatus.processing,
+                        duration_ms=1000, start_time_ms=0, audio_path=str(audio)))
+        s.add(PlaudFile(id="rb", filename="Broken", status=FileStatus.error,
+                        duration_ms=1000, start_time_ms=0, audio_path=str(audio)))
+
+    r = c.get("/")
+    assert 'class="ops-card" href="/status"' in r.text
+    assert "Workspace status" in r.text
+    card = r.text.split('data-testid="ops-card"', 1)[1].split("</a>", 1)[0]
+    assert "<strong>1</strong> generating" in card
+    assert '<strong class="ops-attn">1</strong> need attention' in card
+    assert "<strong>1</strong> ready" in card
+    assert "View system status" in card
+
+
+def test_sidebar_ops_card_all_caught_up(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    _seed(str(audio))  # only r1, status done
+
+    r = c.get("/")
+    card = r.text.split('data-testid="ops-card"', 1)[1].split("</a>", 1)[0]
+    assert "All caught up" in card
+    assert "generating" not in card and "need attention" not in card
+
+
 def test_detail_page_renders(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     audio = tmp_path / "audio.mp3"

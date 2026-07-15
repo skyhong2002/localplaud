@@ -81,7 +81,9 @@ def acceptance_check(
         console.print(f"[red]✗[/] {exc}")
         raise typer.Exit(1) from exc
     if json_output:
-        console.print_json(json.dumps(report, ensure_ascii=False))
+        # Plain stdout, never Rich: automation parses this even when the
+        # environment forces color (FORCE_COLOR would inject ANSI codes).
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         table = Table(title=f"Subscription independence · {file_id}")
         table.add_column("Check")

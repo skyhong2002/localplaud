@@ -407,3 +407,27 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
         stage_runs = {stage.stage: stage for stage in row.stage_runs}
         assert stage_runs[StageName.transcribe].attempts == 1
         assert stage_runs[StageName.correct].attempts == 2
+
+
+def test_acceptance_check_json_stays_ansi_free_under_force_color(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    from localplaud.cli import app
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(id="bare", filename="Bare recording", status=FileStatus.downloaded,
+                      duration_ms=1000, start_time_ms=0, audio_path=str(tmp_path / "a.wav"))
+        )
+
+    # Automation environments commonly force color; --json must remain plain
+    # machine-readable stdout regardless (Rich would inject ANSI sequences).
+    monkeypatch.setenv("FORCE_COLOR", "3")
+    result = CliRunner().invoke(app, ["acceptance-check", "bare", "--json"])
+    assert result.exit_code == 1  # bare recording cannot pass the gate
+    assert "\x1b" not in result.stdout
+    report = json.loads(result.stdout)
+    assert report["passed"] is False
+    assert report["schema"].startswith("localplaud-subscription-independence/")

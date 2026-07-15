@@ -482,6 +482,20 @@ def _base_ctx(request: Request, active: str) -> dict:
         workspace_preferences = get_workspace_preferences(session)
         organization = _organization_summary(session)
         visible_filter = PlaudFile.is_trash.is_(False)
+        status_counts = dict(
+            session.execute(
+                select(PlaudFile.status, func.count())
+                .where(visible_filter)
+                .group_by(PlaudFile.status)
+            ).all()
+        )
+        sidebar_ops = {
+            "ready": status_counts.get(FileStatus.done, 0),
+            "attention": status_counts.get(FileStatus.error, 0)
+            + status_counts.get(FileStatus.partial, 0),
+            "processing": status_counts.get(FileStatus.processing, 0)
+            + status_counts.get(FileStatus.downloading, 0),
+        }
         sidebar_counts = {
             "all": session.scalar(
                 select(func.count()).select_from(PlaudFile).where(visible_filter)
@@ -539,6 +553,7 @@ def _base_ctx(request: Request, active: str) -> dict:
             "folders": organization["folders"],
             "counts": sidebar_counts,
             "scenes": sidebar_scenes,
+            "ops": sidebar_ops,
         },
         "workspace_preferences": workspace_preferences,
         "supported_locales": SUPPORTED_LOCALES,
