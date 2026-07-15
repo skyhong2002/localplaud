@@ -147,6 +147,7 @@ _ZH_HANT_TW = {
     "Ask the library": "詢問錄音庫",
     "Saved note": "已儲存筆記",
     "Related": "相關",
+    "Matches the recording title": "符合錄音標題",
     "Follow-ups keep this scope.": "後續提問會維持此範圍。",
     "Only selected recordings": "僅限已選錄音",
     "Named speaker": "已命名講者",

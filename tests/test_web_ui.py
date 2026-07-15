@@ -1336,8 +1336,12 @@ def test_search_results_are_title_first_with_quiet_kind_labels(monkeypatch, tmp_
 
     r = c.get("/search?q=hello")
     assert r.status_code == 200
-    # Title-first group header with duration · date · folder context.
-    assert '<strong class="home-row-title">Weekly Sync</strong>' in r.text
+    # Title-first group header with duration · date · folder context, owned
+    # search styling with a stable two-line clamp, full text on title=.
+    assert '<strong class="search-group-title">Weekly Sync</strong>' in r.text
+    assert 'title="Weekly Sync"' in r.text
+    assert "-webkit-line-clamp:2" in r.text
+    assert "@media (max-width:700px){ .search-hit-text { display:-webkit-box;-webkit-line-clamp:3" in r.text
     head = r.text.split('class="search-group-head"', 1)[1].split("</a>", 1)[0]
     assert "10:00 ·" in head and "跨部門產品營運與客戶成功長期追蹤資料夾" in head
     # Transcript match: the playable timestamp is the label — no jargon chips.
@@ -1351,6 +1355,11 @@ def test_search_results_are_title_first_with_quiet_kind_labels(monkeypatch, tmp_
     notes = c.get("/search?q=point")
     assert '<span class="search-kind">Note</span>' in notes.text
 
+    # A title match renders compactly instead of duplicating the heading.
+    titles = c.get("/search?q=Weekly")
+    assert "Matches the recording title" in titles.text
+    title_hit = titles.text.split("Matches the recording title", 1)[0].rsplit('class="search-hit"', 1)[1]
+    assert "Weekly Sync" not in title_hit
     # No-query and no-match states offer direct next actions, no marketing.
     empty = c.get("/search")
     assert "Search your whole library" in empty.text
