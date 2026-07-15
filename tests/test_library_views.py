@@ -124,6 +124,18 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     assert "Bravo call" in r.text
     assert "Trash" in r.text  # trash view link
     assert "Capture source 1" in r.text  # capture-source facet
+    # Sidebar source items stay distinguishable at rail width: short visible
+    # label, full label preserved on the link for hover/assistive context.
+    assert ">Source 1</span>" in r.text
+    assert 'title="Capture source 1"' in r.text
+    # Mobile rows are title-first cards: no repeated per-cell column labels,
+    # duration and recorded date collapse into one muted meta line.
+    assert "content:attr(data-label)" not in r.text
+    assert 'data-label="Name"' not in r.text
+    assert '<td class="num dur-cell">' in r.text
+    assert '<td class="num rec-cell">' in r.text
+    assert ".rectable tbody td.rec-cell::before { content:'· '; }" in r.text
+    assert ".rectable .nm { max-width:none; text-align:left;" in r.text
     assert 'id="app-view" hx-history-elt' in r.text
     assert 'id="recording-file-list"' not in r.text
     assert 'href="/file/b?return_to=%2F"' in r.text
@@ -151,7 +163,8 @@ def test_library_paginates_without_truncating_ask_scope(monkeypatch, tmp_path):
     ask = c.get("/?ask=true")
     assert first.text.count('class="row-select"') == 100
     assert ".quickadd { min-width:0;flex-basis:100%;margin-left:0; }" in first.text
-    assert ".rectable tbody td.name-cell { padding-right:44px; }" in first.text
+    assert ".rectable tbody td.name-cell { padding:0 44px 3px 12px!important; }" in first.text
+    assert ".rectable tbody td.select-cell ~ td.name-cell { padding-left:40px!important; }" in first.text
     assert "Page 1 / 2" in first.text and "Bulk recording 100" in first.text
     assert "Alpha meeting" not in first.text
     assert "Page 2 / 2" in second.text and "Alpha meeting" in second.text

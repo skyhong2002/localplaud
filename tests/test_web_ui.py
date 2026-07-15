@@ -338,6 +338,24 @@ def test_home_renders_recent_recordings_and_operational_cards(monkeypatch, tmp_p
     assert 'href="/home"' in response.text and 'href="/"' in response.text
 
 
+def test_transcript_page_wraps_speaker_name_for_one_line_clamp(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import Speaker
+    from localplaud.db.session import session_scope
+
+    long_name = "陳品妤（產品營運與跨部門協調負責人 Product Operations Lead, Taipei HQ）"
+    with session_scope() as s:
+        s.add(Speaker(file_id="r1", key="SPEAKER_00", display_name=long_name))
+
+    page = c.get("/file/r1/transcript-page?view=raw")
+    assert page.status_code == 200
+    # The name is wrapped in .who-name (CSS clamps it to one ellipsized line)
+    # and duplicated into title= so the full identity stays reachable.
+    assert f'<span class="who" title="{long_name}">' in page.text
+    assert f'<span class="who-name">{long_name}</span>' in page.text
+
+
 def test_detail_page_renders(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     audio = tmp_path / "audio.mp3"
@@ -428,6 +446,18 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     # viewports, so wide tables squeeze into vertical letter stacks instead of
     # engaging the horizontal table scroll asserted above.
     assert "vertical-align:top;overflow-wrap:break-word; }" in r.text
+    # The clock shows the recording's stored duration before the browser has
+    # loaded audio metadata; playback sync falls back to the same value.
+    assert ">0:00 / 10:00</span>" in r.text
+    assert "const knownDuration=600.0;" in r.text
+    assert "d=player.duration||knownDuration" in r.text
+    # Speaker labels clamp to one visual line; the full name stays in the
+    # legend, hover title, and exports.
+    assert (
+        ".seg .who .who-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }"
+        in r.text
+    )
+    assert ".speaker-pill>summary{max-width:min(200px,58vw)}" in r.text
     assert "availableHeight=Math.max(1,viewport.clientHeight-30)" in r.text
     assert "availableHeight/natural.height*100" in r.text
     assert "zoom:var(--mm-scale)" in r.text

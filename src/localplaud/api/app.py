@@ -516,7 +516,12 @@ def _base_ctx(request: Request, active: str) -> dict:
             or 0,
         }
         sidebar_scenes = [
-            {"value": scene, "label": _scene_label(scene), "count": count}
+            {
+                "value": scene,
+                "label": _scene_label(scene),
+                "label_short": _scene_label_short(scene),
+                "count": count,
+            }
             for scene, count in session.execute(
                 select(PlaudFile.scene, func.count())
                 .where(visible_filter, PlaudFile.scene.is_not(None))
@@ -560,6 +565,14 @@ def _scene_label(scene: int | None) -> str:
     if scene is None:
         return "Unknown capture source"
     return f"Capture source {scene}"
+
+
+def _scene_label_short(scene: int | None) -> str:
+    # Sidebar item text under the "Sources" group header: the long form
+    # ellipsizes into identical, indistinguishable entries at rail width.
+    if scene is None:
+        return "Unknown source"
+    return f"Source {scene}"
 
 
 def _parse_library_params(

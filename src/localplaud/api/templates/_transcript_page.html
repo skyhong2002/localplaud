@@ -2,7 +2,7 @@
 <div class="seg {% if seg.speaker %}spk{% endif %}" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
   <div class="ts">{{ (seg.start or 0) | mmss }}</div>
   <div class="txt">
-    {% if seg.speaker %}<span class="who"><span class="dot"></span>{{ speaker_names.get(seg.speaker, seg.speaker) }}</span><br>{% endif %}{{ seg.text }}
+    {% if seg.speaker %}{% set who_name = speaker_names.get(seg.speaker, seg.speaker) %}<span class="who" title="{{ who_name }}"><span class="dot"></span><span class="who-name">{{ who_name }}</span></span><br>{% endif %}{{ seg.text }}
     {% if can_edit %}
     <button class="editbtn" type="button" title="{{ t('Edit this segment') }}" aria-label="{{ t('Edit segment text') }}">✎</button>
     <form class="segedit" method="post" action="/file/{{ file_id }}/transcript/segments/{{ offset + loop.index0 }}" hidden>

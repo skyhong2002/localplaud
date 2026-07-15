@@ -127,21 +127,22 @@
     .table-wrap { border:0;overflow:visible; }
     .rectable thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
     .rectable, .rectable tbody, .rectable tr, .rectable td { display:block; width:100%; }
-    .rectable tbody tr { border:1px solid var(--border); border-radius:var(--radius); margin-bottom:8px; padding:4px 2px; }
-    .rectable tbody td { border:0; padding:5px 12px; display:flex; justify-content:space-between; gap:12px; }
-    .rectable tbody td::before { content:attr(data-label); font-size:11px; font-weight:700; text-transform:uppercase;
-      letter-spacing:0; color:var(--faint); flex:none; }
-    .rectable .nm { max-width:none; text-align:right; }
-    .rectable .num { text-align:right; }
+    /* Title-first mobile cards: the recording title is the hierarchy, so rows
+       carry no repeated column labels — duration and recorded date collapse
+       into one muted meta line under the title. */
+    .rectable tbody tr { position:relative; border:1px solid var(--border); border-radius:var(--radius); margin-bottom:8px; padding:10px 2px 9px; }
+    .rectable tbody td { border:0; padding:0 12px; }
+    .rectable .nm { max-width:none; text-align:left; font-size:14.5px; line-height:1.4; }
+    .rectable tbody td.name-cell { padding:0 44px 3px 12px!important; }
+    .rectable tbody td.dur-cell, .rectable tbody td.rec-cell { display:inline-block; width:auto; text-align:left; color:var(--faint); font-size:12px; }
+    .rectable tbody td.rec-cell { padding-left:0; }
+    .rectable tbody td.rec-cell::before { content:'· '; }
     .rectable tbody tr.attn td:first-child { box-shadow:none; }
-    .rectable tbody td.select-cell { justify-content:flex-start; }
-    .rectable tbody td.select-cell::before { display:none; }
-    .select-cell { width:100%!important;padding:5px 12px!important; }
+    .rectable tbody td.select-cell { position:absolute;left:6px;top:9px;width:auto!important;padding:3px!important; }
     .select-cell input { position:static;transform:none;opacity:1; }
+    .rectable tbody td.select-cell ~ td.name-cell { padding-left:40px!important; }
+    .rectable tbody td.select-cell ~ td.dur-cell { padding-left:40px; }
     .rectable tbody td.row-menu-cell { position:absolute;right:7px;top:5px;width:auto;padding:0; }
-    .rectable tbody td.row-menu-cell::before { display:none; }
-    .rectable tbody tr { position:relative; }
-    .rectable tbody td.name-cell { padding-right:44px; }
     .quickadd { min-width:0;flex-basis:100%;margin-left:0; }
     .quickadd form { left:0;right:auto;width:min(260px,100%); }
   }
@@ -293,11 +294,11 @@
         {% for f in files %}
         <tr class="{% if f.needs_attention %}attn{% endif %}">
           {% if lib.view != 'trash' %}<td class="select-cell"><input class="row-select" type="checkbox" value="{{ f.id }}" aria-label="Select {{ f.filename }}"></td>{% endif %}
-          <td class="name-cell" data-label="Name">
+          <td class="name-cell">
             <a class="nm" href="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-get="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="Needs attention — {{ f.status }}" aria-label="Needs attention"></span>{% endif %}</a>
           </td>
-          <td data-label="Duration" class="num">{{ f.duration_ms | dur }}</td>
-          <td data-label="Recorded" class="num">{{ f.start_time_ms | dt }}</td>
+          <td class="num dur-cell">{{ f.duration_ms | dur }}</td>
+          <td class="num rec-cell">{{ f.start_time_ms | dt }}</td>
           <td class="row-menu-cell"><details class="row-menu"><summary aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg');width:15px;height:15px"></span></summary><div class="row-menu-popover"><div class="sub" style="padding:5px 9px 7px;font-size:10.5px">{{ t('Plaud cloud') if f.origin == 'plaud' else t('Local import') }}{% if f.folder %} · {{ f.folder.name }}{% endif %}{% if f.status != 'done' %} · {{ t(f.status) }}{% endif %}</div><a href="/file/{{ f.id }}?return_to={{ return_to_param }}">{{ t('Open recording') }}</a>{% if f.has_transcript or f.has_summary %}<a href="/file/{{ f.id }}/export.md" data-no-partial>{{ t('Export') }}</a>{% endif %}</div></details></td>
         </tr>
         {% endfor %}
