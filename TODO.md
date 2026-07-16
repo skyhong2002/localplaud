@@ -398,6 +398,12 @@ embedding raw provider credentials or model settings in each rule.
   error/partial attention indicators, and a read-only trash mirror view with count
   (localplaud never deletes cloud data). `/` and `/api/files` share
   the sort/state/scene/view params and fall back safely on bad input.
+- ✅ Library filtering now also supports inclusive recorded-date and duration ranges
+  through one composable URL/API contract. Calendar boundaries follow the durable
+  workspace timezone (including DST), filters survive sorting, pagination, and the
+  recording side list, and invalid ranges fail closed with visible recovery. Unknown
+  capture sources, legacy Plaud-origin rows, uncategorized counts, long filter labels,
+  and visible per-row processing state share the same truthful query surface.
 - ✅ Added local folders and tags with additive legacy-DB migration, guarded CRUD,
   counts and filters, a true uncategorized view, deterministic metadata in the JSON
   API, folder/tag pills on library and detail views, and atomic multi-recording bulk

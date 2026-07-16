@@ -10,7 +10,7 @@ import re
 import secrets
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Annotated, Literal
@@ -528,7 +528,11 @@ def _base_ctx(request: Request, active: str) -> dict:
             "uncategorized": session.scalar(
                 select(func.count())
                 .select_from(PlaudFile)
-                .where(visible_filter, PlaudFile.folder_id.is_(None))
+                .where(
+                    visible_filter,
+                    PlaudFile.folder_id.is_(None),
+                    ~PlaudFile.tags.any(),
+                )
             )
             or 0,
             "trash": session.scalar(
@@ -555,14 +559,14 @@ def _base_ctx(request: Request, active: str) -> dict:
         }
         sidebar_scenes = [
             {
-                "value": scene,
+                "value": scene if scene is not None else "unknown",
                 "label": _scene_label(scene),
                 "label_short": _scene_label_short(scene),
                 "count": count,
             }
             for scene, count in session.execute(
                 select(PlaudFile.scene, func.count())
-                .where(visible_filter, PlaudFile.scene.is_not(None))
+                .where(visible_filter)
                 .group_by(PlaudFile.scene)
                 .order_by(PlaudFile.scene)
             )
@@ -638,17 +642,24 @@ def _parse_library_params(
     folder: str | None = None,
     tag: str | None = None,
     origin: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    min_duration_minutes: str | None = None,
+    max_duration_minutes: str | None = None,
 ) -> dict:
     """Normalize library query params, falling back to defaults on bad input."""
     sort_key = sort if sort in _SORT_COLUMNS else "recorded"
     direction = dir if dir in {"asc", "desc"} else "desc"
     state_val = state if state in _STATE_VALUES or state in _STATE_ALIASES else None
-    scene_val: int | None = None
+    scene_val: int | Literal["unknown"] | None = None
     if scene not in (None, ""):
-        try:
-            scene_val = int(scene)
-        except (TypeError, ValueError):
-            scene_val = None
+        if scene == "unknown":
+            scene_val = "unknown"
+        else:
+            try:
+                scene_val = int(scene)
+            except (TypeError, ValueError):
+                scene_val = None
     view_val = view if view in {"all", "trash", "uncategorized"} else "all"
 
     def optional_int(value: str | None) -> int | None:
@@ -656,6 +667,34 @@ def _parse_library_params(
             return int(value) if value not in (None, "") else None
         except (TypeError, ValueError):
             return None
+
+    def optional_date(value: str | None) -> str | None:
+        if value in (None, "") or re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) is None:
+            return None
+        try:
+            parsed = date.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
+        # Leave room for every valid IANA offset and date_to's next-day bound.
+        if not date(1, 1, 2) <= parsed <= date(9999, 12, 30):
+            return None
+        return parsed.isoformat()
+
+    def optional_minutes(value: str | None) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(parsed) or parsed < 0 or parsed > 1_000_000:
+            return None
+        return parsed
+
+    date_from_val = optional_date(date_from)
+    date_to_val = optional_date(date_to)
+    min_duration_val = optional_minutes(min_duration_minutes)
+    max_duration_val = optional_minutes(max_duration_minutes)
 
     return {
         "q": q or "",
@@ -667,6 +706,16 @@ def _parse_library_params(
         "folder": optional_int(folder),
         "tag": optional_int(tag),
         "origin": origin if origin in {"plaud", "local"} else None,
+        "date_from": date_from_val,
+        "date_to": date_to_val,
+        "min_duration_minutes": min_duration_val,
+        "max_duration_minutes": max_duration_val,
+        "invalid_date_range": bool(date_from_val and date_to_val and date_from_val > date_to_val),
+        "invalid_duration_range": bool(
+            min_duration_val is not None
+            and max_duration_val is not None
+            and min_duration_val > max_duration_val
+        ),
     }
 
 
@@ -708,6 +757,10 @@ def _library_state_from_return_url(value: str) -> tuple[dict, int]:
         first("folder"),
         first("tag"),
         first("origin"),
+        first("date_from"),
+        first("date_to"),
+        first("min_duration_minutes"),
+        first("max_duration_minutes"),
     )
     try:
         page = max(1, int(first("page") or 1))
@@ -824,10 +877,32 @@ def _library_context_title(params: dict, organization: dict) -> str:
         return "Plaud recordings"
     if params["origin"] == "local":
         return "Local uploads"
+    if any(
+        params[key] is not None
+        for key in (
+            "state",
+            "scene",
+            "date_from",
+            "date_to",
+            "min_duration_minutes",
+            "max_duration_minutes",
+        )
+    ):
+        return "Filtered files"
     return "All files"
 
 
-def _library_query(params: dict):
+def _library_date_ms(value: str, timezone_name: str, *, exclusive_end: bool = False) -> int:
+    """Convert a workspace-local calendar day to a UTC millisecond boundary."""
+    local_day = date.fromisoformat(value)
+    timezone = ZoneInfo(timezone_name)
+    boundary = datetime.combine(local_day, datetime.min.time(), tzinfo=timezone)
+    if exclusive_end:
+        boundary += timedelta(days=1)
+    return int(boundary.astimezone(UTC).timestamp() * 1000)
+
+
+def _library_query(params: dict, timezone_name: str = "UTC"):
     """Build a PlaudFile select from normalized library params."""
     column = _SORT_COLUMNS[params["sort"]]
     order = column.asc() if params["dir"] == "asc" else column.desc()
@@ -837,9 +912,12 @@ def _library_query(params: dict):
     if params["view"] == "uncategorized":
         stmt = stmt.where(PlaudFile.folder_id.is_(None), ~PlaudFile.tags.any())
     if params["q"]:
-        pattern = f"%{params['q']}%"
+        pattern = f"%{_escape_like_literal(params['q'])}%"
         stmt = stmt.where(
-            or_(PlaudFile.local_title.ilike(pattern), PlaudFile.filename.ilike(pattern))
+            or_(
+                PlaudFile.local_title.ilike(pattern, escape="\\"),
+                PlaudFile.filename.ilike(pattern, escape="\\"),
+            )
         )
     if params["state"] is not None:
         alias_states = _STATE_ALIASES.get(params["state"])
@@ -848,13 +926,32 @@ def _library_query(params: dict):
         else:
             stmt = stmt.where(PlaudFile.status == params["state"])
     if params["scene"] is not None:
-        stmt = stmt.where(PlaudFile.scene == params["scene"])
+        stmt = stmt.where(
+            PlaudFile.scene.is_(None)
+            if params["scene"] == "unknown"
+            else PlaudFile.scene == params["scene"]
+        )
     if params["folder"] is not None:
         stmt = stmt.where(PlaudFile.folder_id == params["folder"])
     if params["tag"] is not None:
         stmt = stmt.where(PlaudFile.tags.any(Tag.id == params["tag"]))
-    if params["origin"] is not None:
-        stmt = stmt.where(PlaudFile.origin == params["origin"])
+    if params["origin"] == "plaud":
+        stmt = stmt.where(or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None)))
+    elif params["origin"] == "local":
+        stmt = stmt.where(PlaudFile.origin == "local")
+    if params["date_from"] is not None:
+        stmt = stmt.where(
+            PlaudFile.start_time_ms >= _library_date_ms(params["date_from"], timezone_name)
+        )
+    if params["date_to"] is not None:
+        stmt = stmt.where(
+            PlaudFile.start_time_ms
+            < _library_date_ms(params["date_to"], timezone_name, exclusive_end=True)
+        )
+    if params["min_duration_minutes"] is not None:
+        stmt = stmt.where(PlaudFile.duration_ms >= round(params["min_duration_minutes"] * 60_000))
+    if params["max_duration_minutes"] is not None:
+        stmt = stmt.where(PlaudFile.duration_ms <= round(params["max_duration_minutes"] * 60_000))
     return stmt
 
 
@@ -873,22 +970,26 @@ def _library_facets(session, params: dict) -> dict:
         .order_by(PlaudFile.scene)
     ).all()
     scenes = [
-        {"value": sc, "label": _scene_label(sc), "count": n, "active": sc == params["scene"]}
+        {
+            "value": sc if sc is not None else "unknown",
+            "label": _scene_label(sc),
+            "count": n,
+            "active": (sc if sc is not None else "unknown") == params["scene"],
+        }
         for sc, n in scene_rows
-        if sc is not None
     ]
     origin_rows = session.execute(
-        select(PlaudFile.origin, func.count())
+        select(func.coalesce(PlaudFile.origin, "plaud"), func.count())
         .where(PlaudFile.is_trash.is_(False))
-        .group_by(PlaudFile.origin)
-        .order_by(PlaudFile.origin)
+        .group_by(func.coalesce(PlaudFile.origin, "plaud"))
+        .order_by(func.coalesce(PlaudFile.origin, "plaud"))
     ).all()
     origins = [
         {
-            "value": value or "plaud",
-            "label": "Plaud cloud" if (value or "plaud") == "plaud" else "Local import",
+            "value": value,
+            "label": "Plaud cloud" if value == "plaud" else "Local import",
             "count": count,
-            "active": (value or "plaud") == params["origin"],
+            "active": value == params["origin"],
         }
         for value, count in origin_rows
     ]
@@ -951,10 +1052,29 @@ def api_files(
     folder: str | None = None,
     tag: str | None = None,
     origin: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    min_duration_minutes: str | None = None,
+    max_duration_minutes: str | None = None,
 ) -> JSONResponse:
-    params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag, origin)
+    params = _parse_library_params(
+        q,
+        sort,
+        dir,
+        state,
+        scene,
+        view,
+        folder,
+        tag,
+        origin,
+        date_from,
+        date_to,
+        min_duration_minutes,
+        max_duration_minutes,
+    )
     with session_scope() as session:
-        rows = list(session.scalars(_library_query(params)))
+        timezone_name = get_workspace_preferences(session)["timezone"]
+        rows = list(session.scalars(_library_query(params, timezone_name)))
         data = _file_summaries(session, rows)
     return JSONResponse({"files": data})
 
@@ -1593,6 +1713,10 @@ def index(
     tag: str | None = None,
     ask_thread: str | None = None,
     origin: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    min_duration_minutes: str | None = None,
+    max_duration_minutes: str | None = None,
     page: int = 1,
     workspace: bool = False,
     preserve_filelist: bool = False,
@@ -1618,9 +1742,24 @@ def index(
                 "preserve_filelist": keep_filelist,
             },
         )
-    params = _parse_library_params(q, sort, dir, state, scene, view, folder, tag, origin)
+    params = _parse_library_params(
+        q,
+        sort,
+        dir,
+        state,
+        scene,
+        view,
+        folder,
+        tag,
+        origin,
+        date_from,
+        date_to,
+        min_duration_minutes,
+        max_duration_minutes,
+    )
     with session_scope() as session:
-        library_query = _library_query(params)
+        timezone_name = get_workspace_preferences(session)["timezone"]
+        library_query = _library_query(params, timezone_name)
         total = (
             session.scalar(
                 select(func.count()).select_from(library_query.order_by(None).subquery())
@@ -2694,7 +2833,8 @@ def file_detail(
             thread_to_dict(selected_ask_thread) if selected_ask_thread is not None else None
         )
         organization = _organization_summary(session)
-        filelist_query = _library_query(filelist_params)
+        timezone_name = get_workspace_preferences(session)["timezone"]
+        filelist_query = _library_query(filelist_params, timezone_name)
         filelist_total = (
             session.scalar(
                 select(func.count()).select_from(filelist_query.order_by(None).subquery())

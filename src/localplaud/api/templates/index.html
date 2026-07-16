@@ -1,19 +1,31 @@
 {% extends "base.html" %}
 
-{%- macro liburl(sort, dir, state, scene, view) -%}
-/?sort={{ sort }}&amp;dir={{ dir }}&amp;view={{ view }}
+{%- macro liburl(sort='__keep__', dir='__keep__', state='__keep__', scene='__keep__', view='__keep__', folder='__keep__', tag='__keep__', origin='__keep__', ranges=true) -%}
+{%- set sort_value = lib.sort if sort == '__keep__' else sort -%}
+{%- set dir_value = lib.dir if dir == '__keep__' else dir -%}
+{%- set state_value = lib.state if state == '__keep__' else state -%}
+{%- set scene_value = lib.scene if scene == '__keep__' else scene -%}
+{%- set view_value = lib.view if view == '__keep__' else view -%}
+{%- set folder_value = lib.folder if folder == '__keep__' else folder -%}
+{%- set tag_value = lib.tag if tag == '__keep__' else tag -%}
+{%- set origin_value = lib.origin if origin == '__keep__' else origin -%}
+/?sort={{ sort_value }}&amp;dir={{ dir_value }}&amp;view={{ view_value }}
 {%- if q %}&amp;q={{ q | urlencode }}{% endif -%}
-{%- if state %}&amp;state={{ state | urlencode }}{% endif -%}
-{%- if scene is not none and scene != '' %}&amp;scene={{ scene }}{% endif -%}
-{%- if lib.folder is not none %}&amp;folder={{ lib.folder }}{% endif -%}
-{%- if lib.tag is not none %}&amp;tag={{ lib.tag }}{% endif -%}
-{%- if lib.origin %}&amp;origin={{ lib.origin }}{% endif -%}
+{%- if state_value %}&amp;state={{ state_value | urlencode }}{% endif -%}
+{%- if scene_value is not none and scene_value != '' %}&amp;scene={{ scene_value }}{% endif -%}
+{%- if folder_value is not none and folder_value != '' %}&amp;folder={{ folder_value }}{% endif -%}
+{%- if tag_value is not none and tag_value != '' %}&amp;tag={{ tag_value }}{% endif -%}
+{%- if origin_value %}&amp;origin={{ origin_value }}{% endif -%}
+{%- if ranges and lib.date_from %}&amp;date_from={{ lib.date_from }}{% endif -%}
+{%- if ranges and lib.date_to %}&amp;date_to={{ lib.date_to }}{% endif -%}
+{%- if ranges and lib.min_duration_minutes is not none %}&amp;min_duration_minutes={{ lib.min_duration_minutes }}{% endif -%}
+{%- if ranges and lib.max_duration_minutes is not none %}&amp;max_duration_minutes={{ lib.max_duration_minutes }}{% endif -%}
 {%- endmacro -%}
 
 {%- macro sorth(col, label) -%}
   {%- set active = lib.sort == col -%}
   {%- set nxt = ('desc' if (active and lib.dir == 'asc') else ('asc' if active else ('asc' if col == 'name' else 'desc'))) -%}
-  <a class="sorth {% if active %}on{% endif %}" href="{{ liburl(col, nxt, lib.state, lib.scene, lib.view) }}">
+  <a class="sorth {% if active %}on{% endif %}" href="{{ liburl(sort=col, dir=nxt) }}">
     {{ label }}{% if active %}<span class="arr">{{ '▲' if lib.dir == 'asc' else '▼' }}</span>{% endif %}
   </a>
 {%- endmacro -%}
@@ -24,7 +36,7 @@
   .filtrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .filtrow .lbl { font-size:11px; font-weight:700; letter-spacing:0; text-transform:uppercase; color:var(--faint); margin-right:2px; }
   .fchip { font-size:11.5px; font-weight:600; border-radius:5px; padding:3px 10px; border:1px solid var(--border2);
-           color:var(--muted); background:var(--panel); cursor:pointer; white-space:nowrap; }
+           max-width:100%;overflow:hidden;text-overflow:ellipsis;color:var(--muted); background:var(--panel); cursor:pointer; white-space:nowrap; }
   .fchip:hover { border-color:var(--blue-br); }
   .fchip.on { color:var(--blue); border-color:var(--blue-br); background:var(--blue-soft); }
   .fchip.trash.on { color:var(--red); border-color:var(--red); background:var(--red-soft); }
@@ -66,7 +78,7 @@
   .orgpill.folder::before { content:'▰'; color:var(--c,var(--blue)); }
   .orgpill.tag::before { content:'•'; color:var(--c,var(--purple)); font-size:16px; line-height:8px; }
   .orgbox { margin:14px 0 4px; padding:12px 13px; border:1px solid var(--border); border-radius:var(--radius); background:var(--panel2); }
-  .orgrow { display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  .orgrow { display:flex; min-width:0;gap:7px; align-items:center; flex-wrap:wrap; margin-top:8px; }
   .orgrow:first-child { margin-top:0; }
   .orgrow .lbl { width:52px; flex:none; }
   .quickadd { margin-left:auto; position:relative; }
@@ -113,8 +125,24 @@
   .filter-menu>summary { list-style:none;width:36px;height:36px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--border2);border-radius:6px;background:var(--panel);font-size:0;cursor:pointer; }
   .filter-menu>summary::-webkit-details-marker { display:none; }
   .filter-menu[open]>summary { background:var(--panel2); }
+  .filter-count { position:absolute;right:-5px;top:-5px;display:grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border:2px solid var(--panel);border-radius:9px;background:var(--blue);color:#fff;font-size:9px;font-weight:700;line-height:1; }
   .filter-popover { position:absolute;right:0;top:45px;z-index:20;width:min(680px,calc(100vw - 40px));max-height:70vh;overflow:auto;padding:14px;background:var(--panel);border:1px solid var(--border2);border-radius:8px;box-shadow:var(--shadow); }
   .filter-popover .orgbox { margin:0;border:0;padding:0;background:transparent; }
+  .filter-head { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px; }
+  .filter-head strong { font-size:13px; }
+  .filter-close { width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer; }
+  .filter-close:hover { background:var(--panel2);color:var(--fg); }
+  .range-filter { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border); }
+  .range-filter fieldset { min-width:0;margin:0;padding:0;border:0; }
+  .range-filter legend { margin-bottom:7px;color:var(--fg);font-size:11px;font-weight:700;text-transform:uppercase; }
+  .range-inputs { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px; }
+  .range-inputs label { min-width:0;color:var(--muted);font-size:11px; }
+  .range-inputs input { width:100%;min-width:0;margin-top:4px;padding:7px 8px;border:1px solid var(--border2);border-radius:6px;background:var(--panel);color:var(--fg);font:inherit; }
+  .range-inputs input:focus { border-color:var(--blue);outline:2px solid var(--blue-soft); }
+  .range-actions { grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap; }
+  .range-error { margin-right:auto;color:var(--red);font-size:11.5px; }
+  .range-clear { color:var(--muted);font-size:11.5px;font-weight:600; }
+  .range-submit { display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:0;border-radius:6px;background:var(--fg);color:var(--panel);font:inherit;font-size:11.5px;font-weight:650;cursor:pointer; }
   .table-wrap { border:0;overflow:visible; }
   .table-wrap .rectable { margin:0; }
   .table-wrap .rectable tbody tr:last-child td { border-bottom:0; }
@@ -139,6 +167,8 @@
     .library-actions .btn.sec { display:none; }
     .library-toolbar { top:18px;right:14px; }
     .filter-popover { position:fixed;left:10px;right:10px;top:64px;width:auto;max-height:calc(100vh - 74px); }
+    .range-filter { grid-template-columns:1fr; }
+    .range-actions { grid-column:1; }
     .table-wrap { border:0;overflow:visible; }
     .rectable thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
     .rectable, .rectable tbody, .rectable tr, .rectable td { display:block; width:100%; }
@@ -196,19 +226,21 @@
   </section>
   {% else %}
   {% set active_folder = organization.folders | selectattr('id', 'equalto', lib.folder) | first %}
+  {% set filter_count = (1 if q else 0) + (1 if lib.state else 0) + (1 if lib.scene is not none else 0) + (1 if lib.folder is not none else 0) + (1 if lib.tag is not none else 0) + (1 if lib.origin else 0) + (1 if lib.date_from else 0) + (1 if lib.date_to else 0) + (1 if lib.min_duration_minutes is not none else 0) + (1 if lib.max_duration_minutes is not none else 0) %}
   <div class="library-head">
     <div><h1>{% if lib.view == 'trash' %}{{ t('Trash') }}{% elif lib.view == 'uncategorized' %}{{ t('Uncategorized') }}{% elif active_folder %}{{ active_folder.name }}{% elif lib.origin == 'plaud' %}{{ t('Plaud recordings') }}{% elif lib.origin == 'local' %}{{ t('Local uploads') }}{% else %}{{ t('All files') }}{% endif %}</h1></div>
     <div class="library-actions"></div>
   </div>
   <div class="library-toolbar">
-    <form class="library-search" method="get" action="/"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span><input name="q" value="{{ q }}" placeholder="{{ t('Search files') }}"><input type="hidden" name="view" value="{{ lib.view }}">{% for name, value in [('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin), ('state', lib.state), ('scene', lib.scene), ('sort', lib.sort), ('dir', lib.dir)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}</form>
-    <details class="filter-menu"><summary aria-label="{{ t('Filter and organize') }}" title="{{ t('Filter and organize') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg')"></span>{{ t('Filter and organize') }}</summary><div class="filter-popover">
+    <form class="library-search" method="get" action="/"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span><input name="q" value="{{ q }}" placeholder="{{ t('Search files') }}"><input type="hidden" name="view" value="{{ lib.view }}">{% for name, value in [('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin), ('state', lib.state), ('scene', lib.scene), ('sort', lib.sort), ('dir', lib.dir), ('date_from', lib.date_from), ('date_to', lib.date_to), ('min_duration_minutes', lib.min_duration_minutes), ('max_duration_minutes', lib.max_duration_minutes)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}</form>
+    <details class="filter-menu" {% if lib.invalid_date_range or lib.invalid_duration_range %}open{% endif %}><summary aria-label="{{ t('Filter and organize') }}" title="{{ t('Filter and organize') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg')"></span>{{ t('Filter and organize') }}{% if filter_count %}<span class="filter-count" aria-hidden="true">{{ filter_count }}</span><span class="visually-hidden">{{ filter_count }} {{ t('active filters') }}</span>{% endif %}</summary><div class="filter-popover">
+    <div class="filter-head"><strong>{{ t('Filter and organize') }}</strong><button class="filter-close" type="button" aria-label="{{ t('Close filters') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
     <div class="orgbox" aria-label="Library organization">
       <div class="orgrow">
         <span class="lbl">{{ t('Folders') }}</span>
-        <a class="fchip {% if lib.folder is none %}on{% endif %}" href="/?view=all">{{ t('All') }}</a>
+        <a class="fchip {% if lib.folder is none %}on{% endif %}" href="{{ liburl(view='all', folder='', tag='') }}">{{ t('All') }}</a>
         {% for folder in organization.folders %}
-        <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="/?view=all&amp;folder={{ folder.id }}">
+        <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="{{ liburl(view='all', folder=folder.id, tag='') }}" title="{{ folder.name }}">
           {{ folder.name }} <span class="n">{{ folder.count }}</span>
         </a>
         {% endfor %}
@@ -218,9 +250,9 @@
       </div>
       <div class="orgrow">
         <span class="lbl">{{ t('Tags') }}</span>
-        <a class="fchip {% if lib.tag is none %}on{% endif %}" href="/?view=all">{{ t('All') }}</a>
+        <a class="fchip {% if lib.tag is none %}on{% endif %}" href="{{ liburl(view='all', folder='', tag='') }}">{{ t('All') }}</a>
         {% for tag in organization.tags %}
-        <a class="fchip {% if lib.tag == tag.id %}on{% endif %}" href="/?view=all&amp;tag={{ tag.id }}">
+        <a class="fchip {% if lib.tag == tag.id %}on{% endif %}" href="{{ liburl(view='all', folder='', tag=tag.id) }}" title="{{ tag.name }}">
           {{ tag.name }} <span class="n">{{ tag.count }}</span>
         </a>
         {% endfor %}
@@ -246,26 +278,32 @@
            href="{{ liburl(lib.sort, lib.dir, lib.state, '', lib.view) }}">{{ t('All') }}</a>
         {% for sc in facets.scenes %}
         <a class="fchip {% if sc.active %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{{ sc.label }} <span class="n">{{ sc.count }}</span></a>
+           href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{{ t(sc.label) }} <span class="n">{{ sc.count }}</span></a>
         {% endfor %}
       </div>
       {% endif %}
       {% if facets.origins %}
       <div class="filtrow">
         <span class="lbl">{{ t('Comes from') }}</span>
-        <a class="fchip {% if not lib.origin %}on{% endif %}" href="/?view={{ lib.view }}">{{ t('All') }}</a>
-        {% for source in facets.origins %}<a class="fchip {% if source.active %}on{% endif %}" href="/?view={{ lib.view }}&amp;origin={{ source.value }}">{{ source.label }} <span class="n">{{ source.count }}</span></a>{% endfor %}
+        <a class="fchip {% if not lib.origin %}on{% endif %}" href="{{ liburl(origin='') }}">{{ t('All') }}</a>
+        {% for source in facets.origins %}<a class="fchip {% if source.active %}on{% endif %}" href="{{ liburl(origin=source.value) }}">{{ t(source.label) }} <span class="n">{{ source.count }}</span></a>{% endfor %}
       </div>
       {% endif %}
       <div class="filtrow">
         <span class="lbl">{{ t('View') }}</span>
         <a class="fchip {% if lib.view == 'all' %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'all') }}">{{ t('All files') }}</a>
+           href="{{ liburl(view='all') }}">{{ t('All files') }}</a>
         <a class="fchip {% if lib.view == 'uncategorized' %}on{% endif %}"
-           href="/?view=uncategorized">{{ t('Uncategorized') }}</a>
+           href="{{ liburl(view='uncategorized', folder='', tag='') }}">{{ t('Uncategorized') }}</a>
         <a class="fchip trash {% if lib.view == 'trash' %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, lib.scene, 'trash') }}">{{ t('Trash') }} <span class="n">{{ facets.trash_count }}</span></a>
+           href="{{ liburl(view='trash', folder='', tag='') }}">{{ t('Trash') }} <span class="n">{{ facets.trash_count }}</span></a>
       </div>
+      <form class="range-filter" method="get" action="/">
+        {% for name, value in [('q', q), ('sort', lib.sort), ('dir', lib.dir), ('state', lib.state), ('scene', lib.scene), ('view', lib.view), ('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
+        <fieldset><legend>{{ t('Recorded date') }}</legend><div class="range-inputs"><label>{{ t('From') }}<input type="date" name="date_from" value="{{ lib.date_from or '' }}"></label><label>{{ t('To') }}<input type="date" name="date_to" value="{{ lib.date_to or '' }}"></label></div></fieldset>
+        <fieldset><legend>{{ t('Duration in minutes') }}</legend><div class="range-inputs"><label>{{ t('Minimum') }}<input type="number" name="min_duration_minutes" value="{{ lib.min_duration_minutes if lib.min_duration_minutes is not none else '' }}" min="0" max="1000000" step="0.1" inputmode="decimal"></label><label>{{ t('Maximum') }}<input type="number" name="max_duration_minutes" value="{{ lib.max_duration_minutes if lib.max_duration_minutes is not none else '' }}" min="0" max="1000000" step="0.1" inputmode="decimal"></label></div></fieldset>
+        <div class="range-actions">{% if lib.invalid_date_range %}<span class="range-error" role="alert">{{ t('Start date must not follow end date.') }}</span>{% elif lib.invalid_duration_range %}<span class="range-error" role="alert">{{ t('Minimum duration must not exceed maximum duration.') }}</span>{% endif %}<a class="range-clear" href="{{ liburl(ranges=false) }}">{{ t('Clear date and duration') }}</a><button class="range-submit" type="submit"><span class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></span>{{ t('Apply filters') }}</button></div>
+      </form>
     </div>
     </div></details>
   </div>
@@ -280,7 +318,7 @@
     <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/audio-lines.svg')"></span>
       {% if lib.view == 'trash' %}
         {{ t('Nothing in trash.') }}
-      {% elif lib.q or lib.state or lib.scene is not none or lib.folder is not none or lib.tag is not none or lib.origin or lib.view == 'uncategorized' %}
+      {% elif lib.q or lib.state or lib.scene is not none or lib.folder is not none or lib.tag is not none or lib.origin or lib.date_from or lib.date_to or lib.min_duration_minutes is not none or lib.max_duration_minutes is not none or lib.view == 'uncategorized' %}
         {{ t('No recordings match these filters.') }}
       {% else %}
         {{ t('No recordings yet.') }}<br>{{ t('Connect the official Plaud API or MCP in Settings, then import your library.') }}
@@ -320,6 +358,7 @@
           {% if lib.view != 'trash' %}<td class="select-cell"><input class="row-select" type="checkbox" value="{{ f.id }}" aria-label="Select {{ f.filename }}"></td>{% endif %}
           <td class="name-cell">
             <a class="nm" href="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-get="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="Needs attention — {{ f.status }}" aria-label="Needs attention"></span>{% endif %}</a>
+            <span class="file-subline"><span>{{ t(f.status) }}</span><span>·</span><span>{{ t('Plaud cloud') if f.origin == 'plaud' else t('Local import') }}</span>{% if f.folder %}<span>·</span><span>{{ f.folder.name }}</span>{% endif %}</span>
           </td>
           <td class="num dur-cell">{{ f.duration_ms | dur }}</td>
           <td class="num rec-cell">{{ f.start_time_ms | dt }}</td>
@@ -376,6 +415,28 @@
   appView?.addEventListener('htmx:beforeCleanupElement', event => {
     if (event.target === appView) cleanupController.abort();
   });
+  const filterMenu = document.querySelector('.filter-menu');
+  const filterTrigger = filterMenu?.querySelector(':scope > summary');
+  const filterClose = filterMenu?.querySelector('.filter-close');
+  let filterReturnFocus = null;
+  filterTrigger?.addEventListener('click', () => {
+    if (!filterMenu.open) filterReturnFocus = document.activeElement;
+  }, {signal: cleanupController.signal});
+  filterMenu?.addEventListener('toggle', () => {
+    if (filterMenu.open) filterClose?.focus();
+  }, {signal: cleanupController.signal});
+  const closeFilters = () => {
+    if (!filterMenu?.open) return;
+    filterMenu.open = false;
+    (filterReturnFocus?.isConnected ? filterReturnFocus : filterTrigger)?.focus();
+  };
+  filterClose?.addEventListener('click', closeFilters, {signal: cleanupController.signal});
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && filterMenu?.open) {
+      event.preventDefault();
+      closeFilters();
+    }
+  }, {signal: cleanupController.signal});
   const tr = window.localplaudT;
   const folders = {{ organization.folders | tojson }};
   const tags = {{ organization.tags | tojson }};
