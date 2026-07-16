@@ -490,6 +490,68 @@ def test_autoflow_transcript_exports_are_durable_downloadable_and_idempotent(
         assert session.get(AutomationExport, txt["id"]).automation_run_id is None
 
 
+def test_autoflow_export_renders_content_and_provenance_from_one_snapshot(
+    monkeypatch, tmp_path
+):
+    from pathlib import Path
+
+    _client(monkeypatch, tmp_path)
+    import localplaud.export_formats as export_formats
+    from localplaud.automations import deliver_automation_export
+    from localplaud.db.models import (
+        AutomationExport,
+        AutomationRule,
+        AutomationRun,
+        PlaudFile,
+    )
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="snapshot", filename="Snapshot"))
+        rule = AutomationRule(name="Snapshot export", trigger={}, actions={})
+        session.add(rule)
+        session.flush()
+        run = AutomationRun(
+            rule_id=rule.id,
+            rule_version=1,
+            file_id="snapshot",
+            status="completed",
+            matched=True,
+            detail={"export_requested": ["txt"]},
+        )
+        session.add(run)
+        session.flush()
+        run_id = run.id
+
+    calls = 0
+
+    def snapshot(_file_id):
+        nonlocal calls
+        calls += 1
+        return {
+            "title": "Snapshot",
+            "segments": [{"text": "revision two", "start": 0, "end": 1}],
+            "speaker_names": {},
+            "notes": [],
+            "audio_path": None,
+            "transcript_provenance": {
+                "transcript_id": 1,
+                "transcript_source": "local",
+                "transcript_revision_id": 2,
+                "transcript_revision": 2,
+            },
+        }
+
+    monkeypatch.setattr(export_formats, "recording_data", snapshot)
+    assert deliver_automation_export(run_id, "txt")["status"] == "completed"
+
+    with session_scope() as session:
+        row = session.query(AutomationExport).one()
+        assert row.provenance["transcript_revision"] == 2
+        assert b"revision two" in Path(row.path).read_bytes()
+    assert calls == 1
+
+
 def test_export_failure_isolated_then_retries_after_transcript_exists(
     monkeypatch, tmp_path
 ):

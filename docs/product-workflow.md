@@ -491,7 +491,10 @@ per recording with stable local keys and user-editable display names
 (renamed from the Web detail page and applied in transcript view, regenerated
 artifacts, Ask, and export). Run-local provider labels are reconciled using clear,
 one-to-one timestamp overlap; ambiguous or new voices get fresh unnamed identities
-so a saved name is never silently moved to uncertain speech. Transcript corrections are
+so a saved name is never silently moved to uncertain speech. One canonical segment
+can also be reassigned to another stable speaker without altering raw ASR;
+speaker-only revisions preserve its timed words and flow through regenerated notes,
+search, Ask, and export. Transcript corrections are
 stored as provenance-preserving revisions: per-segment
 inline edits create a corrected canonical transcript on top of the immutable raw
 ASR row, survive re-ASR, re-index in the background without rerunning ASR, and hide

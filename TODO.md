@@ -290,6 +290,10 @@ embedding raw provider credentials or model settings in each rule.
   labels against the previous speech timeline with one-to-one overlap matching;
   ambiguous/new voices receive a fresh unnamed identity rather than inheriting a
   user's display name. The mapping is retained in stage-attempt provenance.
+- ✅ Segment-level speaker attribution can be corrected from the canonical transcript
+  editor without changing immutable raw ASR. Speaker-only revisions retain word
+  timings/text/confidence, apply the stable key to nested words, invalidate dependent
+  notes/maps/indexes, and re-index without rerunning ASR or diarization.
 - ✅ Added durable Plaud-style speaker paragraphs after alignment and diarization:
   losslessly split mixed-speaker word runs, merge consecutive same-speaker speech
   across short pauses, preserve every word timestamp/confidence, and prevent Ask

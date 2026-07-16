@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
+import re
 import secrets
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -31,6 +33,7 @@ from markdown_it import MarkdownIt
 from markupsafe import Markup
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import aliased
 from starlette.background import BackgroundTask
 
@@ -743,6 +746,8 @@ def _file_workspace_url(
     ask_thread: str | None = None,
     revision: int | None = None,
     note_id: int | None = None,
+    t: int | None = None,
+    segment_error: str | None = None,
 ) -> str:
     """Build a side-list link without dropping the open workspace context."""
     pairs: list[tuple[str, str | int]] = [("return_to", return_to), ("tab", tab)]
@@ -751,10 +756,60 @@ def _file_workspace_url(
         ("ask_thread", ask_thread),
         ("revision", revision),
         ("note_id", note_id),
+        ("t", t),
+        ("segment_error", segment_error),
     ):
         if value is not None:
             pairs.append((key, value))
     return f"/file/{quote(file_id, safe='')}?{urlencode(pairs)}"
+
+
+def _safe_playback_second(value: str | float | int | None) -> int | None:
+    """Keep workspace redirects bounded and discard malformed playback state."""
+    try:
+        parsed = float(value) if value not in {None, ""} else None
+        second = int(parsed) if parsed is not None and math.isfinite(parsed) else None
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return min(second, 7 * 24 * 60 * 60) if second is not None and second > 0 else None
+
+
+def _speaker_keys_for_editing(session, row: PlaudFile, segments: list[dict]) -> list[str]:
+    """Return every stable speaker identity that can be assigned again."""
+    raw_row = _canonical_raw_row(row, get_settings())
+    raw_keys = speaker_keys_from_segments(raw_row.segments or []) if raw_row else []
+    durable_keys = session.scalars(
+        select(Speaker.key).where(Speaker.file_id == row.id).order_by(Speaker.id)
+    )
+    return list(
+        dict.fromkeys(
+            [*speaker_keys_from_segments(segments), *raw_keys, *durable_keys]
+        )
+    )
+
+
+def _transcript_revision_reason(note: str | None) -> dict | None:
+    """Parse durable speaker-edit notes into localizable presentation data."""
+    if not note:
+        return None
+    reassigned = re.fullmatch(
+        r"(?:(edited text) and )?reassigned segment (\d+) from (.+) to (.+)", note
+    )
+    if reassigned:
+        return {
+            "kind": "text_and_speaker" if reassigned.group(1) else "speaker",
+            "segment": int(reassigned.group(2)) + 1,
+            "from": None if reassigned.group(3) == "unassigned" else reassigned.group(3),
+            "to": None if reassigned.group(4) == "unassigned" else reassigned.group(4),
+        }
+    normalized = re.fullmatch(r"normalized segment (\d+) word speakers as (.+)", note)
+    if normalized:
+        return {
+            "kind": "speaker_normalized",
+            "segment": int(normalized.group(1)) + 1,
+            "to": None if normalized.group(2) == "unassigned" else normalized.group(2),
+        }
+    return None
 
 
 def _library_context_title(params: dict, organization: dict) -> str:
@@ -1996,6 +2051,12 @@ def _recording_edit_blocked(row: PlaudFile) -> bool:
     return processing_claim_active(row)
 
 
+def _serialize_transcript_mutation(session) -> None:
+    """Linearize revision reads/writes on SQLite before stale-write checks."""
+    if session.get_bind().dialect.name == "sqlite":
+        session.execute(sql_text("BEGIN IMMEDIATE"))
+
+
 def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) -> None:
     """Preserve derived rows but make stale artifacts ineligible for reuse/UI."""
     stale_generation = secrets.token_hex(16)
@@ -2027,6 +2088,9 @@ def recording_transcript_page(
     page_transcript_token: str | None = None,
     offset: int = 0,
     limit: int = 120,
+    return_to: str | None = None,
+    tab: str = "transcript",
+    t: str | None = None,
 ):
     settings = get_settings()
     offset = max(0, offset)
@@ -2122,6 +2186,13 @@ def recording_transcript_page(
         page_segments = segments[offset : offset + limit]
         next_offset = offset + limit if offset + limit < len(segments) else None
         speaker_names = display_names(session, file_id)
+        speaker_options = [
+            {"key": key, "name": speaker_names.get(key) or key}
+            for key in _speaker_keys_for_editing(session, row, segments)
+        ]
+    return_to = _validated_library_return_url(return_to)
+    tab = tab if tab in {"transcript", "notes", "mindmap", "ask"} else "transcript"
+    playback_second = _safe_playback_second(t)
     return templates.TemplateResponse(
         request=request,
         name="_transcript_page.html",
@@ -2143,8 +2214,12 @@ def recording_transcript_page(
             "segments": page_segments,
             "next_offset": next_offset,
             "speaker_names": speaker_names,
+            "speaker_options": speaker_options,
             "can_edit": can_edit and source != "imported",
             "transcript_revision": transcript_revision,
+            "return_to": return_to,
+            "tab": tab,
+            "playback_second": playback_second,
         },
     )
 
@@ -2201,11 +2276,22 @@ def file_detail(
     return_to: str | None = None,
     workspace: bool = False,
     preserve_filelist: bool = False,
+    t: str | None = None,
+    segment_error: str | None = None,
 ):
     settings = get_settings()
     return_to = _validated_library_return_url(return_to)
     return_to_param = quote(return_to, safe="")
     filelist_params, filelist_page = _library_state_from_return_url(return_to)
+    playback_second = _safe_playback_second(t)
+    segment_edit_error = {
+        "stale_revision": "Transcript changed. Reload before saving.",
+        "recording_processing": "Recording is processing. Wait until it finishes before editing.",
+        "not_found": "Recording not found.",
+        "no_transcript": "No transcript is available to edit.",
+        "segment_not_found": "That transcript segment is no longer available.",
+        "unknown_speaker": "That speaker is no longer available.",
+    }.get(segment_error or "")
     active_tab = (
         "notes"
         if note_id is not None
@@ -2383,7 +2469,7 @@ def file_detail(
         speaker_names = display_names(session, r.id)
         speakers = [
             {"key": key, "name": speaker_names.get(key)}
-            for key in speaker_keys_from_segments(canonical_segments)
+            for key in _speaker_keys_for_editing(session, r, canonical_segments)
         ]
         show_corrected = corrected is not None and view != "raw"
         shown_revision = preview_revision if preview_revision is not None else corrected
@@ -2445,6 +2531,7 @@ def file_detail(
                 {
                     "revision": row.revision,
                     "note": row.note or "Transcript correction",
+                    "reason": _transcript_revision_reason(row.note),
                     "kind": row.kind,
                     "provider": row.provider,
                     "model": row.model,
@@ -2694,6 +2781,8 @@ def file_detail(
         "preserve_filelist": preserve_filelist or not workspace,
         "return_to": return_to,
         "return_to_param": return_to_param,
+        "playback_second": playback_second,
+        "segment_edit_error": segment_edit_error,
     }
     return templates.TemplateResponse(request=request, name="detail.html", context=ctx)
 
@@ -3591,6 +3680,7 @@ def rename_speaker(
     import threading
 
     with session_scope() as session:
+        _serialize_transcript_mutation(session)
         r = session.get(PlaudFile, file_id)
         if r is None:
             return JSONResponse({"error": "not found"}, status_code=404)
@@ -3646,12 +3736,20 @@ def rename_speaker(
 
 @app.post("/file/{file_id}/transcript/segments/{idx}")
 def edit_transcript_segment(
+    request: Request,
     file_id: str,
     idx: int,
     text: str = Form(...),
     base_revision: int = Form(...),
+    speaker: str = Form("__unchanged__"),
+    return_to: str = Form("/"),
+    tab: str = Form("transcript"),
+    view: str = Form("corrected"),
+    t: str = Form(""),
 ):
-    """Correct one transcript segment. Creates the next TranscriptRevision on
+    """Correct one transcript segment's text and/or speaker attribution.
+
+    Creates the next TranscriptRevision on
     top of the current canonical transcript (latest revision, else the raw
     local ASR row, which is never modified), then re-indexes in the background
     without rerunning ASR. Summaries are not auto-regenerated — regeneration
@@ -3659,46 +3757,127 @@ def edit_transcript_segment(
     import copy
     import threading
 
+    accept = request.headers.get("accept", "")
+    wants_json = "application/json" in accept
+    wants_html = "text/html" in accept and not wants_json
+    return_to = _validated_library_return_url(return_to)
+    tab = tab if tab in {"transcript", "notes", "mindmap", "ask"} else "transcript"
+    view = view if view in {"raw", "corrected"} else "corrected"
+    playback_second = _safe_playback_second(t)
+
+    def error_response(code: str, message: str, status_code: int):
+        if not wants_html:
+            return JSONResponse(
+                {"error": message, "code": code}, status_code=status_code
+            )
+        return RedirectResponse(
+            _file_workspace_url(
+                file_id,
+                return_to,
+                tab=tab,
+                view=view,
+                t=playback_second,
+                segment_error=code,
+            ),
+            status_code=303,
+        )
+
+    def workspace_redirect(*, changed: bool) -> RedirectResponse:
+        return RedirectResponse(
+            _file_workspace_url(
+                file_id,
+                return_to,
+                tab=tab,
+                view="corrected" if changed else view,
+                t=playback_second,
+            ),
+            status_code=303,
+        )
+
     with session_scope() as session:
+        _serialize_transcript_mutation(session)
         r = session.get(PlaudFile, file_id)
         if r is None:
-            return JSONResponse({"error": "not found"}, status_code=404)
+            return error_response("not_found", "not found", 404)
         if _recording_edit_blocked(r):
-            return JSONResponse(
-                {"error": "recording is processing; try again when it finishes"},
-                status_code=409,
+            return error_response(
+                "recording_processing",
+                "recording is processing; try again when it finishes",
+                409,
             )
         settings = get_settings()
         raw_row = _canonical_raw_row(r, settings)
         corrected = _canonical_revision(r, raw_row)
         if corrected is not None:
             base_segments = corrected.segments
-            has_speakers = corrected.has_speakers
             base_transcript_id = corrected.base_transcript_id
             revision_source = corrected.source
         elif raw_row is not None:
             base_segments = raw_row.segments
-            has_speakers = raw_row.has_speakers
             base_transcript_id = raw_row.id
             revision_source = raw_row.source
         else:
-            return JSONResponse({"error": "no transcript to edit"}, status_code=400)
+            return error_response("no_transcript", "no transcript to edit", 400)
         current_revision = corrected.revision if corrected is not None else 0
         if base_revision != current_revision:
-            return JSONResponse(
-                {"error": "transcript changed; reload before saving"},
-                status_code=409,
+            return error_response(
+                "stale_revision", "transcript changed; reload before saving", 409
             )
         next_revision = max((rev.revision for rev in r.transcript_revisions), default=0) + 1
         if not 0 <= idx < len(base_segments):
-            return JSONResponse({"error": "segment index out of range"}, status_code=400)
+            return error_response(
+                "segment_not_found", "segment index out of range", 400
+            )
+        current_segment = base_segments[idx]
+        current_speaker = current_segment.get("speaker")
+        valid_speakers = set(_speaker_keys_for_editing(session, r, base_segments))
+        if speaker == "__unchanged__":
+            selected_speaker = current_speaker
+        elif speaker == "__none__":
+            selected_speaker = None
+        elif speaker in valid_speakers:
+            selected_speaker = speaker
+        else:
+            return error_response("unknown_speaker", "unknown speaker key", 400)
+        text_changed = text != (current_segment.get("text") or "")
+        direct_speaker_changed = selected_speaker != current_speaker
+        nested_speaker_changed = not text_changed and any(
+            word.get("speaker") != selected_speaker
+            for word in (current_segment.get("words") or [])
+        )
+        speaker_changed = direct_speaker_changed or nested_speaker_changed
+        if not text_changed and not speaker_changed:
+            if wants_json:
+                return {"changed": False, "revision": current_revision}
+            return workspace_redirect(changed=False)
         segments = copy.deepcopy(base_segments)
         # Word timings/text describe the raw ASR segment and become invalid once
-        # its text is edited. Preserve segment timing/speaker, but clear stale words.
-        segments[idx] = dict(segments[idx]) | {"text": text, "words": []}
+        # its text is edited. A speaker-only correction preserves every timed word
+        # and changes attribution at both segment and word level.
+        words = [] if text_changed else list(segments[idx].get("words") or [])
+        for word in words:
+            word["speaker"] = selected_speaker
+        segments[idx] = dict(segments[idx]) | {
+            "text": text,
+            "speaker": selected_speaker,
+            "words": words,
+        }
         joined = "\n".join(
             (s.get("text") or "").strip() for s in segments if (s.get("text") or "").strip()
         )
+        if direct_speaker_changed:
+            from_speaker = current_speaker or "unassigned"
+            to_speaker = selected_speaker or "unassigned"
+            revision_note = f"reassigned segment {idx} from {from_speaker} to {to_speaker}"
+            if text_changed:
+                revision_note = f"edited text and {revision_note}"
+        elif nested_speaker_changed:
+            revision_note = (
+                f"normalized segment {idx} word speakers as "
+                f"{selected_speaker or 'unassigned'}"
+            )
+        else:
+            revision_note = f"edited segment {idx}"
         session.add(
             TranscriptRevision(
                 file_id=file_id,
@@ -3707,8 +3886,9 @@ def edit_transcript_segment(
                 source=revision_source,
                 segments=segments,
                 text=joined,
-                has_speakers=has_speakers,
-                note=f"edited segment {idx}",
+                has_speakers=bool(speaker_keys_from_segments(segments)),
+                note=revision_note,
+                kind="speaker_edit" if speaker_changed else "user_edit",
             )
         )
         # Invalidate the index now: stale chunks must not serve search/Ask.
@@ -3731,7 +3911,13 @@ def edit_transcript_segment(
         },
         daemon=True,
     ).start()
-    return RedirectResponse(url=f"/file/{file_id}", status_code=303)
+    if wants_json:
+        return {
+            "changed": True,
+            "revision": next_revision,
+            "speaker": selected_speaker,
+        }
+    return workspace_redirect(changed=True)
 
 
 @app.post("/file/{file_id}/transcript/replace")
@@ -3753,6 +3939,7 @@ def replace_transcript_text(
     if len(needle) > 500 or len(replace) > 5000:
         return JSONResponse({"error": "find or replacement text is too long"}, status_code=400)
     with session_scope() as session:
+        _serialize_transcript_mutation(session)
         row = session.get(PlaudFile, file_id)
         if row is None:
             return JSONResponse({"error": "not found"}, status_code=404)
@@ -3835,6 +4022,7 @@ def restore_transcript_revision(
     import threading
 
     with session_scope() as session:
+        _serialize_transcript_mutation(session)
         row = session.get(PlaudFile, file_id)
         if row is None:
             return JSONResponse({"error": "not found"}, status_code=404)

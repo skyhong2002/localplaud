@@ -397,10 +397,11 @@ def deliver_automation_export(run_id: int, fmt: str) -> dict:
         file_id = run.file_id
 
     try:
-        from .export_formats import render_transcript, transcript_provenance
+        from .export_formats import recording_data, render_transcript_data
 
-        content, _media_type = render_transcript(file_id, fmt)
-        provenance = transcript_provenance(file_id)
+        snapshot = recording_data(file_id)
+        content, _media_type = render_transcript_data(snapshot, fmt)
+        provenance = snapshot["transcript_provenance"]
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(prefix=".transcript-", dir=path.parent)
         try:

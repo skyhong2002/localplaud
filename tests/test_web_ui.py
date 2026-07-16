@@ -705,7 +705,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert ".mm-label" in r.text and "overflow-wrap:anywhere" in r.text
     assert "body.nav-open { overflow:hidden; }" in r.text
     assert ".title-edit { width:36px;height:36px;opacity:1; }" in r.text
-    assert ".seg .editbtn { min-width:36px;min-height:36px;visibility:visible; }" in r.text
+    assert ".seg .editbtn { min-width:36px;min-height:36px;opacity:1; }" in r.text
     assert "max-height:calc(100dvh - 24px);overflow:hidden" in r.text
     assert ".import-body { min-height:0;" in r.text and "overflow-y:auto" in r.text
     assert ".ask-user-message" in r.text and ".saved-note-actions" in r.text

@@ -431,10 +431,13 @@
     .speaker-editor label { display:grid;gap:4px;font-size:10.5px; }
     .legend .spk-name { width:100%;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:6px;padding:6px 8px;font-size:12px;outline:none; }
     .legend .spk-name:focus { border-color:var(--blue); }
-    .seg .editbtn { visibility:hidden; background:none; border:0; color:var(--muted); cursor:pointer; font-size:12px; padding:0 4px; }
-    .seg:hover .editbtn { visibility:visible; }
+    .seg .editbtn { opacity:0; background:none; border:0; color:var(--muted); cursor:pointer; font-size:12px; padding:0 4px; }
+    .seg .editbtn .nav-icon { width:13px;height:13px; }
+    .seg:hover .editbtn,.seg:focus-within .editbtn,.seg .editbtn:focus-visible { opacity:1; }
     .seg .editbtn:hover { color:var(--fg); }
     .segedit { margin-top:6px; display:flex; flex-direction:column; gap:6px; cursor:default; }
+    .segedit label { display:grid;gap:4px; }
+    .segedit select { width:min(320px,100%); }
     .segedit textarea { width:100%; background:var(--panel); border:1px solid var(--border2); color:var(--fg); border-radius:8px; padding:8px 10px; font-size:13px; font-family:inherit; resize:vertical; outline:none; }
     .segedit textarea:focus { border-color:var(--blue); }
     .segedit .actions { display:flex; gap:6px; }
@@ -523,7 +526,7 @@
       .recording-actions .icon-action { width:35px;padding:0; }
       .recording-title-row { max-width:100%; }
       .title-edit { width:36px;height:36px;opacity:1; }
-      .seg .editbtn { min-width:36px;min-height:36px;visibility:visible; }
+      .seg .editbtn { min-width:36px;min-height:36px;opacity:1; }
       .recording-alert { flex-wrap:wrap; }
       .recording-alert-actions { width:100%;justify-content:flex-end; }
       .notes-toolbar { grid-template-columns:1fr;align-items:stretch; }

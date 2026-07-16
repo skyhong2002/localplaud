@@ -324,7 +324,8 @@ def _run_remote_stage(
     return json.loads(artifact)
 
 
-def _set_stage(
+def _set_stage_in_session(
+    session,
     file_id: str,
     stage: StageName,
     status: StageStatus,
@@ -339,100 +340,119 @@ def _set_stage(
     expected_stale_generation: object = _STALE_GENERATION_UNSET,
 ) -> None:
     now = datetime.now(UTC)
-    with session_scope() as session:
-        run = session.scalar(
-            select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
+    run = session.scalar(
+        select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
+    )
+    if run is None:
+        run = StageRun(file_id=file_id, stage=stage, attempts=0, detail={})
+        session.add(run)
+    if expected_stale_generation is not _STALE_GENERATION_UNSET:
+        current_generation = (run.detail or {}).get("stale_generation")
+        if current_generation != expected_stale_generation:
+            raise RuntimeError(
+                "stage inputs changed after generation; retry from the current artifacts"
+            )
+    snapshot = _PROFILE_SNAPSHOT.get()
+    reused = bool((detail or {}).get("reused"))
+    if snapshot is not None and not (reused and run.resolved_profile_snapshot is not None):
+        run.resolved_profile_snapshot = snapshot
+    profile_stage = "embed" if stage == StageName.index else stage.value
+    if begin_attempt:
+        run.attempts = (run.attempts or 0) + 1
+        run.started_at = now
+        run.completed_at = None
+        selection = (snapshot or {}).get("stages", {}).get(profile_stage) or {}
+        session.add(
+            StageAttempt(
+                file_id=file_id,
+                stage=stage,
+                attempt=run.attempts,
+                status=StageStatus.running,
+                provider=(selection.get("connection") or "").split(":", 1)[-1] or None,
+                model=selection.get("model"),
+                resolved_profile_snapshot=snapshot,
+                started_at=now,
+            )
         )
-        if run is None:
-            run = StageRun(file_id=file_id, stage=stage, attempts=0, detail={})
-            session.add(run)
-        if expected_stale_generation is not _STALE_GENERATION_UNSET:
-            current_generation = (run.detail or {}).get("stale_generation")
-            if current_generation != expected_stale_generation:
-                raise RuntimeError(
-                    "stage inputs changed after generation; retry from the current artifacts"
-                )
-        snapshot = _PROFILE_SNAPSHOT.get()
-        reused = bool((detail or {}).get("reused"))
-        if snapshot is not None and not (reused and run.resolved_profile_snapshot is not None):
-            run.resolved_profile_snapshot = snapshot
-        profile_stage = "embed" if stage == StageName.index else stage.value
-        if begin_attempt:
-            run.attempts = (run.attempts or 0) + 1
-            run.started_at = now
-            run.completed_at = None
-            selection = (snapshot or {}).get("stages", {}).get(profile_stage) or {}
-            session.add(
-                StageAttempt(
-                    file_id=file_id,
-                    stage=stage,
-                    attempt=run.attempts,
-                    status=StageStatus.running,
-                    provider=(selection.get("connection") or "").split(":", 1)[-1] or None,
-                    model=selection.get("model"),
-                    resolved_profile_snapshot=snapshot,
-                    started_at=now,
-                )
+    run.status = status
+    if provider is not None:
+        run.provider = provider
+    if model is not None:
+        run.model = model
+    if artifact_source is not None:
+        run.artifact_source = artifact_source
+    if detail is not None:
+        run.detail = detail
+    run.error = error[:2000] if error else None
+    if status in {
+        StageStatus.completed,
+        StageStatus.degraded,
+        StageStatus.failed,
+        StageStatus.skipped,
+    }:
+        run.completed_at = now
+        attempt = session.scalar(
+            select(StageAttempt).where(
+                StageAttempt.file_id == file_id,
+                StageAttempt.stage == stage,
+                StageAttempt.attempt == run.attempts,
+                StageAttempt.status == StageStatus.running,
             )
-        run.status = status
-        if provider is not None:
-            run.provider = provider
-        if model is not None:
-            run.model = model
-        if artifact_source is not None:
-            run.artifact_source = artifact_source
-        if detail is not None:
-            run.detail = detail
-        run.error = error[:2000] if error else None
-        if status in {
-            StageStatus.completed,
-            StageStatus.degraded,
-            StageStatus.failed,
-            StageStatus.skipped,
-        }:
-            run.completed_at = now
-            attempt = session.scalar(
-                select(StageAttempt).where(
-                    StageAttempt.file_id == file_id,
-                    StageAttempt.stage == stage,
-                    StageAttempt.attempt == run.attempts,
-                    StageAttempt.status == StageStatus.running,
-                )
-            )
-            if attempt is not None:
-                started = attempt.started_at
-                if started.tzinfo is None:
-                    started = started.replace(tzinfo=UTC)
-                latency_ms = max(0, int((now - started).total_seconds() * 1000))
-                normalized = normalize_usage(usage)
-                if (peak_memory := process_peak_memory_mb()) is not None:
-                    normalized["process_peak_memory_mb"] = peak_memory
-                pricing = pricing_for_stage(session, snapshot, profile_stage)
-                cost = estimate_cost(normalized, pricing)
-                attempt.status = status
-                attempt.provider = run.provider or attempt.provider
-                attempt.model = run.model or attempt.model
-                attempt.usage = normalized
-                attempt.estimated_cost_usd = cost
-                attempt.latency_ms = latency_ms
-                attempt.error = run.error
-                attempt.completed_at = now
-                run.detail = dict(run.detail or {}) | {
-                    "usage": normalized,
-                    "latency_ms": latency_ms,
-                    "estimated_cost_usd": cost,
-                    "pricing": pricing,
-                }
+        )
+        if attempt is not None:
+            started = attempt.started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            latency_ms = max(0, int((now - started).total_seconds() * 1000))
+            normalized = normalize_usage(usage)
+            if (peak_memory := process_peak_memory_mb()) is not None:
+                normalized["process_peak_memory_mb"] = peak_memory
+            pricing = pricing_for_stage(session, snapshot, profile_stage)
+            cost = estimate_cost(normalized, pricing)
+            attempt.status = status
+            attempt.provider = run.provider or attempt.provider
+            attempt.model = run.model or attempt.model
+            attempt.usage = normalized
+            attempt.estimated_cost_usd = cost
+            attempt.latency_ms = latency_ms
+            attempt.error = run.error
+            attempt.completed_at = now
+            run.detail = dict(run.detail or {}) | {
+                "usage": normalized,
+                "latency_ms": latency_ms,
+                "estimated_cost_usd": cost,
+                "pricing": pricing,
+            }
+
+
+def _set_stage(
+    file_id: str,
+    stage: StageName,
+    status: StageStatus,
+    **metadata,
+) -> None:
+    with session_scope() as session:
+        _set_stage_in_session(session, file_id, stage, status, **metadata)
+
+
+def _begin_stage_in_session(session, file_id: str, stage: StageName) -> str | None:
+    run = session.scalar(
+        select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
+    )
+    stale_generation = (run.detail or {}).get("stale_generation") if run else None
+    _set_stage_in_session(
+        session,
+        file_id,
+        stage,
+        StageStatus.running,
+        begin_attempt=True,
+    )
+    return stale_generation
 
 
 def _begin_stage(file_id: str, stage: StageName) -> str | None:
     with session_scope() as session:
-        run = session.scalar(
-            select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
-        )
-        stale_generation = (run.detail or {}).get("stale_generation") if run else None
-    _set_stage(file_id, stage, StageStatus.running, begin_attempt=True)
-    return stale_generation
+        return _begin_stage_in_session(session, file_id, stage)
 
 
 def _finish_stage(
