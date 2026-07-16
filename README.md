@@ -62,7 +62,9 @@ PDF embeds a portable Traditional Chinese font. Generated and Saved notes export
 Markdown, TXT, DOCX, or PDF; original-audio, mind-map image, and Markdown archive
 exports remain available. Transcript and current notes can be copied directly, and
 the Library can export up to 50 selected recordings as one provenance-aware ZIP with
-a partial-availability manifest. Durable
+a partial-availability manifest. Library and recording Ask surfaces also provide a
+searchable, paginated conversation-history drawer with rename/delete controls;
+deleting a conversation preserves any Saved notes created from its answers. Durable
 provider/model/execution profiles, explicit
 stage fallbacks, remote workers, local AutoFlow rules, inbox notifications,
 TXT/SRT/VTT AutoFlow exports, scoped authorized webhooks, and authorized SMTP email

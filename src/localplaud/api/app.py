@@ -984,6 +984,20 @@ class BulkExportBody(BaseModel):
     speakers: bool = True
 
 
+class AskThreadTitleBody(BaseModel):
+    title: str
+
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("conversation title must not be empty")
+        if len(value) > 200:
+            raise ValueError("conversation title must not exceed 200 characters")
+        return value
+
+
 class RecordingTitleBody(BaseModel):
     title: str | None = Field(default=None, max_length=512)
 
@@ -1299,6 +1313,47 @@ def bulk_export_files(body: BulkExportBody) -> StreamingResponse:
         headers=headers,
         background=BackgroundTask(result.close),
     )
+
+
+@app.get("/api/ask/threads")
+def ask_thread_history(
+    file_id: str | None = None,
+    q: str = "",
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    from ..ask_threads import list_threads
+
+    try:
+        return list_threads(file_id, query=q, page=page, page_size=page_size)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.patch("/api/ask/threads/{thread_id}")
+def rename_ask_thread(
+    thread_id: str,
+    body: AskThreadTitleBody,
+    file_id: str | None = None,
+) -> dict:
+    from ..ask_threads import rename_thread
+
+    try:
+        return rename_thread(thread_id, body.title, file_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="conversation not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/ask/threads/{thread_id}")
+def delete_ask_thread(thread_id: str, file_id: str | None = None) -> dict:
+    from ..ask_threads import delete_thread
+
+    try:
+        return delete_thread(thread_id, file_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="conversation not found") from exc
 
 
 # --------------------------------------------------------------------------- #

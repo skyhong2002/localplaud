@@ -335,6 +335,11 @@ embedding raw provider credentials or model settings in each rule.
   citations remain grounded in the current query. Any assistant answer can be saved
   idempotently as an editable note with source moments; Saved notes has its own page,
   recording tabs, edit/delete controls, deep links, and Markdown export coverage.
+- ✅ Library and recording Ask history now has an exact-surface, searchable and
+  paginated drawer with deterministic ordering, metadata, inline rename, and delete.
+  Deletion explicitly detaches and preserves Saved notes even when SQLite foreign-key
+  enforcement is disabled; desktop/mobile focus trapping, Escape, inert background,
+  focus restoration, request cleanup, and long-content bounds are covered.
 - ✅ Transcript corrections as revisions: inline per-segment editing on the Web
   detail page creates immutable `transcript_revisions` on top of the untouched raw
   ASR row; the latest revision is the canonical transcript for summaries, indexing,

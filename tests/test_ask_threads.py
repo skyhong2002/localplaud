@@ -153,6 +153,93 @@ def test_editable_note_source_migration_is_idempotent(tmp_path):
     assert "source_summary_id" in columns
 
 
+def test_ask_history_api_and_accessible_drawer_contract(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import AskMessage, AskThread, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        library = AskThread(id="library-history", file_id=None, title="Library decisions")
+        recording = AskThread(id="recording-history", file_id="r1", title="Weekly follow-up")
+        session.add_all([library, recording])
+        session.flush()
+        session.add_all(
+            [
+                AskMessage(thread_id=library.id, role="user", content="Compare recordings"),
+                AskMessage(thread_id=library.id, role="assistant", content="Library answer"),
+                AskMessage(thread_id=recording.id, role="user", content="What shipped?"),
+                AskMessage(thread_id=recording.id, role="assistant", content="The beta shipped"),
+            ]
+        )
+        session.flush()
+        answer = session.scalar(
+            select(AskMessage).where(
+                AskMessage.thread_id == recording.id,
+                AskMessage.role == "assistant",
+            )
+        )
+        session.add(
+            UserNote(
+                file_id="r1",
+                title="Saved release answer",
+                content_md="The beta shipped",
+                source_type="ask",
+                ask_message_id=answer.id,
+                citations=[{"file_id": "r1", "start": 12.0}],
+            )
+        )
+
+    library_history = client.get("/api/ask/threads").json()
+    recording_history = client.get("/api/ask/threads?file_id=r1").json()
+    assert [item["thread_id"] for item in library_history["threads"]] == ["library-history"]
+    assert [item["thread_id"] for item in recording_history["threads"]] == [
+        "recording-history"
+    ]
+    assert recording_history["threads"][0]["saved_note_count"] == 1
+    assert client.patch(
+        "/api/ask/threads/recording-history", json={"title": "Wrong surface"}
+    ).status_code == 404
+    renamed = client.patch(
+        "/api/ask/threads/recording-history?file_id=r1",
+        json={"title": "  Release follow-up  "},
+    )
+    assert renamed.status_code == 200 and renamed.json()["title"] == "Release follow-up"
+    trimmed_limit = client.patch(
+        "/api/ask/threads/recording-history?file_id=r1",
+        json={"title": f"  {'x' * 200}  "},
+    )
+    assert trimmed_limit.status_code == 200 and len(trimmed_limit.json()["title"]) == 200
+    assert client.patch(
+        "/api/ask/threads/recording-history?file_id=r1", json={"title": "   "}
+    ).status_code == 422
+
+    library_page = client.get("/?ask=true&ask_thread=library-history")
+    detail_page = client.get("/file/r1?tab=ask&ask_thread=recording-history")
+    for page in (library_page, detail_page):
+        assert 'data-open-ask-history' in page.text
+        assert 'id="ask-history-backdrop" hidden' in page.text
+        assert 'role="dialog" aria-modal="true" aria-labelledby="ask-history-title"' in page.text
+        assert "region.inert=true" in page.text
+        assert "event.key==='Escape'" in page.text
+        assert "document.activeElement===last" in page.text
+        assert "if(restoreFocus)opener?.focus()" in page.text
+        assert "signal:cleanupController.signal" in page.text
+        assert "-webkit-line-clamp:2" in page.text
+        assert "if(!backdrop.hidden)return" in page.text
+        assert "candidate.dataset.threadId===item.thread_id" in page.text
+    assert "const fileId=null,selectedId=\"library-history\"" in library_page.text
+    assert 'const fileId="r1",selectedId="recording-history"' in detail_page.text
+
+    deleted = client.delete("/api/ask/threads/recording-history?file_id=r1")
+    assert deleted.status_code == 200
+    assert deleted.json()["detached_saved_note_count"] == 1
+    with session_scope() as session:
+        note = session.scalar(select(UserNote).where(UserNote.title == "Saved release answer"))
+        assert note is not None and note.ask_message_id is None
+        assert note.content_md == "The beta shipped"
+
+
 def test_single_recording_followup_persists_history_and_sources(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed()

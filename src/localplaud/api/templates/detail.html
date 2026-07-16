@@ -307,6 +307,7 @@
     </div>
 
     <div class="tabpanel" id="recording-panel-ask" role="tabpanel" aria-labelledby="recording-tab-ask" data-panel="ask" {% if active_tab != 'ask' %}hidden{% endif %}>
+      <div style="display:flex;justify-content:flex-end;margin:-3px 0 8px"><button class="btn sec" type="button" data-open-ask-history><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span>{{ t('History') }}</button></div>
       <form class="ask" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-swap="innerHTML"
             hx-indicator="#file-ask-spin">
         <input type="text" name="q" id="ask-q" placeholder="{{ t('Ask a question about this recording…') }}"
@@ -445,6 +446,10 @@
   </section>
 </div>
 {% endif %}
+{% set ask_history_file_id = f.id %}
+{% set ask_history_selected_id = f.selected_ask_thread.thread_id if f.selected_ask_thread else none %}
+{% set ask_history_open_url = '/file/' ~ f.id ~ '?tab=ask&return_to=' ~ return_to_param %}
+{% include '_ask_history.html' %}
 {% endblock %}
 
 {% block scripts %}

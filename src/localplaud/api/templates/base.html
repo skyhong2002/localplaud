@@ -154,6 +154,26 @@
     .import-close { width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer; }
     .import-close:hover { background:var(--panel2);color:var(--fg); }
     .import-body { min-height:0;flex:1;padding:18px;display:flex;flex-direction:column;overflow-y:auto; }
+    .ask-history-backdrop { justify-content:flex-end;padding:0; }
+    .ask-history-drawer { width:min(400px,100%);height:100dvh;max-height:none;min-height:0;border-radius:8px 0 0 8px; }
+    .ask-history-body { gap:0;padding:0; }
+    .ask-history-tools { position:sticky;top:0;z-index:2;padding:14px 16px 12px;border-bottom:1px solid var(--border);background:var(--panel); }
+    .ask-history-search { display:flex;gap:7px; }
+    .ask-history-search input { min-width:0;flex:1; }
+    .ask-history-list { min-height:0; }
+    .ask-history-row { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;max-width:100%;padding:13px 16px;border-bottom:1px solid var(--border); }
+    .ask-history-row.current { background:var(--blue-soft); }
+    .ask-history-main { min-width:0; }
+    .ask-history-title { display:block;font-size:13px;font-weight:650;line-height:1.35;overflow-wrap:anywhere; }
+    .ask-history-preview { display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-top:4px;font-size:11.5px;line-height:1.45;color:var(--muted);overflow-wrap:anywhere; }
+    .ask-history-meta { display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;color:var(--faint);font-size:10.5px; }
+    .ask-history-actions { display:flex;gap:3px;align-items:flex-start; }
+    .ask-history-action { width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer; }
+    .ask-history-action:hover { background:var(--panel2);color:var(--fg); }
+    .ask-history-action .nav-icon { width:14px;height:14px; }
+    .ask-history-rename { grid-column:1/-1;display:flex;gap:7px;min-width:0; }
+    .ask-history-rename input { min-width:0;flex:1; }
+    .ask-history-footer { position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 16px;border-top:1px solid var(--border);background:var(--panel); }
     .import-tabs { display:flex;gap:4px;margin-bottom:15px; }
     .import-tabs button { flex:1;border:1px solid var(--border);background:var(--panel);color:var(--muted);padding:9px;border-radius:8px;font-weight:600;cursor:pointer; }
     .import-tabs button.on { color:var(--blue);border-color:var(--blue-br);background:var(--blue-soft); }
@@ -470,6 +490,8 @@
       .mindmap-tree { min-height:100%; }
       .import-backdrop { align-items:flex-start;padding:12px; }
       .import-modal { max-height:calc(100dvh - 24px); }
+      .ask-history-backdrop { padding:0; }
+      .ask-history-drawer { width:100%;max-height:100dvh;border-radius:0; }
       .saved-note-head { flex-direction:column; }
       .saved-note-actions { width:100%;justify-content:flex-start; }
       .main > .content{ padding:20px 16px 60px; }

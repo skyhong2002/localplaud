@@ -166,7 +166,7 @@
 <div class="library-page"><div class="library-inner">
   {% if active == 'ask' %}
   <section class="ask-surface" id="library-ask">
-    <div class="ask-hero"><h1><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Ask localplaud') }}</h1><div class="sub">{{ t('Ask across your library. Answers stay grounded in indexed recordings and cite their sources.') }}</div></div>
+    <div class="ask-hero"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px"><div><h1><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Ask localplaud') }}</h1><div class="sub">{{ t('Ask across your library. Answers stay grounded in indexed recordings and cite their sources.') }}</div></div><button class="btn sec" type="button" data-open-ask-history><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span>{{ t('History') }}</button></div></div>
     <details class="ask-scope-details" id="library-ask-scope-details">
       <summary>
         <span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg');width:12px;height:12px"></span>
@@ -359,6 +359,12 @@
     </form>
   </section>
 </div>
+{% endif %}
+{% if active == 'ask' %}
+  {% set ask_history_file_id = none %}
+  {% set ask_history_selected_id = selected_ask_thread.thread_id if selected_ask_thread else none %}
+  {% set ask_history_open_url = '/?ask=true#library-ask' %}
+  {% include '_ask_history.html' %}
 {% endif %}
 {% endblock %}
 

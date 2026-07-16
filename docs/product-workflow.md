@@ -508,7 +508,10 @@ execution, and unavailable providers never trigger an implicit fallback. A produ
 recording has completed the OpenCode Go path end to end: the immutable `ai_polish`
 revision became the canonical input for notes, mind map, and embedding chunks while
 raw ASR remained directly inspectable.
-Saved Ask answers are editable note bodies with durable follow-up threads.
+Saved Ask answers are editable note bodies with durable follow-up threads. Library
+and recording Ask surfaces expose exact-scope conversation history through a
+searchable, paginated desktop/mobile drawer. Threads can be renamed or deleted;
+deleting one preserves Saved notes and their citations as independent local data.
 Generated notes can be promoted idempotently to a provenance-linked editable copy
 inside the same recording workspace. User edits affect only that copy; the original
 AI artifact and its model/template/transcript lineage remain immutable.
