@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import re
+import zipfile
+from io import BytesIO
+
+import pytest
 
 
 def _client(monkeypatch, tmp_path):
@@ -97,6 +103,25 @@ def test_dashboard_renders(monkeypatch, tmp_path):
     assert "All files" in r.text
     assert "rectable" in r.text
     assert "Total audio" not in r.text  # one dense library surface, not a dashboard
+
+
+def test_library_bulk_export_modal_has_accessible_dialog_contract(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    page = c.get("/")
+
+    assert 'id="bulk-export-open"' in page.text
+    assert 'role="dialog" aria-modal="true" aria-labelledby="bulk-export-title"' in page.text
+    assert 'id="bulk-export-transcript" type="checkbox" checked' in page.text
+    assert 'id="bulk-export-notes" type="checkbox" checked' in page.text
+    assert "setExportBackgroundInert(true)" in page.text
+    assert "if (event.key === 'Escape')" in page.text
+    assert "if (event.shiftKey && document.activeElement === first)" in page.text
+    assert "if (restoreFocus) exportOpener?.focus()" in page.text
+    assert "fetch('/api/files/export'" in page.text
+    assert "signal:cleanupController.signal" in page.text
+    assert "if (error.name === 'AbortError') return" in page.text
+    assert "response.status === 409 ? tr('No selected recording has an available transcript or note')" in page.text
 
 
 def test_real_browser_navigation_gets_progressive_library_and_recording_shells(
@@ -738,6 +763,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "item.tabIndex=active?0:-1" in r.text
     assert "function openDialog(backdrop,opener)" in r.text
     assert "recordingShell.inert=true" in r.text
+    assert "dialogChromeRegions.forEach(region=>{region.inert=true;})" in r.text
     assert "event.key==='Escape'" in r.text
     assert "event.key!=='Tab'" in r.text
     assert "dialogOpener?.focus()" in r.text
@@ -1113,6 +1139,12 @@ def test_export_menu_and_format_endpoints(monkeypatch, tmp_path):
     page = c.get("/file/r1")
     assert "Export recording" in page.text
     assert "Speaker labels" in page.text and "Original audio" in page.text
+    assert 'id="copy-transcript"' in page.text and 'id="copy-notes"' in page.text
+    assert "navigator.clipboard.writeText(text)" in page.text
+    assert "document.execCommand('copy')" in page.text
+    assert "priorFocus?.focus()" in page.text
+    assert "export/transcript.txt?timestamps=${timestamps}&speakers=${speakers}" in page.text
+    assert "fetch('/file/r1/export/notes.md',{signal:cleanupController.signal})" in page.text
     assert 'data-fmt="docx"' in page.text and 'data-fmt="pdf"' in page.text
     txt = c.get("/file/r1/export/transcript.txt?timestamps=false&speakers=false")
     assert txt.status_code == 200 and "hello team" in txt.text
@@ -1133,6 +1165,116 @@ def test_export_menu_and_format_endpoints(monkeypatch, tmp_path):
     assert c.get("/file/r1/export/transcript.json").status_code == 404
     assert c.get("/file/r1/export/notes.txt").status_code == 200
     assert c.get("/file/r1/export/audio").content == b"audio"
+
+
+def test_bulk_export_route_streams_zip_and_reports_partial_availability(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="bare", filename="No derived content"))
+
+    response = c.post(
+        "/api/files/export",
+        json={
+            "file_ids": ["r1", "bare"],
+            "transcript_format": "txt",
+            "notes_format": "md",
+            "timestamps": False,
+            "speakers": False,
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/zip")
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="localplaud-recordings.zip"'
+    )
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-localplaud-export-emitted"] == "2"
+    assert response.headers["x-localplaud-export-skipped"] == "2"
+    assert int(response.headers["content-length"]) == len(response.content)
+    with zipfile.ZipFile(BytesIO(response.content)) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        transcript_name = next(name for name in archive.namelist() if name.endswith("transcript.txt"))
+        transcript = archive.read(transcript_name).decode()
+    assert "hello team" in transcript
+    assert "SPEAKER_00" not in transcript and "[00:01]" not in transcript
+    assert [row["id"] for row in manifest["recordings"]] == ["r1", "bare"]
+    assert c.post(
+        "/api/files/export", json={"file_ids": ["missing"], "transcript_format": "txt"}
+    ).status_code == 404
+    assert c.post(
+        "/api/files/export", json={"file_ids": ["bare"], "notes_format": "md"}
+    ).status_code == 409
+    assert c.post("/api/files/export", json={"file_ids": ["r1"]}).status_code == 422
+
+
+def test_bulk_export_stream_closes_on_client_disconnect(monkeypatch):
+    from starlette.requests import ClientDisconnect
+
+    from localplaud.api.app import BulkExportBody, bulk_export_files
+    from localplaud.bulk_export import BulkExportResult
+
+    stream = BytesIO(b"archive")
+    result = BulkExportResult(
+        stream=stream,
+        size_bytes=7,
+        manifest={
+            "recordings": [
+                {"outputs": [{"status": "emitted"}]},
+            ]
+        },
+    )
+    monkeypatch.setattr("localplaud.bulk_export.build_bulk_export", lambda _request: result)
+    response = bulk_export_files(
+        BulkExportBody(file_ids=["r1"], transcript_format="txt")
+    )
+
+    async def disconnect():
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            if message["type"] == "http.response.body":
+                raise OSError("client disconnected")
+
+        await response(
+            {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"}},
+            receive,
+            send,
+        )
+
+    with pytest.raises(ClientDisconnect):
+        asyncio.run(disconnect())
+    assert stream.closed
+
+
+def test_saved_note_only_recording_can_open_export_and_copy_notes(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="notes-only", filename="Notes only"))
+        session.add(
+            UserNote(
+                file_id="notes-only",
+                title="Durable note",
+                content_md="Local content",
+                source_type="manual",
+            )
+        )
+
+    page = c.get("/file/notes-only")
+    assert page.status_code == 200
+    assert 'id="open-export"' in page.text
+    assert 'id="copy-notes"' in page.text
+    assert 'id="copy-transcript"' not in page.text
+    assert 'href="/file/notes-only/export.md"' in page.text
+    exported = c.get("/file/notes-only/export/notes.md")
+    assert exported.status_code == 200 and "Local content" in exported.text
 
 
 def test_reprocess_missing_audio(monkeypatch, tmp_path):

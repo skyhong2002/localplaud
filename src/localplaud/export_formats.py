@@ -15,6 +15,10 @@ from .store.speakers import display_names
 _PDF_FONT_PATH = Path(__file__).parent / "assets" / "fonts" / "NotoSansTC.ttf"
 
 
+class MissingExportContentError(LookupError):
+    """The selected recording has no current content for the requested export."""
+
+
 def _plain_markdown_inline(value: str) -> str:
     value = re.sub(r"\[([^]]+)]\(([^)]+)\)", r"\1 (\2)", value)
     return re.sub(r"(\*\*|__|`|~~)", "", value).strip()
@@ -134,10 +138,25 @@ def render_transcript(
     timestamps: bool = True,
     speakers: bool = True,
 ) -> tuple[bytes, str]:
-    data = recording_data(file_id)
+    return render_transcript_data(
+        recording_data(file_id),
+        fmt,
+        timestamps=timestamps,
+        speakers=speakers,
+    )
+
+
+def render_transcript_data(
+    data: dict,
+    fmt: str,
+    *,
+    timestamps: bool = True,
+    speakers: bool = True,
+) -> tuple[bytes, str]:
+    """Render a transcript from one immutable recording-data snapshot."""
     segments = data["segments"]
     if not segments:
-        raise LookupError("recording has no exportable transcript")
+        raise MissingExportContentError("recording has no exportable transcript")
 
     def text_for(segment: dict) -> str:
         text = str(segment.get("text") or "").strip()
@@ -313,9 +332,13 @@ def render_transcript(
 
 
 def render_notes(file_id: str, fmt: str) -> tuple[bytes, str]:
-    data = recording_data(file_id)
+    return render_notes_data(recording_data(file_id), fmt)
+
+
+def render_notes_data(data: dict, fmt: str) -> tuple[bytes, str]:
+    """Render current notes from the same snapshot used for manifest lineage."""
     if not data["notes"]:
-        raise LookupError("recording has no exportable notes")
+        raise MissingExportContentError("recording has no exportable notes")
     lines: list[str] = []
     markdown: list[str] = [f"# {data['title']}", ""]
     for note in data["notes"]:

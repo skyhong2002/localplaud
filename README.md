@@ -60,7 +60,9 @@ recording export dialog
 produces transcript TXT/SRT/VTT/DOCX/PDF formats with timestamp/speaker controls.
 PDF embeds a portable Traditional Chinese font. Generated and Saved notes export as
 Markdown, TXT, DOCX, or PDF; original-audio, mind-map image, and Markdown archive
-exports remain available. Durable
+exports remain available. Transcript and current notes can be copied directly, and
+the Library can export up to 50 selected recordings as one provenance-aware ZIP with
+a partial-availability manifest. Durable
 provider/model/execution profiles, explicit
 stage fallbacks, remote workers, local AutoFlow rules, inbox notifications,
 TXT/SRT/VTT AutoFlow exports, scoped authorized webhooks, and authorized SMTP email

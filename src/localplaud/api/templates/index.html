@@ -84,9 +84,16 @@
   .bulkbar select { max-width:180px; border:1px solid var(--border2); border-radius:7px; padding:7px 9px;
     background:var(--panel); color:var(--fg); }
   .bulkbar button { border:0; border-radius:7px; padding:7px 11px; background:var(--blue); color:#fff; font-weight:650; cursor:pointer; }
+  .bulkbar .bulk-export { display:inline-flex;align-items:center;gap:6px;background:var(--panel);color:var(--blue);border:1px solid var(--blue-br); }
+  .bulkbar .bulk-export .nav-icon { width:14px;height:14px; }
   .bulkbar .clear { background:transparent; color:var(--muted); padding-inline:5px; }
   .bulkmsg { width:100%; color:var(--muted); font-size:11.5px; display:none; }
   .bulkmsg.on { display:block; }
+  .bulk-export-options { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
+  .bulk-export-option { display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid var(--border);border-radius:8px;min-width:0; }
+  .bulk-export-choice { display:flex;align-items:center;gap:8px;font-weight:650; }
+  .bulk-export-controls { display:flex;flex-direction:column;gap:8px; }
+  .bulk-export-controls select { width:100%; }
 
   .banner { border:1px solid var(--border2); background:var(--panel2); border-radius:var(--radius);
     padding:11px 14px; margin:12px 0; font-size:13px; color:var(--muted); }
@@ -153,6 +160,7 @@
     .rectable tbody td.row-menu-cell { position:absolute;right:7px;top:5px;width:auto;padding:0; }
     .quickadd { min-width:0;flex-basis:100%;margin-left:0; }
     .quickadd form { left:0;right:auto;width:min(260px,100%); }
+    .bulk-export-options { grid-template-columns:1fr; }
   }
 </style>
 <div class="library-page"><div class="library-inner">
@@ -291,6 +299,7 @@
       </select>
       <select id="bulk-target" aria-label="Folder or tag"></select>
       <button type="button" id="bulk-apply">{{ t('Apply') }}</button>
+      <button type="button" class="bulk-export" id="bulk-export-open"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>{{ t('Export selected') }}</button>
       <button type="button" class="clear" id="bulk-clear">{{ t('Clear') }}</button>
       <div class="bulkmsg" id="bulk-message" role="status"></div>
     </div>
@@ -323,11 +332,45 @@
     {% endif %}
   {% endif %}
 </div></div>
+{% if files and lib.view != 'trash' %}
+<div class="import-backdrop" id="bulk-export-backdrop" hidden>
+  <section class="import-modal" style="min-height:0;width:min(600px,100%)" role="dialog" aria-modal="true" aria-labelledby="bulk-export-title" aria-describedby="bulk-export-description">
+    <div class="import-head"><span id="bulk-export-title">{{ t('Export selected recordings') }}</span><button class="import-close" id="bulk-export-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <form class="import-body" id="bulk-export-form" style="gap:14px">
+      <div><strong><span id="bulk-export-count">0</span> {{ t('recordings') }}</strong><div class="sub" id="bulk-export-description" style="font-size:12px;margin-top:3px">{{ t('Available transcripts and notes are included; manifest.json lists anything unavailable.') }}</div></div>
+      <div class="bulk-export-options">
+        <fieldset class="bulk-export-option">
+          <label class="bulk-export-choice"><input id="bulk-export-transcript" type="checkbox" checked> {{ t('Transcript') }}</label>
+          <div class="bulk-export-controls" id="bulk-export-transcript-controls">
+            <label class="sub">{{ t('Format') }}<select class="search-input" id="bulk-export-transcript-format"><option value="txt">TXT</option><option value="srt">SRT</option><option value="vtt">VTT</option><option value="docx">DOCX</option><option value="pdf">PDF</option></select></label>
+            <label><input id="bulk-export-timestamps" type="checkbox" checked> {{ t('Timestamps') }}</label>
+            <label><input id="bulk-export-speakers" type="checkbox" checked> {{ t('Speaker labels') }}</label>
+          </div>
+        </fieldset>
+        <fieldset class="bulk-export-option">
+          <label class="bulk-export-choice"><input id="bulk-export-notes" type="checkbox" checked> {{ t('Notes') }}</label>
+          <div class="bulk-export-controls" id="bulk-export-notes-controls">
+            <label class="sub">{{ t('Format') }}<select class="search-input" id="bulk-export-notes-format"><option value="md">MD</option><option value="txt">TXT</option><option value="docx">DOCX</option><option value="pdf">PDF</option></select></label>
+          </div>
+        </fieldset>
+      </div>
+      <div id="bulk-export-status" class="sub" role="status" aria-live="polite" style="font-size:12px;min-height:17px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn sec" id="bulk-export-cancel" type="button">{{ t('Cancel') }}</button><button class="btn" id="bulk-export-download" type="submit"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>{{ t('Download ZIP') }}</button></div>
+    </form>
+  </section>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
 (() => {
+  const cleanupController = new AbortController();
+  const appView = document.getElementById('app-view');
+  appView?.addEventListener('htmx:beforeCleanupElement', event => {
+    if (event.target === appView) cleanupController.abort();
+  });
+  const tr = window.localplaudT;
   const folders = {{ organization.folders | tojson }};
   const tags = {{ organization.tags | tojson }};
   const checks = [...document.querySelectorAll('.row-select')];
@@ -339,6 +382,15 @@
   const apply = document.getElementById('bulk-apply');
   const clear = document.getElementById('bulk-clear');
   const message = document.getElementById('bulk-message');
+  const exportOpen = document.getElementById('bulk-export-open');
+  const exportBackdrop = document.getElementById('bulk-export-backdrop');
+  const exportForm = document.getElementById('bulk-export-form');
+  const exportStatus = document.getElementById('bulk-export-status');
+  const exportDownload = document.getElementById('bulk-export-download');
+  const exportTranscript = document.getElementById('bulk-export-transcript');
+  const exportNotes = document.getElementById('bulk-export-notes');
+  let exportOpener = null;
+  let backgroundInert = new Map();
 
   document.querySelectorAll('.library-ask-chip').forEach(chip => chip.addEventListener('click', () => {
     const input = document.getElementById('library-ask-q');
@@ -368,6 +420,7 @@
     const n = selected().length;
     if (count) count.textContent = n;
     if (bar) bar.classList.toggle('on', n > 0);
+    if (exportOpen) exportOpen.disabled = n > 50;
     if (all) { all.checked = n > 0 && n === checks.length; all.indeterminate = n > 0 && n < checks.length; }
   }
   function targets() {
@@ -395,6 +448,97 @@
   action?.addEventListener('change', targets);
   targets();
   sync();
+
+  const exportFocusables = () => [...exportBackdrop.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])')].filter(item => !item.closest('[hidden]'));
+  function setExportBackgroundInert(inert) {
+    const regions = [...document.querySelectorAll('.product-rail,.sidebar,.mobile-bar,.library-page')];
+    if (inert) {
+      backgroundInert = new Map(regions.map(region => [region, region.inert]));
+      regions.forEach(region => { region.inert = true; });
+    } else {
+      backgroundInert.forEach((wasInert, region) => { region.inert = wasInert; });
+      backgroundInert.clear();
+    }
+  }
+  function closeExport({restoreFocus=true}={}) {
+    if (!exportBackdrop || exportBackdrop.hidden) return;
+    exportBackdrop.hidden = true;
+    setExportBackgroundInert(false);
+    document.body.classList.remove('dialog-open');
+    if (restoreFocus) exportOpener?.focus();
+    exportOpener = null;
+  }
+  function syncExportOptions() {
+    if (!exportTranscript || !exportNotes || !exportDownload) return;
+    document.getElementById('bulk-export-transcript-controls')?.querySelectorAll('input,select').forEach(control => { control.disabled = !exportTranscript.checked; });
+    document.getElementById('bulk-export-notes-controls')?.querySelectorAll('input,select').forEach(control => { control.disabled = !exportNotes.checked; });
+    exportDownload.disabled = !exportTranscript.checked && !exportNotes.checked;
+  }
+  exportTranscript?.addEventListener('change', syncExportOptions);
+  exportNotes?.addEventListener('change', syncExportOptions);
+  syncExportOptions();
+  exportOpen?.addEventListener('click', event => {
+    const fileIds = selected();
+    if (!fileIds.length) return;
+    if (fileIds.length > 50) { show(tr('Select no more than 50 recordings'), true); return; }
+    exportOpener = event.currentTarget;
+    document.getElementById('bulk-export-count').textContent = fileIds.length;
+    exportStatus.textContent = '';
+    exportBackdrop.hidden = false;
+    setExportBackgroundInert(true);
+    document.body.classList.add('dialog-open');
+    requestAnimationFrame(() => exportFocusables()[0]?.focus());
+  });
+  document.getElementById('bulk-export-close')?.addEventListener('click', () => closeExport());
+  document.getElementById('bulk-export-cancel')?.addEventListener('click', () => closeExport());
+  exportBackdrop?.addEventListener('click', event => { if (event.target === exportBackdrop) closeExport(); });
+  document.addEventListener('keydown', event => {
+    if (!exportBackdrop || exportBackdrop.hidden) return;
+    if (event.key === 'Escape') { event.preventDefault(); closeExport(); return; }
+    if (event.key !== 'Tab') return;
+    const items = exportFocusables();
+    if (!items.length) { event.preventDefault(); return; }
+    const first = items[0], last = items.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }, {signal: cleanupController.signal});
+  cleanupController.signal.addEventListener('abort', () => closeExport({restoreFocus:false}), {once:true});
+
+  exportForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!exportTranscript.checked && !exportNotes.checked) { exportStatus.textContent = tr('Choose at least one content type'); return; }
+    exportDownload.disabled = true;
+    exportStatus.textContent = tr('Preparing archive…');
+    const body = {
+      file_ids: selected(),
+      transcript_format: exportTranscript.checked ? document.getElementById('bulk-export-transcript-format').value : null,
+      notes_format: exportNotes.checked ? document.getElementById('bulk-export-notes-format').value : null,
+      timestamps: document.getElementById('bulk-export-timestamps').checked,
+      speakers: document.getElementById('bulk-export-speakers').checked,
+    };
+    try {
+      const response = await fetch('/api/files/export', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:cleanupController.signal});
+      if (!response.ok) {
+        const message = response.status === 404 ? tr('A selected recording is no longer available') : response.status === 409 ? tr('No selected recording has an available transcript or note') : response.status === 422 ? tr('Export request is invalid') : tr('Could not export recordings');
+        throw new Error(message);
+      }
+      const blob = await response.blob();
+      if (cleanupController.signal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const filename = /filename="?([^";]+)"?/i.exec(disposition)?.[1] || 'localplaud-recordings.zip';
+      link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const partial = Number(response.headers.get('X-Localplaud-Export-Skipped') || 0) + Number(response.headers.get('X-Localplaud-Export-Errors') || 0);
+      exportStatus.textContent = tr(partial ? 'Archive downloaded. Some unavailable items are listed in manifest.json.' : 'Archive downloaded');
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      exportStatus.textContent = error.message || tr('Could not export recordings');
+    } finally {
+      if (!cleanupController.signal.aborted) syncExportOptions();
+    }
+  });
 
   apply?.addEventListener('click', async () => {
     const fileIds = selected();

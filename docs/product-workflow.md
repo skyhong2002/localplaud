@@ -404,6 +404,15 @@ layout; PDF embeds Noto Sans TC so mixed Taiwan Mandarin/English remains portabl
 Generated and Saved notes use Markdown-aware DOCX/PDF rendering rather than exposing
 raw Markdown syntax. Audio, archive, and mind-map exports remain complementary formats.
 
+The recording export dialog can also copy the canonical transcript with the same
+timestamp/speaker controls or copy all current generated and Saved notes as Markdown.
+The Library exports up to 50 selected recordings as one bounded ZIP. It reuses these
+same canonical renderers, preserves requested order, excludes stale or disallowed
+cloud-derived artifacts, and includes a checksummed `manifest.json` that records
+transcript lineage plus every emitted, unavailable, or failed output. A partially
+available selection still downloads its valid content; an entirely unavailable
+selection fails without creating a misleading empty archive.
+
 Transcript export must allow timestamps and speaker names to be toggled.
 
 ## Acceptance scenarios

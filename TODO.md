@@ -440,6 +440,11 @@ embedding raw provider credentials or model settings in each rule.
   portable Taiwan Mandarin/English output. Generated and Saved notes use the same
   document pipeline for Markdown/TXT/DOCX/PDF; archive, mind-map image, and
   original-audio exports remain available alongside the transcript formats.
+- ✅ Completed the daily export workflow with Copy transcript, Copy all current notes,
+  and Library batch ZIP export for up to 50 selected recordings. Batch archives use
+  canonical stale/provenance-aware renderers, collision-resistant paths, bounded
+  spooling/size limits, deterministic output, and a checksummed partial-availability
+  manifest without mutating recordings or processing state.
 - ✅ Generated notes now create one provenance-linked editable copy instead of
   mutating AI output. The recording workspace opens that user-owned note tab and
   edits title/Markdown inline; the original generated content, template/model, and

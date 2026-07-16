@@ -16,7 +16,14 @@ from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
@@ -25,6 +32,7 @@ from markupsafe import Markup
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import aliased
+from starlette.background import BackgroundTask
 
 from ..ask_skills import get_ask_skill, list_ask_skills
 from ..ask_threads import thread_to_dict
@@ -968,6 +976,14 @@ class BulkFilesBody(BaseModel):
     action: Literal["resume", "delete_local_processing"]
 
 
+class BulkExportBody(BaseModel):
+    file_ids: list[str] = Field(min_length=1, max_length=200)
+    transcript_format: Literal["txt", "srt", "vtt", "docx", "pdf"] | None = None
+    notes_format: Literal["md", "txt", "docx", "pdf"] | None = None
+    timestamps: bool = True
+    speakers: bool = True
+
+
 class RecordingTitleBody(BaseModel):
     title: str | None = Field(default=None, max_length=512)
 
@@ -1222,6 +1238,67 @@ def bulk_files(body: BulkFilesBody) -> dict:
             row.pipeline_last_failure_at = now
             row.pipeline_next_retry_at = now
     return {"action": body.action, "updated": len(file_ids), "queued": file_ids}
+
+
+@app.post("/api/files/export")
+def bulk_export_files(body: BulkExportBody) -> StreamingResponse:
+    from ..bulk_export import (
+        BulkExportRequest,
+        BulkExportValidationError,
+        NoExportableContentError,
+        UnknownRecordingIdsError,
+        build_bulk_export,
+    )
+
+    try:
+        result = build_bulk_export(
+            BulkExportRequest(
+                recording_ids=body.file_ids,
+                transcript_format=body.transcript_format,
+                notes_format=body.notes_format,
+                timestamps=body.timestamps,
+                speakers=body.speakers,
+            )
+        )
+    except BulkExportValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except UnknownRecordingIdsError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="one or more selected recordings no longer exists",
+        ) from exc
+    except NoExportableContentError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="none of the selected recordings has an available transcript or note",
+        ) from exc
+
+    statuses = [
+        output["status"]
+        for recording in result.manifest["recordings"]
+        for output in recording["outputs"]
+    ]
+
+    def chunks():
+        try:
+            yield from result
+        finally:
+            result.close()
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{result.filename}"',
+        "Content-Length": str(result.size_bytes),
+        "Cache-Control": "no-store",
+        "X-Localplaud-Export-Emitted": str(statuses.count("emitted")),
+        "X-Localplaud-Export-Skipped": str(statuses.count("skipped")),
+        "X-Localplaud-Export-Errors": str(statuses.count("error")),
+    }
+    return StreamingResponse(
+        chunks(),
+        media_type=result.media_type,
+        headers=headers,
+        background=BackgroundTask(result.close),
+    )
 
 
 # --------------------------------------------------------------------------- #
