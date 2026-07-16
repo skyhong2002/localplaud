@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import secrets
 import tempfile
 from pathlib import Path
 
@@ -111,7 +112,11 @@ def _mark_notes_stale(session, file_id: str) -> None:
         )
         if run is not None:
             run.status = StageStatus.pending
-            run.detail = (run.detail or {}) | {"stale": True, "reason": "AutoFlow changed notes"}
+            run.detail = (run.detail or {}) | {
+                "stale": True,
+                "stale_generation": secrets.token_hex(16),
+                "reason": "AutoFlow changed notes",
+            }
             run.error = None
 
 

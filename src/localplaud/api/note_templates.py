@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -17,6 +18,7 @@ from ..db.models import (
     StageStatus,
 )
 from ..db.session import session_scope
+from ..worker.pipeline import processing_claim_active
 
 router = APIRouter(prefix="/api", tags=["note-templates"])
 _KEY = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -239,6 +241,11 @@ def select_recording_note_template(file_id: str, body: RecordingTemplateBody) ->
         recording = session.get(PlaudFile, file_id)
         if recording is None:
             raise HTTPException(status_code=404, detail="recording not found")
+        if processing_claim_active(recording):
+            raise HTTPException(
+                status_code=409,
+                detail="recording is processing; change template when it finishes",
+            )
         if body.key is not None and body.key != "auto":
             exists = session.scalar(
                 select(NoteTemplate.id).where(
@@ -248,13 +255,18 @@ def select_recording_note_template(file_id: str, body: RecordingTemplateBody) ->
             if exists is None:
                 raise HTTPException(status_code=404, detail="template not found")
         recording.note_template_key = body.key
+        stale_generation = secrets.token_hex(16)
         for stage in (StageName.summarize, StageName.mind_map, StageName.index):
             run = session.scalar(
                 select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
             )
             if run is not None:
                 run.status = StageStatus.pending
-                run.detail = (run.detail or {}) | {"stale": True, "reason": "note template changed"}
+                run.detail = (run.detail or {}) | {
+                    "stale": True,
+                    "stale_generation": stale_generation,
+                    "reason": "note template changed",
+                }
                 run.error = None
     return {"file_id": file_id, "key": body.key}
 

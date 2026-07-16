@@ -279,11 +279,28 @@
       <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
       <div id="mindmap-viewport" class="mindmap-viewport"><div id="mindmap-tree" class="mindmap-tree"></div></div>
       {% elif f.mind_map_out_of_date %}
+      {% if f.mind_map_rebuild_in_progress %}
+      <div class="empty generate-empty" data-generation-progress data-static-title>
+        <span class="nav-icon empty-icon generate-progress-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>
+        <strong class="empty-title" id="generation-progress-title">{{ t('Rebuilding mind map…') }}</strong>
+        <span class="sub empty-sub" aria-live="polite" id="generation-progress-note">{{ t('This page updates automatically when results are ready.') }}</span>
+      </div>
+      {% elif f.mind_map_rebuild_available %}
+      <div class="empty generate-empty">
+        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>
+        <strong class="empty-title">{{ t('Mind map is out of date.') }}</strong>
+        <span class="sub empty-sub">{{ t('The notes it was built from have changed. Rebuild it from the current notes — the notes stay untouched and the previous mind map is kept in version history.') }}</span>
+        {% if f.mind_map_rebuild_error %}<span class="sub empty-sub" role="status" style="color:var(--red)">{{ t('The last rebuild failed:') }} {{ f.mind_map_rebuild_error }}</span>{% endif %}
+        <button class="btn generate-cta" type="button" id="rebuild-mindmap"><span class="nav-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>{{ t('Try the rebuild again') if f.mind_map_rebuild_error else t('Rebuild mind map') }}</button>
+        <span id="mindmap-rebuild-result" class="sub" aria-live="polite"></span>
+      </div>
+      {% else %}
       <div class="empty generate-empty">
         <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>
         <strong class="empty-title">{{ t('Mind map is out of date.') }}</strong>
         <span class="sub empty-sub">{{ t('The notes or transcript it was built from have changed. Regenerate notes to rebuild it; the previous mind map stays in version history.') }}</span>
       </div>
+      {% endif %}
       {% else %}
       <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Mind map is not available yet.') }}</div>
       {% endif %}
@@ -604,7 +621,7 @@
       if(cleanupController.signal.aborted)return;
       const status=typeof data?.status==='string'?data.status:null;
       if(status&&pendingStates.includes(status)){
-        if(progressEmpty)document.getElementById('generation-progress-title').textContent=friendly(status);
+        if(progressEmpty&&!progressEmpty.hasAttribute('data-static-title'))document.getElementById('generation-progress-title').textContent=friendly(status);
         if(stateLabel)stateLabel.textContent=friendly(status);
         statusTimer=setTimeout(tick,2500);
         return;
@@ -630,6 +647,9 @@
   async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent=tr('Checking recording signals…');const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`${tr('Auto suggests')} ${data.template?.name||data.key} · ${data.confidence} ${tr('confidence')} · ${reason}`;previewTemplateResolution(data.key);}else out.textContent=data.detail||tr('Could not preview Auto selection');}
   noteTemplateSelect?.addEventListener('change',()=>{if(noteTemplateSelect.value==='auto')previewAutoTemplate();else{document.getElementById('note-template-result').textContent=tr('Ready to generate with this template.');previewTemplateResolution(noteTemplateSelect.value);}});
   document.getElementById('generate-notes')?.addEventListener('click',async event=>{const button=event.currentTarget,out=document.getElementById('note-template-result'),key=noteTemplateSelect.value;button.disabled=true;out.textContent=tr('Saving template…');const saved=await fetch('/api/files/{{ f.id }}/note-template',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({key})});if(!saved.ok){const data=await saved.json();out.textContent=data.detail||tr('Could not save template');button.disabled=false;return;}out.textContent=tr('Queueing notes and mind map…');const generated=await fetch('/file/{{ f.id }}/generate-notes',{method:'POST'});if(!generated.ok){out.textContent=await generated.text()||tr('Could not start generation');button.disabled=false;return;}out.textContent=tr('Notes and mind map are queued.');setTimeout(()=>location.href='/file/{{ f.id }}?tab=notes',900);});
+  // Mind-map-only rebuild from the out-of-date state: notes are never
+  // touched; progress and results surface through the normal status flow.
+  document.getElementById('rebuild-mindmap')?.addEventListener('click',async event=>{const button=event.currentTarget,out=document.getElementById('mindmap-rebuild-result');button.disabled=true;out.textContent=tr('Queueing mind map rebuild…');const response=await fetch('/file/{{ f.id }}/rebuild-mind-map',{method:'POST'});if(!response.ok){out.textContent=await response.text()||tr('Could not start the rebuild');button.disabled=false;return;}out.textContent=tr('Mind map rebuild is queued.');setTimeout(()=>location.href='/file/{{ f.id }}?tab=mindmap',900);});
   // Mind map workspace: render the Markdown outline as a visual hierarchy.
   const mmSrc = document.getElementById('mindmap-src');
   if (mmSrc) {

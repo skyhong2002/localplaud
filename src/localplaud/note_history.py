@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from typing import Any
 
 from sqlalchemy import func, select
@@ -163,9 +164,11 @@ def _mark_dependent_mind_map_stale(session: Session, restored: Summary) -> bool:
     ``source_template_key``). Restoring a version of that template changes
     the mind map's input, so it can no longer be presented as current. A
     legacy mind map without a recorded source cannot be proven current
-    either, so it is marked as well. Restoring the mind map itself has no
-    downstream consumer. Marking uses the established stale idiom — the
-    artifact row is preserved and nothing is queued.
+    either, so it is marked as well — unless its recorded ``source_note``
+    fingerprint proves the restored content is exactly what it was built
+    from. Restoring the mind map itself has no downstream consumer. Marking
+    uses the established stale idiom — the artifact row is preserved and
+    nothing is queued.
     """
     if restored.template == "mind_map":
         return False
@@ -181,6 +184,14 @@ def _mark_dependent_mind_map_stale(session: Session, restored: Summary) -> bool:
     source_key = (live_map.template_snapshot or {}).get("source_template_key")
     if source_key is not None and source_key != restored.template:
         return False
+    # A map that records exactly which note content it was built from stays
+    # current when that same content comes back — restoring the very version
+    # the map used is a no-op for its input.
+    recorded_fingerprint = ((live_map.template_snapshot or {}).get("source_note") or {}).get(
+        "content_fingerprint"
+    )
+    if recorded_fingerprint is not None and recorded_fingerprint == fingerprint_digest(restored):
+        return False
     run = session.scalar(
         select(StageRun).where(
             StageRun.file_id == restored.file_id,
@@ -195,5 +206,9 @@ def _mark_dependent_mind_map_stale(session: Session, restored: Summary) -> bool:
     run.status = StageStatus.pending
     run.error = None
     run.completed_at = None
-    run.detail = dict(run.detail or {}) | {"stale": True, "reason": "note version restored"}
+    run.detail = dict(run.detail or {}) | {
+        "stale": True,
+        "stale_generation": secrets.token_hex(16),
+        "reason": "note version restored",
+    }
     return True

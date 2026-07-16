@@ -65,6 +65,7 @@ from .diarize import DiarizationUnavailable, diarize, group_speaker_segments
 log = logging.getLogger(__name__)
 _PROFILE_SNAPSHOT: ContextVar[dict | None] = ContextVar("resolved_profile_snapshot", default=None)
 _PROCESSING_LEASE = timedelta(hours=24)
+_STALE_GENERATION_UNSET = object()
 
 
 class PipelineAlreadyRunning(RuntimeError):
@@ -80,7 +81,20 @@ def processing_claim_active(row: PlaudFile, *, now: datetime | None = None) -> b
     return lease > (now or datetime.now(UTC))
 
 
-def _claim_processing(file_id: str, *, require_audio: bool = True) -> str:
+def _retry_snapshot_datetime(value: str | None) -> datetime | None:
+    parsed = datetime.fromisoformat(value) if value else None
+    if parsed is not None and parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _claim_processing(
+    file_id: str,
+    *,
+    require_audio: bool = True,
+    retry_scope: StageName | None = None,
+    mark_processing: bool = True,
+) -> str:
     """Atomically claim one recording so UI and daemon work cannot overlap."""
     token = uuid.uuid4().hex
     now = datetime.now(UTC)
@@ -90,6 +104,12 @@ def _claim_processing(file_id: str, *, require_audio: bool = True) -> str:
             raise ValueError(f"unknown file {file_id}")
         if require_audio and (not row.audio_path or not Path(row.audio_path).exists()):
             raise FileNotFoundError(f"audio missing for {file_id}: {row.audio_path}")
+        claim_values = {
+            "processing_token": token,
+            "processing_lease_until": now + _PROCESSING_LEASE,
+        }
+        if mark_processing:
+            claim_values |= {"status": FileStatus.processing, "error": None}
         claimed = session.execute(
             update(PlaudFile)
             .where(
@@ -100,17 +120,32 @@ def _claim_processing(file_id: str, *, require_audio: bool = True) -> str:
                     PlaudFile.processing_lease_until <= now,
                 ),
             )
-            .values(
-                processing_token=token,
-                processing_lease_until=now + _PROCESSING_LEASE,
-                status=FileStatus.processing,
-                error=None,
-            )
+            .values(**claim_values)
             .execution_options(synchronize_session=False)
         ).rowcount
-    if claimed != 1:
-        raise PipelineAlreadyRunning(f"recording {file_id} is already processing")
+        if claimed != 1:
+            raise PipelineAlreadyRunning(f"recording {file_id} is already processing")
+        if retry_scope == StageName.mind_map:
+            run = session.scalar(
+                select(StageRun).where(
+                    StageRun.file_id == file_id, StageRun.stage == StageName.mind_map
+                )
+            )
+            if run is None:
+                run = StageRun(
+                    file_id=file_id, stage=StageName.mind_map, attempts=0, detail={}
+                )
+                session.add(run)
     return token
+
+
+def _assert_processing_claim(file_id: str, token: str) -> None:
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            raise ValueError(f"unknown file {file_id}")
+        if row.processing_token != token or not processing_claim_active(row):
+            raise PipelineAlreadyRunning(f"processing claim for {file_id} is no longer active")
 
 
 def _release_processing(file_id: str, token: str) -> None:
@@ -256,6 +291,7 @@ def _run_remote_stage(
         if connection is None:
             raise ValueError(f"remote connection not found: {selection['connection']}")
         config = dict(connection.config or {})
+    effective_options = (selection.get("options") or {}) | (options or {})
     fingerprint = hashlib.sha256(
         json.dumps(
             {
@@ -263,7 +299,10 @@ def _run_remote_stage(
                 "stage": stage,
                 "selection": selection,
                 "inputs": [i.sha256 for i in inputs],
+                "options": effective_options,
             },
+            ensure_ascii=False,
+            separators=(",", ":"),
             sort_keys=True,
         ).encode()
     ).hexdigest()
@@ -272,7 +311,7 @@ def _run_remote_stage(
         stage=JobStage(stage),
         model=selection.get("model"),
         inputs=inputs,
-        options=(selection.get("options") or {}) | (options or {}),
+        options=effective_options,
     )
     client = RemoteWorkerClient.from_config(config)
     try:
@@ -297,6 +336,7 @@ def _set_stage(
     detail: dict | None = None,
     usage: dict | None = None,
     error: str | None = None,
+    expected_stale_generation: object = _STALE_GENERATION_UNSET,
 ) -> None:
     now = datetime.now(UTC)
     with session_scope() as session:
@@ -306,6 +346,12 @@ def _set_stage(
         if run is None:
             run = StageRun(file_id=file_id, stage=stage, attempts=0, detail={})
             session.add(run)
+        if expected_stale_generation is not _STALE_GENERATION_UNSET:
+            current_generation = (run.detail or {}).get("stale_generation")
+            if current_generation != expected_stale_generation:
+                raise RuntimeError(
+                    "stage inputs changed after generation; retry from the current artifacts"
+                )
         snapshot = _PROFILE_SNAPSHOT.get()
         reused = bool((detail or {}).get("reused"))
         if snapshot is not None and not (reused and run.resolved_profile_snapshot is not None):
@@ -379,12 +425,30 @@ def _set_stage(
                 }
 
 
-def _begin_stage(file_id: str, stage: StageName) -> None:
+def _begin_stage(file_id: str, stage: StageName) -> str | None:
+    with session_scope() as session:
+        run = session.scalar(
+            select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
+        )
+        stale_generation = (run.detail or {}).get("stale_generation") if run else None
     _set_stage(file_id, stage, StageStatus.running, begin_attempt=True)
+    return stale_generation
 
 
-def _finish_stage(file_id: str, stage: StageName, **metadata) -> None:
-    _set_stage(file_id, stage, StageStatus.completed, **metadata)
+def _finish_stage(
+    file_id: str,
+    stage: StageName,
+    *,
+    expected_stale_generation: object = _STALE_GENERATION_UNSET,
+    **metadata,
+) -> None:
+    _set_stage(
+        file_id,
+        stage,
+        StageStatus.completed,
+        expected_stale_generation=expected_stale_generation,
+        **metadata,
+    )
 
 
 def _skip_stage(file_id: str, stage: StageName, reason: str) -> None:
@@ -483,7 +547,7 @@ def _run_fallback_stage(
     failures: list[dict] = []
     for position, candidate in enumerate(candidates):
         token = _PROFILE_SNAPSHOT.set(candidate)
-        _begin_stage(file_id, durable_stage)
+        stale_generation = _begin_stage(file_id, durable_stage)
         try:
             outcome = operation(candidate)
             detail = dict(outcome.get("detail") or {}) | {
@@ -498,6 +562,7 @@ def _run_fallback_stage(
                 artifact_source=outcome.get("artifact_source", "local"),
                 detail=detail,
                 usage=outcome.get("usage"),
+                expected_stale_generation=stale_generation,
             )
             return outcome.get("value"), candidate
         except Exception as exc:  # noqa: BLE001 - classified by provider contract
@@ -597,6 +662,105 @@ def process_derived_artifacts(file_id: str, settings: Settings | None = None) ->
         raise
     finally:
         _release_processing(file_id, token)
+
+
+def process_mind_map_only(
+    file_id: str,
+    settings: Settings | None = None,
+    *,
+    claim_token: str | None = None,
+) -> None:
+    """Rebuild only the mind map from the current transcript and source notes.
+
+    The narrowest reprocessing scope: notes, transcript rows and revisions,
+    speech stages, embeddings/index, and Ask are never touched. It uses the
+    same durable claim, resolved profile, fallback policy, cost guard,
+    attempts, provenance, and stage state transitions as the full pipeline,
+    and the displaced mind map is archived to version history exactly like a
+    regeneration.
+    """
+    token = claim_token or _claim_processing(
+        file_id, require_audio=False, retry_scope=StageName.mind_map
+    )
+    try:
+        if claim_token is not None:
+            _assert_processing_claim(file_id, claim_token)
+        _process_mind_map_only_claimed(file_id, settings=settings)
+    except Exception as exc:
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            if row is not None and row.status == FileStatus.processing:
+                row.status = FileStatus.error
+                row.error = str(exc)[:2000]
+                run = next(
+                    (item for item in row.stage_runs if item.stage == StageName.mind_map), None
+                )
+                if run is not None:
+                    run.status = StageStatus.failed
+                    run.error = str(exc)[:2000]
+                    run.completed_at = datetime.now(UTC)
+                    _schedule_mind_map_retry(row, run, settings or get_settings())
+                else:
+                    _schedule_pipeline_retry(row, settings or get_settings())
+        raise
+    finally:
+        _release_processing(file_id, token)
+
+
+def claim_mind_map_rebuild(file_id: str) -> str:
+    """Synchronously reserve a recording before a UI rebuild is acknowledged."""
+    return _claim_processing(
+        file_id,
+        require_audio=False,
+        retry_scope=StageName.mind_map,
+    )
+
+
+def release_processing_claim(
+    file_id: str,
+    token: str,
+    *,
+    status: FileStatus | None = None,
+    error: str | None = None,
+) -> None:
+    """Token-conditionally release a UI claim and optionally restore rollup state."""
+    values = {"processing_token": None, "processing_lease_until": None}
+    if status is not None:
+        values |= {"status": status, "error": error}
+    with session_scope() as session:
+        session.execute(
+            update(PlaudFile)
+            .where(PlaudFile.id == file_id, PlaudFile.processing_token == token)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+
+
+def abandon_mind_map_rebuild(file_id: str, token: str) -> bool:
+    """Atomically release this claim while leaving a daemon-resumable queue."""
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None or row.processing_token != token:
+            return False
+        row.processing_token = None
+        row.processing_lease_until = None
+        row.status = FileStatus.partial
+        row.error = "mind map rebuild is queued for background retry"
+        run = next((item for item in row.stage_runs if item.stage == StageName.mind_map), None)
+        if run is None:
+            run = StageRun(
+                file_id=file_id, stage=StageName.mind_map, attempts=0, detail={}
+            )
+            session.add(run)
+        run.status = StageStatus.pending
+        run.error = None
+        run.completed_at = None
+        run.detail = dict(run.detail or {}) | {
+            "stale": True,
+            "mind_map_only": True,
+            "reason": "user requested mind map rebuild",
+        }
+        return True
 
 
 def _process_file_claimed(
@@ -1104,6 +1268,241 @@ def _process_derived_artifacts_claimed(file_id: str, settings: Settings | None =
         _PROFILE_SNAPSHOT.reset(profile_token)
 
 
+def mind_map_rebuild_source(session, row: PlaudFile, settings: Settings) -> SummaryRow | None:
+    """Pick the live local note output a mind-map-only rebuild reads from.
+
+    The live map's own recorded source wins; otherwise the recording's
+    configured template, then the workspace default. ``auto`` is a selection
+    directive, not a template, so it never names a source directly — with
+    exactly one live output the choice is still unambiguous.
+    """
+    live = {
+        s.template: s
+        for s in row.summaries
+        if s.source == "local" and s.template != "mind_map"
+    }
+    if not live:
+        return None
+    live_map = next(
+        (s for s in row.summaries if s.template == "mind_map" and s.source == "local"),
+        None,
+    )
+    recorded = (
+        (live_map.template_snapshot or {}).get("source_template_key")
+        if live_map is not None
+        else None
+    )
+    for key in (recorded, row.note_template_key, settings.pipeline.summary_template, "default"):
+        if key and key != "auto" and key in live:
+            return live[key]
+    if len(live) == 1:
+        return next(iter(live.values()))
+    return None
+
+
+def _mind_map_rebuild_inputs(file_id: str, settings: Settings) -> dict:
+    """Read the complete immutable rebuild input snapshot in one DB session."""
+    from ..note_history import source_summary_provenance
+
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            raise ValueError(f"unknown file {file_id}")
+        if any(
+            run.stage == StageName.summarize and (run.detail or {}).get("stale")
+            for run in row.stage_runs
+        ):
+            raise ValueError(
+                "source notes are out of date; regenerate notes instead of "
+                "rebuilding only the mind map"
+            )
+        source = mind_map_rebuild_source(session, row, settings)
+        if source is None:
+            raise ValueError(
+                f"a live generated note output is required to rebuild the mind map for {file_id}"
+            )
+        raw = _select_raw_transcript(row, settings)
+        if raw is None or raw.source != "local":
+            raise ValueError(f"canonical local transcript required for {file_id}")
+        revision = row.corrected_transcript_for_source(raw.source)
+        if revision is not None:
+            transcript = _rehydrate_revision(revision, raw)
+        else:
+            transcript = _rehydrate_transcript(raw)
+        names = {
+            speaker.key: speaker.display_name for speaker in row.speakers if speaker.display_name
+        }
+        transcript = _apply_speaker_display_names(transcript, names)
+        lineage = {
+            "input_transcript_id": raw.id,
+            "input_transcript_revision": revision.revision if revision else 0,
+            "input_transcript_source": raw.source,
+        }
+        source_note = source_summary_provenance(source)
+        if source.restored_from_revision:
+            source_note["restored_from_revision"] = source.restored_from_revision
+        return {
+            "template_key": source.template,
+            "summary_md": source.content_md,
+            "source_note": source_note,
+            "transcript": transcript,
+            "transcript_lineage": lineage,
+            "transcript_guard": lineage | {"speaker_names": names},
+            "snapshot": resolve_recording_profile(
+                session, file_id, template_key=source.template
+            ).to_dict(),
+        }
+
+
+def _process_mind_map_only_claimed(file_id: str, settings: Settings | None = None) -> None:
+    settings = settings or get_settings()
+    if not settings.pipeline.mind_map:
+        raise ValueError("the mind map stage is disabled in settings")
+    inputs = _mind_map_rebuild_inputs(file_id, settings)
+    template_key = inputs["template_key"]
+    snapshot = inputs["snapshot"]
+    transcript = inputs["transcript"]
+    transcript_lineage = inputs["transcript_lineage"]
+
+    profile_token = _PROFILE_SNAPSHOT.set(snapshot)
+    partial_errors: list[str] = []
+    try:
+        try:
+            _run_fallback_stage(
+                file_id,
+                "mind_map",
+                StageName.mind_map,
+                snapshot,
+                _mind_map_operation(
+                    file_id,
+                    settings,
+                    transcript,
+                    template_key,
+                    transcript_lineage,
+                    None,
+                    source_input=(inputs["summary_md"], inputs["source_note"]),
+                    transcript_guard=inputs["transcript_guard"],
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - notes and old map stay usable
+            log.exception("Mind map rebuild failed for %s", file_id)
+            partial_errors.append(f"mind_map: {exc}")
+        _finish_mind_map_cycle(file_id, settings, partial_errors)
+        log.info(
+            "Mind map rebuild %s for %s",
+            "failed" if partial_errors else "complete",
+            file_id,
+        )
+    finally:
+        _PROFILE_SNAPSHOT.reset(profile_token)
+
+
+def _mind_map_source_input(file_id: str, template: str) -> tuple[str | None, dict | None]:
+    """Load the live source note content and its immutable provenance together.
+
+    One read keeps them atomic: the recorded provenance (template key/version,
+    restored revision, content fingerprint) describes exactly the note content
+    handed to the generator, even if a concurrent edit lands afterwards.
+    """
+    from ..note_history import source_summary_provenance
+
+    with session_scope() as session:
+        rows = [
+            s
+            for s in session.get(PlaudFile, file_id).summaries
+            if s.template == template and s.source == "local"
+        ]
+        if not rows:
+            return None, None
+        row = rows[-1]
+        provenance = source_summary_provenance(row)
+        if row.restored_from_revision:
+            provenance["restored_from_revision"] = row.restored_from_revision
+        return row.content_md, provenance
+
+
+def _mind_map_operation(
+    file_id: str,
+    settings: Settings,
+    transcript: Transcript,
+    template_key: str,
+    transcript_lineage: dict | None,
+    auto_recommendation: dict | None,
+    *,
+    source_input: tuple[str | None, dict | None] | None = None,
+    transcript_guard: dict | None = None,
+):
+    """Build the fallback-stage operation that generates and persists the mind map.
+
+    Shared by the full derived cycle and the mind-map-only rebuild so both
+    record identical stage state, usage, and source-note provenance.
+    """
+
+    def run_mind_map(candidate):
+        candidate_settings = _settings_for_stage(settings, candidate, "mind_map")
+        candidate_settings.pipeline.summary_template = template_key
+        projected_usage = _llm_projected_usage(transcript, candidate_settings)
+        cost_budget = _cost_guard(file_id, "mind_map", candidate, projected_usage)
+        summary_md, source_note = (
+            source_input
+            if source_input is not None
+            else _mind_map_source_input(file_id, template_key)
+        )
+        if _remote_selection(candidate, "mind_map"):
+            result = _run_remote_stage(
+                file_id,
+                candidate,
+                "mind_map",
+                [_remote_json_input("transcript", _transcript_payload(transcript))],
+                options={"summary_md": summary_md},
+            )
+            result.setdefault("provider", "remote-worker")
+            result.setdefault("model", _llm_model(candidate_settings))
+        else:
+            result = mindmap.generate_mind_map(transcript, candidate_settings, summary_md)
+        result["template_snapshot"] = {
+            "source_template_key": template_key,
+            "source_template_version": summary_templates.get_effective_template(
+                template_key
+            ).version,
+        } | ({"source_note": source_note} if source_note else {})
+        _persist_summary(
+            file_id,
+            result,
+            transcript_lineage,
+            expected_mind_map_inputs=(
+                {
+                    "transcript": transcript_guard or transcript_lineage,
+                    "source_note": source_note,
+                }
+                if source_note is not None
+                else None
+            ),
+        )
+        return {
+            "value": result,
+            "provider": result.get("provider"),
+            "model": result.get("model"),
+            "detail": (result.get("detail", {}))
+            | {
+                "transcript": transcript_lineage,
+                "auto_template": auto_recommendation,
+                "cost_budget": cost_budget,
+            },
+            "usage": {
+                "input_chars": len(transcript.text),
+                "output_chars": len(result.get("content_md") or ""),
+                "requests": (
+                    (result.get("detail") or {}).get("map_calls", 0)
+                    + (result.get("detail") or {}).get("reduce_calls", 0)
+                    + 1
+                ),
+            },
+        }
+
+    return run_mind_map
+
+
 def _run_derived_stages(
     file_id: str,
     settings: Settings,
@@ -1224,54 +1623,14 @@ def _run_derived_stages(
                 source_template_key=template_key,
             ):
                 try:
-
-                    def run_mind_map(candidate):
-                        candidate_settings = _settings_for_stage(settings, candidate, "mind_map")
-                        candidate_settings.pipeline.summary_template = template_key
-                        projected_usage = _llm_projected_usage(transcript, candidate_settings)
-                        cost_budget = _cost_guard(file_id, "mind_map", candidate, projected_usage)
-                        summary_md = _load_summary_md(file_id, template_key)
-                        if _remote_selection(candidate, "mind_map"):
-                            result = _run_remote_stage(
-                                file_id,
-                                candidate,
-                                "mind_map",
-                                [_remote_json_input("transcript", _transcript_payload(transcript))],
-                                options={"summary_md": summary_md},
-                            )
-                            result.setdefault("provider", "remote-worker")
-                            result.setdefault("model", _llm_model(candidate_settings))
-                        else:
-                            result = mindmap.generate_mind_map(
-                                transcript, candidate_settings, summary_md
-                            )
-                        result["template_snapshot"] = {
-                            "source_template_key": template_key,
-                            "source_template_version": summary_templates.get_effective_template(
-                                template_key
-                            ).version,
-                        }
-                        _persist_summary(file_id, result, transcript_lineage)
-                        return {
-                            "value": result,
-                            "provider": result.get("provider"),
-                            "model": result.get("model"),
-                            "detail": (result.get("detail", {}))
-                            | {
-                                "transcript": transcript_lineage,
-                                "auto_template": auto_recommendation,
-                                "cost_budget": cost_budget,
-                            },
-                            "usage": {
-                                "input_chars": len(transcript.text),
-                                "output_chars": len(result.get("content_md") or ""),
-                                "requests": (
-                                    (result.get("detail") or {}).get("map_calls", 0)
-                                    + (result.get("detail") or {}).get("reduce_calls", 0)
-                                    + 1
-                                ),
-                            },
-                        }
+                    run_mind_map = _mind_map_operation(
+                        file_id,
+                        settings,
+                        transcript,
+                        template_key,
+                        transcript_lineage,
+                        auto_recommendation,
+                    )
 
                     _run_fallback_stage(
                         file_id,
@@ -1376,6 +1735,68 @@ def _finish_processing_cycle(file_id: str, settings: Settings, partial_errors: l
             row.status = FileStatus.done
             row.error = None
             reset_pipeline_retry(row)
+
+
+def _schedule_mind_map_retry(row: PlaudFile, run: StageRun, settings: Settings) -> None:
+    detail = dict(run.detail or {})
+    count = int(detail.get("mind_map_retry_count") or 0) + 1
+    detail["mind_map_retry_count"] = count
+    detail["mind_map_last_failure_at"] = datetime.now(UTC).isoformat()
+    maximum = settings.pipeline.retry_max_attempts
+    if maximum <= 0 or count >= maximum:
+        detail["mind_map_next_retry_at"] = None
+    else:
+        delay = min(
+            settings.pipeline.retry_base_seconds * (2 ** (count - 1)),
+            settings.pipeline.retry_max_seconds,
+        )
+        detail["mind_map_next_retry_at"] = (
+            datetime.now(UTC) + timedelta(seconds=delay)
+        ).isoformat()
+    run.detail = detail
+
+
+def _finish_mind_map_cycle(
+    file_id: str,
+    settings: Settings,
+    partial_errors: list[str],
+) -> None:
+    """Terminal rollup for a mind-map-only cycle.
+
+    Unlike a full cycle, the untouched stages never got a chance to clear or
+    re-record their own failures — so a clean rebuild must not roll the file
+    up to ``done`` while another stage is still failed.
+    """
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if partial_errors:
+            row.status = FileStatus.partial
+            row.error = "; ".join(partial_errors)[:2000]
+            run = next(item for item in row.stage_runs if item.stage == StageName.mind_map)
+            # The file columns remain the daemon's due-queue index, but the
+            # narrow rebuild gets an independent failure budget. The prior
+            # file-wide backoff remains untouched throughout.
+            _schedule_mind_map_retry(row, run, settings)
+            return
+        leftover = []
+        for run in row.stage_runs:
+            if run.stage == StageName.mind_map:
+                continue
+            stale = bool((run.detail or {}).get("stale"))
+            incomplete = run.status in {
+                StageStatus.pending,
+                StageStatus.running,
+                StageStatus.failed,
+            }
+            if stale or incomplete:
+                reason = run.error or ("out of date" if stale else "not complete")
+                leftover.append(f"{run.stage.value}: {reason}")
+        if leftover:
+            row.status = FileStatus.partial
+            row.error = "; ".join(leftover)[:2000]
+        else:
+            row.status = FileStatus.done
+            row.error = None
 
 
 def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str] | None:
@@ -1613,11 +2034,74 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
     return next_revision
 
 
-def _persist_summary(file_id: str, result: dict, lineage: dict | None = None) -> None:
-    from ..note_history import archive_summary, content_fingerprint
+def _persist_summary(
+    file_id: str,
+    result: dict,
+    lineage: dict | None = None,
+    *,
+    expected_mind_map_inputs: dict | None = None,
+) -> None:
+    from ..note_history import (
+        archive_summary,
+        content_fingerprint,
+        fingerprint_digest,
+    )
 
     template = result.get("template", "default")
     with session_scope() as session:
+        if expected_mind_map_inputs is not None:
+            file_row = session.get(PlaudFile, file_id)
+            transcript_guard = expected_mind_map_inputs.get("transcript") or {}
+            raw = _select_raw_transcript(file_row, get_settings()) if file_row else None
+            revision = (
+                file_row.corrected_transcript_for_source(raw.source)
+                if file_row is not None and raw is not None
+                else None
+            )
+            current_transcript = {
+                "input_transcript_id": raw.id if raw is not None else None,
+                "input_transcript_revision": revision.revision if revision is not None else 0,
+                "input_transcript_source": raw.source if raw is not None else None,
+            }
+            expected_lineage = {
+                key: transcript_guard.get(key)
+                for key in (
+                    "input_transcript_id",
+                    "input_transcript_revision",
+                    "input_transcript_source",
+                )
+            }
+            current_names = {
+                speaker.key: speaker.display_name
+                for speaker in (file_row.speakers if file_row is not None else [])
+                if speaker.display_name
+            }
+            expected_names = transcript_guard.get("speaker_names", current_names)
+            source_note = expected_mind_map_inputs.get("source_note") or {}
+            source = session.scalar(
+                select(SummaryRow).where(
+                    SummaryRow.file_id == file_id,
+                    SummaryRow.template == source_note.get("template"),
+                    SummaryRow.source == "local",
+                )
+            )
+            source_matches = (
+                source is not None
+                and fingerprint_digest(source) == source_note.get("content_fingerprint")
+            )
+            source_stage_stale = any(
+                run.stage == StageName.summarize and bool((run.detail or {}).get("stale"))
+                for run in (file_row.stage_runs if file_row is not None else [])
+            )
+            if (
+                current_transcript != expected_lineage
+                or current_names != expected_names
+                or not source_matches
+                or source_stage_stale
+            ):
+                raise RuntimeError(
+                    "mind map inputs changed during rebuild; retry from the current transcript and notes"
+                )
         replacement = SummaryRow(
             file_id=file_id,
             template=template,
@@ -1725,17 +2209,13 @@ def process_pending(
     settings = settings or get_settings()
     now = datetime.now(UTC)
     with session_scope() as session:
-        due_retry = (
-            PlaudFile.status.in_([FileStatus.error, FileStatus.partial])
-            & (PlaudFile.pipeline_retry_count < settings.pipeline.retry_max_attempts)
-            & or_(
-                PlaudFile.pipeline_next_retry_at.is_(None),
-                PlaudFile.pipeline_next_retry_at <= now,
-            )
-        )
         candidate_rows = list(
             session.scalars(
-                select(PlaudFile).where(or_(PlaudFile.status == FileStatus.downloaded, due_retry))
+                select(PlaudFile).where(
+                    PlaudFile.status.in_(
+                        [FileStatus.downloaded, FileStatus.error, FileStatus.partial]
+                    )
+                )
             )
         )
         rows = []
@@ -1747,9 +2227,50 @@ def process_pending(
                 and run.status != StageStatus.completed
                 for run in row.stage_runs
             )
-            if row.audio_path is None and not derived_only:
+            # A pending mind-map-only rebuild retries at that same narrow
+            # scope — unless a broader derived regeneration is also pending,
+            # which supersedes it (and covers the mind map anyway).
+            mind_map_only = not derived_only and any(
+                run.stage == StageName.mind_map
+                and bool((run.detail or {}).get("mind_map_only"))
+                and run.status != StageStatus.completed
+                for run in row.stage_runs
+            )
+            if row.status != FileStatus.downloaded:
+                if mind_map_only:
+                    map_run = next(
+                        run
+                        for run in row.stage_runs
+                        if run.stage == StageName.mind_map
+                        and bool((run.detail or {}).get("mind_map_only"))
+                    )
+                    detail = map_run.detail or {}
+                    scoped_count = int(detail.get("mind_map_retry_count") or 0)
+                    scoped_due = _retry_snapshot_datetime(
+                        detail.get("mind_map_next_retry_at")
+                    )
+                    if (
+                        scoped_count >= settings.pipeline.retry_max_attempts
+                        or (scoped_due is not None and scoped_due > now)
+                    ):
+                        continue
+                elif (
+                    row.pipeline_retry_count >= settings.pipeline.retry_max_attempts
+                    or (
+                        row.pipeline_next_retry_at is not None
+                        and (
+                            row.pipeline_next_retry_at.replace(tzinfo=UTC)
+                            if row.pipeline_next_retry_at.tzinfo is None
+                            else row.pipeline_next_retry_at
+                        )
+                        > now
+                    )
+                ):
+                    continue
+            if row.audio_path is None and not (derived_only or mind_map_only):
                 continue
-            rows.append((row, derived_only))
+            scope = "derived" if derived_only else ("mind_map" if mind_map_only else "full")
+            rows.append((row, scope))
 
         def timestamp(value: datetime | None) -> float:
             if value is None:
@@ -1759,36 +2280,45 @@ def process_pending(
             return value.timestamp()
 
         def queue_key(item) -> tuple[float, int, str]:
-            item = item[0]
-            if item.status == FileStatus.downloaded:
+            row, scope = item
+            if row.status == FileStatus.downloaded:
                 event_time = (
-                    item.start_time_ms / 1000
-                    if item.start_time_ms is not None
-                    else timestamp(item.created_at)
+                    row.start_time_ms / 1000
+                    if row.start_time_ms is not None
+                    else timestamp(row.created_at)
                 )
                 fresh_tiebreak = 1
-            else:
+            elif scope == "mind_map":
+                map_run = next(run for run in row.stage_runs if run.stage == StageName.mind_map)
+                detail = map_run.detail or {}
                 event_time = timestamp(
-                    item.pipeline_next_retry_at or item.pipeline_last_failure_at or item.created_at
+                    _retry_snapshot_datetime(
+                        detail.get("mind_map_next_retry_at")
+                        or detail.get("mind_map_last_failure_at")
+                    )
                 )
                 fresh_tiebreak = 0
-            return event_time, fresh_tiebreak, item.id
+            else:
+                event_time = timestamp(
+                    row.pipeline_next_retry_at or row.pipeline_last_failure_at or row.created_at
+                )
+                fresh_tiebreak = 0
+            return event_time, fresh_tiebreak, row.id
 
         rows.sort(key=queue_key, reverse=True)
-        jobs = [
-            (item.id, derived_only)
-            for item, derived_only in (rows[:limit] if limit is not None else rows)
-        ]
+        jobs = [(item.id, scope) for item, scope in (rows[:limit] if limit is not None else rows)]
     if not jobs:
         return 0
 
     workers = max(1, settings.pipeline.concurrency)
 
-    def _run(job: tuple[str, bool]) -> bool:
-        fid, derived_only = job
+    def _run(job: tuple[str, str]) -> bool:
+        fid, scope = job
         try:
-            if derived_only:
+            if scope == "derived":
                 process_derived_artifacts(fid, settings)
+            elif scope == "mind_map":
+                process_mind_map_only(fid, settings)
             else:
                 process_file(fid, settings, force=force)
             return True

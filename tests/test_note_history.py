@@ -520,7 +520,9 @@ def test_restore_marks_dependent_mind_map_out_of_date(monkeypatch, tmp_path):
         assert len(runs) == 3  # index + summarize + mind_map, nothing phantom
         map_run = runs[StageName.mind_map]
         assert map_run.status == StageStatus.pending
-        assert map_run.detail == {"stale": True, "reason": "note version restored"}
+        assert map_run.detail["stale"] is True
+        assert map_run.detail["reason"] == "note version restored"
+        assert map_run.detail["stale_generation"]
         assert map_run.error is None and map_run.completed_at is None
         assert map_run.attempts == 2  # real attempt history preserved
         # Unrelated stages and artifacts stay exactly as they were.
@@ -539,10 +541,13 @@ def test_restore_marks_dependent_mind_map_out_of_date(monkeypatch, tmp_path):
     denied = c.get("/file/r1/export/mind-map.png")
     assert denied.status_code == 409
     assert "out of date" in denied.json()["detail"]
-    # The workspace says so instead of showing the outdated tree.
+    # The workspace says so instead of showing the outdated tree — and since
+    # the inputs (restored notes + local transcript) are current, it offers
+    # the mind-map-only rebuild instead of a full notes regeneration.
     page = c.get("/file/r1")
     assert "Mind map is out of date." in page.text
-    assert "Regenerate notes to rebuild it" in page.text
+    assert 'id="rebuild-mindmap"' in page.text
+    assert "Rebuild it from the current notes" in page.text
     assert 'id="mindmap-src"' not in page.text
     assert "Sync topics" not in page.text
 
@@ -597,7 +602,9 @@ def test_mind_map_and_unrelated_template_restores_stale_nothing(monkeypatch, tmp
                   data={"tab": "notes"}, follow_redirects=False).status_code == 303
     runs = map_runs()
     assert len(runs) == 1
-    assert runs[0].detail == {"stale": True, "reason": "note version restored"}
+    assert runs[0].detail["stale"] is True
+    assert runs[0].detail["reason"] == "note version restored"
+    assert runs[0].detail["stale_generation"]
     assert runs[0].attempts == 0  # created only to carry the marker
 
 

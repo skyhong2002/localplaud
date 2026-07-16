@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import re
+import secrets
 
 from sqlalchemy import delete, select
 
@@ -88,6 +89,7 @@ def correct_segments(
 
 def _mark_derived_stale(session, file_id: str, *, reason: str = "vocabulary") -> None:
     session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+    stale_generation = secrets.token_hex(16)
     for stage in (StageName.summarize, StageName.mind_map, StageName.index):
         run = session.scalar(
             select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
@@ -98,7 +100,11 @@ def _mark_derived_stale(session, file_id: str, *, reason: str = "vocabulary") ->
         run.status = StageStatus.pending
         run.error = None
         run.completed_at = None
-        run.detail = dict(run.detail or {}) | {"stale": True, "reason": reason}
+        run.detail = dict(run.detail or {}) | {
+            "stale": True,
+            "stale_generation": stale_generation,
+            "reason": reason,
+        }
 
 
 def apply_vocabulary(

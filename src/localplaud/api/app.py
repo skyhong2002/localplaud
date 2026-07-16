@@ -1809,8 +1809,16 @@ def _transcript_page_token(row: Transcript) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:24]
 
 
+def _recording_edit_blocked(row: PlaudFile) -> bool:
+    """Derived generation owns a stable input snapshot while its lease is active."""
+    from ..worker.pipeline import processing_claim_active
+
+    return processing_claim_active(row)
+
+
 def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) -> None:
     """Preserve derived rows but make stale artifacts ineligible for reuse/UI."""
+    stale_generation = secrets.token_hex(16)
     for stage in stages:
         run = session.scalar(
             select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
@@ -1821,7 +1829,10 @@ def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) ->
         run.status = StageStatus.pending
         run.error = None
         run.completed_at = None
-        run.detail = dict(run.detail or {}) | {"stale": True}
+        run.detail = dict(run.detail or {}) | {
+            "stale": True,
+            "stale_generation": stale_generation,
+        }
 
 
 @app.get("/file/{file_id}/transcript-page", response_class=HTMLResponse)
@@ -2065,6 +2076,37 @@ def file_detail(
         mind_map_out_of_date = StageName.mind_map in stale_stages and any(
             s.template == "mind_map" and s.source == "local" for s in r.summaries
         )
+        # A mind-map-only rebuild is offered only when its inputs are current:
+        # the canonical transcript exists and the source notes are not stale.
+        from ..worker.pipeline import mind_map_rebuild_source, processing_claim_active
+
+        mind_map_rebuild_available = (
+            mind_map_out_of_date
+            and StageName.summarize not in stale_stages
+            and r.local_transcript is not None
+            and mind_map_rebuild_source(session, r, settings) is not None
+        )
+        mind_map_run = next(
+            (run for run in r.stage_runs if run.stage == StageName.mind_map), None
+        )
+        mind_map_only_scope = bool(
+            mind_map_run and (mind_map_run.detail or {}).get("mind_map_only")
+        )
+        mind_map_rebuild_in_progress = bool(
+            mind_map_out_of_date
+            and mind_map_only_scope
+            and mind_map_run.status in {StageStatus.pending, StageStatus.running}
+            and processing_claim_active(r)
+        )
+        mind_map_rebuild_error = (
+            sanitize_error(mind_map_run.error, max_length=500)
+            if mind_map_out_of_date
+            and mind_map_run is not None
+            and mind_map_only_scope
+            and mind_map_run.status == StageStatus.failed
+            and mind_map_run.error
+            else None
+        )
         # History is bounded at the query: per template, only the newest
         # _NOTE_HISTORY_PREVIEW_LIMIT archived bodies are loaded; totals come
         # from a count, never from materializing every version.
@@ -2240,6 +2282,9 @@ def file_detail(
             ),
             "summaries": summaries,
             "mind_map_out_of_date": mind_map_out_of_date,
+            "mind_map_rebuild_available": mind_map_rebuild_available,
+            "mind_map_rebuild_in_progress": mind_map_rebuild_in_progress,
+            "mind_map_rebuild_error": mind_map_rebuild_error,
             "error": r.error,
             "retry": {
                 "count": r.pipeline_retry_count or 0,
@@ -3100,7 +3145,7 @@ def export_mind_map_png(file_id: str):
         # or vocabulary changed); exporting it as current would be untruthful.
         raise HTTPException(
             status_code=409,
-            detail="mind map is out of date; regenerate notes to rebuild it",
+            detail="mind map is out of date; rebuild it from the Mind map tab first",
         )
     try:
         content = render_mind_map_png(mind_map.content_md, title=title)
@@ -3180,15 +3225,148 @@ def generate_recording_notes(file_id: str):
         )
         for run in recording.stage_runs:
             if run.stage in {StageName.summarize, StageName.mind_map, StageName.index}:
-                run.detail = dict(run.detail or {}) | {
+                detail = dict(run.detail or {}) | {
                     "reason": "user requested regeneration",
                     "derived_only": True,
                 }
+                # A full regeneration supersedes any narrower pending rebuild.
+                detail.pop("mind_map_only", None)
+                run.detail = detail
         recording.status = FileStatus.partial
         reset_pipeline_retry(recording)
 
     threading.Thread(target=process_derived_artifacts, args=(file_id,), daemon=True).start()
     return HTMLResponse("notes and mind map queued")
+
+
+def _mind_map_rebuild_eligibility_error(session, recording: PlaudFile) -> str | None:
+    from ..worker.pipeline import mind_map_rebuild_source
+
+    if recording.local_transcript is None:
+        return "a local transcript is required first"
+    if any(
+        run.stage == StageName.summarize and (run.detail or {}).get("stale")
+        for run in recording.stage_runs
+    ):
+        return "notes are out of date; regenerate notes instead"
+    if mind_map_rebuild_source(session, recording, get_settings()) is None:
+        has_notes = any(
+            summary.source == "local" and summary.template != "mind_map"
+            for summary in recording.summaries
+        )
+        return (
+            "cannot determine which notes to rebuild from; regenerate notes instead"
+            if has_notes
+            else "generated notes are required first"
+        )
+    mind_map_run = next(
+        (run for run in recording.stage_runs if run.stage == StageName.mind_map), None
+    )
+    has_stale_map = (
+        mind_map_run is not None
+        and bool((mind_map_run.detail or {}).get("stale"))
+        and any(
+            summary.source == "local" and summary.template == "mind_map"
+            for summary in recording.summaries
+        )
+    )
+    return None if has_stale_map else "mind map is already current"
+
+
+@app.post("/file/{file_id}/rebuild-mind-map", response_class=HTMLResponse)
+def rebuild_recording_mind_map(file_id: str):
+    """Rebuild only the mind map from the current canonical transcript and notes.
+
+    Notes, transcript revisions, speech stages, embeddings/index, and Ask are
+    never touched; the displaced mind map is archived to version history. The
+    stale flag clears only when the rebuild succeeds — a failure leaves the
+    stage failed with its error and a scheduled retry at this same scope.
+    """
+    import threading
+
+    from ..worker.pipeline import (
+        PipelineAlreadyRunning,
+        abandon_mind_map_rebuild,
+        claim_mind_map_rebuild,
+        process_mind_map_only,
+        processing_claim_active,
+        release_processing_claim,
+    )
+
+    claim_token = None
+    with session_scope() as session:
+        recording = session.get(PlaudFile, file_id)
+        if recording is None:
+            return HTMLResponse("recording not found", status_code=404)
+        if processing_claim_active(recording):
+            return HTMLResponse("already processing", status_code=409)
+        if eligibility_error := _mind_map_rebuild_eligibility_error(session, recording):
+            return HTMLResponse(eligibility_error, status_code=409)
+
+    try:
+        # Reserve synchronously before acknowledging the POST. Concurrent or
+        # repeated requests lose the same atomic lease instead of launching a
+        # thread that later discovers the conflict.
+        claim_token = claim_mind_map_rebuild(file_id)
+    except PipelineAlreadyRunning:
+        return HTMLResponse("already processing", status_code=409)
+
+    eligibility_error = None
+    try:
+        with session_scope() as session:
+            recording = session.get(PlaudFile, file_id)
+            if recording is None:
+                raise LookupError("recording disappeared while queueing")
+            eligibility_error = _mind_map_rebuild_eligibility_error(session, recording)
+            if eligibility_error is None:
+                recording.status = FileStatus.processing
+                recording.error = None
+                _mark_derived_stale(session, file_id, (StageName.mind_map,))
+                for run in recording.stage_runs:
+                    if run.stage == StageName.mind_map:
+                        detail = dict(run.detail or {}) | {
+                            "reason": "user requested mind map rebuild",
+                            "mind_map_only": True,
+                        }
+                        # An explicit Retry starts a new narrow failure budget,
+                        # while file-level retry state remains untouched.
+                        for key in (
+                            "derived_only",
+                            "mind_map_retry_count",
+                            "mind_map_next_retry_at",
+                            "mind_map_last_failure_at",
+                        ):
+                            detail.pop(key, None)
+                        run.detail = detail
+    except Exception:
+        abandon_mind_map_rebuild(file_id, claim_token)
+        raise
+
+    if eligibility_error is not None:
+        current = eligibility_error == "mind map is already current"
+        release_processing_claim(
+            file_id,
+            claim_token,
+            status=FileStatus.done if current else FileStatus.partial,
+            error=None if current else eligibility_error,
+        )
+        return HTMLResponse(eligibility_error, status_code=409)
+
+    try:
+        worker = threading.Thread(
+            target=process_mind_map_only,
+            args=(file_id,),
+            kwargs={"claim_token": claim_token},
+            daemon=True,
+        )
+        worker.start()
+    except Exception:
+        abandon_mind_map_rebuild(file_id, claim_token)
+        return HTMLResponse(
+            "could not start immediately; mind map rebuild remains queued",
+            status_code=503,
+        )
+    return HTMLResponse("mind map rebuild queued")
 
 
 @app.post("/file/{file_id}/profile")
@@ -3222,6 +3400,11 @@ def rename_speaker(
         r = session.get(PlaudFile, file_id)
         if r is None:
             return JSONResponse({"error": "not found"}, status_code=404)
+        if _recording_edit_blocked(r):
+            return JSONResponse(
+                {"error": "recording is processing; try again when it finishes"},
+                status_code=409,
+            )
         settings = get_settings()
         raw_row = _canonical_raw_row(r, settings)
         corrected = _canonical_revision(r, raw_row)
@@ -3286,6 +3469,11 @@ def edit_transcript_segment(
         r = session.get(PlaudFile, file_id)
         if r is None:
             return JSONResponse({"error": "not found"}, status_code=404)
+        if _recording_edit_blocked(r):
+            return JSONResponse(
+                {"error": "recording is processing; try again when it finishes"},
+                status_code=409,
+            )
         settings = get_settings()
         raw_row = _canonical_raw_row(r, settings)
         corrected = _canonical_revision(r, raw_row)
@@ -3374,6 +3562,11 @@ def replace_transcript_text(
         row = session.get(PlaudFile, file_id)
         if row is None:
             return JSONResponse({"error": "not found"}, status_code=404)
+        if _recording_edit_blocked(row):
+            return JSONResponse(
+                {"error": "recording is processing; try again when it finishes"},
+                status_code=409,
+            )
         raw = _canonical_raw_row(row, get_settings())
         corrected = _canonical_revision(row, raw)
         if corrected is not None:
@@ -3451,6 +3644,11 @@ def restore_transcript_revision(
         row = session.get(PlaudFile, file_id)
         if row is None:
             return JSONResponse({"error": "not found"}, status_code=404)
+        if _recording_edit_blocked(row):
+            return JSONResponse(
+                {"error": "recording is processing; try again when it finishes"},
+                status_code=409,
+            )
         raw = _canonical_raw_row(row, get_settings())
         corrected = _canonical_revision(row, raw)
         if raw is None or corrected is None:
@@ -3562,6 +3760,12 @@ def restore_summary_version_route(
     changed — but the artifact is preserved and not regenerated.
     """
     with session_scope() as session:
+        recording = session.get(PlaudFile, file_id)
+        if recording is not None and _recording_edit_blocked(recording):
+            return JSONResponse(
+                {"error": "recording is processing; try again when it finishes"},
+                status_code=409,
+            )
         row = session.get(Summary, summary_id)
         if row is None or row.file_id != file_id:
             # The live output was regenerated (new row id) or removed since render.
