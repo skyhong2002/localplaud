@@ -89,6 +89,9 @@ accessibility require a different design.
 - Recent-files home plus all-files, uncategorized, and trash/recovery views.
 - Folders/tags, capture-source, date, duration, and processing-state filters, with
   sortable name, duration, and creation-date columns.
+- Folder and tag creation, rename, and deletion are available from the Library;
+  removing organization only unassigns recordings and never deletes audio or derived
+  artifacts.
 - Every row communicates recorded time, duration, processing state, and whether
   attention is needed.
 - Bulk organization, export, reprocess, and deletion of local derivatives.

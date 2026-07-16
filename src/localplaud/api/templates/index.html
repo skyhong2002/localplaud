@@ -81,6 +81,28 @@
   .orgrow { display:flex; min-width:0;gap:7px; align-items:center; flex-wrap:wrap; margin-top:8px; }
   .orgrow:first-child { margin-top:0; }
   .orgrow .lbl { width:52px; flex:none; }
+  .org-manage { display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:6px 8px;border:0;border-radius:5px;background:transparent;color:var(--blue);font-size:11.5px;font-weight:650;cursor:pointer; }
+  .org-manage:hover { background:var(--panel); }
+  .org-manage .nav-icon { width:14px;height:14px; }
+  .organization-manager-modal { width:min(640px,100%);min-height:0;max-height:min(760px,calc(100dvh - 40px)); }
+  .organization-manager-body { gap:17px;overflow-y:auto; }
+  .organization-manager-section { min-width:0; }
+  .organization-manager-section h3 { margin:0 0 5px;font-size:14px; }
+  .organization-manager-list { border-top:1px solid var(--border); }
+  .organization-manager-row { min-width:0;padding:10px 0;border-bottom:1px solid var(--border); }
+  .organization-manager-view { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center; }
+  .organization-manager-name { min-width:0;overflow-wrap:anywhere;font-size:12.5px;font-weight:600; }
+  .organization-manager-count { display:block;margin-top:2px;color:var(--faint);font-size:10.5px;font-weight:400; }
+  .organization-manager-actions { display:flex;gap:3px; }
+  .organization-manager-action { width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer; }
+  .organization-manager-action:hover { background:var(--panel2);color:var(--fg); }
+  .organization-manager-action.delete { color:var(--red); }
+  .organization-manager-action .nav-icon { width:14px;height:14px; }
+  .organization-manager-edit { display:flex;gap:7px;align-items:center;min-width:0; }
+  .organization-manager-edit input { min-width:0;flex:1; }
+  .organization-manager-confirm { display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:9px;border-radius:6px;background:var(--red-soft);font-size:11.5px; }
+  .organization-manager-confirm span { min-width:0;flex:1 1 240px;overflow-wrap:anywhere; }
+  .organization-manager-status { position:sticky;bottom:0;min-height:18px;padding-top:7px;background:var(--panel);overflow-wrap:anywhere; }
   .quickadd { margin-left:auto; position:relative; }
   .quickadd summary { list-style:none; cursor:pointer; color:var(--blue); font-size:11.5px; font-weight:650; }
   .quickadd summary::-webkit-details-marker { display:none; }
@@ -191,6 +213,10 @@
     .quickadd { min-width:0;flex-basis:100%;margin-left:0; }
     .quickadd form { left:0;right:auto;width:min(260px,100%); }
     .bulk-export-options { grid-template-columns:1fr; }
+    .organization-manager-modal { max-height:calc(100dvh - 24px); }
+    .organization-manager-view { align-items:start; }
+    .organization-manager-edit { align-items:stretch;flex-wrap:wrap; }
+    .organization-manager-edit input { flex-basis:100%; }
   }
 </style>
 <div class="library-page"><div class="library-inner">
@@ -261,6 +287,8 @@
           <form data-create-kind="tags"><input name="name" maxlength="80" placeholder="{{ t('Tag name') }}" required><button>{{ t('Add') }}</button></form>
         </details>
       </div>
+      <button class="org-manage" id="organization-manager-open" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span>{{ t('Manage folders and tags') }}</button>
+      <div id="organization-create-status" class="sub" role="status" aria-live="polite" style="min-height:16px;font-size:11px"></div>
     </div>
     <div class="libbar">
       <div class="filtrow">
@@ -372,6 +400,34 @@
     {% endif %}
   {% endif %}
 </div></div>
+{% if active != 'ask' %}
+<div class="import-backdrop" id="organization-manager-backdrop" hidden>
+  <section class="import-modal organization-manager-modal" role="dialog" aria-modal="true" aria-labelledby="organization-manager-title" aria-describedby="organization-manager-description">
+    <div class="import-head"><span id="organization-manager-title">{{ t('Manage folders and tags') }}</span><button class="import-close" id="organization-manager-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="import-body organization-manager-body">
+      <p class="sub" id="organization-manager-description" style="margin:0;font-size:12px">{{ t('Rename or remove local organization without deleting recordings or audio.') }}</p>
+      {% for kind, heading, items in [('folders', t('Folders'), organization.folders), ('tags', t('Tags'), organization.tags)] %}
+      <section class="organization-manager-section" data-organization-section="{{ kind }}">
+        <h3>{{ heading }}</h3>
+        <div class="organization-manager-list">
+          {% for item in items %}
+          <div class="organization-manager-row" data-organization-kind="{{ kind }}" data-organization-id="{{ item.id }}" data-organization-color="{{ item.color or '' }}">
+            <div class="organization-manager-view">
+              <div class="organization-manager-name"><span data-organization-name>{{ item.name }}</span><span class="organization-manager-count">{{ item.count }} {{ t('recordings') }}</span></div>
+              <div class="organization-manager-actions"><button class="organization-manager-action" data-organization-rename type="button" aria-label="{{ t('Rename') }} {{ item.name }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></button><button class="organization-manager-action delete" data-organization-delete type="button" aria-label="{{ t('Delete') }} {{ item.name }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/trash-2.svg')"></span></button></div>
+            </div>
+            <form class="organization-manager-edit" hidden><input class="search-input" name="name" maxlength="80" required aria-label="{{ t('Name') }}"><button class="btn" type="submit">{{ t('Save') }}</button><button class="btn sec" data-organization-cancel type="button">{{ t('Cancel') }}</button></form>
+            <div class="organization-manager-confirm" hidden><span>{{ t('Removing this folder or tag only unassigns it. Recordings and audio stay intact.') }}</span><button class="btn sec" data-organization-delete-cancel type="button">{{ t('Cancel') }}</button><button class="btn" data-organization-delete-confirm type="button" style="background:var(--red)">{{ t('Delete') }}</button></div>
+          </div>
+          {% else %}<div class="sub" style="padding:11px 0">{{ t('No folders or tags in this section yet.') }}</div>{% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+      <div class="sub organization-manager-status" id="organization-manager-status" role="status" aria-live="polite"></div>
+    </div>
+  </section>
+</div>
+{% endif %}
 {% if files and lib.view != 'trash' %}
 <div class="import-backdrop" id="bulk-export-backdrop" hidden>
   <section class="import-modal" style="min-height:0;width:min(600px,100%)" role="dialog" aria-modal="true" aria-labelledby="bulk-export-title" aria-describedby="bulk-export-description">
@@ -441,6 +497,29 @@
   const tr = window.localplaudT;
   const folders = {{ organization.folders | tojson }};
   const tags = {{ organization.tags | tojson }};
+  const organizationOpen = document.getElementById('organization-manager-open');
+  const organizationBackdrop = document.getElementById('organization-manager-backdrop');
+  const organizationClose = document.getElementById('organization-manager-close');
+  const organizationStatus = document.getElementById('organization-manager-status');
+  const createStatus = document.getElementById('organization-create-status');
+  const organizationModal = organizationBackdrop ? window.localplaudModal({backdrop:organizationBackdrop,background:()=>[document.querySelector('.library-page'),document.querySelector('.product-rail'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')],cleanupSignal:cleanupController.signal}) : null;
+  const organizationDetail = (data, fallback) => { const detail=data?.detail,item=Array.isArray(detail)?detail[0]?.msg:detail;return tr(typeof item==='string'?item:fallback); };
+  const setOrganizationBusy = value => { organizationModal?.setBusy(value);if(organizationClose)organizationClose.disabled=value;organizationBackdrop?.querySelectorAll('button,input').forEach(control=>{control.disabled=value;}); };
+  const resetOrganizationRow = row => { row.querySelector('.organization-manager-view').hidden=false;row.querySelector('.organization-manager-edit').hidden=true;row.querySelector('.organization-manager-confirm').hidden=true; };
+  const resetOrganizationManager = () => { organizationBackdrop?.querySelectorAll('.organization-manager-row').forEach(resetOrganizationRow);if(organizationStatus)organizationStatus.textContent='';setOrganizationBusy(false); };
+  async function mutateOrganization(url, options, fallback) { let response;try{response=await fetch(url,{...options,signal:cleanupController.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr(fallback));}let data={};try{data=await response.json();}catch(_error){}if(!response.ok)throw new Error(organizationDetail(data,fallback));return data; }
+  organizationOpen?.addEventListener('click',event=>{resetOrganizationManager();organizationModal.open(event.currentTarget,organizationClose);},{signal:cleanupController.signal});
+  organizationClose?.addEventListener('click',()=>organizationModal.close(),{signal:cleanupController.signal});
+  organizationBackdrop?.addEventListener('localplaud:modal-close',resetOrganizationManager,{signal:cleanupController.signal});
+  organizationBackdrop?.querySelectorAll('.organization-manager-row').forEach(row=>{
+    const view=row.querySelector('.organization-manager-view'),edit=row.querySelector('.organization-manager-edit'),confirmDelete=row.querySelector('.organization-manager-confirm'),input=edit.elements.name,name=row.querySelector('[data-organization-name]'),kind=row.dataset.organizationKind,id=row.dataset.organizationId,color=row.dataset.organizationColor||null;
+    row.querySelector('[data-organization-rename]').addEventListener('click',()=>{confirmDelete.hidden=true;view.hidden=true;edit.hidden=false;input.value=name.textContent.trim();input.focus();},{signal:cleanupController.signal});
+    row.querySelector('[data-organization-cancel]').addEventListener('click',()=>{resetOrganizationRow(row);row.querySelector('[data-organization-rename]').focus();},{signal:cleanupController.signal});
+    row.querySelector('[data-organization-delete]').addEventListener('click',event=>{edit.hidden=true;confirmDelete.hidden=false;event.currentTarget.closest('.organization-manager-view').hidden=true;confirmDelete.querySelector('[data-organization-delete-cancel]').focus();},{signal:cleanupController.signal});
+    row.querySelector('[data-organization-delete-cancel]').addEventListener('click',()=>{resetOrganizationRow(row);row.querySelector('[data-organization-delete]').focus();},{signal:cleanupController.signal});
+    edit.addEventListener('submit',async event=>{event.preventDefault();const nextName=input.value.trim();if(!nextName){organizationStatus.textContent=tr('Enter a name');input.focus();return;}setOrganizationBusy(true);organizationStatus.textContent=tr('Updating…');try{await mutateOrganization(`/api/${kind}/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nextName,color})},'Could not rename item');location.reload();}catch(error){organizationStatus.textContent=error.name==='AbortError'?'':error.message;setOrganizationBusy(false);input.focus();}},{signal:cleanupController.signal});
+    row.querySelector('[data-organization-delete-confirm]').addEventListener('click',async()=>{setOrganizationBusy(true);organizationStatus.textContent=tr('Deleting…');try{await mutateOrganization(`/api/${kind}/${id}`,{method:'DELETE'},'Could not delete item');const url=new URL(location.href),queryKey=kind==='folders'?'folder':'tag';if(url.searchParams.get(queryKey)===id)url.searchParams.delete(queryKey);location.assign(`${url.pathname}${url.search}${url.hash}`);}catch(error){organizationStatus.textContent=error.name==='AbortError'?'':error.message;setOrganizationBusy(false);confirmDelete.querySelector('[data-organization-delete-confirm]').focus();}},{signal:cleanupController.signal});
+  });
   const checks = [...document.querySelectorAll('.row-select')];
   const all = document.getElementById('select-all');
   const bar = document.getElementById('bulkbar');
@@ -638,20 +717,22 @@
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const button = form.querySelector('button');
-      const name = new FormData(form).get('name');
+      const name = String(new FormData(form).get('name') || '').trim();
+      if(!name){if(createStatus)createStatus.textContent=tr('Enter a name');form.elements.name.focus();return;}
       button.disabled = true;
+      if(createStatus)createStatus.textContent = '';
       try {
-        const response = await fetch(`/api/${form.dataset.createKind}`, {
+        const data = await mutateOrganization(`/api/${form.dataset.createKind}`, {
           method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail?.[0]?.msg || data.detail || 'Could not create item');
+        }, 'Could not create item');
         window.location.href = `/?view=all&${form.dataset.createKind === 'folders' ? 'folder' : 'tag'}=${data.id}`;
       } catch (error) {
+        if(error.name==='AbortError')return;
         button.disabled = false;
-        window.alert(error.message);
+        if(createStatus)createStatus.textContent = error.message;
+        form.elements.name.focus();
       }
-    });
+    }, {signal:cleanupController.signal});
   });
 })();
 </script>

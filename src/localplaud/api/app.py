@@ -41,6 +41,7 @@ from ..config import get_settings
 from ..date_filters import calendar_date_ms, normalize_calendar_date, resolve_date_scope
 from ..db.models import (
     AskThread,
+    AutomationRule,
     AutomationRun,
     BrowserSession,
     Chunk,
@@ -1306,6 +1307,31 @@ def _update_organization_item(model, item_id: int, body: OrganizationItemBody) -
         return _organization_item(row)
 
 
+def _automation_references_organization(
+    session, *, kind: str, item_id: int
+) -> bool:
+    def references(value) -> bool:
+        try:
+            return value is not None and int(value) == item_id
+        except (TypeError, ValueError):
+            return False
+
+    for rule in session.scalars(select(AutomationRule)):
+        trigger = rule.trigger or {}
+        actions = rule.actions or {}
+        if kind == "folder" and (
+            references(trigger.get("folder_id"))
+            or references(actions.get("folder_id"))
+        ):
+            return True
+        if kind == "tag" and (
+            references(trigger.get("tag_id"))
+            or any(references(value) for value in (actions.get("add_tag_ids") or []))
+        ):
+            return True
+    return False
+
+
 @app.post("/api/folders", status_code=201)
 def create_folder(body: OrganizationItemBody) -> dict:
     return _create_organization_item(Folder, body)
@@ -1322,6 +1348,12 @@ def delete_folder(item_id: int) -> dict:
         row = session.get(Folder, item_id)
         if row is None:
             raise HTTPException(status_code=404, detail="not found")
+        if _automation_references_organization(
+            session, kind="folder", item_id=item_id
+        ):
+            raise HTTPException(
+                status_code=409, detail="folder is used by an AutoFlow rule"
+            )
         session.execute(
             update(PlaudFile).where(PlaudFile.folder_id == item_id).values(folder_id=None)
         )
@@ -1345,6 +1377,10 @@ def delete_tag(item_id: int) -> dict:
         row = session.get(Tag, item_id)
         if row is None:
             raise HTTPException(status_code=404, detail="not found")
+        if _automation_references_organization(session, kind="tag", item_id=item_id):
+            raise HTTPException(
+                status_code=409, detail="tag is used by an AutoFlow rule"
+            )
         session.execute(delete(recording_tags).where(recording_tags.c.tag_id == item_id))
         session.delete(row)
     return {"deleted": True}

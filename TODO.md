@@ -408,7 +408,10 @@ embedding raw provider credentials or model settings in each rule.
   counts and filters, a true uncategorized view, deterministic metadata in the JSON
   API, folder/tag pills on library and detail views, and atomic multi-recording bulk
   move/add/remove controls. The recording workspace now edits or clears folder/tags
-  through the same atomic API. Organization never mutates Plaud cloud or trash state.
+  through the same atomic API. The Library now exposes accessible rename/delete
+  management with inline confirmation and preserves active filters; deletion only
+  unassigns local organization and never removes recordings or audio. Organization
+  never mutates Plaud cloud or trash state.
 - ✅ Library selection also supports bulk Resume and bulk deletion of local
   processing artifacts. Resume queues every validated recording through the durable
   worker rather than spawning unbounded threads. Cleanup rejects active claims,

@@ -69,11 +69,42 @@ def test_crud_validation_conflicts_and_unknowns(monkeypatch, tmp_path):
     assert folder.json()["name"] == "Work"
     assert client.post("/api/folders", json={"name": "work"}).status_code == 409
     assert client.patch("/api/folders/999", json={"name": "Nope"}).status_code == 404
+    renamed_folder = client.patch(
+        f"/api/folders/{folder.json()['id']}",
+        json={"name": "Projects", "color": folder.json()["color"]},
+    )
+    assert renamed_folder.json()["name"] == "Projects"
+    assert renamed_folder.json()["color"] == "blue"
 
     tag = client.post("/api/tags", json={"name": "Person", "color": "red"}).json()
     changed = client.patch(f"/api/tags/{tag['id']}", json={"name": "People"})
     assert changed.json() == {"id": tag["id"], "name": "People", "color": None}
     assert client.delete("/api/tags/999").status_code == 404
+
+    from localplaud.db.models import AutomationRule
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(
+            AutomationRule(
+                name="Keep organization references valid",
+                trigger={"folder_id": folder.json()["id"]},
+                actions={"add_tag_ids": [tag["id"]]},
+            )
+        )
+        session.add(
+            AutomationRule(
+                name="Keep string organization references valid",
+                trigger={"tag_id": str(tag["id"])},
+                actions={"folder_id": str(folder.json()["id"])},
+            )
+        )
+    blocked_folder = client.delete(f"/api/folders/{folder.json()['id']}")
+    blocked_tag = client.delete(f"/api/tags/{tag['id']}")
+    assert blocked_folder.status_code == 409
+    assert blocked_folder.json()["detail"] == "folder is used by an AutoFlow rule"
+    assert blocked_tag.status_code == 409
+    assert blocked_tag.json()["detail"] == "tag is used by an AutoFlow rule"
 
 
 def test_bulk_organization_is_atomic_and_supports_unassign_remove(monkeypatch, tmp_path):
@@ -151,6 +182,31 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert "Interview" in page.text
     assert "Uncategorized" in page.text
     assert 'id="bulkbar"' in page.text
+    assert 'id="organization-manager-open"' in page.text
+    assert 'id="organization-manager-backdrop" hidden' in page.text
+    assert 'aria-labelledby="organization-manager-title"' in page.text
+    assert 'data-organization-kind="folders"' in page.text
+    assert 'data-organization-kind="tags"' in page.text
+    assert 'aria-label="Rename Research"' in page.text
+    assert 'aria-label="Delete Interview"' in page.text
+    assert "const organizationModal = organizationBackdrop ? window.localplaudModal" in page.text
+    assert "background:()=>[document.querySelector('.library-page')" in page.text
+    assert "method:'PATCH'" in page.text
+    assert "method:'DELETE'" in page.text
+    assert "body:JSON.stringify({name:nextName,color})" in page.text
+    assert "throw new Error(tr(fallback))" in page.text
+    assert "const nextName=input.value.trim()" in page.text
+    assert "String(new FormData(form).get('name') || '').trim()" in page.text
+    assert "}, {signal:cleanupController.signal})" in page.text
+    assert "if(url.searchParams.get(queryKey)===id)url.searchParams.delete(queryKey)" in page.text
+    assert "window.alert(error.message)" not in page.text
+
+    from localplaud.i18n import catalog
+
+    messages = catalog("zh-Hant-TW")
+    assert messages["Manage folders and tags"] == "管理資料夾與標籤"
+    assert messages["name already exists"] == "名稱已存在"
+    assert messages["Could not delete item"] == "無法刪除項目"
     assert '<option value="resume">' in page.text
     assert '<option value="delete-local-processing">' in page.text
     assert 'value="a"' in page.text
