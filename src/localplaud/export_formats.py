@@ -343,7 +343,7 @@ def render_notes_data(data: dict, fmt: str) -> tuple[bytes, str]:
     markdown: list[str] = [f"# {data['title']}", ""]
     for note in data["notes"]:
         lines += [note["title"], note["content"], ""]
-        markdown += [f"## {note['title']}", "", note["content"].strip(), ""]
+        markdown += [f"## {note['title']}", "", note["content"], ""]
     if fmt == "md":
         return "\n".join(markdown).encode(), "text/markdown"
     if fmt == "txt":

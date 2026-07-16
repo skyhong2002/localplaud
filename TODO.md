@@ -340,6 +340,12 @@ embedding raw provider credentials or model settings in each rule.
   Deletion explicitly detaches and preserves Saved notes even when SQLite foreign-key
   enforcement is disabled; desktop/mobile focus trapping, Escape, inert background,
   focus restoration, request cleanup, and long-content bounds are covered.
+- ✅ User-authored Markdown notes can now be created from any non-trash recording or
+  the Saved Notes hub, including metadata-only, unprocessed, failed, and processing
+  recordings. Manual notes have fixed local provenance, enter existing search/export/
+  backup flows, survive local cleanup, and never mutate transcripts, generated notes,
+  Ask, stage state, or processing claims. Recording and hub views expose source-aware
+  copy/edit/export/delete actions plus accessible dirty-form modal lifecycle.
 - ✅ Transcript corrections as revisions: inline per-segment editing on the Web
   detail page creates immutable `transcript_revisions` on top of the untouched raw
   ASR row; the latest revision is the canonical transcript for summaries, indexing,

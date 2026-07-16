@@ -414,8 +414,10 @@ def test_ready_to_generate_empty_state_offers_method_dialog(monkeypatch, tmp_pat
     empty_block = r.text.split('class="empty generate-empty"', 1)[1].split("</div>", 1)[0]
     for term in ("diarize", "align", "embed", "ASR", "pipeline"):
         assert term not in empty_block
-    # No-notes guidance for a recording without a local transcript.
-    assert "Notes are generated from the local transcript. Generate the transcript first." in r.text
+    # Manual notes stay available without a transcript; generated notes remain disabled.
+    assert "Create a note now. Generated notes become available after a local transcript exists." in r.text
+    assert 'data-open-manual-note' in r.text
+    assert 'id="generate-notes" disabled' in r.text
 
 
 def test_metadata_only_recording_guides_audio_import(monkeypatch, tmp_path):
@@ -456,7 +458,8 @@ def test_notes_empty_state_guides_template_generation(monkeypatch, tmp_path):
     r = c.get("/file/r4?tab=notes")
     assert r.status_code == 200
     assert "No notes yet." in r.text
-    assert "Pick a template above and generate notes" in r.text
+    assert "Create your own note or choose a template to generate one from the transcript." in r.text
+    assert 'data-open-manual-note' in r.text
     # A local transcript already exists, so the pre-generation dialog is gone.
     assert 'id="generate-backdrop"' not in r.text
 
@@ -498,10 +501,10 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert f'title="Editable note · {long_title}"' in r.text
     saved_tab = r.text.split('class="note-tab saved-note-tab', 1)[1].split("</button>", 1)[0]
     assert "pencil.svg" in saved_tab
-    # The "+" affordance guides to the generation controls without generating.
-    assert "data-note-add" in r.text
-    assert 'aria-label="Generate another note output"' in r.text
-    assert "document.querySelector('.notes-toolbar')?.scrollIntoView" in r.text
+    # The "+" affordance creates a user-owned note without invoking generation.
+    assert "data-open-manual-note" in r.text
+    assert 'aria-label="New note"' in r.text
+    assert 'id="manual-note-backdrop"' in r.text
     # Generated-note provenance now carries version and creation time.
     assert _re.search(r"v3 · [A-Z][a-z]{2} \d{2}, \d{4} · \d{2}:\d{2} · Generated from", r.text)
     # Lockstep invariant: the highlighted tab's target is exactly the one

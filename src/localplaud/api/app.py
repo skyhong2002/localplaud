@@ -95,11 +95,24 @@ _MARKDOWN = (
     .enable("strikethrough")
     .disable("image")
 )
+_NOTE_SOURCE_LABELS = {
+    "manual": "Created by you",
+    "ask": "Saved from Ask",
+    "generated_summary": "Editable generated copy",
+}
 
 
 def _render_markdown(value: str | None) -> Markup:
     """Render stored Markdown with raw HTML and unsafe link schemes disabled."""
     return Markup(_MARKDOWN.render(value or ""))
+
+
+def _note_source_label(source_type: str) -> str:
+    return _NOTE_SOURCE_LABELS.get(source_type, "Editable note")
+
+
+def _escape_like_literal(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 @asynccontextmanager
@@ -947,6 +960,41 @@ def file_usage(file_id: str) -> dict:
         },
         "budget": budget,
     }
+
+
+@app.get("/api/files/picker")
+def recording_picker(q: str = "", limit: int = 20) -> dict:
+    q = q.strip()
+    if len(q) > 200:
+        raise HTTPException(status_code=422, detail="search must not exceed 200 characters")
+    if not 1 <= limit <= 50:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 50")
+    stmt = select(PlaudFile).where(PlaudFile.is_trash.is_(False))
+    if q:
+        pattern = f"%{_escape_like_literal(q)}%"
+        stmt = stmt.where(
+            or_(
+                PlaudFile.local_title.ilike(pattern, escape="\\"),
+                PlaudFile.filename.ilike(pattern, escape="\\"),
+            )
+        )
+    stmt = stmt.order_by(PlaudFile.start_time_ms.desc(), PlaudFile.id.desc()).limit(limit)
+    with session_scope() as session:
+        rows = list(session.scalars(stmt))
+        return {
+            "recordings": [
+                {
+                    "id": row.id,
+                    "title": row.display_title,
+                    "recorded_at": (
+                        datetime.fromtimestamp(row.start_time_ms / 1000, tz=UTC).isoformat()
+                        if row.start_time_ms is not None
+                        else None
+                    ),
+                }
+                for row in rows
+            ]
+        }
 
 
 class OrganizationItemBody(BaseModel):
@@ -2382,6 +2430,7 @@ def file_detail(
             "duration_ms": r.duration_ms,
             "start_time_ms": r.start_time_ms,
             "has_audio": bool(r.audio_path and Path(r.audio_path).exists()),
+            "is_trash": r.is_trash,
             "has_local_transcript": r.local_transcript is not None,
             "origin": r.origin or "plaud",
             "transcript": transcript,
@@ -2442,10 +2491,15 @@ def file_detail(
                     "title": note.title,
                     "content_md": note.content_md,
                     "source_type": note.source_type,
+                    "source_label": _note_source_label(note.source_type),
                     "source_summary_id": note.source_summary_id,
                     "citations": note.citations or [],
                 }
-                for note in r.user_notes
+                for note in sorted(
+                    r.user_notes,
+                    key=lambda item: (item.updated_at, item.id),
+                    reverse=True,
+                )
             ],
             "selected_note_id": (
                 note_id if any(note.id == note_id for note in r.user_notes) else None
@@ -2877,14 +2931,22 @@ def notes_page(request: Request):
                 "title": row.title,
                 "content_md": row.content_md,
                 "source_type": row.source_type,
+                "source_label": _note_source_label(row.source_type),
                 "citations": row.citations or [],
             }
             for row in rows
         ]
+        recording_count = int(
+            session.scalar(
+                select(func.count(PlaudFile.id)).where(PlaudFile.is_trash.is_(False))
+            )
+            or 0
+        )
     return templates.TemplateResponse(
         request=request,
         name="notes.html",
-        context=_base_ctx(request, "notes") | {"notes": notes},
+        context=_base_ctx(request, "notes")
+        | {"notes": notes, "recording_count": recording_count},
     )
 
 

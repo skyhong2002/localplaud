@@ -214,17 +214,18 @@
             {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
           </select>
         </div>
+        {% if not f.is_trash %}<button class="btn sec" type="button" data-open-manual-note><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span>{{ t('New note') }}</button>{% endif %}
         <button class="btn" type="button" id="generate-notes" {% if not f.has_local_transcript %}disabled{% endif %}><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Regenerate notes') if notes else t('Generate notes') }}</button>
         <span id="note-template-result" class="notes-status sub">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% endif %}</span>
       </div>
       {% if notes or f.user_notes %}
       {# One shared active target keeps the highlighted tab and the initially
          visible panel in lockstep even if either list's ordering changes. #}
-      {% set active_note_target = ('sum-' ~ notes[0].id) if notes else ('saved-' ~ f.user_notes[0].id) %}
+      {% set active_note_target = ('saved-' ~ f.selected_note_id) if f.selected_note_id else (('sum-' ~ notes[0].id) if notes else ('saved-' ~ f.user_notes[0].id)) %}
       <div class="note-tabs">
         {% for s in notes %}<button type="button" data-note-target="sum-{{ s.id }}" class="note-tab {% if ('sum-' ~ s.id) == active_note_target %}on{% endif %}" title="{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.created_at %} · {{ s.created_at }}{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}</button>{% endfor %}
         {% for note in f.user_notes %}<button type="button" data-note-target="saved-{{ note.id }}" class="note-tab saved-note-tab {% if ('saved-' ~ note.id) == active_note_target %}on{% endif %}" title="{{ t('Editable note') }} · {{ note.title }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg');width:11px;height:11px"></span>{{ note.title }}</button>{% endfor %}
-        <button type="button" class="note-tab note-add-tab" data-note-add aria-label="{{ t('Generate another note output') }}" title="{{ t('Generate another note output') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg');width:12px;height:12px"></span></button>
+        {% if not f.is_trash %}<button type="button" class="note-tab note-add-tab" data-open-manual-note aria-label="{{ t('New note') }}" title="{{ t('New note') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg');width:12px;height:12px"></span></button>{% endif %}
       </div>
     {% for s in notes %}
     <div class="note-panel" data-note-panel="sum-{{ s.id }}" {% if ('sum-' ~ s.id) != active_note_target %}hidden{% endif %}>
@@ -241,9 +242,15 @@
 
     {% for note in f.user_notes %}
     <div class="note-panel" data-note-panel="saved-{{ note.id }}" {% if ('saved-' ~ note.id) != active_note_target %}hidden{% endif %}>
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
-        <div class="sub" style="font-size:12px">{{ t('Editable note') }} · {{ note.source_type }}</div>
-        <button class="btn sec" type="button" data-note-edit="{{ note.id }}" style="padding:6px 9px">{{ t('Edit here') }}</button>
+      <div class="saved-note-head" style="margin-bottom:8px">
+        <div class="sub" style="font-size:12px">{{ t(note.source_label) }}</div>
+        <div class="saved-note-actions">
+          <span class="sub" data-note-action-status="{{ note.id }}" role="status" aria-live="polite"></span>
+          <button class="btn sec" type="button" data-note-copy="{{ note.id }}" style="padding:6px 9px">{{ t('Copy') }}</button>
+          <a class="btn sec" href="/api/notes/{{ note.id }}/export.md" style="padding:6px 9px">{{ t('Export') }}</a>
+          <button class="btn sec" type="button" data-note-edit="{{ note.id }}" style="padding:6px 9px">{{ t('Edit here') }}</button>
+          <button class="btn sec" type="button" data-note-delete="{{ note.id }}" data-note-source="{{ note.source_type }}" style="padding:6px 9px;color:var(--red)">{{ t('Delete') }}</button>
+        </div>
       </div>
       <div class="md" data-workspace-note-body>{{ note.content_md | markdown }}</div>
       <form data-workspace-note-form="{{ note.id }}" hidden style="display:grid;gap:8px;margin-top:10px">
@@ -258,7 +265,8 @@
       <div class="empty generate-empty">
         <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span>
         <strong class="empty-title">{{ t('No notes yet.') }}</strong>
-        <span class="sub empty-sub">{% if f.has_local_transcript %}{{ t('Pick a template above and generate notes — the transcript stays untouched and every generated version is kept.') }}{% else %}{{ t('Notes are generated from the local transcript. Generate the transcript first.') }}{% endif %}</span>
+        <span class="sub empty-sub">{% if f.has_local_transcript %}{{ t('Create your own note or choose a template to generate one from the transcript.') }}{% else %}{{ t('Create a note now. Generated notes become available after a local transcript exists.') }}{% endif %}</span>
+        {% if not f.is_trash %}<button class="btn sec generate-cta" type="button" data-open-manual-note><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span>{{ t('New note') }}</button>{% endif %}
       </div>
       {% endif %}
     </div>
@@ -443,6 +451,18 @@
       </section>
       <div id="export-result" class="sub" role="status" aria-live="polite" style="font-size:12px;min-height:17px"></div>
     </div>
+  </section>
+</div>
+{% endif %}
+{% if not f.is_trash %}
+<div class="import-backdrop" id="manual-note-backdrop" data-dirty="false" hidden>
+  <section class="import-modal manual-note-modal" role="dialog" aria-modal="true" aria-labelledby="manual-note-title">
+    <div class="import-head"><span id="manual-note-title">{{ t('New note') }}</span><button class="import-close" id="manual-note-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <form class="import-body manual-note-form" id="manual-note-form">
+      <label>{{ t('Title') }}<input class="search-input" id="manual-note-name" name="title" maxlength="200" autocomplete="off" required placeholder="{{ t('Decision log') }}"></label>
+      <label>{{ t('Note') }}<textarea class="search-input" name="content_md" maxlength="200000" required placeholder="{{ t('Write in Markdown…') }}"></textarea></label>
+      <div class="manual-note-actions"><span class="sub" id="manual-note-status" role="status" aria-live="polite"></span><button class="btn sec" id="manual-note-cancel" type="button">{{ t('Cancel') }}</button><button class="btn" id="manual-note-create" type="submit">{{ t('Create note') }}</button></div>
+    </form>
   </section>
 </div>
 {% endif %}
@@ -693,19 +713,30 @@
   window.addEventListener('popstate',()=>{const requested=new URLSearchParams(location.search).get('tab')||'transcript';activatePanel(['transcript','notes','mindmap','ask'].includes(requested)?requested:'transcript');},{signal:cleanupController.signal});
   document.querySelector('details:has([data-imported-transcript-loader])')?.addEventListener('toggle',event=>{if(event.currentTarget.open){const loader=event.currentTarget.querySelector('[data-imported-transcript-loader]');if(loader)window.htmx.trigger(loader,'load-imported');}});
   document.querySelectorAll('[data-note-target]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-note-target]').forEach(item=>item.classList.remove('on'));button.classList.add('on');document.querySelectorAll('[data-note-panel]').forEach(panel=>panel.hidden=panel.dataset.notePanel!==button.dataset.noteTarget);}));
-  document.querySelector('[data-note-add]')?.addEventListener('click',()=>{
-    document.querySelector('.notes-toolbar')?.scrollIntoView({behavior:'smooth',block:'center'});
-    document.getElementById('note-template-select')?.focus();
-  });
+  const manualNoteBackdrop=document.getElementById('manual-note-backdrop'),manualNoteForm=document.getElementById('manual-note-form'),manualNoteStatus=document.getElementById('manual-note-status');
+  const manualNoteModal=manualNoteBackdrop?window.localplaudModal({backdrop:manualNoteBackdrop,background:[recordingShell,...dialogChromeRegions],cleanupSignal:cleanupController.signal,dirtyMessage:tr('Discard this unfinished note?')}):null;
+  if(manualNoteModal){
+    const createButton=document.getElementById('manual-note-create'),closeButton=document.getElementById('manual-note-close'),cancelButton=document.getElementById('manual-note-cancel');
+    const resetManualNote=()=>{manualNoteForm.reset();manualNoteStatus.textContent='';createButton.disabled=false;closeButton.disabled=false;cancelButton.disabled=false;manualNoteModal.setDirty(false);manualNoteModal.setBusy(false);};
+    document.querySelectorAll('[data-open-manual-note]').forEach(button=>button.addEventListener('click',event=>{resetManualNote();manualNoteModal.open(event.currentTarget,document.getElementById('manual-note-name'));}));
+    manualNoteForm.addEventListener('input',()=>manualNoteModal.setDirty(Boolean(manualNoteForm.elements.title.value.trim()||manualNoteForm.elements.content_md.value.trim())));
+    closeButton.addEventListener('click',()=>manualNoteModal.close());
+    cancelButton.addEventListener('click',()=>manualNoteModal.close());
+    manualNoteBackdrop.addEventListener('localplaud:modal-close',resetManualNote);
+    manualNoteForm.addEventListener('submit',async event=>{event.preventDefault();createButton.disabled=true;closeButton.disabled=true;cancelButton.disabled=true;manualNoteModal.setBusy(true);manualNoteStatus.textContent=tr('Creating note…');try{const response=await fetch('/api/files/{{ f.id }}/notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:manualNoteForm.elements.title.value,content_md:manualNoteForm.elements.content_md.value}),signal:cleanupController.signal}),data=await response.json();if(!response.ok)throw new Error(response.status===409?tr('This recording is in Trash.'):data.detail?.[0]?.msg||data.detail||tr('Could not create note'));manualNoteModal.setDirty(false);location.href=`/file/{{ f.id }}?tab=notes&note_id=${data.id}`;}catch(error){if(error.name!=='AbortError'){manualNoteStatus.textContent=error.message||tr('Could not create note');createButton.disabled=false;closeButton.disabled=false;cancelButton.disabled=false;manualNoteModal.setBusy(false);}}});
+  }
   const selectedNoteId={{ f.selected_note_id|tojson }};
   if(selectedNoteId){activatePanel('notes');document.querySelector(`[data-note-target="saved-${selectedNoteId}"]`)?.click();}
   const requestedNoteTarget=new URLSearchParams(location.search).get('note');
   if(requestedNoteTarget&&!selectedNoteId)document.querySelector(`[data-note-target="${CSS.escape(requestedNoteTarget)}"]`)?.click();
   document.querySelectorAll('[data-version-preview]').forEach(button=>button.addEventListener('click',()=>{const preview=button.closest('[data-version-row]')?.querySelector('.note-version-preview');if(!preview)return;const show=preview.hidden;preview.hidden=!show;button.setAttribute('aria-expanded',String(show));button.textContent=show?tr('Hide preview'):tr('Preview');}));
   document.querySelectorAll('[data-summary-copy]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;button.textContent={{ t('Creating editable copy…')|tojson }};const response=await fetch(`/api/files/{{ f.id }}/summaries/${button.dataset.summaryCopy}/editable-copy`,{method:'POST'}),data=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?tab=notes&note_id=${data.id}`;return;}button.disabled=false;button.textContent=data.detail||{{ t('Could not create editable copy')|tojson }};}));
-  document.querySelectorAll('[data-note-edit]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.note-panel');panel.querySelector('[data-workspace-note-body]').hidden=true;panel.querySelector('[data-workspace-note-form]').hidden=false;button.hidden=true;}));
-  document.querySelectorAll('[data-note-cancel]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.note-panel');panel.querySelector('[data-workspace-note-body]').hidden=false;panel.querySelector('[data-workspace-note-form]').hidden=true;panel.querySelector('[data-note-edit]').hidden=false;}));
-  document.querySelectorAll('[data-workspace-note-form]').forEach(form=>form.addEventListener('submit',async event=>{event.preventDefault();const id=form.dataset.workspaceNoteForm,data=new FormData(form),status=form.querySelector('[data-note-status]');status.textContent={{ t('Saving…')|tojson }};const response=await fetch(`/api/notes/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:data.get('title'),content_md:data.get('content_md')})}),result=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?tab=notes&note_id=${id}`;return;}status.textContent=result.detail||{{ t('Could not save')|tojson }};}));
+  document.querySelectorAll('[data-note-copy]').forEach(button=>button.addEventListener('click',async()=>{const id=button.dataset.noteCopy,panel=button.closest('.note-panel'),status=panel.querySelector(`[data-note-action-status="${id}"]`),text=panel.querySelector('[data-workspace-note-form] textarea[name="content_md"]').value;try{await writeClipboard(text);status.textContent=tr('Markdown copied');setTimeout(()=>{if(status.isConnected)status.textContent='';},1200);}catch(_error){status.textContent=tr('Copy failed');}}));
+  document.querySelectorAll('[data-note-delete]').forEach(button=>button.addEventListener('click',async()=>{const messages={manual:'Delete this note? This removes only your local note.',ask:'Delete this saved note? The original Ask thread is preserved.',generated_summary:'Delete this editable copy? The generated note is preserved.'};if(!confirm(tr(messages[button.dataset.noteSource]||'Delete this editable note?')))return;button.disabled=true;try{const response=await fetch(`/api/notes/${button.dataset.noteDelete}`,{method:'DELETE',signal:cleanupController.signal});if(!response.ok)throw new Error();location.href='/file/{{ f.id }}?tab=notes';}catch(error){if(error.name!=='AbortError'){button.disabled=false;button.closest('.note-panel').querySelector('[data-note-action-status]').textContent=tr('Could not delete note');}}}));
+  document.querySelectorAll('[data-note-edit]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.note-panel'),form=panel.querySelector('[data-workspace-note-form]');form.dataset.originalTitle=form.elements.title.value;form.dataset.originalContent=form.elements.content_md.value;panel.querySelector('[data-workspace-note-body]').hidden=true;form.hidden=false;button.hidden=true;form.elements.title.focus();form.elements.title.select();}));
+  document.querySelectorAll('[data-note-cancel]').forEach(button=>button.addEventListener('click',()=>{const panel=button.closest('.note-panel'),form=panel.querySelector('[data-workspace-note-form]'),edit=panel.querySelector('[data-note-edit]');form.elements.title.value=form.dataset.originalTitle??form.elements.title.value;form.elements.content_md.value=form.dataset.originalContent??form.elements.content_md.value;panel.querySelector('[data-workspace-note-body]').hidden=false;form.hidden=true;edit.hidden=false;edit.focus();}));
+  document.querySelectorAll('[data-workspace-note-form]').forEach(form=>form.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();form.querySelector('[data-note-cancel]').click();}}));
+  document.querySelectorAll('[data-workspace-note-form]').forEach(form=>form.addEventListener('submit',async event=>{event.preventDefault();const id=form.dataset.workspaceNoteForm,data=new FormData(form),status=form.querySelector('[data-note-status]');status.textContent={{ t('Saving…')|tojson }};try{const response=await fetch(`/api/notes/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:data.get('title'),content_md:data.get('content_md')}),signal:cleanupController.signal}),result=await response.json();if(response.ok){location.href=`/file/{{ f.id }}?tab=notes&note_id=${id}`;return;}status.textContent=result.detail||{{ t('Could not save')|tojson }};}catch(error){if(error.name!=='AbortError')status.textContent=error.message||{{ t('Could not save')|tojson }};}}));
   // speaker colors — segments first (keeps first-appearance ordering), then
   // the server-rendered legend swatches share the same mapping
   colorSegments(document);

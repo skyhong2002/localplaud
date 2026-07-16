@@ -11,6 +11,41 @@
     window.localplaudT = message => ({{ translations|tojson }})[message] || message;
     window.spkColor = (() => { const m={}, n=8; let i=0;
       return s => { if(!s) return null; if(!(s in m)) m[s]=i++%n; return m[s]; }; })();
+    window.localplaudModal = ({backdrop,background=[],cleanupSignal,dirtyMessage}) => {
+      let opener=null,inertState=new Map();
+      const focusables=()=>[...backdrop.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(item=>!item.closest('[hidden]'));
+      const close=({restoreFocus=true,force=false}={})=>{
+        if(backdrop.hidden)return true;
+        if(!force&&backdrop.dataset.busy==='true')return false;
+        if(!force&&backdrop.dataset.dirty==='true'&&dirtyMessage&&!confirm(dirtyMessage))return false;
+        backdrop.hidden=true;backdrop.dataset.dirty='false';backdrop.dataset.busy='false';backdrop.removeAttribute('aria-busy');
+        inertState.forEach((wasInert,region)=>{region.inert=wasInert;});inertState.clear();
+        document.body.classList.remove('dialog-open');
+        backdrop.dispatchEvent(new CustomEvent('localplaud:modal-close'));
+        if(restoreFocus)opener?.focus();opener=null;return true;
+      };
+      const open=(trigger,preferredFocus)=>{
+        if(!backdrop.hidden)return;
+        opener=trigger||document.activeElement;backdrop.dataset.busy='false';backdrop.removeAttribute('aria-busy');
+        const regions=[...new Set(background.filter(Boolean))];
+        inertState=new Map(regions.map(region=>[region,region.inert]));
+        regions.forEach(region=>{region.inert=true;});
+        backdrop.hidden=false;document.body.classList.add('dialog-open');
+        requestAnimationFrame(()=>{(preferredFocus||focusables()[0])?.focus();});
+      };
+      backdrop.addEventListener('click',event=>{if(event.target===backdrop)close();});
+      document.addEventListener('keydown',event=>{
+        if(backdrop.hidden)return;
+        if(event.key==='Escape'){event.preventDefault();close();return;}
+        if(event.key!=='Tab')return;
+        const items=focusables();if(!items.length){event.preventDefault();return;}
+        const first=items[0],last=items.at(-1);
+        if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+        else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+      },cleanupSignal?{signal:cleanupSignal}:undefined);
+      cleanupSignal?.addEventListener('abort',()=>close({restoreFocus:false,force:true}),{once:true});
+      return {open,close,setDirty:value=>{backdrop.dataset.dirty=String(Boolean(value));},setBusy:value=>{backdrop.dataset.busy=String(Boolean(value));if(value)backdrop.setAttribute('aria-busy','true');else backdrop.removeAttribute('aria-busy');}};
+    };
   </script>
   <style>
     /* Plaud-like workspace: grouped navigation, dense library, white reader. */
@@ -174,6 +209,18 @@
     .ask-history-rename { grid-column:1/-1;display:flex;gap:7px;min-width:0; }
     .ask-history-rename input { min-width:0;flex:1; }
     .ask-history-footer { position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 16px;border-top:1px solid var(--border);background:var(--panel); }
+    .manual-note-modal { width:min(680px,100%);min-height:0;max-height:min(760px,calc(100dvh - 40px)); }
+    .manual-note-form { gap:12px; }
+    .manual-note-form label { display:grid;gap:5px;font-size:12px;color:var(--muted); }
+    .manual-note-form textarea { width:100%;min-height:220px;resize:vertical;line-height:1.5; }
+    .manual-note-actions { display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap; }
+    .manual-note-actions [role="status"] { min-width:0;margin-right:auto;overflow-wrap:anywhere; }
+    .recording-picker-results { display:grid;gap:5px;max-height:190px;overflow-y:auto;padding:4px;border:1px solid var(--border);border-radius:7px;background:var(--bg); }
+    .recording-picker-item { display:grid;gap:2px;width:100%;min-width:0;padding:8px 10px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--fg);text-align:left;cursor:pointer; }
+    .recording-picker-item:hover,.recording-picker-item:focus-visible { background:var(--panel); }
+    .recording-picker-item[aria-selected="true"] { border-color:var(--blue-br);background:var(--blue-soft); }
+    .recording-picker-title { overflow-wrap:anywhere;font-size:12.5px;font-weight:600; }
+    .recording-picker-date { color:var(--faint);font-size:11px; }
     .import-tabs { display:flex;gap:4px;margin-bottom:15px; }
     .import-tabs button { flex:1;border:1px solid var(--border);background:var(--panel);color:var(--muted);padding:9px;border-radius:8px;font-weight:600;cursor:pointer; }
     .import-tabs button.on { color:var(--blue);border-color:var(--blue-br);background:var(--blue-soft); }
@@ -319,7 +366,7 @@
     .note-tabs .saved-note-tab,.note-tabs .note-add-tab { display:inline-flex;align-items:center;gap:5px; }
     .note-tabs .saved-note-tab .nav-icon,.note-tabs .note-add-tab .nav-icon { flex:none; }
     .note-tabs .note-add-tab { padding:6px 8px;color:var(--faint); }
-    .notes-toolbar { display:grid;grid-template-columns:minmax(220px,1fr) auto;align-items:end;gap:9px;margin:2px 0 15px;padding:12px;border:1px solid var(--border);border-radius:7px;background:#FAFAFA; }
+    .notes-toolbar { display:grid;grid-template-columns:minmax(220px,1fr) auto auto;align-items:end;gap:9px;margin:2px 0 15px;padding:12px;border:1px solid var(--border);border-radius:7px;background:#FAFAFA; }
     .notes-template-control { display:grid;grid-template-columns:auto minmax(180px,1fr);align-items:center;gap:9px; }
     .notes-template-control label { font-size:12px;font-weight:650;white-space:nowrap; }
     .notes-template-control select { width:100%;padding:7px 9px; }
@@ -492,6 +539,8 @@
       .import-modal { max-height:calc(100dvh - 24px); }
       .ask-history-backdrop { padding:0; }
       .ask-history-drawer { width:100%;max-height:100dvh;border-radius:0; }
+      .manual-note-modal { width:100%;max-height:calc(100dvh - 24px); }
+      .manual-note-form textarea { min-height:180px; }
       .saved-note-head { flex-direction:column; }
       .saved-note-actions { width:100%;justify-content:flex-start; }
       .main > .content{ padding:20px 16px 60px; }

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
 
 from ..ask_threads import note_to_dict, save_answer_as_note
-from ..db.models import Summary, UserNote
+from ..db.models import PlaudFile, Summary, UserNote
 from ..db.session import session_scope
 from ..note_history import source_summary_provenance
 
@@ -28,16 +29,29 @@ class SaveAnswerBody(BaseModel):
 
 
 class NoteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(min_length=1, max_length=200)
     content_md: str = Field(min_length=1, max_length=200_000)
 
-    @field_validator("title", "content_md")
+    @field_validator("title", mode="before")
     @classmethod
-    def trim(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("value must not be empty")
+    def trim_title(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("content_md")
+    @classmethod
+    def reject_blank_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("content must not be blank")
         return value
+
+
+def _serialize_manual_note_creation(session: Session) -> None:
+    # Reserve the SQLite writer before checking the trash boundary so a concurrent
+    # mirror update cannot commit between that check and the note insert.
+    if session.get_bind().dialect.name == "sqlite":
+        session.execute(text("BEGIN IMMEDIATE"))
 
 
 @router.get("/notes")
@@ -55,6 +69,30 @@ def save_answer(message_id: int, body: SaveAnswerBody) -> dict:
         return save_answer_as_note(message_id, body.title)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/files/{file_id}/notes", status_code=201)
+def create_manual_note(file_id: str, body: NoteBody) -> dict:
+    with session_scope() as session:
+        _serialize_manual_note_creation(session)
+        recording = session.get(PlaudFile, file_id)
+        if recording is None:
+            raise HTTPException(status_code=404, detail="recording not found")
+        if recording.is_trash:
+            raise HTTPException(status_code=409, detail="recording is in trash")
+        note = UserNote(
+            file_id=file_id,
+            title=body.title,
+            content_md=body.content_md,
+            source_type="manual",
+            ask_message_id=None,
+            source_summary_id=None,
+            source_summary_snapshot=None,
+            citations=[],
+        )
+        session.add(note)
+        session.flush()
+        return note_to_dict(note)
 
 
 @router.post("/files/{file_id}/summaries/{summary_id}/editable-copy", status_code=201)
@@ -105,7 +143,7 @@ def export_note(note_id: int) -> PlainTextResponse:
         note = session.get(UserNote, note_id)
         if note is None:
             raise HTTPException(status_code=404, detail="note not found")
-        parts = [f"# {note.title}", "", note.content_md.strip(), ""]
+        parts = [f"# {note.title}", "", note.content_md, ""]
         if note.citations:
             parts.extend(["## Sources", ""])
             for citation in note.citations:
@@ -116,7 +154,11 @@ def export_note(note_id: int) -> PlainTextResponse:
                     label += f" @ {minutes:02d}:{seconds:02d}"
                 parts.append(f"- {label}")
             parts.append("")
-        return PlainTextResponse("\n".join(parts), media_type="text/markdown")
+        return PlainTextResponse(
+            "\n".join(parts),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="note-{note.id}.md"'},
+        )
 
 
 @router.delete("/notes/{note_id}", status_code=204)

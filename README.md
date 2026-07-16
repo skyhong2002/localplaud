@@ -64,7 +64,10 @@ exports remain available. Transcript and current notes can be copied directly, a
 the Library can export up to 50 selected recordings as one provenance-aware ZIP with
 a partial-availability manifest. Library and recording Ask surfaces also provide a
 searchable, paginated conversation-history drawer with rename/delete controls;
-deleting a conversation preserves any Saved notes created from its answers. Durable
+deleting a conversation preserves any Saved notes created from its answers. Manual
+Markdown notes can be created from a recording or the Saved Notes hub without a
+transcript or AI provider, and share the same search, edit, copy, export, backup, and
+local-data preservation paths as other user-owned notes. Durable
 provider/model/execution profiles, explicit
 stage fallbacks, remote workers, local AutoFlow rules, inbox notifications,
 TXT/SRT/VTT AutoFlow exports, scoped authorized webhooks, and authorized SMTP email

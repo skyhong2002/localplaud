@@ -91,7 +91,7 @@ def render_markdown(file_id: str) -> str:
             parts += [heading, "", summary.content_md.strip(), ""]
 
         for note in file.user_notes:
-            parts += [f"## {note.title}", "", note.content_md.strip(), ""]
+            parts += [f"## {note.title}", "", note.content_md, ""]
             if note.citations:
                 parts += ["Sources:", ""]
                 for citation in note.citations:

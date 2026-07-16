@@ -515,6 +515,12 @@ deleting one preserves Saved notes and their citations as independent local data
 Generated notes can be promoted idempotently to a provenance-linked editable copy
 inside the same recording workspace. User edits affect only that copy; the original
 AI artifact and its model/template/transcript lineage remain immutable.
+User-authored Markdown notes are independent local data and can be created before
+audio import, transcription, or generation. They are selectable in the recording
+Notes workspace, searchable and exportable through the existing note paths, and never
+claim provider/model provenance or alter transcript, generation, Ask, or processing
+state. The Saved Notes hub can find a recording and create the same note without
+opening its workspace first.
 The Templates workspace now separates My Space and Explore, with server-side search,
 scenario/category browsing, provenance, descriptions, authorship/popularity signals,
 prompt preview, immutable version editing, and copy-to-workspace. Other major gaps

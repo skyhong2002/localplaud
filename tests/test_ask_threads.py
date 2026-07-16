@@ -449,7 +449,7 @@ def test_library_answer_with_multiple_recordings_saves_as_library_note(monkeypat
     note = client.post(f"/api/ask/messages/{message_id}/save-note", json={}).json()
     assert note["file_id"] is None
     assert len(note["citations"]) == 2
-    assert "Library · ask" in client.get("/notes").text
+    assert "Library · Saved from Ask" in client.get("/notes").text
 
 
 def test_grounded_quick_action_is_durable_versioned_and_non_mutating(monkeypatch, tmp_path):
