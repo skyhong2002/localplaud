@@ -364,7 +364,7 @@ def test_save_answer_is_idempotent_editable_and_visible(monkeypatch, tmp_path):
     long_title = "L" * 200
     assert client.put(
         f"/api/notes/{note_id}",
-        json={"title": long_title, "content_md": "Still grounded."},
+        json={"title": long_title, "content_md": "Still grounded.", "base_version": 1},
     ).status_code == 200
     long_notes_page = client.get("/notes")
     assert long_title in long_notes_page.text
@@ -374,7 +374,11 @@ def test_save_answer_is_idempotent_editable_and_visible(monkeypatch, tmp_path):
 
     changed = client.put(
         f"/api/notes/{note_id}",
-        json={"title": "Launch decision", "content_md": "Edited grounded note."},
+        json={
+            "title": "Launch decision",
+            "content_md": "Edited grounded note.",
+            "base_version": 2,
+        },
     )
     assert changed.status_code == 200
     assert client.get("/api/notes?file_id=r1").json()["notes"][0]["title"] == "Launch decision"
@@ -384,6 +388,86 @@ def test_save_answer_is_idempotent_editable_and_visible(monkeypatch, tmp_path):
     assert "- Weekly Sync @ 00:12" in exported.text
     assert client.delete(f"/api/notes/{note_id}").status_code == 204
     assert client.get("/api/notes").json()["notes"] == []
+
+
+def test_oversized_ask_answer_cannot_create_an_uneditable_note(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import AskMessage, AskThread, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        thread = AskThread(id="oversized", file_id="r1", title="Oversized")
+        session.add(thread)
+        session.flush()
+        message = AskMessage(
+            thread_id=thread.id,
+            role="assistant",
+            content="X" * 200_001,
+        )
+        session.add(message)
+        session.flush()
+        message_id = message.id
+
+    response = client.post(f"/api/ask/messages/{message_id}/save-note", json={})
+    assert response.status_code == 409
+    assert response.json()["detail"] == "content is too large to create an editable note"
+    with session_scope() as session:
+        assert session.query(UserNote).count() == 0
+
+
+def test_oversized_generated_summary_cannot_create_an_uneditable_copy(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import Summary, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        summary = Summary(
+            file_id="r1",
+            template="oversized",
+            content_md="X" * 200_001,
+            source="local",
+        )
+        session.add(summary)
+        session.flush()
+        summary_id = summary.id
+
+    response = client.post(f"/api/files/r1/summaries/{summary_id}/editable-copy")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "content is too large to create an editable note"
+    with session_scope() as session:
+        assert session.query(UserNote).count() == 0
+
+
+def test_blank_ask_and_generated_sources_cannot_create_uneditable_notes(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import AskMessage, AskThread, Summary, UserNote
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        thread = AskThread(id="blank", file_id="r1", title="Blank")
+        session.add(thread)
+        session.flush()
+        message = AskMessage(thread_id=thread.id, role="assistant", content=" \n ")
+        summary = Summary(
+            file_id="r1", template="blank", content_md="", source="local"
+        )
+        session.add_all([message, summary])
+        session.flush()
+        message_id, summary_id = message.id, summary.id
+
+    saved = client.post(f"/api/ask/messages/{message_id}/save-note", json={})
+    copied = client.post(f"/api/files/r1/summaries/{summary_id}/editable-copy")
+    assert saved.status_code == copied.status_code == 409
+    assert saved.json()["detail"] == copied.json()["detail"] == "content must not be blank"
+    with session_scope() as session:
+        assert session.query(UserNote).count() == 0
 
 
 def test_generated_summary_becomes_editable_copy_without_mutating_source(
@@ -416,7 +500,11 @@ def test_generated_summary_becomes_editable_copy_without_mutating_source(
 
     changed = client.put(
         f"/api/notes/{note_id}",
-        json={"title": "Edited notes", "content_md": "User-owned correction."},
+        json={
+            "title": "Edited notes",
+            "content_md": "User-owned correction.",
+            "base_version": 1,
+        },
     )
     assert changed.status_code == 200
     with session_scope() as session:

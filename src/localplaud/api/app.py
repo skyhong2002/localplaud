@@ -29,8 +29,6 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
-from markdown_it import MarkdownIt
-from markupsafe import Markup
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy import text as sql_text
@@ -70,6 +68,7 @@ from ..db.models import (
 from ..db.session import init_db, session_scope
 from ..error_redaction import sanitize_error
 from ..i18n import SUPPORTED_LOCALES, catalog, translator
+from ..markdown import render_markdown as _render_markdown
 from ..note_history import content_fingerprint, restore_summary_version
 from ..preferences import (
     get_workspace_preferences,
@@ -92,22 +91,11 @@ from .vocabulary import router as vocabulary_router
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
-_MARKDOWN = (
-    MarkdownIt("commonmark", {"html": False, "linkify": False})
-    .enable("table")
-    .enable("strikethrough")
-    .disable("image")
-)
 _NOTE_SOURCE_LABELS = {
     "manual": "Created by you",
     "ask": "Saved from Ask",
     "generated_summary": "Editable generated copy",
 }
-
-
-def _render_markdown(value: str | None) -> Markup:
-    """Render stored Markdown with raw HTML and unsafe link schemes disabled."""
-    return Markup(_MARKDOWN.render(value or ""))
 
 
 def _note_source_label(source_type: str) -> str:
@@ -2575,6 +2563,7 @@ def file_detail(
             "user_notes": [
                 {
                     "id": note.id,
+                    "version": note.version,
                     "title": note.title,
                     "content_md": note.content_md,
                     "source_type": note.source_type,
@@ -3015,6 +3004,7 @@ def notes_page(request: Request):
         notes = [
             {
                 "id": row.id,
+                "version": row.version,
                 "file_id": row.file_id,
                 "filename": file_names.get(row.file_id),
                 "title": row.title,

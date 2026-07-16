@@ -350,6 +350,11 @@ embedding raw provider credentials or model settings in each rule.
   backup flows, survive local cleanup, and never mutate transcripts, generated notes,
   Ask, stage state, or processing claims. Recording and hub views expose source-aware
   copy/edit/export/delete actions plus accessible dirty-form modal lifecycle.
+- ✅ Manual, Ask-saved, and editable generated-copy notes now have immutable
+  title/body version history with optimistic stale-write protection. The recording
+  workspace and Saved Notes hub share a bounded, lazy-loading history drawer;
+  restore creates a new live version while preserving citations and source
+  provenance, and concurrent SQLite writers cannot silently overwrite each other.
 - ✅ Transcript corrections as revisions: inline per-segment editing on the Web
   detail page creates immutable `transcript_revisions` on top of the untouched raw
   ASR row; the latest revision is the canonical transcript for summaries, indexing,

@@ -420,7 +420,7 @@ def test_detail_page_history_control_without_dead_restore_buttons(monkeypatch, t
     from localplaud.db.session import session_scope
 
     page = c.get("/file/r1")
-    assert "Version history" not in page.text  # no control before any history exists
+    assert 'class="note-history-tool"' not in page.text
 
     _generate("# note v1")
     _generate("# note v2")

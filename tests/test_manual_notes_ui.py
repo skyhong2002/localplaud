@@ -109,6 +109,24 @@ def test_recording_and_notes_hub_render_manual_lifecycle_contract(client):
     assert "data-note-copy" in detail.text and "data-note-delete" in detail.text
     assert "textarea[name=\"content_md\"]'" in detail.text
     assert "data-note-add" not in detail.text
+    assert f'data-user-note-history="{manual_id}"' in detail.text
+    assert 'data-note-version="1"' in detail.text
+    assert 'name="base_version" value="1"' in detail.text
+    assert detail.text.count('id="user-note-history-backdrop"') == 1
+    assert 'class="import-modal user-note-history-drawer"' in detail.text
+    assert "window.localplaudModal({backdrop,background" in detail.text
+    assert "before_version" in detail.text and "next_before_version" in detail.text
+    assert "timeZone:workspaceTimezone" in detail.text
+    assert "Discard unsaved changes and open version history?" in detail.text
+    assert "This note changed elsewhere. Your text is still here." in detail.text
+    assert "event.stopImmediatePropagation();closeConfirmation()" in detail.text
+    assert "previewController?.abort();previewController=null" in detail.text
+    assert "preview.innerHTML=data.content_html" in detail.text
+    assert "cancel.disabled=true;restore.disabled=true" in detail.text
+    assert "data.detail?.code==='note_changed'" in detail.text
+    assert "Copy draft and reload" in detail.text
+    assert "history_restored" in detail.text
+    assert "requestAnimationFrame(()=>document.querySelector" in detail.text
 
     hub = client.get("/notes")
     assert hub.status_code == 200
@@ -130,6 +148,12 @@ def test_recording_and_notes_hub_render_manual_lifecycle_contract(client):
     assert "backdrop.dataset.busy==='true'" in hub.text
     assert "manualNoteModal.setBusy(true)" in detail.text
     assert "if(error.name!=='AbortError')status.textContent" in detail.text
+    assert f'data-user-note-history="{manual_id}"' in hub.text
+    assert hub.text.count('id="user-note-history-backdrop"') == 1
+    assert ".user-note-history-preview { max-width:100%;max-height:280px;overflow:auto" in hub.text
+    assert ".user-note-history-title { overflow-wrap:anywhere" in hub.text
+    assert ".user-note-history-snippet { display:-webkit-box" in hub.text
+    assert ".user-note-history-footer [role=\"status\"] { min-width:0;flex:1 1 180px;overflow-wrap:anywhere; }" in hub.text
 
 
 def test_notes_hub_without_recordings_guides_to_add_audio(client):
@@ -157,7 +181,7 @@ def test_manual_note_create_update_search_and_recording_exports(client):
     raw_body = "    UniqueManualNeedle\n\n- Ship beta  \n"
     updated = client.put(
         f"/api/notes/{note_id}",
-        json={"title": "Release decision", "content_md": raw_body},
+        json={"title": "Release decision", "content_md": raw_body, "base_version": 1},
     )
     assert updated.status_code == 200
     search = client.get("/search", params={"q": "UniqueManualNeedle"})

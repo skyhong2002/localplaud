@@ -1066,6 +1066,73 @@ def migrate_editable_note_provenance_schema(engine: Engine) -> list[str]:
     return migrated
 
 
+def migrate_editable_note_revision_schema(engine: Engine) -> list[str]:
+    """Add editable-note optimistic versioning and immutable history.
+
+    The migration is additive on every SQLAlchemy dialect. Fresh databases get
+    the complete table from ``create_all``; deployed databases need the live
+    version column before the mapped UserNote can be queried. Creating the
+    revision table through SQLAlchemy keeps types, foreign keys, indexes, and
+    uniqueness portable across SQLite and PostgreSQL.
+    """
+    from .models import UserNoteRevision
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "user_notes" not in tables:
+        return []
+
+    migrated: list[str] = []
+    columns = {item["name"] for item in inspector.get_columns("user_notes")}
+    revision_columns = (
+        {item["name"] for item in inspector.get_columns("user_note_revisions")}
+        if "user_note_revisions" in tables
+        else None
+    )
+    statements = editable_note_history_migration_statements(
+        {"user_notes": columns, "user_note_revisions": revision_columns},
+        engine.dialect,
+    )
+    if statements:
+        with engine.begin() as connection:
+            for label, statement in statements:
+                connection.execute(text(statement))
+                migrated.append(label)
+
+    if "user_note_revisions" not in tables:
+        UserNoteRevision.__table__.create(bind=engine, checkfirst=True)
+        migrated.append("user_note_revisions")
+    return migrated
+
+
+def editable_note_history_migration_statements(
+    existing_columns: dict[str, set[str] | None], dialect: Dialect
+) -> list[tuple[str, str]]:
+    """Return portable additive DDL for the live editable-note version."""
+    statements: list[tuple[str, str]] = []
+    columns = existing_columns.get("user_notes")
+    if columns is not None and "version" not in columns:
+        rendered = Integer().compile(dialect=dialect)
+        statements.append(
+            (
+                "user_notes.version",
+                "ALTER TABLE user_notes ADD COLUMN "
+                f"version {rendered} NOT NULL DEFAULT 1",
+            )
+        )
+    revisions = existing_columns.get("user_note_revisions")
+    if revisions is not None and "content_preview" not in revisions:
+        rendered = String(240).compile(dialect=dialect)
+        statements.append(
+            (
+                "user_note_revisions.content_preview",
+                "ALTER TABLE user_note_revisions ADD COLUMN "
+                f"content_preview {rendered} NOT NULL DEFAULT ''",
+            )
+        )
+    return statements
+
+
 def _backfill_editable_note_provenance(engine: Engine) -> int:
     from ..note_history import source_summary_provenance
     from .models import Summary, SummaryRevision, UserNote

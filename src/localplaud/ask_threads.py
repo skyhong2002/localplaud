@@ -20,6 +20,7 @@ from .db.models import (
     UserNote,
 )
 from .db.session import session_scope
+from .editable_notes import require_editable_note_content
 from .worker import qa
 
 _THREAD_PREVIEW_LENGTH = 180
@@ -391,6 +392,7 @@ def save_answer_as_note(message_id: int, title: str | None = None) -> dict:
         )
         if existing is not None:
             return note_to_dict(existing)
+        require_editable_note_content(message.content)
         thread = message.thread
         previous_question = next(
             (
@@ -437,4 +439,5 @@ def note_to_dict(row: UserNote) -> dict:
         "source_summary_id": row.source_summary_id,
         "source_summary_snapshot": row.source_summary_snapshot,
         "citations": row.citations or [],
+        "version": row.version,
     }

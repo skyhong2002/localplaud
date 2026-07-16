@@ -181,6 +181,7 @@ def test_manual_note_persists_exact_content_and_forced_provenance(client):
         "source_summary_id": None,
         "source_summary_snapshot": None,
         "citations": [],
+        "version": 1,
     }
     assert response.json() == expected
     with session_scope() as session:
@@ -195,6 +196,7 @@ def test_manual_note_persists_exact_content_and_forced_provenance(client):
             "source_summary_id": note.source_summary_id,
             "source_summary_snapshot": note.source_summary_snapshot,
             "citations": note.citations,
+            "version": note.version,
         } == {key: value for key, value in expected.items() if key != "id"}
 
 
@@ -214,17 +216,22 @@ def test_manual_note_list_update_delete_continuity_and_shared_contract(client):
     content = "\n    updated code\n" + ("C" * 199_982)
     updated = client.put(
         f"/api/notes/{note_id}",
-        json={"title": f" {title}\n", "content_md": content},
+        json={"title": f" {title}\n", "content_md": content, "base_version": 1},
     )
     assert updated.status_code == 200
     assert updated.json()["title"] == title
     assert updated.json()["content_md"] == content
 
     for payload in (
-        {"title": " ", "content_md": "Body"},
-        {"title": "U" * 201, "content_md": "Body"},
-        {"title": "Valid", "content_md": "C" * 200_001},
-        {"title": "Valid", "content_md": "Body", "source_type": "manual"},
+        {"title": " ", "content_md": "Body", "base_version": 2},
+        {"title": "U" * 201, "content_md": "Body", "base_version": 2},
+        {"title": "Valid", "content_md": "C" * 200_001, "base_version": 2},
+        {
+            "title": "Valid",
+            "content_md": "Body",
+            "base_version": 2,
+            "source_type": "manual",
+        },
     ):
         assert client.put(f"/api/notes/{note_id}", json=payload).status_code == 422
 

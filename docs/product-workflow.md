@@ -518,6 +518,12 @@ deleting one preserves Saved notes and their citations as independent local data
 Generated notes can be promoted idempotently to a provenance-linked editable copy
 inside the same recording workspace. User edits affect only that copy; the original
 AI artifact and its model/template/transcript lineage remain immutable.
+Manual notes, Saved Ask answers, and editable generated-note copies use optimistic
+versions rather than last-write-wins updates. Every real edit archives the displaced
+title and exact Markdown body; history is bounded and lazy-loaded, and restoring an
+older version creates a new live version while keeping citations, Ask/source links,
+and generated-copy provenance unchanged. The recording workspace and Saved Notes hub
+share the same keyboard-accessible desktop/mobile history drawer.
 User-authored Markdown notes are independent local data and can be created before
 audio import, transcription, or generation. They are selectable in the recording
 Notes workspace, searchable and exportable through the existing note paths, and never

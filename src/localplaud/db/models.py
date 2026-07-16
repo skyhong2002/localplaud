@@ -561,11 +561,39 @@ class UserNote(Base):
     # history restore rewrites in place; this records which version was copied.
     source_summary_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
     citations: Mapped[list] = mapped_column(JSON, default=list)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )
     file: Mapped[PlaudFile | None] = relationship(back_populates="user_notes")
+    revisions: Mapped[list[UserNoteRevision]] = relationship(
+        back_populates="note",
+        cascade="all, delete-orphan",
+        order_by="UserNoteRevision.version",
+    )
+
+
+class UserNoteRevision(Base):
+    """Immutable title/body snapshot displaced from an editable UserNote."""
+
+    __tablename__ = "user_note_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    note_id: Mapped[int] = mapped_column(
+        ForeignKey("user_notes.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(200))
+    content_md: Mapped[str] = mapped_column(Text)
+    content_preview: Mapped[str] = mapped_column(String(240), default="", server_default="")
+    archived_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    note: Mapped[UserNote] = relationship(back_populates="revisions")
+
+    __table_args__ = (
+        UniqueConstraint("note_id", "version", name="uq_user_note_revision_note_version"),
+    )
 
 
 class ImportRun(Base):
