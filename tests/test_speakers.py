@@ -303,6 +303,11 @@ def test_rename_invalidates_derived_artifacts_and_names_canonical(monkeypatch, t
     transcript, source = _load_transcript("r1", get_settings())
     assert source == "local"
     assert transcript.segments[0].speaker == "Alice"
+    stable_transcript, stable_source = _load_transcript(
+        "r1", get_settings(), display_speaker_names=False
+    )
+    assert stable_source == "local"
+    assert stable_transcript.segments[0].speaker == "SPEAKER_00"
     with session_scope() as s:
         row = s.get(PlaudFile, "r1")
         assert row.chunks == []

@@ -26,6 +26,7 @@ def _seed():
     from localplaud.db.models import (
         Folder,
         PlaudFile,
+        Speaker,
         Summary,
         Tag,
         Transcript,
@@ -59,7 +60,7 @@ def _seed():
             provider="test",
             source="local",
             text="the launch was delayed",
-            segments=[{"text": "the launch was delayed", "start": 12.5, "end": 16.0, "speaker": "Sky"}],
+            segments=[{"text": "the launch was delayed", "start": 12.5, "end": 16.0, "speaker": "SPEAKER_00"}],
         )
         session.add(raw)
         session.flush()
@@ -70,7 +71,7 @@ def _seed():
                 revision=1,
                 source="local",
                 text="the launch was approved",
-                segments=[{"text": "the launch was approved", "start": 12.5, "end": 16.0, "speaker": "Sky"}],
+                segments=[{"text": "the launch was approved", "start": 12.5, "end": 16.0, "speaker": "SPEAKER_00"}],
             )
         )
         session.add(
@@ -82,13 +83,22 @@ def _seed():
                 segments=[{"text": "exclusive cloud phrase", "start": 4.0, "end": 6.0}],
             )
         )
-        session.add(
-            Summary(
-                file_id=local.id,
-                template="meeting",
-                source="local",
-                content_md="Decision owner is Morgan.",
-            )
+        session.add_all(
+            [
+                Summary(
+                    file_id=local.id,
+                    template="meeting",
+                    source="local",
+                    content_md="Decision owner is Morgan.",
+                ),
+                Summary(
+                    file_id=local.id,
+                    template="mind_map",
+                    source="local",
+                    content_md="# Roadmap\n- Launch branch alpha",
+                ),
+                Speaker(file_id=local.id, key="SPEAKER_00", display_name="Sky"),
+            ]
         )
         session.add(
             UserNote(file_id=local.id, title="Follow-up", content_md="Call Riley tomorrow.")
@@ -104,11 +114,19 @@ def test_lexical_search_uses_corrected_canonical_transcript(monkeypatch, tmp_pat
     assert hit["file_id"] == "local-recording"
     assert hit["kind"] == "transcript"
     assert hit["start"] == 12.5
+    assert hit["speaker"] == "Sky"
+    assert hit["speaker_key"] == "SPEAKER_00"
     assert lexical_search("delayed") == []
-    assert lexical_search("Morgan")[0]["kind"] == "note"
+    generated = lexical_search("Morgan")[0]
+    assert generated["kind"] == "note"
+    assert generated["target"] == "generated_note" and generated["artifact_id"]
     # User-owned saved notes report their own kind so results label them
     # distinctly from generated notes.
-    assert lexical_search("Riley")[0]["kind"] == "saved_note"
+    saved = lexical_search("Riley")[0]
+    assert saved["kind"] == "saved_note"
+    assert saved["target"] == "saved_note" and saved["artifact_id"]
+    mind_map = lexical_search("alpha")[0]
+    assert mind_map["target"] == "mind_map" and mind_map["artifact_id"]
     assert lexical_search("Launch meeting")[0]["kind"] == "title"
 
 
@@ -152,6 +170,28 @@ def test_search_page_works_without_embeddings_and_links_timestamp(monkeypatch, t
     assert "embedding provider isn&#39;t available" not in response.text
 
 
+def test_search_note_hits_link_to_exact_workspace_artifact(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import Summary, UserNote
+    from localplaud.db.session import session_scope
+
+    monkeypatch.setattr("localplaud.worker.qa.retrieve", lambda *args, **kwargs: [])
+    with session_scope() as session:
+        generated_id = session.query(Summary).filter_by(template="meeting").one().id
+        saved_id = session.query(UserNote).one().id
+
+    generated = client.get("/search", params={"q": "Morgan"})
+    saved = client.get("/search", params={"q": "Riley"})
+    mind_map = client.get("/search", params={"q": "alpha"})
+    transcript = client.get("/search", params={"q": "approved"})
+    assert f"/file/local-recording?tab=notes&amp;note=sum-{generated_id}" in generated.text
+    assert f"/file/local-recording?tab=notes&amp;note_id={saved_id}" in saved.text
+    assert "/file/local-recording?tab=mindmap" in mind_map.text
+    assert "Sky" in transcript.text
+    assert "SPEAKER_00" not in transcript.text
+
+
 def test_search_page_applies_filters_to_semantic_hits(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed()
@@ -164,7 +204,7 @@ def test_search_page_applies_filters_to_semantic_hits(monkeypatch, tmp_path):
         calls.append(kwargs)
         return [
             {"file_id": "cloud-recording", "filename": "Plaud interview", "text": "meaning", "start": 2.0, "end": 3.0, "speaker": None, "score": 0.8},
-            {"file_id": "local-recording", "filename": "Launch meeting", "text": "meaning", "start": 2.0, "end": 3.0, "speaker": None, "score": 0.7},
+            {"file_id": "local-recording", "filename": "Launch meeting", "text": "meaning", "start": None, "end": None, "speaker": None, "score": 0.7},
         ]
 
     monkeypatch.setattr(qa, "retrieve", fake_retrieve)

@@ -60,8 +60,8 @@
       <span class="search-hit-text">{{ t('Matches the recording title') }}</span>
     </a>
     {% else %}
-    <a class="search-hit" href="/file/{{ g.file_id }}{% if h.start is not none %}?t={{ h.start }}{% endif %}">
-      <span class="search-hit-ts">{% if h.start is not none %}{{ h.start | mmss }}{% else %}<span class="search-kind">{{ t({'note':'Note','saved_note':'Saved note','semantic':'Related'}.get(h.kind, 'Note')) }}</span>{% endif %}</span>
+    <a class="search-hit" href="/file/{{ g.file_id }}{% if h.target == 'generated_note' %}?tab=notes&amp;note=sum-{{ h.artifact_id }}{% elif h.target == 'saved_note' %}?tab=notes&amp;note_id={{ h.artifact_id }}{% elif h.target == 'mind_map' %}?tab=mindmap{% elif h.start is not none %}?t={{ h.start }}{% endif %}">
+      <span class="search-hit-ts">{% if h.start is not none %}{{ h.start | mmss }}{% else %}<span class="search-kind">{{ t('Related' if h.kind == 'semantic' else {'generated_note':'Note','saved_note':'Saved note','mind_map':'Mind map','transcript':'Transcript'}.get(h.target, 'Note')) }}</span>{% endif %}</span>
       <span class="search-hit-text">{% if h.speaker %}<span class="search-hit-speaker">{{ h.speaker }}</span> {% endif %}{{ h.text[:220] }}{% if h.text|length > 220 %}…{% endif %}{% if h.start is not none and h.kind == 'semantic' %} <span class="search-kind">{{ t('Related') }}</span>{% endif %}</span>
     </a>
     {% endif %}

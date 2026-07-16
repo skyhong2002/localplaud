@@ -1677,14 +1677,22 @@ def _run_derived_stages(
             )
 
         if pcfg.index and transcript is not None:
+            stable_index_input = _load_transcript(
+                file_id,
+                settings,
+                display_speaker_names=False,
+            )
+            index_transcript = (
+                stable_index_input[0] if stable_index_input is not None else transcript
+            )
             if force or not _has_chunks(file_id, derived_snapshot):
                 try:
 
                     def run_index(candidate):
                         candidate_settings = _settings_for_stage(settings, candidate, "embed")
                         projected_usage = {
-                            "input_chars": len(transcript.text),
-                            "input_items": len(transcript.segments),
+                            "input_chars": len(index_transcript.text),
+                            "input_items": len(index_transcript.segments),
                             "projection": True,
                         }
                         cost_budget = _cost_guard(file_id, "embed", candidate, projected_usage)
@@ -1693,7 +1701,11 @@ def _run_derived_stages(
                                 file_id,
                                 candidate,
                                 "embed",
-                                [_remote_json_input("transcript", _transcript_payload(transcript))],
+                                [
+                                    _remote_json_input(
+                                        "transcript", _transcript_payload(index_transcript)
+                                    )
+                                ],
                             )
                             model_name = _persist_remote_chunks(
                                 file_id, payload, transcript_lineage
@@ -1701,7 +1713,10 @@ def _run_derived_stages(
                             provider = "remote-worker"
                         else:
                             model_name = _persist_chunks(
-                                file_id, transcript, candidate_settings, transcript_lineage
+                                file_id,
+                                index_transcript,
+                                candidate_settings,
+                                transcript_lineage,
                             )
                             provider = candidate_settings.embeddings.provider
                         return {
@@ -1713,8 +1728,8 @@ def _run_derived_stages(
                                 "cost_budget": cost_budget,
                             },
                             "usage": {
-                                "input_chars": len(transcript.text),
-                                "input_items": len(transcript.segments),
+                                "input_chars": len(index_transcript.text),
+                                "input_items": len(index_transcript.segments),
                             },
                         }
 
@@ -1819,7 +1834,12 @@ def _finish_mind_map_cycle(
             row.error = None
 
 
-def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str] | None:
+def _load_transcript(
+    file_id: str,
+    settings: Settings,
+    *,
+    display_speaker_names: bool = True,
+) -> tuple[Transcript, str] | None:
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
         if row is None:
@@ -1841,14 +1861,18 @@ def _load_transcript(file_id: str, settings: Settings) -> tuple[Transcript, str]
                 for speaker in row.speakers
                 if speaker.display_name
             }
-            return (_apply_speaker_display_names(transcript, names), corrected.source)
+            if display_speaker_names:
+                transcript = _apply_speaker_display_names(transcript, names)
+            return transcript, corrected.source
         if selected is None:
             return None
         transcript = _rehydrate_transcript(selected)
         names = {
             speaker.key: speaker.display_name for speaker in row.speakers if speaker.display_name
         }
-        return (_apply_speaker_display_names(transcript, names), selected.source)
+        if display_speaker_names:
+            transcript = _apply_speaker_display_names(transcript, names)
+        return transcript, selected.source
 
 
 def _load_raw_transcript(file_id: str, settings: Settings) -> Transcript | None:

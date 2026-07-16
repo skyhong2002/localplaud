@@ -3,7 +3,7 @@
     <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><div class="fl-title">{{ t(filelist_context.title) }}</div><span class="sub" style="font-size:11px">{{ filelist_context.total }}</span></div>
     <form method="get" action="/" class="fl-search-wrap">
       <span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span><input class="fl-search" name="q" value="{{ q or '' }}" placeholder="{{ t('Search files…') }}" autocomplete="off">
-      {% for name, value in [('view', filelist_context.params.view), ('folder', filelist_context.params.folder), ('tag', filelist_context.params.tag), ('origin', filelist_context.params.origin), ('state', filelist_context.params.state), ('scene', filelist_context.params.scene), ('sort', filelist_context.params.sort), ('dir', filelist_context.params.dir)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
+      {% for name, value in [('view', filelist_context.params.view), ('folder', filelist_context.params.folder), ('tag', filelist_context.params.tag), ('origin', filelist_context.params.origin), ('state', filelist_context.params.state), ('scene', filelist_context.params.scene), ('sort', filelist_context.params.sort), ('dir', filelist_context.params.dir), ('date_from', filelist_context.params.date_from), ('date_to', filelist_context.params.date_to), ('min_duration_minutes', filelist_context.params.min_duration_minutes), ('max_duration_minutes', filelist_context.params.max_duration_minutes)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
     </form>
   </div>
   <div class="fl-scroll">

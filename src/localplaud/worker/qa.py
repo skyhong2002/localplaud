@@ -218,16 +218,58 @@ def retrieve(
         norms = mat / (np.linalg.norm(mat, axis=1, keepdims=True) + 1e-8)
         scores = norms @ qn
         top = np.argsort(-scores)[:top_k]
+        selected_file_ids = {chunks[int(index)].file_id for index in top}
+        files = {
+            row.id: row
+            for row in session.scalars(
+                select(PlaudFile).where(PlaudFile.id.in_(selected_file_ids))
+            )
+        }
+        selected_speakers = list(
+            session.scalars(
+                select(Speaker).where(Speaker.file_id.in_(selected_file_ids))
+            )
+        )
+        stable_speaker_keys = {
+            (speaker.file_id, speaker.key) for speaker in selected_speakers
+        }
+        speaker_names = {
+            (speaker.file_id, speaker.key): speaker.display_name
+            for speaker in selected_speakers
+            if speaker.display_name
+        }
+        display_name_keys: dict[tuple[str, str], str | None] = {}
+        for speaker in selected_speakers:
+            if not speaker.display_name:
+                continue
+            key = (speaker.file_id, speaker.display_name)
+            display_name_keys[key] = (
+                None if key in display_name_keys else speaker.key
+            )
         for i in top:
             c = chunks[int(i)]
-            f = session.get(PlaudFile, c.file_id)
+            f = files.get(c.file_id)
+            stable_speaker = (
+                c.speaker
+                if c.speaker is not None
+                and (c.file_id, c.speaker) in stable_speaker_keys
+                else None
+            )
+            display_speaker = speaker_names.get((c.file_id, c.speaker))
+            if display_speaker is None and c.speaker is not None:
+                legacy_key = display_name_keys.get((c.file_id, c.speaker))
+                if legacy_key is not None:
+                    stable_speaker = legacy_key
+                    display_speaker = c.speaker
             results.append(
                 {
+                    "target": "transcript",
                     "score": float(scores[int(i)]),
                     "text": c.text,
                     "start": c.start,
                     "end": c.end,
-                    "speaker": c.speaker,
+                    "speaker": display_speaker or c.speaker,
+                    "speaker_key": stable_speaker,
                     "file_id": c.file_id,
                     "filename": f.display_title if f else c.file_id,
                 }
@@ -253,7 +295,8 @@ def _format_context(hits: list[dict]) -> str:
     blocks = []
     for h in hits:
         stamp = f" @ {h['start']:.0f}s" if h.get("start") is not None else ""
-        blocks.append(f"[{h['filename']}{stamp}] {h['text']}")
+        speaker = f" · {h['speaker']}" if h.get("speaker") else ""
+        blocks.append(f"[{h['filename']}{stamp}{speaker}] {h['text']}")
     return "\n\n".join(blocks)
 
 

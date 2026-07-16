@@ -419,6 +419,8 @@ def test_filter_urls_and_detail_filelist_preserve_range_state(monkeypatch, tmp_p
     assert 'data-recording-id="a"' in detail.text
     assert 'data-recording-id="b"' not in detail.text
     assert "tab=notes" in detail.text
+    for name, value in expected.items():
+        assert f'name="{name}" value="{value[0]}"' in detail.text
 
 
 def test_library_paginates_without_truncating_ask_scope(monkeypatch, tmp_path):

@@ -54,11 +54,18 @@ def lexical_search(
         hits: list[dict] = []
         for row in rows:
             common = {"file_id": row.id, "filename": row.display_title}
+            speaker_names = {
+                speaker.key: speaker.display_name
+                for speaker in row.speakers
+                if speaker.display_name
+            }
             if needle in row.display_title.casefold() or needle in (row.filename or "").casefold():
                 hits.append(
                     common
                     | {
                         "kind": "title",
+                        "target": "recording",
+                        "artifact_id": None,
                         "score": 1.0,
                         "text": row.display_title,
                         "start": None,
@@ -78,11 +85,15 @@ def lexical_search(
                     common
                     | {
                         "kind": "transcript",
+                        "target": "transcript",
+                        "artifact_id": None,
                         "score": 0.9,
                         "text": _excerpt(text, query),
                         "start": segment.get("start"),
                         "end": segment.get("end"),
-                        "speaker": segment.get("speaker"),
+                        "speaker": speaker_names.get(segment.get("speaker"))
+                        or segment.get("speaker"),
+                        "speaker_key": segment.get("speaker"),
                     }
                 )
                 transcript_hits += 1
@@ -109,6 +120,10 @@ def lexical_search(
                     common
                     | {
                         "kind": "note",
+                        "target": (
+                            "mind_map" if note.template == "mind_map" else "generated_note"
+                        ),
+                        "artifact_id": note.id,
                         "score": 0.75,
                         "text": _excerpt(note.content_md, query),
                         "start": None,
@@ -129,6 +144,8 @@ def lexical_search(
                         # User-owned saved notes are a distinct result kind from
                         # generated notes so results can label them honestly.
                         "kind": "saved_note",
+                        "target": "saved_note",
+                        "artifact_id": note.id,
                         "score": 0.8,
                         "text": _excerpt(text, query),
                         "start": None,

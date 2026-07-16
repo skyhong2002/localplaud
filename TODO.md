@@ -446,6 +446,11 @@ embedding raw provider credentials or model settings in each rule.
   new Ask threads persist a v2 timezone plus UTC-boundary snapshot so later preference
   changes cannot move the scope. Legacy threads retain their prior UTC meaning, Trash
   is excluded before ranking, and unsafe dates fail before any provider call.
+- ✅ Search results now navigate to the exact transcript moment, generated note,
+  Saved note, or mind map that matched. Recording note tabs persist in the URL and
+  browser history, while Search and new Ask citations show the recording-local
+  speaker display name without rewriting the stable diarization key. Recording-side
+  searches also retain the active library date and duration ranges.
 - ✅ Added suggested questions and versioned, inspectable local quick actions for
   action items, task tables, and insights at both recording and whole-library scope.
   Each scope has an explicit prompt snapshot and uses its matching grounded retrieval,

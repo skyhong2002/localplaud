@@ -64,7 +64,12 @@ def test_retrieve_scopes_to_file(monkeypatch, tmp_path):
     _fresh_db(monkeypatch, tmp_path)
     _seed_two_files()
     monkeypatch.setattr("localplaud.worker.qa.build_embedder", lambda cfg: _FakeEmbedder())
+    from localplaud.db.models import Chunk, Speaker
+    from localplaud.db.session import session_scope
     from localplaud.worker.qa import retrieve
+
+    with session_scope() as session:
+        session.add(Speaker(file_id="r1", key="SPEAKER_00", display_name="Sky"))
 
     # Unscoped: both files' relevant chunks surface.
     all_hits = retrieve("q", top_k=6)
@@ -75,6 +80,22 @@ def test_retrieve_scopes_to_file(monkeypatch, tmp_path):
     assert scoped
     assert all(h["file_id"] == "r1" for h in scoped)
     assert scoped[0]["text"] == "r1 relevant"
+    assert scoped[0]["speaker"] == "Sky"
+    assert scoped[0]["speaker_key"] == "SPEAKER_00"
+    with session_scope() as session:
+        assert session.query(Chunk).filter_by(file_id="r1", idx=0).one().speaker == "SPEAKER_00"
+        session.query(Chunk).filter_by(file_id="r1", idx=0).one().speaker = "Sky"
+    legacy = retrieve("q", top_k=1, file_id="r1")[0]
+    assert legacy["speaker"] == "Sky"
+    assert legacy["speaker_key"] == "SPEAKER_00"
+    from localplaud.worker.qa import _format_context
+
+    assert "[Recording One @ 12s · Sky]" in _format_context([legacy])
+    with session_scope() as session:
+        session.add(Speaker(file_id="r1", key="SPEAKER_01", display_name="Sky"))
+    ambiguous = retrieve("q", top_k=1, file_id="r1")[0]
+    assert ambiguous["speaker"] == "Sky"
+    assert ambiguous["speaker_key"] is None
 
 
 def test_retrieve_applies_combined_library_scope(monkeypatch, tmp_path):

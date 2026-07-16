@@ -467,8 +467,11 @@ Search now works without an embedding provider across local titles, the
 provenance-correct canonical transcript, generated notes, and saved notes. Folder,
 tag, source, and recording-date filters apply consistently; date boundaries use the
 workspace timezone before lexical and semantic ranking. Timestamped transcript
-matches open the player at the matching moment, while semantic hits are blended in
-when an embedding index is available.
+matches open the player at the matching moment; note and mind-map matches open the
+exact artifact, and note selection survives refresh and browser navigation. Search
+and new Ask citations resolve stable speaker keys to the user's recording-local
+display names without changing stored transcript/chunk identity. Semantic hits are
+blended in when an embedding index is available.
 MLX large-v3-turbo is smoke-tested on SkyLabMac, and
 the code targets pyannote Community-1. Optional VAD groundwork now exists behind a
 default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-timestamp

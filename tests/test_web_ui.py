@@ -516,6 +516,22 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert f'data-note-panel="{active_target}"' in r.text
     for other in set(panel_keys) - {active_target}:
         assert f'data-note-panel="{other}" hidden' in r.text
+    # Note tabs are durable navigation state: exact Search links survive reload,
+    # and browser Back restores both the workspace tab and selected note.
+    assert "const activateNoteTarget=(target,push=false)" in r.text
+    assert "url.searchParams.set('note',target)" in r.text
+    assert "url.searchParams.set('note_id',target.slice(6))" in r.text
+    assert "window.addEventListener('popstate',syncWorkspaceLocation" in r.text
+    assert "const syncFilelistTab=name=>" in r.text
+    assert "for(const attribute of ['href','hx-get'])" in r.text
+    assert "syncFilelistTab(name);if(push)" in r.text
+    assert "document.addEventListener('htmx:configRequest'" in r.text
+    assert "event.detail.path=workspacePathForTab(event.detail.path,activePanelName())" in r.text
+    assert "if(next!==current)history.pushState(state,'',url)" in r.text
+    assert (
+        "if(name!=='notes'){url.searchParams.delete('note');"
+        "url.searchParams.delete('note_id');}" in r.text
+    )
 
 
 def test_saved_only_recording_activates_saved_tab_and_panel(monkeypatch, tmp_path):
