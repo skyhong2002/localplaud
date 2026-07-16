@@ -242,7 +242,10 @@ update it idempotently. Mirrored rules execute through the same validated local
 actions and retain versioned history, but local update, toggle, and delete endpoints
 reject them. Discover labels the owner and management hint, offers read-only dry-run,
 and catalogs local rules, external owners, authorized webhooks, and authorized email
-without pretending generic integrations are installed applications.
+without pretending generic integrations are installed applications. Its edit dialog
+uses the same focus trap, Escape, inert-background, focus-restoration, and unsaved-form
+protections as the recording workspace; mobile rule/run history remains readable, and
+failed rule actions or delivery retries stay visible without a misleading reload.
 
 Authorized SMTP destinations use the same durable downstream boundary. Settings stores
 only an environment password reference and explicit From/To addresses, TLS mode,

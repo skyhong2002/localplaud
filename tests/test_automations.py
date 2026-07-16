@@ -103,6 +103,10 @@ def test_rule_dry_run_execution_history_and_versioning(monkeypatch, tmp_path):
         assert session.get(PlaudFile, "match").note_template_key == "call"
         assert session.query(AutomationRun).count() == 2
         assert session.query(Notification).count() == 2
+    history_page = client.get("/discover")
+    assert 'class="automation-run-row"' in history_page.text
+    assert 'class="automation-run-file" href="/file/match"' in history_page.text
+    assert 'class="sub automation-run-detail"' in history_page.text
 
 
 def test_lower_priority_number_wins_and_toggle_stops_execution(monkeypatch, tmp_path):
@@ -239,6 +243,15 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
             "actions": {"export_formats": ["txt", "txt"]},
         },
     ).status_code == 422
+    long_name = "L" * 120
+    assert client.post(
+        "/api/automations/rules",
+        json={
+            "name": long_name,
+            "trigger": {},
+            "actions": {"folder_id": folder_id},
+        },
+    ).status_code == 201
     page = client.get("/discover")
     assert page.status_code == 200
     assert "AutoFlow" in page.text and "Run history" in page.text
@@ -246,6 +259,46 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert 'href="/discover"' in page.text
     assert "Create a local inbox notification" in page.text
     assert 'name="webhook_integration_id"' in page.text
+    assert 'aria-labelledby="rule-title"' in page.text
+    assert 'id="autoflow-status"' in page.text
+    assert 'role="status" aria-live="polite"' in page.text
+    assert "const ruleModal=window.localplaudModal" in page.text
+    assert "ruleModal.open(trigger,form.elements.name)" in page.text
+    assert "form.addEventListener('input',()=>ruleModal.setDirty(true))" in page.text
+    assert "saveButton.disabled=true;ruleModal.setBusy(true)" in page.text
+    assert "if(!response.ok)throw new Error" in page.text
+    assert "fetch(url,{...options,signal:cleanupController.signal})" in page.text
+    assert "if(error.name==='AbortError')throw error;throw new Error(tr(fallback))" in page.text
+    assert "if(error.name!=='AbortError')" in page.text
+    assert "showPageStatus(error.message,true);button.disabled=false" in page.text
+    assert "if(data.status==='failed')throw new Error(data.error||tr(fallback))" in page.text
+    assert "htmx:beforeCleanupElement" in page.text
+    assert "event.detail.elt===page" in page.text
+    assert "alert(" not in page.text
+    assert 'class="automation-run-row"' not in page.text  # empty history fixture
+    assert ".automation-run-row{display:grid" in page.text
+    assert "@media(max-width:520px)" in page.text
+    assert ".automation-run-row{grid-template-columns:auto minmax(0,1fr)" in page.text
+    assert ".automation-run-detail{grid-column:1/-1}" in page.text
+    assert ".automation-run-file,.automation-run-detail{min-width:0;overflow-wrap:anywhere}" in page.text
+    assert ".autoflow-rule-title>strong{min-width:0;max-width:100%;overflow-wrap:anywhere}" in page.text
+    assert "grid-template-columns:90px minmax(130px,1fr) minmax(160px,auto)" in page.text
+    assert long_name in page.text
+
+    preferences = client.get("/api/preferences/workspace").json()
+    assert client.put(
+        "/api/preferences/workspace",
+        json=preferences | {"locale": "zh-Hant-TW"},
+    ).status_code == 200
+    translated = client.get("/discover")
+    assert "多項規則設定同一欄位時，優先序數字較小者優先" in translated.text
+    assert "dirtyMessage:tr('Discard these AutoFlow changes?')" in translated.text
+    from localplaud.i18n import catalog
+
+    assert catalog("zh-Hant-TW")["Discard these AutoFlow changes?"] == (
+        "要捨棄尚未儲存的 AutoFlow 變更嗎？"
+    )
+    assert catalog("zh-Hant-TW")["Edit AutoFlow"] == "編輯 AutoFlow"
 
 
 def test_external_rules_are_idempotent_executable_and_read_only(monkeypatch, tmp_path):

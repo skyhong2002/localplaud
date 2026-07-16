@@ -543,8 +543,12 @@ embedding raw provider credentials or model settings in each rule.
   and SMTP email catalogs. Discover now also has an Applications & Integrations
   catalog and explicit external-rule ownership: owner applications idempotently sync
   versioned rules, while local edit/toggle/delete APIs reject them and the Web App
-  presents the owner and management hint as read-only. Remaining: additional concrete
-  application adapters beyond the generic external-owner contract.
+  keeps those rules visibly read-only. AutoFlow editing now uses the shared accessible
+  modal lifecycle with focus trapping, Escape, background inertness, focus restoration,
+  and dirty-form protection. Mobile rule/history layouts stay within 390px, and every
+  mutation or delivery retry checks its response before reload and reports failures in
+  an inline live region. Remaining: additional concrete application adapters beyond
+  the generic external-owner contract.
 - ✅ Settings now has a responsive, navigable information architecture for Plaud
   account state, processing recommendations, vocabulary, templates, provider/model/
   profile setup, remote workers, authorized webhooks/email, and system health. The
