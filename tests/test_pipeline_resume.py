@@ -435,6 +435,249 @@ def test_pending_batch_prioritizes_newest_recordings(monkeypatch, tmp_path):
     assert processed == ["new", "middle"]
 
 
+def test_pending_batch_propagates_daemon_owner_to_worker_threads(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.claims import current_processing_owner, processing_owner
+    from localplaud.worker.pipeline import process_pending
+
+    settings = get_settings()
+    settings.pipeline.concurrency = 2
+    init_db()
+    with session_scope() as session:
+        session.add_all(
+            [
+                PlaudFile(
+                    id=f"owned-{index}",
+                    status=FileStatus.downloaded,
+                    audio_path=f"/owned-{index}.wav",
+                    start_time_ms=index,
+                )
+                for index in range(2)
+            ]
+        )
+
+    observed: list[str | None] = []
+    monkeypatch.setattr(
+        "localplaud.worker.pipeline.process_file",
+        lambda _file_id, _settings, force=False: observed.append(current_processing_owner()),
+    )
+    with processing_owner("daemon-owner"):
+        assert process_pending(settings) == 2
+    assert observed == ["daemon-owner", "daemon-owner"]
+
+
+def test_processing_claim_token_carries_daemon_owner_within_column_limit(
+    monkeypatch, tmp_path
+):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.claims import processing_owner
+    from localplaud.worker.pipeline import _claim_processing, _release_processing
+
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="owned-claim", status=FileStatus.done))
+    with processing_owner("0123456789abcdef"):
+        token = _claim_processing("owned-claim", require_audio=False, mark_processing=False)
+    assert token.startswith("daemon:0123456789abcdef:")
+    assert len(token) <= 64
+    _release_processing("owned-claim", token)
+
+
+def test_displaced_pipeline_cannot_publish_or_mark_failure(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import UTC, datetime, timedelta
+    from threading import Event
+
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.asr.base import Segment, Transcript
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import PipelineAlreadyRunning, process_file
+
+    init_db()
+    audio = tmp_path / "takeover.wav"
+    audio.write_bytes(b"RIFFfake")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="takeover",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+            )
+        )
+
+    provider_started = Event()
+    provider_return = Event()
+
+    def delayed_asr(_wav, _settings):
+        provider_started.set()
+        assert provider_return.wait(5)
+        return Transcript(
+            segments=[Segment(text="stale result", start=0.0, end=1.0)],
+            provider="old-worker",
+            model="old-model",
+        )
+
+    monkeypatch.setattr("localplaud.worker.pipeline.transcribe.run_asr", delayed_asr)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        old_worker = pool.submit(process_file, "takeover")
+        assert provider_started.wait(5)
+        with session_scope() as session:
+            recording = session.get(PlaudFile, "takeover")
+            recording.processing_token = "new-owner-token"
+            recording.processing_lease_until = datetime.now(UTC) + timedelta(minutes=5)
+            recording.status = FileStatus.processing
+            recording.error = None
+        provider_return.set()
+        with pytest.raises(PipelineAlreadyRunning, match="no longer active"):
+            old_worker.result(timeout=5)
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, "takeover")
+        assert recording.processing_token == "new-owner-token"
+        assert recording.status == FileStatus.processing
+        assert recording.error is None
+        assert recording.local_transcript is None
+        transcribe_run = next(
+            run for run in recording.stage_runs if run.stage == StageName.transcribe
+        )
+        assert transcribe_run.status == StageStatus.running
+
+
+def test_displaced_conversion_never_publishes_partial_wav(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import UTC, datetime, timedelta
+    from threading import Event
+
+    _reset_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "true")
+    monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "audio"))
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.store.files import wav_path
+    from localplaud.worker.pipeline import PipelineAlreadyRunning, process_file
+
+    get_settings(reload=True)
+    init_db()
+    audio = tmp_path / "source.opus"
+    audio.write_bytes(b"raw")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="wav-takeover",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+            )
+        )
+
+    staged = Event()
+    release = Event()
+
+    def partial_convert(_source, destination):
+        destination.write_bytes(b"partial-old-owner")
+        staged.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr("localplaud.worker.pipeline.convert.to_wav", partial_convert)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        old_worker = pool.submit(process_file, "wav-takeover")
+        assert staged.wait(5)
+        with session_scope() as session:
+            row = session.get(PlaudFile, "wav-takeover")
+            row.processing_token = "replacement"
+            row.processing_lease_until = datetime.now(UTC) + timedelta(minutes=5)
+        release.set()
+        with pytest.raises(PipelineAlreadyRunning, match="no longer active"):
+            old_worker.result(timeout=5)
+
+    final_wav = wav_path("wav-takeover")
+    assert not final_wav.exists()
+    assert list(final_wav.parent.glob(".*.tmp.wav")) == []
+    with session_scope() as session:
+        row = session.get(PlaudFile, "wav-takeover")
+        assert row.processing_token == "replacement"
+        assert row.wav_path is None
+
+
+def test_vocabulary_detail_write_is_fenced_after_takeover(monkeypatch, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, StageName
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import PipelineAlreadyRunning, process_file
+
+    init_db()
+    audio = tmp_path / "vocabulary.wav"
+    audio.write_bytes(b"RIFF")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="vocabulary-takeover",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+            )
+        )
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
+    _install_fakes(monkeypatch, counters)
+
+    def displace_then_report(file_id, **_kwargs):
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            row.processing_token = "replacement"
+            row.processing_lease_until = datetime.now(UTC) + timedelta(minutes=5)
+        return {"replacements": 1, "revision": 1}
+
+    monkeypatch.setattr("localplaud.vocabulary.apply_vocabulary", displace_then_report)
+    with pytest.raises(PipelineAlreadyRunning, match="no longer active"):
+        process_file("vocabulary-takeover")
+    with session_scope() as session:
+        row = session.get(PlaudFile, "vocabulary-takeover")
+        run = next(item for item in row.stage_runs if item.stage == StageName.transcribe)
+        assert "vocabulary" not in (run.detail or {})
+        assert row.processing_token == "replacement"
+
+
+def test_note_index_handoff_asserts_claim_before_independent_work(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import PipelineAlreadyRunning, process_file
+
+    init_db()
+    audio = tmp_path / "handoff.wav"
+    audio.write_bytes(b"RIFF")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(id="handoff", status=FileStatus.downloaded, audio_path=str(audio))
+        )
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
+    _install_fakes(monkeypatch, counters)
+    provider_calls = 0
+
+    def stale_claim(*_args, **_kwargs):
+        raise PipelineAlreadyRunning("processing claim for handoff is no longer active")
+
+    def note_provider(*_args, **_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        return 0
+
+    monkeypatch.setattr("localplaud.worker.pipeline._assert_processing_claim", stale_claim)
+    monkeypatch.setattr(
+        "localplaud.worker.knowledge_index.process_file_documents", note_provider
+    )
+    with pytest.raises(PipelineAlreadyRunning, match="no longer active"):
+        process_file("handoff")
+    assert provider_calls == 0
+
+
 def test_pending_batch_resumes_audio_less_derived_retry(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import (

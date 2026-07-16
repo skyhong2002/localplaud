@@ -17,6 +17,7 @@ from ..llm.base import build_llm
 from .summarize import (
     _chunk_text,
     _group_notes,
+    _llm_provider_model,
     _reduction_max_tokens,
     _render_transcript,
 )
@@ -193,12 +194,13 @@ def generate_mind_map(
         max_tokens=1500,
     )
     content = _normalize_outline(raw)
+    provider, model = _llm_provider_model(settings)
     return {
         "template": "mind_map",
         "title": None,
         "content_md": content,
-        "provider": settings.llm.provider,
-        "model": getattr(getattr(settings.llm, settings.llm.provider, None), "model", None),
+        "provider": provider,
+        "model": model,
         "detail": {
             "strategy": strategy,
             "transcript_chars": len(transcript_text),

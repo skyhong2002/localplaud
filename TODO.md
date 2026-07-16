@@ -90,8 +90,9 @@ migration/debug-only.
   records that baseline durably, then downloads and processes recordings first seen
   on later polls by default. This avoids a surprise historical backfill while making
   the normal recorder → Plaud App → localplaud path hands-off. A durable expiring
-  catalog-sync claim serializes concurrent pollers, and each audio download uses an
-  atomic status claim so overlapping CLI/daemon cycles cannot fetch the same file twice.
+  catalog-sync claim serializes concurrent pollers, and each audio download uses a
+  durable owner token, lease, and private staging path so overlapping CLI/daemon cycles
+  cannot fetch or publish the same file twice after restart recovery.
   The upgrade baseline neutralizes legacy audio-less queues/errors before automatic
   download becomes eligible, preventing an accidental historical retry.
 - ✅ Added a read-only `localplaud acceptance-check RECORDING_ID` product gate. It
@@ -334,6 +335,28 @@ embedding raw provider credentials or model settings in each rule.
   grounded question chips; graceful degrade when unindexed or providers are down.
 - ✅ Whole-library Ask citations now deep-link to `/file/{id}?t={start}` and seek the
   player on load, so a cited answer opens the recording at the cited moment.
+- ✅ Recording and whole-library Ask now rank current local generated notes and
+  user-owned Manual, Ask-saved, and editable-copy notes alongside corrected
+  transcript chunks. Note evidence has durable artifact/version provenance and opens
+  the exact note instead of fabricating a timestamp. Cloud/Plaud summaries, stale or
+  lineage-mismatched generated notes, ambiguous legacy copies, trash, and filtered
+  library-level notes fail closed; speaker scope remains transcript-only. Note
+  embeddings use an additive durable document queue with independent leases,
+  retries, provider/profile snapshots, cost/fallback enforcement, and remote-worker
+  support. Note edits invalidate only their old chunks, and embedding failure never
+  changes recording stage/file state. Startup only queues metadata; with automatic
+  processing disabled it performs no note embedding work.
+- ✅ Embedding identity is now fail-closed across transcript and note evidence.
+  Ask queries every configured current primary/fallback space so recordings remain
+  searchable while reindex converges; profile, folder, template, provider-model, and AutoFlow
+  changes durably requeue both transcript and note indexes. Transcript-only reindex
+  uses the resolved profile, remote-worker contract, fallback attempts, generation
+  fencing, and the shared provider-cost ceiling without rerunning ASR. Legacy vectors
+  with no provable profile are removed and queued, never compared by dimension alone.
+- ✅ Pipeline attempts, note indexing, and Ask now reserve against one durable
+  recording/library cost ledger. SQLite and PostgreSQL reservations serialize per
+  scope, failed/direct calls remain conservatively accounted, and a persisted Ask
+  message atomically replaces its temporary reservation instead of double-counting.
 - ✅ Ask conversations are durable grounded threads for both one recording and the
   whole library. Follow-ups retain bounded conversation context while retrieval and
   citations remain grounded in the current query. Any assistant answer can be saved
@@ -342,6 +365,8 @@ embedding raw provider credentials or model settings in each rule.
   Library, recording, quick-action, and follow-up requests share a visible busy/error
   lifecycle that prevents duplicate submission, preserves the current answer and
   question on failure, and points users to History before retrying an uncertain call.
+  Existing threads take a cross-process durable request lease before provider egress;
+  daemon-owned leases are owner-fenced and recovered on replacement-daemon startup.
   Save-to-note also restores its control after network or malformed-response failures.
 - ✅ Library and recording Ask history now has an exact-surface, searchable and
   paginated drawer with deterministic ordering, metadata, inline rename, and delete.

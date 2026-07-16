@@ -64,7 +64,10 @@ class NoteBody(BaseModel):
 
 
 class NoteUpdateBody(NoteBody):
-    base_version: int = Field(ge=1)
+    # Pre-history API clients did not send a version. Preserve that last-write-
+    # wins contract while still archiving the displaced body; current clients
+    # send the version and receive optimistic-concurrency protection.
+    base_version: int | None = Field(default=None, ge=1)
 
 
 class NoteRestoreBody(BaseModel):
@@ -82,12 +85,12 @@ def _serialize_manual_note_creation(session: Session) -> None:
 
 def _lock_note_for_write(session: Session, note_id: int) -> UserNote | None:
     """Serialize the version check with the archive and live-row update."""
-    if session.get_bind().dialect.name == "sqlite":
-        session.execute(text("BEGIN IMMEDIATE"))
-        return session.get(UserNote, note_id)
-    return session.scalar(
-        select(UserNote).where(UserNote.id == note_id).with_for_update()
-    )
+    from ..worker.knowledge_index import KnowledgeIndexBusyError, lock_user_note_for_mutation
+
+    try:
+        return lock_user_note_for_mutation(session, note_id)
+    except KnowledgeIndexBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _archive_live_note(session: Session, note: UserNote) -> None:
@@ -102,8 +105,10 @@ def _archive_live_note(session: Session, note: UserNote) -> None:
     )
 
 
-def _require_current_version(note: UserNote, base_version: int, *, action: str) -> None:
-    if note.version != base_version:
+def _require_current_version(
+    note: UserNote, base_version: int | None, *, action: str
+) -> None:
+    if base_version is not None and note.version != base_version:
         raise HTTPException(
             status_code=409,
             detail={
@@ -126,15 +131,18 @@ def list_notes(file_id: str | None = None) -> dict:
 @router.post("/ask/messages/{message_id}/save-note", status_code=201)
 def save_answer(message_id: int, body: SaveAnswerBody) -> dict:
     try:
-        return save_answer_as_note(message_id, body.title)
+        result = save_answer_as_note(message_id, body.title)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except EditableNoteContentError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return result
 
 
 @router.post("/files/{file_id}/notes", status_code=201)
 def create_manual_note(file_id: str, body: NoteBody) -> dict:
+    from ..worker.knowledge_index import sync_user_note_document
+
     with session_scope() as session:
         _serialize_manual_note_creation(session)
         recording = session.get(PlaudFile, file_id)
@@ -154,45 +162,53 @@ def create_manual_note(file_id: str, body: NoteBody) -> dict:
         )
         session.add(note)
         session.flush()
-        return note_to_dict(note)
+        sync_user_note_document(session, note)
+        result = note_to_dict(note)
+    return result
 
 
 @router.post("/files/{file_id}/summaries/{summary_id}/editable-copy", status_code=201)
 def copy_generated_summary(file_id: str, summary_id: int) -> dict:
     """Create one editable note without mutating the generated artifact."""
+    from ..worker.knowledge_index import sync_user_note_document
+
     with session_scope() as session:
         summary = session.get(Summary, summary_id)
         if summary is None or summary.file_id != file_id:
             raise HTTPException(status_code=404, detail="generated note not found")
         if summary.template == "mind_map":
             raise HTTPException(status_code=409, detail="mind maps are not editable notes")
-        existing = session.scalar(
-            select(UserNote).where(UserNote.source_summary_id == summary.id)
-        )
+        existing = session.scalar(select(UserNote).where(UserNote.source_summary_id == summary.id))
         if existing is not None:
-            return note_to_dict(existing)
-        try:
-            require_editable_note_content(summary.content_md)
-        except EditableNoteContentError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        note = UserNote(
-            file_id=file_id,
-            title=(summary.title or summary.template.replace("-", " ").title())[:200],
-            content_md=summary.content_md,
-            source_type="generated_summary",
-            source_summary_id=summary.id,
-            # The id tracks the live output slot, which a history restore
-            # rewrites in place; the snapshot pins the exact copied version.
-            source_summary_snapshot=source_summary_provenance(summary),
-            citations=[],
-        )
-        session.add(note)
-        session.flush()
-        return note_to_dict(note)
+            sync_user_note_document(session, existing)
+            result = note_to_dict(existing)
+        else:
+            try:
+                require_editable_note_content(summary.content_md)
+            except EditableNoteContentError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            note = UserNote(
+                file_id=file_id,
+                title=(summary.title or summary.template.replace("-", " ").title())[:200],
+                content_md=summary.content_md,
+                source_type="generated_summary",
+                source_summary_id=summary.id,
+                # The id tracks the live output slot, which a history restore
+                # rewrites in place; the snapshot pins the exact copied version.
+                source_summary_snapshot=source_summary_provenance(summary),
+                citations=[],
+            )
+            session.add(note)
+            session.flush()
+            sync_user_note_document(session, note)
+            result = note_to_dict(note)
+    return result
 
 
 @router.put("/notes/{note_id}")
 def update_note(note_id: int, body: NoteUpdateBody) -> dict:
+    from ..worker.knowledge_index import sync_user_note_document
+
     with session_scope() as session:
         note = _lock_note_for_write(session, note_id)
         if note is None:
@@ -205,7 +221,9 @@ def update_note(note_id: int, body: NoteUpdateBody) -> dict:
         note.content_md = body.content_md
         note.version += 1
         session.flush()
-        return note_to_dict(note)
+        sync_user_note_document(session, note)
+        result = note_to_dict(note)
+    return result
 
 
 @router.get("/notes/{note_id}/history")
@@ -236,10 +254,7 @@ def list_note_history(
         has_more = len(rows) > limit
         page = rows[:limit]
         return {
-            "items": [
-                dict(row) | {"archived_at": _utc_iso(row["archived_at"])}
-                for row in page
-            ],
+            "items": [dict(row) | {"archived_at": _utc_iso(row["archived_at"])} for row in page],
             "next_before_version": page[-1]["version"] if has_more and page else None,
         }
 
@@ -270,6 +285,8 @@ def get_note_revision(note_id: int, version: int) -> dict:
 
 @router.post("/notes/{note_id}/history/{version}/restore")
 def restore_note_revision(note_id: int, version: int, body: NoteRestoreBody) -> dict:
+    from ..worker.knowledge_index import sync_user_note_document
+
     with session_scope() as session:
         note = _lock_note_for_write(session, note_id)
         if note is None:
@@ -288,7 +305,9 @@ def restore_note_revision(note_id: int, version: int, body: NoteRestoreBody) -> 
         note.content_md = revision.content_md
         note.version += 1
         session.flush()
-        return note_to_dict(note)
+        sync_user_note_document(session, note)
+        result = note_to_dict(note)
+    return result
 
 
 @router.get("/notes/{note_id}/export.md", response_class=PlainTextResponse)
@@ -301,7 +320,12 @@ def export_note(note_id: int) -> PlainTextResponse:
         if note.citations:
             parts.extend(["## Sources", ""])
             for citation in note.citations:
-                label = citation.get("filename") or citation.get("file_id") or "Recording"
+                label = (
+                    citation.get("artifact_title")
+                    or citation.get("filename")
+                    or citation.get("file_id")
+                    or "Note"
+                )
                 start = citation.get("start")
                 if start is not None:
                     minutes, seconds = divmod(max(0, int(start)), 60)
@@ -317,14 +341,15 @@ def export_note(note_id: int) -> PlainTextResponse:
 
 @router.delete("/notes/{note_id}", status_code=204)
 def delete_note(note_id: int) -> Response:
+    from ..worker.knowledge_index import delete_user_note_document
+
     with session_scope() as session:
-        note = session.get(UserNote, note_id)
+        note = _lock_note_for_write(session, note_id)
         if note is None:
             raise HTTPException(status_code=404, detail="note not found")
+        delete_user_note_document(session, note)
         # Keep deletion bounded even when every archived body is near the
         # 200k limit; ORM delete-orphan would otherwise materialize them all.
-        session.execute(
-            delete(UserNoteRevision).where(UserNoteRevision.note_id == note_id)
-        )
+        session.execute(delete(UserNoteRevision).where(UserNoteRevision.note_id == note_id))
         session.delete(note)
     return Response(status_code=204)

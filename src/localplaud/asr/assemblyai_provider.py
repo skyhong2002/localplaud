@@ -81,12 +81,16 @@ class AssemblyAIProvider:
             )
 
         duration = getattr(transcript, "audio_duration", None)
+        model = getattr(transcript, "speech_model_used", None) or getattr(
+            transcript, "speech_model", None
+        )
+        model = getattr(model, "value", model)
         return Transcript(
             segments=segments,
             language=None if language == "auto" else language,
             duration=float(duration) if duration is not None else None,
             provider=self.name,
-            model=None,
+            model=str(model) if model is not None else None,
             has_speakers=True,
         )
 

@@ -240,6 +240,91 @@ def test_superseded_reindex_cannot_publish_or_complete_stage(monkeypatch, tmp_pa
         assert attempt.model == "fake"
 
 
+def test_superseded_reindex_settles_dispatch_reservation_once(monkeypatch, tmp_path):
+    _database(monkeypatch, tmp_path)
+    _seed()
+
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.db.models import (
+        ProviderCostReservation,
+        StageAttempt,
+        StageName,
+        StageStatus,
+    )
+    from localplaud.db.session import session_scope
+    from localplaud.providers.usage import cost_budget_status
+    from localplaud.worker.reindex import _skip_superseded_attempt
+
+    reservation_id = "stage:reindex:embed:1"
+    with session_scope() as session:
+        session.add(
+            StageAttempt(
+                file_id="race",
+                stage=StageName.index,
+                attempt=1,
+                status=StageStatus.running,
+                usage={"dispatch_reservation_ids": [reservation_id]},
+                estimated_cost_usd=0,
+                started_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            ProviderCostReservation(
+                id=reservation_id,
+                scope_key="file:race",
+                file_id="race",
+                operation="embed",
+                status="active",
+                owner="old-worker",
+                lease_until=datetime.now(UTC) + timedelta(hours=1),
+                estimated_cost_usd=0.25,
+            )
+        )
+
+    with session_scope() as session:
+        _skip_superseded_attempt(session, "race", 1)
+
+    with session_scope() as session:
+        attempt = session.scalar(select(StageAttempt))
+        assert attempt.status == StageStatus.skipped
+        assert attempt.usage["dispatch_reservation_ids"] == [reservation_id]
+        assert attempt.estimated_cost_usd == pytest.approx(0.25)
+        assert session.get(ProviderCostReservation, reservation_id) is None
+        budget = cost_budget_status(session, "race", {"policy": {}})
+        assert budget["stage_spent_usd"] == pytest.approx(0.25)
+        assert budget["reserved_usd"] == 0
+        assert budget["spent_usd"] == pytest.approx(0.25)
+
+
+def test_postgresql_reindex_writes_lock_library_before_recording_rows():
+    from localplaud.worker.reindex import _lock_reindex_write_rows
+
+    events: list[str] = []
+
+    class Bind:
+        class dialect:
+            name = "postgresql"
+
+    class Session:
+        def get_bind(self):
+            return Bind()
+
+        def execute(self, statement):
+            events.append(str(statement))
+
+        def scalar(self, statement):
+            events.append(str(statement))
+
+    _lock_reindex_write_rows(Session(), "race")
+
+    assert events[0] == "SELECT pg_advisory_xact_lock_shared(1280330574)"
+    assert "plaud_files.id = :id_1" in events[1]
+    assert "FOR UPDATE" in events[1]
+    assert "stage_runs.id" in events[2]
+    assert "FOR UPDATE" in events[2]
+
+
 def test_canonical_text_and_lineage_are_one_locked_snapshot(monkeypatch, tmp_path):
     settings = _database(monkeypatch, tmp_path)
     _seed()
@@ -364,3 +449,198 @@ def test_reindex_keeps_stable_speaker_key_for_named_scope(monkeypatch, tmp_path)
         retrieval_scope={"speaker_name": "Alice"},
     )
     assert [hit["text"] for hit in hits] == ["revision one"]
+
+
+def test_reindex_refuses_an_active_recording_claim(monkeypatch, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    settings = _database(monkeypatch, tmp_path)
+    _seed()
+    import localplaud.worker.index as index_module
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker.reindex import reindex_file
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, "race")
+        recording.processing_token = "another-process"
+        recording.processing_lease_until = datetime.now(UTC) + timedelta(minutes=5)
+    monkeypatch.setattr(
+        index_module,
+        "embed_chunks",
+        lambda *_args, **_kwargs: pytest.fail("provider must not run without the claim"),
+    )
+    assert reindex_file("race", settings) is False
+
+
+def test_displaced_reindex_cannot_publish_or_complete(monkeypatch, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    settings = _database(monkeypatch, tmp_path)
+    _seed()
+    import localplaud.worker.index as index_module
+    from localplaud.db.models import (
+        Chunk,
+        PlaudFile,
+        ProviderCostReservation,
+        StageAttempt,
+        StageName,
+        StageRun,
+        StageStatus,
+    )
+    from localplaud.db.session import session_scope
+    from localplaud.worker.reindex import reindex_file
+
+    provider_started = Event()
+    provider_return = Event()
+
+    def delayed_embed(chunks, _settings):
+        provider_started.set()
+        assert provider_return.wait(5)
+        return [b"\x00\x00\x80?"] * len(chunks), "old-space", 1
+
+    monkeypatch.setattr(index_module, "embed_chunks", delayed_embed)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        old_worker = pool.submit(reindex_file, "race", settings)
+        assert provider_started.wait(5)
+        with session_scope() as session:
+            attempt = session.scalar(
+                select(StageAttempt).where(
+                    StageAttempt.file_id == "race",
+                    StageAttempt.stage == StageName.index,
+                    StageAttempt.status == StageStatus.running,
+                )
+            )
+            reservation_id = "stage:race:embed:displaced"
+            attempt.usage = {"dispatch_reservation_ids": [reservation_id]}
+            attempt.estimated_cost_usd = 0.25
+            session.add(
+                ProviderCostReservation(
+                    id=reservation_id,
+                    scope_key="file:race",
+                    file_id="race",
+                    operation="embed",
+                    status="active",
+                    lease_until=datetime.now(UTC) + timedelta(minutes=5),
+                    estimated_cost_usd=0.25,
+                )
+            )
+            recording = session.get(PlaudFile, "race")
+            recording.processing_token = "new-reindex-owner"
+            recording.processing_lease_until = datetime.now(UTC) + timedelta(minutes=5)
+        provider_return.set()
+        assert old_worker.result(timeout=5) is False
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, "race")
+        assert recording.processing_token == "new-reindex-owner"
+        assert session.scalar(select(Chunk.id).where(Chunk.file_id == "race")) is None
+        run = session.scalar(
+            select(StageRun).where(
+                StageRun.file_id == "race", StageRun.stage == StageName.index
+            )
+        )
+        assert run.status == StageStatus.running
+        attempt = session.scalar(
+            select(StageAttempt).where(
+                StageAttempt.file_id == "race", StageAttempt.stage == StageName.index
+            )
+        )
+        assert attempt.status == StageStatus.skipped
+        assert attempt.estimated_cost_usd == 0.25
+        assert session.get(ProviderCostReservation, reservation_id) is None
+
+
+@pytest.mark.parametrize(
+    ("returned_model", "message"),
+    [(None, "returned no model"), ("wrong-space", "different model")],
+)
+def test_remote_reindex_requires_exact_returned_model(
+    monkeypatch, tmp_path, returned_model, message
+):
+    import base64
+
+    import numpy as np
+
+    import localplaud.worker.reindex as reindex
+    from localplaud.asr.base import Segment, Transcript
+
+    settings = _database(monkeypatch, tmp_path)
+    snapshot = {
+        "stages": {
+            "embed": {
+                "connection": "worker:gpu",
+                "model": "requested-space",
+                "execution_target": "remote_worker",
+            }
+        },
+        "policy": {},
+    }
+    transcript = Transcript(segments=[Segment(text="Grounded", start=0, end=1)])
+    chunks = [{"text": "Grounded", "start": 0, "end": 1, "speaker": None}]
+    monkeypatch.setattr(reindex, "_cost_guard", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        reindex,
+        "_run_remote_stage",
+        lambda *_args, **_kwargs: {
+            "chunks": chunks,
+            "vectors_base64": [
+                base64.b64encode(np.asarray([1.0], dtype=np.float32).tobytes()).decode()
+            ],
+            "model": returned_model,
+            "dim": 1,
+        },
+    )
+    with pytest.raises(ValueError, match=message):
+        reindex._embed_reindex_chunks(
+            "race", transcript, chunks, settings, snapshot
+        )
+
+
+def test_pending_scanner_recovers_abandoned_running_reindex(monkeypatch, tmp_path):
+    from datetime import UTC, datetime
+
+    settings = _database(monkeypatch, tmp_path)
+    _seed()
+    import localplaud.worker.index as index_module
+    from localplaud.db.models import StageAttempt, StageName, StageRun, StageStatus
+    from localplaud.db.session import session_scope
+    from localplaud.worker.reindex import process_pending_reindexes
+
+    with session_scope() as session:
+        run = session.scalar(
+            select(StageRun).where(
+                StageRun.file_id == "race", StageRun.stage == StageName.index
+            )
+        )
+        run.status = StageStatus.running
+        run.attempts = 1
+        run.detail = dict(run.detail or {}) | {"reindex_only": True}
+        session.add(
+            StageAttempt(
+                file_id="race",
+                stage=StageName.index,
+                attempt=1,
+                status=StageStatus.running,
+                started_at=datetime.now(UTC),
+            )
+        )
+    monkeypatch.setattr(
+        index_module,
+        "embed_chunks",
+        lambda chunks, _settings: ([b"\x00\x00\x80?"] * len(chunks), "fake", 1),
+    )
+    assert process_pending_reindexes(settings, limit=1) == 1
+    with session_scope() as session:
+        attempts = list(
+            session.scalars(
+                select(StageAttempt)
+                .where(StageAttempt.file_id == "race")
+                .order_by(StageAttempt.attempt)
+            )
+        )
+        assert [attempt.status for attempt in attempts] == [
+            StageStatus.skipped,
+            StageStatus.completed,
+        ]
+        assert all(attempt.completed_at is not None for attempt in attempts)

@@ -1350,11 +1350,15 @@ def test_generate_notes_only_queues_derived_stages(monkeypatch, tmp_path):
         def __init__(self, *, target, args=(), kwargs=None, daemon=None):
             self.target = target
             self.args = args
+            self.kwargs = kwargs or {}
 
         def start(self):
-            started.append((self.target, self.args))
+            started.append((self.target, self.args, self.kwargs))
 
     monkeypatch.setattr("threading.Thread", DeferredThread)
+    monkeypatch.setattr(
+        "localplaud.poller.poll.current_daemon_owner", lambda: "web-daemon-owner"
+    )
     response = c.post("/file/r1/generate-notes")
     assert response.status_code == 200
     assert response.text == "notes and mind map queued"
@@ -1367,7 +1371,9 @@ def test_generate_notes_only_queues_derived_stages(monkeypatch, tmp_path):
     with session_scope() as session:
         recording = session.get(PlaudFile, "r1")
         stages = {run.stage: run for run in recording.stage_runs}
-        assert recording.status == FileStatus.partial
+        assert recording.status == FileStatus.processing
+        assert recording.processing_token.startswith("daemon:web-daemon-owner:")
+        assert started[0][2]["claim_token"] == recording.processing_token
         for stage in (StageName.summarize, StageName.mind_map, StageName.index):
             assert stages[stage].status == StageStatus.pending
             assert stages[stage].detail["stale"] is True

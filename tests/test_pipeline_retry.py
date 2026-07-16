@@ -225,10 +225,50 @@ def test_processing_claim_migration_is_idempotent(tmp_path):
     assert set(migrate_processing_claim_schema(engine)) == {
         "plaud_files.processing_token",
         "plaud_files.processing_lease_until",
+        "plaud_files.download_token",
+        "plaud_files.download_lease_until",
     }
     assert migrate_processing_claim_schema(engine) == []
     columns = {column["name"] for column in inspect(engine).get_columns("plaud_files")}
-    assert {"processing_token", "processing_lease_until"} <= columns
+    assert {
+        "processing_token",
+        "processing_lease_until",
+        "download_token",
+        "download_lease_until",
+    } <= columns
+
+
+def test_processing_claim_migration_backfills_one_fixed_legacy_download_lease(tmp_path):
+    from sqlalchemy import create_engine, text
+
+    from localplaud.db.migrations import migrate_processing_claim_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-download.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY, "
+                "status VARCHAR(20), updated_at DATETIME)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO plaud_files (id, status, updated_at) "
+                "VALUES ('active', 'downloading', CURRENT_TIMESTAMP)"
+            )
+        )
+    migrate_processing_claim_schema(engine)
+    with engine.begin() as connection:
+        first = connection.execute(
+            text("SELECT download_lease_until FROM plaud_files WHERE id = 'active'")
+        ).scalar_one()
+    assert first is not None
+    assert migrate_processing_claim_schema(engine) == []
+    with engine.begin() as connection:
+        second = connection.execute(
+            text("SELECT download_lease_until FROM plaud_files WHERE id = 'active'")
+        ).scalar_one()
+    assert second == first
 
 
 def test_manual_resume_resets_retry_budget(monkeypatch, tmp_path):
@@ -258,10 +298,50 @@ def test_manual_resume_resets_retry_budget(monkeypatch, tmp_path):
     assert response.status_code == 200
     with session_scope() as session:
         row = session.get(PlaudFile, "manual")
-        assert row.status == FileStatus.downloaded
+        assert row.status == FileStatus.processing
         assert row.pipeline_retry_count == 0
         assert row.pipeline_next_retry_at is None
         assert row.pipeline_last_failure_at is None
+
+
+def test_reprocess_claims_synchronously_before_thread_handoff(monkeypatch, tmp_path):
+    _reset(monkeypatch, tmp_path)
+    from fastapi.testclient import TestClient
+
+    from localplaud.api.app import app
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    audio = tmp_path / "sync-claim.wav"
+    audio.write_bytes(b"RIFF")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="sync-claim",
+                status=FileStatus.error,
+                audio_path=str(audio),
+            )
+        )
+    handed_off = []
+
+    class DeferredThread:
+        def __init__(self, *, target, args=(), kwargs=None, daemon=None):
+            self.target = target
+            self.args = args
+            self.kwargs = kwargs or {}
+
+        def start(self):
+            with session_scope() as session:
+                row = session.get(PlaudFile, "sync-claim")
+                assert row.processing_token == self.kwargs["claim_token"]
+                assert row.status == FileStatus.processing
+            handed_off.append((self.target, self.args, self.kwargs))
+
+    monkeypatch.setattr("threading.Thread", DeferredThread)
+    response = TestClient(app).post("/file/sync-claim/reprocess")
+    assert response.status_code == 200
+    assert handed_off[0][1] == ("sync-claim",)
+    assert handed_off[0][2]["claim_token"]
 
 
 def test_processing_claim_is_exclusive_and_releasable(monkeypatch, tmp_path):
@@ -294,6 +374,40 @@ def test_processing_claim_is_exclusive_and_releasable(monkeypatch, tmp_path):
     replacement = _claim_processing("claimed")
     assert replacement != token
     _release_processing("claimed", replacement)
+
+
+def test_expired_claim_cannot_release_with_status_but_can_cleanup_token(
+    monkeypatch, tmp_path
+):
+    _reset(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import _claim_processing, release_processing_claim
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="expired-release", status=FileStatus.downloaded))
+    token = _claim_processing("expired-release", require_audio=False)
+    with session_scope() as session:
+        row = session.get(PlaudFile, "expired-release")
+        row.processing_lease_until = datetime.now(UTC) - timedelta(seconds=1)
+
+    release_processing_claim(
+        "expired-release",
+        token,
+        status=FileStatus.done,
+        error="stale owner wrote status",
+    )
+    with session_scope() as session:
+        row = session.get(PlaudFile, "expired-release")
+        assert row.processing_token == token
+        assert row.status == FileStatus.processing
+        assert row.error is None
+
+    release_processing_claim("expired-release", token)
+    with session_scope() as session:
+        row = session.get(PlaudFile, "expired-release")
+        assert row.processing_token is None
+        assert row.status == FileStatus.processing
 
 
 def test_manual_resume_rejects_active_processing_claim(monkeypatch, tmp_path):

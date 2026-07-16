@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — localplaud{% endblock %}
+{% block body %}
+<main class="content note-version-page"><div class="pane-inner" style="max-width:860px">
+  <a class="btn sec" href="{{ back_url }}" style="margin-bottom:16px">{{ t('Back') }}</a>
+  <header style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div><h1 class="page" style="margin:0">{{ title }}</h1><p class="sub" style="margin:6px 0 0">{{ t(kind_label) }} · v{{ version }}{% if created_at %} · {{ created_at }}{% endif %}</p></div>
+    <span class="chip">{{ t('Current') if current else t('Historical version') }}</span>
+  </header>
+  <article class="md" style="margin-top:22px">{{ content_md | markdown }}</article>
+</div></main>
+{% endblock %}

@@ -31,7 +31,6 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, update
-from sqlalchemy import text as sql_text
 from sqlalchemy.orm import aliased
 from starlette.background import BackgroundTask
 
@@ -64,6 +63,7 @@ from ..db.models import (
     Transcript,
     TranscriptRevision,
     UserNote,
+    UserNoteRevision,
     VocabularyTerm,
     recording_tags,
 )
@@ -114,9 +114,12 @@ async def _lifespan(app: FastAPI):
     from ..imports import recover_interrupted_imports
 
     recover_interrupted_imports()
-    import threading
+    with session_scope() as session:
+        auto_process = get_workspace_preferences(session)["auto_process_new_recordings"]
+    if auto_process:
+        import threading
 
-    threading.Thread(target=resume_pending_jobs, daemon=True).start()
+        threading.Thread(target=resume_pending_jobs, daemon=True).start()
     yield
 
 
@@ -241,7 +244,9 @@ def login_page(request: Request, next: str = "/", error: str | None = None):
 
 
 @app.post("/login")
-def login_submit(request: Request, password: Annotated[str, Form()], next: Annotated[str, Form()] = "/"):
+def login_submit(
+    request: Request, password: Annotated[str, Form()], next: Annotated[str, Form()] = "/"
+):
     settings = get_settings().api
     if not settings.login_password or not settings.session_secret:
         raise HTTPException(status_code=503, detail="Web login is not configured")
@@ -465,8 +470,7 @@ def _file_summaries(session, rows: list[PlaudFile]) -> list[dict]:
                     ),
                     "exhausted": (
                         row.status.value in _ATTENTION_STATES
-                        and (row.pipeline_retry_count or 0)
-                        >= settings.pipeline.retry_max_attempts
+                        and (row.pipeline_retry_count or 0) >= settings.pipeline.retry_max_attempts
                     ),
                 },
                 "has_transcript": local_speakers is not None
@@ -491,11 +495,14 @@ def _base_ctx(request: Request, active: str) -> dict:
         or request.headers.get("hx-history-restore-request", "").lower() == "true"
     )
     with session_scope() as session:
-        unread_notifications = session.scalar(
-            select(func.count()).select_from(Notification).where(
-                Notification.read_at.is_(None), Notification.dismissed_at.is_(None)
+        unread_notifications = (
+            session.scalar(
+                select(func.count())
+                .select_from(Notification)
+                .where(Notification.read_at.is_(None), Notification.dismissed_at.is_(None))
             )
-        ) or 0
+            or 0
+        )
         workspace_preferences = get_workspace_preferences(session)
         organization = _organization_summary(session)
         visible_filter = PlaudFile.is_trash.is_(False)
@@ -523,9 +530,7 @@ def _base_ctx(request: Request, active: str) -> dict:
             "cloud": status_counts.get(FileStatus.metadata_only, 0),
         }
         sidebar_counts = {
-            "all": session.scalar(
-                select(func.count()).select_from(PlaudFile).where(visible_filter)
-            )
+            "all": session.scalar(select(func.count()).select_from(PlaudFile).where(visible_filter))
             or 0,
             "uncategorized": session.scalar(
                 select(func.count())
@@ -538,9 +543,7 @@ def _base_ctx(request: Request, active: str) -> dict:
             )
             or 0,
             "trash": session.scalar(
-                select(func.count())
-                .select_from(PlaudFile)
-                .where(PlaudFile.is_trash.is_(True))
+                select(func.count()).select_from(PlaudFile).where(PlaudFile.is_trash.is_(True))
             )
             or 0,
             "plaud": session.scalar(
@@ -825,11 +828,7 @@ def _speaker_keys_for_editing(session, row: PlaudFile, segments: list[dict]) -> 
     durable_keys = session.scalars(
         select(Speaker.key).where(Speaker.file_id == row.id).order_by(Speaker.id)
     )
-    return list(
-        dict.fromkeys(
-            [*speaker_keys_from_segments(segments), *raw_keys, *durable_keys]
-        )
-    )
+    return list(dict.fromkeys([*speaker_keys_from_segments(segments), *raw_keys, *durable_keys]))
 
 
 def _transcript_revision_reason(note: str | None) -> dict | None:
@@ -1307,9 +1306,7 @@ def _update_organization_item(model, item_id: int, body: OrganizationItemBody) -
         return _organization_item(row)
 
 
-def _automation_references_organization(
-    session, *, kind: str, item_id: int
-) -> bool:
+def _automation_references_organization(session, *, kind: str, item_id: int) -> bool:
     def references(value) -> bool:
         try:
             return value is not None and int(value) == item_id
@@ -1320,8 +1317,7 @@ def _automation_references_organization(
         trigger = rule.trigger or {}
         actions = rule.actions or {}
         if kind == "folder" and (
-            references(trigger.get("folder_id"))
-            or references(actions.get("folder_id"))
+            references(trigger.get("folder_id")) or references(actions.get("folder_id"))
         ):
             return True
         if kind == "tag" and (
@@ -1345,18 +1341,37 @@ def update_folder(item_id: int, body: OrganizationItemBody) -> dict:
 @app.delete("/api/folders/{item_id}")
 def delete_folder(item_id: int) -> dict:
     with session_scope() as session:
+        from ..providers.service import (
+            ProfileMutationBusyError,
+            lock_library_profile_membership_change,
+            lock_recording_profile_changes,
+        )
+
+        lock_library_profile_membership_change(session)
+        _guard_ask_evidence_mutation(session, None)
         row = session.get(Folder, item_id)
         if row is None:
             raise HTTPException(status_code=404, detail="not found")
-        if _automation_references_organization(
-            session, kind="folder", item_id=item_id
-        ):
-            raise HTTPException(
-                status_code=409, detail="folder is used by an AutoFlow rule"
+        if _automation_references_organization(session, kind="folder", item_id=item_id):
+            raise HTTPException(status_code=409, detail="folder is used by an AutoFlow rule")
+        file_ids = list(
+            session.scalars(
+                select(PlaudFile.id)
+                .where(PlaudFile.folder_id == item_id)
+                .order_by(PlaudFile.id)
             )
+        )
+        try:
+            lock_recording_profile_changes(session, file_ids)
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         session.execute(
             update(PlaudFile).where(PlaudFile.folder_id == item_id).values(folder_id=None)
         )
+        from ..worker.knowledge_index import sync_file_knowledge_documents
+
+        for file_id in file_ids:
+            sync_file_knowledge_documents(session, file_id)
         session.delete(row)
     return {"deleted": True}
 
@@ -1374,13 +1389,15 @@ def update_tag(item_id: int, body: OrganizationItemBody) -> dict:
 @app.delete("/api/tags/{item_id}")
 def delete_tag(item_id: int) -> dict:
     with session_scope() as session:
+        from ..providers.service import lock_library_profile_membership_change
+
+        lock_library_profile_membership_change(session)
+        _guard_ask_evidence_mutation(session, None)
         row = session.get(Tag, item_id)
         if row is None:
             raise HTTPException(status_code=404, detail="not found")
         if _automation_references_organization(session, kind="tag", item_id=item_id):
-            raise HTTPException(
-                status_code=409, detail="tag is used by an AutoFlow rule"
-            )
+            raise HTTPException(status_code=409, detail="tag is used by an AutoFlow rule")
         session.execute(delete(recording_tags).where(recording_tags.c.tag_id == item_id))
         session.delete(row)
     return {"deleted": True}
@@ -1395,9 +1412,24 @@ def organize_files(body: OrganizeFilesBody) -> dict:
     add_ids = set(body.add_tag_ids)
     remove_ids = set(body.remove_tag_ids)
     with session_scope() as session:
+        from ..providers.service import lock_library_profile_membership_change
+
+        lock_library_profile_membership_change(session)
+        _guard_ask_evidence_mutation(session, None)
         files = list(session.scalars(select(PlaudFile).where(PlaudFile.id.in_(file_ids))))
+        files.sort(key=lambda row: row.id)
         if {row.id for row in files} != set(file_ids):
             raise HTTPException(status_code=404, detail="one or more files were not found")
+        if folder_requested:
+            from ..providers.service import (
+                ProfileMutationBusyError,
+                lock_recording_profile_changes,
+            )
+
+            try:
+                lock_recording_profile_changes(session, [row.id for row in files])
+            except ProfileMutationBusyError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         folder = None
         if folder_requested and body.folder_id is not None:
             folder = session.get(Folder, body.folder_id)
@@ -1419,6 +1451,11 @@ def organize_files(body: OrganizeFilesBody) -> dict:
                 row.tags = [tag for tag in row.tags if tag.id not in remove_ids]
             existing = {tag.id for tag in row.tags}
             row.tags.extend(tags_by_id[tag_id] for tag_id in sorted(add_ids - existing))
+        if folder_requested:
+            from ..worker.knowledge_index import sync_file_knowledge_documents
+
+            for row in files:
+                sync_file_knowledge_documents(session, row.id)
     return {"updated": len(files)}
 
 
@@ -1453,12 +1490,13 @@ def delete_recording_local_audio(file_id: str) -> dict:
 @app.delete("/api/files/{file_id}/local-processing")
 def delete_recording_local_processing(file_id: str) -> dict:
     from ..local_cleanup import delete_local_processing
+    from ..worker.knowledge_index import KnowledgeIndexBusyError
 
     try:
         return delete_local_processing(file_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
+    except (KnowledgeIndexBusyError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -1469,12 +1507,13 @@ def bulk_files(body: BulkFilesBody) -> dict:
     file_ids = list(dict.fromkeys(body.file_ids))
     if body.action == "delete_local_processing":
         from ..local_cleanup import delete_local_processing_many
+        from ..worker.knowledge_index import KnowledgeIndexBusyError
 
         try:
             result = delete_local_processing_many(file_ids)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
+        except (KnowledgeIndexBusyError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"action": body.action, "updated": len(file_ids), **result}
 
@@ -1598,6 +1637,8 @@ def delete_ask_thread(thread_id: str, file_id: str | None = None) -> dict:
         return delete_thread(thread_id, file_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="conversation not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -1609,12 +1650,9 @@ def _wants_progressive_shell(request: Request) -> bool:
     """Use a fast shell for real browser navigation while preserving full SSR fallback."""
     if request.headers.get("hx-history-restore-request", "").lower() == "true":
         return False
-    return (
-        request.headers.get("sec-fetch-dest", "").lower() == "document"
-        or (
-            request.headers.get("hx-request", "").lower() == "true"
-            and request.headers.get("hx-target") == "app-view"
-        )
+    return request.headers.get("sec-fetch-dest", "").lower() == "document" or (
+        request.headers.get("hx-request", "").lower() == "true"
+        and request.headers.get("hx-target") == "app-view"
     )
 
 
@@ -1642,9 +1680,7 @@ def _stats(session) -> dict:
         or 0
     )
     total_ms = (
-        session.scalar(
-            select(func.coalesce(func.sum(PlaudFile.duration_ms), 0)).where(visible)
-        )
+        session.scalar(select(func.coalesce(func.sum(PlaudFile.duration_ms), 0)).where(visible))
         or 0
     )
     return {
@@ -1760,9 +1796,7 @@ def index(
         else "recordings"
     )
     if not workspace and _wants_progressive_shell(request):
-        keep_filelist = (
-            request.headers.get("x-localplaud-preserve-filelist", "").lower() == "true"
-        )
+        keep_filelist = request.headers.get("x-localplaud-preserve-filelist", "").lower() == "true"
         workspace_url = request.url.include_query_params(workspace="true")
         if keep_filelist:
             workspace_url = workspace_url.include_query_params(preserve_filelist="true")
@@ -1937,9 +1971,7 @@ def search(
             if filters["tag_id"] is not None:
                 stmt = stmt.where(PlaudFile.tags.any(Tag.id == filters["tag_id"]))
             if filters["origin"] == "plaud":
-                stmt = stmt.where(
-                    or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None))
-                )
+                stmt = stmt.where(or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None)))
             elif filters["origin"] == "local":
                 stmt = stmt.where(PlaudFile.origin == filters["origin"])
             if filters["date_from_ms"] is not None:
@@ -2074,9 +2106,7 @@ def discover_automations(request: Request):
         webhook_integrations = [
             item for item in list_webhook_integrations(session) if item["enabled"]
         ]
-        email_integrations = [
-            item for item in list_email_integrations(session) if item["enabled"]
-        ]
+        email_integrations = [item for item in list_email_integrations(session) if item["enabled"]]
     automation_rules = list_rules()["rules"]
     ctx = _base_ctx(request, "discover") | {
         "automation_rules": automation_rules,
@@ -2097,7 +2127,9 @@ def discover_automations(request: Request):
                 "name": "External rule owners",
                 "detail": "Mirrored rules stay visible but can only be edited by their owner.",
                 "count": sum(1 for rule in automation_rules if not rule["editable"]),
-                "status": "connected" if any(not rule["editable"] for rule in automation_rules) else "idle",
+                "status": "connected"
+                if any(not rule["editable"] for rule in automation_rules)
+                else "idle",
             },
             {
                 "name": "Authorized webhooks",
@@ -2210,8 +2242,7 @@ def recording_acceptance_panel(request: Request, file_id: str):
     return templates.TemplateResponse(
         request=request,
         name="_acceptance_panel.html",
-        context=_base_ctx(request, "recordings")
-        | {"file_id": file_id, "acceptance": acceptance},
+        context=_base_ctx(request, "recordings") | {"file_id": file_id, "acceptance": acceptance},
     )
 
 
@@ -2250,14 +2281,33 @@ def _recording_edit_blocked(row: PlaudFile) -> bool:
     return processing_claim_active(row)
 
 
-def _serialize_transcript_mutation(session) -> None:
-    """Linearize revision reads/writes on SQLite before stale-write checks."""
-    if session.get_bind().dialect.name == "sqlite":
-        session.execute(sql_text("BEGIN IMMEDIATE"))
+def _guard_ask_evidence_mutation(session, file_id: str | None) -> None:
+    """Map the durable Ask evidence lease to the Web API's conflict contract."""
+    from ..worker.knowledge_index import (
+        KnowledgeIndexBusyError,
+        reject_active_ask_evidence_mutation,
+    )
+
+    try:
+        reject_active_ask_evidence_mutation(session, file_id)
+    except KnowledgeIndexBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _serialize_transcript_mutation(session, file_id: str) -> None:
+    """Lock the recording before checking the durable processing claim."""
+    from ..providers.usage import lock_cost_budget
+
+    lock_cost_budget(session, file_id)
+    _guard_ask_evidence_mutation(session, file_id)
 
 
 def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) -> None:
     """Preserve derived rows but make stale artifacts ineligible for reuse/UI."""
+    if StageName.summarize in stages:
+        from ..worker.knowledge_index import invalidate_generated_documents
+
+        invalidate_generated_documents(session, file_id)
     stale_generation = secrets.token_hex(16)
     for stage in stages:
         run = session.scalar(
@@ -2273,6 +2323,55 @@ def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) ->
             "stale": True,
             "stale_generation": stale_generation,
         }
+
+
+def _queue_transcript_reindex(session, file_id: str) -> None:
+    """Invalidate stale derivatives and leave a daemon-resumable index marker."""
+    _mark_derived_stale(
+        session,
+        file_id,
+        (StageName.summarize, StageName.mind_map, StageName.index),
+    )
+    run = session.scalar(
+        select(StageRun).where(
+            StageRun.file_id == file_id,
+            StageRun.stage == StageName.index,
+        )
+    )
+    assert run is not None
+    run.detail = dict(run.detail or {}) | {
+        "reindex_only": True,
+        "reason": "canonical transcript changed",
+    }
+
+
+def _start_transcript_reindex(
+    file_id: str,
+    *,
+    expected_revision: int,
+    expected_speaker_names: dict[str, str],
+) -> bool:
+    """Start the eager reindex while preserving the durable queue on failure."""
+    import threading
+
+    from ..worker.reindex import reindex_file
+
+    settings = get_settings()
+    if not settings.pipeline.index:
+        return False
+    try:
+        threading.Thread(
+            target=reindex_file,
+            args=(file_id, settings),
+            kwargs={
+                "expected_revision": expected_revision,
+                "expected_speaker_names": expected_speaker_names,
+            },
+            daemon=True,
+        ).start()
+    except RuntimeError:
+        return False
+    return True
 
 
 @app.get("/file/{file_id}/transcript-page", response_class=HTMLResponse)
@@ -2308,9 +2407,7 @@ def recording_transcript_page(
         can_edit = False
         transcript_revision = None
         if source == "imported":
-            if offset > 0 and (
-                page_transcript_id is None or page_transcript_token is None
-            ):
+            if offset > 0 and (page_transcript_id is None or page_transcript_token is None):
                 return HTMLResponse("Transcript version is required", status_code=409)
             transcript_row = (
                 session.get(Transcript, page_transcript_id)
@@ -2318,8 +2415,7 @@ def recording_transcript_page(
                 else row.plaud_transcript
             )
             if transcript_row is not None and (
-                transcript_row.file_id != file_id
-                or transcript_row.source not in {"cloud", "plaud"}
+                transcript_row.file_id != file_id or transcript_row.source not in {"cloud", "plaud"}
             ):
                 return HTMLResponse("Transcript version not found", status_code=404)
             if page_transcript_id is not None and transcript_row is None:
@@ -2342,9 +2438,7 @@ def recording_transcript_page(
                 return HTMLResponse("Transcript version not found", status_code=404)
             segments = []
         elif view == "raw" or corrected is None:
-            if offset > 0 and (
-                page_transcript_id is None or page_transcript_token is None
-            ):
+            if offset > 0 and (page_transcript_id is None or page_transcript_token is None):
                 return HTMLResponse("Transcript version is required", status_code=409)
             transcript_row = (
                 session.get(Transcript, page_transcript_id)
@@ -2501,9 +2595,7 @@ def file_detail(
         else "transcript"
     )
     if not workspace and _wants_progressive_shell(request):
-        keep_filelist = (
-            request.headers.get("x-localplaud-preserve-filelist", "").lower() == "true"
-        )
+        keep_filelist = request.headers.get("x-localplaud-preserve-filelist", "").lower() == "true"
         with session_scope() as session:
             row = session.get(PlaudFile, file_id)
             if row is None:
@@ -2551,9 +2643,7 @@ def file_detail(
             and r.local_transcript is not None
             and mind_map_rebuild_source(session, r, settings) is not None
         )
-        mind_map_run = next(
-            (run for run in r.stage_runs if run.stage == StageName.mind_map), None
-        )
+        mind_map_run = next((run for run in r.stage_runs if run.stage == StageName.mind_map), None)
         mind_map_only_scope = bool(
             mind_map_run and (mind_map_run.detail or {}).get("mind_map_only")
         )
@@ -2873,9 +2963,7 @@ def file_detail(
             f["profile_resolution_error"] = sanitize_error(exc)
             profile_resolution = preview_resolution(session).to_dict()
         f["profile_resolution"] = profile_resolution
-        f["budget"] = cost_budget_status(
-            session, file_id, profile_resolution
-        )
+        f["budget"] = cost_budget_status(session, file_id, profile_resolution)
         f["note_templates"] = [
             {
                 "key": item.key,
@@ -3228,16 +3316,125 @@ def notes_page(request: Request):
             for row in rows
         ]
         recording_count = int(
-            session.scalar(
-                select(func.count(PlaudFile.id)).where(PlaudFile.is_trash.is_(False))
-            )
+            session.scalar(select(func.count(PlaudFile.id)).where(PlaudFile.is_trash.is_(False)))
             or 0
         )
     return templates.TemplateResponse(
         request=request,
         name="notes.html",
-        context=_base_ctx(request, "notes")
-        | {"notes": notes, "recording_count": recording_count},
+        context=_base_ctx(request, "notes") | {"notes": notes, "recording_count": recording_count},
+    )
+
+
+@app.get("/notes/{note_id}/versions/{version}", response_class=HTMLResponse)
+def user_note_version_page(request: Request, note_id: int, version: int):
+    with session_scope() as session:
+        note = session.get(UserNote, note_id)
+        if note is None:
+            raise HTTPException(status_code=404, detail="note not found")
+        if note.version == version:
+            title, content, created_at, current = (
+                note.title,
+                note.content_md,
+                note.updated_at,
+                True,
+            )
+        else:
+            archived = session.scalar(
+                select(UserNoteRevision).where(
+                    UserNoteRevision.note_id == note_id,
+                    UserNoteRevision.version == version,
+                )
+            )
+            if archived is None:
+                raise HTTPException(status_code=404, detail="note version not found")
+            title, content, created_at, current = (
+                archived.title,
+                archived.content_md,
+                archived.archived_at,
+                False,
+            )
+        back_url = (
+            f"/file/{note.file_id}?tab=notes&note_id={note.id}"
+            if note.file_id
+            else f"/notes#note-{note.id}"
+        )
+        context = {
+            "title": title,
+            "content_md": content,
+            "version": version,
+            "current": current,
+            "created_at": _fmt_history_time(created_at),
+            "kind_label": _note_source_label(note.source_type),
+            "back_url": back_url,
+        }
+    return templates.TemplateResponse(
+        request=request,
+        name="note_version.html",
+        context=_base_ctx(request, "notes") | context,
+    )
+
+
+@app.get(
+    "/file/{file_id}/notes/generated/{template}/versions/{revision}",
+    response_class=HTMLResponse,
+)
+def generated_note_version_page(request: Request, file_id: str, template: str, revision: int):
+    from ..note_history import latest_revision_number
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, file_id)
+        if recording is None:
+            raise HTTPException(status_code=404, detail="recording not found")
+        live = session.scalar(
+            select(Summary).where(
+                Summary.file_id == file_id,
+                Summary.template == template,
+                Summary.source == "local",
+            )
+        )
+        live_revision = (
+            live.restored_from_revision
+            if live is not None and live.restored_from_revision
+            else latest_revision_number(session, file_id, template) + 1
+        )
+        if live is not None and live_revision == revision:
+            title = live.title or live.template.replace("-", " ").title()
+            content, created_at, current = live.content_md, live.created_at, True
+        else:
+            archived = session.scalar(
+                select(SummaryRevision).where(
+                    SummaryRevision.file_id == file_id,
+                    SummaryRevision.template == template,
+                    SummaryRevision.revision == revision,
+                    SummaryRevision.source == "local",
+                )
+            )
+            if archived is None:
+                raise HTTPException(status_code=404, detail="generated note version not found")
+            title = archived.title or archived.template.replace("-", " ").title()
+            content, created_at, current = (
+                archived.content_md,
+                archived.created_at,
+                False,
+            )
+        context = {
+            "title": title,
+            "content_md": content,
+            "version": revision,
+            "current": current,
+            "created_at": _fmt_history_time(created_at),
+            "kind_label": "Generated note",
+            "back_url": (
+                f"/file/{file_id}?tab=notes&note=sum-{live.id}"
+                if live is not None
+                else f"/file/{file_id}?tab=notes"
+            ),
+        }
+    return templates.TemplateResponse(
+        request=request,
+        name="note_version.html",
+        context=_base_ctx(request, "notes") | context,
     )
 
 
@@ -3318,21 +3515,23 @@ def _library_ask_scope(
         "file_ids": file_ids or [],
     }
     values.update(resolve_date_scope(date_from, date_to, date_timezone))
-    has_scope = any(
-        values[key] not in (None, "")
-        for key in (
-            "folder_id",
-            "tag_id",
-            "origin",
-            "speaker_name",
+    has_scope = (
+        any(
+            values[key] not in (None, "")
+            for key in (
+                "folder_id",
+                "tag_id",
+                "origin",
+                "speaker_name",
+            )
         )
-    ) or bool(file_ids) or bool(values.get("scope_version"))
+        or bool(file_ids)
+        or bool(values.get("scope_version"))
+    )
     return values if has_scope else None
 
 
-def _ask_fragment_context(
-    request: Request, thread: dict, file_id: str | None, target: str
-) -> dict:
+def _ask_fragment_context(request: Request, thread: dict, file_id: str | None, target: str) -> dict:
     context = _base_ctx(request, "recordings")
     with session_scope() as session:
         context["organization"] = _organization_summary(session)
@@ -3670,8 +3869,16 @@ def reprocess(file_id: str, force: bool = False):
     """Kick off a pipeline re-run for one recording in the background."""
     import threading
 
-    from ..db.models import FileStatus
-    from ..worker.pipeline import process_file, processing_claim_active, reset_pipeline_retry
+    from ..poller.poll import current_daemon_owner
+    from ..worker.claims import processing_claim, processing_owner
+    from ..worker.pipeline import (
+        PipelineAlreadyRunning,
+        _assert_processing_claim_in_session,
+        claim_processing_work,
+        process_file,
+        release_processing_claim,
+        reset_pipeline_retry,
+    )
 
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
@@ -3679,16 +3886,36 @@ def reprocess(file_id: str, force: bool = False):
             return HTMLResponse(
                 '<span style="color:var(--err)">no audio to reprocess</span>', status_code=400
             )
-        if processing_claim_active(r):
-            return HTMLResponse(
-                '<span style="color:var(--warn)">already processing</span>', status_code=409
-            )
-        r.status = FileStatus.downloaded
-        reset_pipeline_retry(r)
-
-    threading.Thread(
-        target=process_file, args=(file_id,), kwargs={"force": force}, daemon=True
-    ).start()
+        previous_status, previous_error = r.status, r.error
+    try:
+        with processing_owner(current_daemon_owner()):
+            claim_token = claim_processing_work(file_id, require_audio=True)
+    except (PipelineAlreadyRunning, FileNotFoundError):
+        return HTMLResponse(
+            '<span style="color:var(--warn)">already processing</span>', status_code=409
+        )
+    try:
+        with processing_claim(file_id, claim_token), session_scope() as session:
+            r = _assert_processing_claim_in_session(session, file_id)
+            reset_pipeline_retry(r)
+        worker = threading.Thread(
+            target=process_file,
+            args=(file_id,),
+            kwargs={"force": force, "claim_token": claim_token},
+            daemon=True,
+        )
+        worker.start()
+    except Exception:
+        release_processing_claim(
+            file_id,
+            claim_token,
+            status=previous_status,
+            error=previous_error,
+        )
+        return HTMLResponse(
+            '<span style="color:var(--err)">could not start reprocessing</span>',
+            status_code=503,
+        )
     return HTMLResponse('<span style="color:var(--warn)">re-running… refresh in a moment</span>')
 
 
@@ -3697,9 +3924,14 @@ def generate_recording_notes(file_id: str):
     """Regenerate notes, mind map, and index without rerunning completed speech stages."""
     import threading
 
+    from ..poller.poll import current_daemon_owner
+    from ..worker.claims import processing_claim, processing_owner
     from ..worker.pipeline import (
+        PipelineAlreadyRunning,
+        _assert_processing_claim_in_session,
+        claim_processing_work,
         process_derived_artifacts,
-        processing_claim_active,
+        release_processing_claim,
         reset_pipeline_retry,
     )
 
@@ -3709,26 +3941,57 @@ def generate_recording_notes(file_id: str):
             return HTMLResponse("recording not found", status_code=404)
         if recording.local_transcript is None:
             return HTMLResponse("a local transcript is required first", status_code=409)
-        if processing_claim_active(recording):
-            return HTMLResponse("already processing", status_code=409)
-        _mark_derived_stale(
-            session,
-            file_id,
-            (StageName.summarize, StageName.mind_map, StageName.index),
+        previous_status, previous_error = recording.status, recording.error
+    try:
+        with processing_owner(current_daemon_owner()):
+            claim_token = claim_processing_work(file_id, require_audio=False)
+    except PipelineAlreadyRunning:
+        return HTMLResponse("already processing", status_code=409)
+    try:
+        transcript_missing = False
+        with processing_claim(file_id, claim_token), session_scope() as session:
+            recording = _assert_processing_claim_in_session(session, file_id)
+            if recording.local_transcript is None:
+                transcript_missing = True
+            else:
+                _mark_derived_stale(
+                    session,
+                    file_id,
+                    (StageName.summarize, StageName.mind_map, StageName.index),
+                )
+                for run in recording.stage_runs:
+                    if run.stage in {StageName.summarize, StageName.mind_map, StageName.index}:
+                        detail = dict(run.detail or {}) | {
+                            "reason": "user requested regeneration",
+                            "derived_only": True,
+                        }
+                        # A full regeneration supersedes any narrower pending rebuild.
+                        detail.pop("mind_map_only", None)
+                        run.detail = detail
+                reset_pipeline_retry(recording)
+        if transcript_missing:
+            release_processing_claim(
+                file_id,
+                claim_token,
+                status=previous_status,
+                error=previous_error,
+            )
+            return HTMLResponse("a local transcript is required first", status_code=409)
+        worker = threading.Thread(
+            target=process_derived_artifacts,
+            args=(file_id,),
+            kwargs={"claim_token": claim_token},
+            daemon=True,
         )
-        for run in recording.stage_runs:
-            if run.stage in {StageName.summarize, StageName.mind_map, StageName.index}:
-                detail = dict(run.detail or {}) | {
-                    "reason": "user requested regeneration",
-                    "derived_only": True,
-                }
-                # A full regeneration supersedes any narrower pending rebuild.
-                detail.pop("mind_map_only", None)
-                run.detail = detail
-        recording.status = FileStatus.partial
-        reset_pipeline_retry(recording)
-
-    threading.Thread(target=process_derived_artifacts, args=(file_id,), daemon=True).start()
+        worker.start()
+    except Exception:
+        release_processing_claim(
+            file_id,
+            claim_token,
+            status=previous_status,
+            error=previous_error,
+        )
+        return HTMLResponse("could not start regeneration", status_code=503)
     return HTMLResponse("notes and mind map queued")
 
 
@@ -3777,8 +4040,11 @@ def rebuild_recording_mind_map(file_id: str):
     """
     import threading
 
+    from ..poller.poll import current_daemon_owner
+    from ..worker.claims import processing_claim, processing_owner
     from ..worker.pipeline import (
         PipelineAlreadyRunning,
+        _assert_processing_claim_in_session,
         abandon_mind_map_rebuild,
         claim_mind_map_rebuild,
         process_mind_map_only,
@@ -3800,16 +4066,15 @@ def rebuild_recording_mind_map(file_id: str):
         # Reserve synchronously before acknowledging the POST. Concurrent or
         # repeated requests lose the same atomic lease instead of launching a
         # thread that later discovers the conflict.
-        claim_token = claim_mind_map_rebuild(file_id)
+        with processing_owner(current_daemon_owner()):
+            claim_token = claim_mind_map_rebuild(file_id)
     except PipelineAlreadyRunning:
         return HTMLResponse("already processing", status_code=409)
 
     eligibility_error = None
     try:
-        with session_scope() as session:
-            recording = session.get(PlaudFile, file_id)
-            if recording is None:
-                raise LookupError("recording disappeared while queueing")
+        with processing_claim(file_id, claim_token), session_scope() as session:
+            recording = _assert_processing_claim_in_session(session, file_id)
             eligibility_error = _mind_map_rebuild_eligibility_error(session, recording)
             if eligibility_error is None:
                 recording.status = FileStatus.processing
@@ -3831,6 +4096,9 @@ def rebuild_recording_mind_map(file_id: str):
                         ):
                             detail.pop(key, None)
                         run.detail = detail
+    except PipelineAlreadyRunning:
+        abandon_mind_map_rebuild(file_id, claim_token)
+        return HTMLResponse("already processing", status_code=409)
     except Exception:
         abandon_mind_map_rebuild(file_id, claim_token)
         raise
@@ -3864,7 +4132,11 @@ def rebuild_recording_mind_map(file_id: str):
 
 @app.post("/file/{file_id}/profile")
 def choose_recording_profile(file_id: str, profile_id: str = Form("")):
-    from ..providers.service import clear_recording_override, select_recording_override
+    from ..providers.service import (
+        ProfileMutationBusyError,
+        clear_recording_override,
+        select_recording_override,
+    )
 
     with session_scope() as session:
         try:
@@ -3872,6 +4144,8 @@ def choose_recording_profile(file_id: str, profile_id: str = Form("")):
                 select_recording_override(session, file_id, int(profile_id))
             else:
                 clear_recording_override(session, file_id)
+        except ProfileMutationBusyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
         except (LookupError, ValueError):
             return JSONResponse({"error": "recording or profile not found"}, status_code=404)
     return RedirectResponse(f"/file/{file_id}", status_code=303)
@@ -3887,10 +4161,8 @@ def rename_speaker(
     """Set (or clear, with an empty name) the display name for one stable
     speaker key. The key itself never changes — it is the diarization label
     stored inside the transcript segments."""
-    import threading
-
     with session_scope() as session:
-        _serialize_transcript_mutation(session)
+        _serialize_transcript_mutation(session, file_id)
         r = session.get(PlaudFile, file_id)
         if r is None:
             return JSONResponse({"error": "not found"}, status_code=404)
@@ -3918,27 +4190,17 @@ def rename_speaker(
         else:
             existing.display_name = clean
         session.execute(delete(Chunk).where(Chunk.file_id == file_id))
-        _mark_derived_stale(
-            session,
-            file_id,
-            (StageName.summarize, StageName.mind_map, StageName.index),
-        )
+        _queue_transcript_reindex(session, file_id)
         expected_revision = corrected.revision if corrected is not None else 0
         expected_names = display_names(session, file_id) | ({key: clean} if clean else {})
         if not clean:
             expected_names.pop(key, None)
 
-    from ..worker.reindex import reindex_file
-
-    threading.Thread(
-        target=reindex_file,
-        args=(file_id,),
-        kwargs={
-            "expected_revision": expected_revision,
-            "expected_speaker_names": expected_names,
-        },
-        daemon=True,
-    ).start()
+    _start_transcript_reindex(
+        file_id,
+        expected_revision=expected_revision,
+        expected_speaker_names=expected_names,
+    )
     return_to = _validated_library_return_url(return_to)
     redirect_url = _file_workspace_url(file_id, return_to, tab="transcript")
     return RedirectResponse(url=redirect_url, status_code=303)
@@ -3965,7 +4227,6 @@ def edit_transcript_segment(
     without rerunning ASR. Summaries are not auto-regenerated — regeneration
     stays an explicit action."""
     import copy
-    import threading
 
     accept = request.headers.get("accept", "")
     wants_json = "application/json" in accept
@@ -3977,9 +4238,7 @@ def edit_transcript_segment(
 
     def error_response(code: str, message: str, status_code: int):
         if not wants_html:
-            return JSONResponse(
-                {"error": message, "code": code}, status_code=status_code
-            )
+            return JSONResponse({"error": message, "code": code}, status_code=status_code)
         return RedirectResponse(
             _file_workspace_url(
                 file_id,
@@ -4005,7 +4264,7 @@ def edit_transcript_segment(
         )
 
     with session_scope() as session:
-        _serialize_transcript_mutation(session)
+        _serialize_transcript_mutation(session, file_id)
         r = session.get(PlaudFile, file_id)
         if r is None:
             return error_response("not_found", "not found", 404)
@@ -4030,14 +4289,10 @@ def edit_transcript_segment(
             return error_response("no_transcript", "no transcript to edit", 400)
         current_revision = corrected.revision if corrected is not None else 0
         if base_revision != current_revision:
-            return error_response(
-                "stale_revision", "transcript changed; reload before saving", 409
-            )
+            return error_response("stale_revision", "transcript changed; reload before saving", 409)
         next_revision = max((rev.revision for rev in r.transcript_revisions), default=0) + 1
         if not 0 <= idx < len(base_segments):
-            return error_response(
-                "segment_not_found", "segment index out of range", 400
-            )
+            return error_response("segment_not_found", "segment index out of range", 400)
         current_segment = base_segments[idx]
         current_speaker = current_segment.get("speaker")
         valid_speakers = set(_speaker_keys_for_editing(session, r, base_segments))
@@ -4052,8 +4307,7 @@ def edit_transcript_segment(
         text_changed = text != (current_segment.get("text") or "")
         direct_speaker_changed = selected_speaker != current_speaker
         nested_speaker_changed = not text_changed and any(
-            word.get("speaker") != selected_speaker
-            for word in (current_segment.get("words") or [])
+            word.get("speaker") != selected_speaker for word in (current_segment.get("words") or [])
         )
         speaker_changed = direct_speaker_changed or nested_speaker_changed
         if not text_changed and not speaker_changed:
@@ -4083,8 +4337,7 @@ def edit_transcript_segment(
                 revision_note = f"edited text and {revision_note}"
         elif nested_speaker_changed:
             revision_note = (
-                f"normalized segment {idx} word speakers as "
-                f"{selected_speaker or 'unassigned'}"
+                f"normalized segment {idx} word speakers as {selected_speaker or 'unassigned'}"
             )
         else:
             revision_note = f"edited segment {idx}"
@@ -4103,24 +4356,14 @@ def edit_transcript_segment(
         )
         # Invalidate the index now: stale chunks must not serve search/Ask.
         session.execute(delete(Chunk).where(Chunk.file_id == file_id))
-        _mark_derived_stale(
-            session,
-            file_id,
-            (StageName.summarize, StageName.mind_map, StageName.index),
-        )
+        _queue_transcript_reindex(session, file_id)
         expected_names = display_names(session, file_id)
 
-    from ..worker.reindex import reindex_file
-
-    threading.Thread(
-        target=reindex_file,
-        args=(file_id,),
-        kwargs={
-            "expected_revision": next_revision,
-            "expected_speaker_names": expected_names,
-        },
-        daemon=True,
-    ).start()
+    _start_transcript_reindex(
+        file_id,
+        expected_revision=next_revision,
+        expected_speaker_names=expected_names,
+    )
     if wants_json:
         return {
             "changed": True,
@@ -4141,7 +4384,6 @@ def replace_transcript_text(
     """Replace text across canonical segments in one immutable revision."""
     import copy
     import re
-    import threading
 
     needle = find.strip()
     if not needle:
@@ -4149,7 +4391,7 @@ def replace_transcript_text(
     if len(needle) > 500 or len(replace) > 5000:
         return JSONResponse({"error": "find or replacement text is too long"}, status_code=400)
     with session_scope() as session:
-        _serialize_transcript_mutation(session)
+        _serialize_transcript_mutation(session, file_id)
         row = session.get(PlaudFile, file_id)
         if row is None:
             return JSONResponse({"error": "not found"}, status_code=404)
@@ -4206,18 +4448,13 @@ def replace_transcript_text(
             )
         )
         session.execute(delete(Chunk).where(Chunk.file_id == file_id))
-        _mark_derived_stale(
-            session, file_id, (StageName.summarize, StageName.mind_map, StageName.index)
-        )
+        _queue_transcript_reindex(session, file_id)
         expected_names = display_names(session, file_id)
-    from ..worker.reindex import reindex_file
-
-    threading.Thread(
-        target=reindex_file,
-        args=(file_id,),
-        kwargs={"expected_revision": next_revision, "expected_speaker_names": expected_names},
-        daemon=True,
-    ).start()
+    _start_transcript_reindex(
+        file_id,
+        expected_revision=next_revision,
+        expected_speaker_names=expected_names,
+    )
     return {"replacements": replacements, "revision": next_revision}
 
 
@@ -4229,10 +4466,9 @@ def restore_transcript_revision(
 ):
     """Restore history by cloning it into a new revision; never rewrite history."""
     import copy
-    import threading
 
     with session_scope() as session:
-        _serialize_transcript_mutation(session)
+        _serialize_transcript_mutation(session, file_id)
         row = session.get(PlaudFile, file_id)
         if row is None:
             return JSONResponse({"error": "not found"}, status_code=404)
@@ -4273,18 +4509,13 @@ def restore_transcript_revision(
             )
         )
         session.execute(delete(Chunk).where(Chunk.file_id == file_id))
-        _mark_derived_stale(
-            session, file_id, (StageName.summarize, StageName.mind_map, StageName.index)
-        )
+        _queue_transcript_reindex(session, file_id)
         expected_names = display_names(session, file_id)
-    from ..worker.reindex import reindex_file
-
-    threading.Thread(
-        target=reindex_file,
-        args=(file_id,),
-        kwargs={"expected_revision": next_revision, "expected_speaker_names": expected_names},
-        daemon=True,
-    ).start()
+    _start_transcript_reindex(
+        file_id,
+        expected_revision=next_revision,
+        expected_speaker_names=expected_names,
+    )
     return RedirectResponse(f"/file/{file_id}?view=corrected", status_code=303)
 
 
@@ -4330,9 +4561,7 @@ def summary_history(file_id: str, summary_id: int, limit: int = 50):
                 "lineage_label": _lineage_label(row.input_transcript_revision),
             },
             "version_count": version_count or 0,
-            "versions": _note_history_entries(
-                rows, content_fingerprint(row), limit=limit
-            ),
+            "versions": _note_history_entries(rows, content_fingerprint(row), limit=limit),
         }
 
 
@@ -4345,20 +4574,30 @@ def restore_summary_version_route(
 ):
     """Make an archived version live again; the displaced current is archived first.
 
-    A content swap on the existing Summary row: nothing is queued and no
-    stage is rerun. The transcript and search index stay as they are (built
-    from the transcript, which this does not change). A mind map sourced
-    from the restored note output is marked out of date — its input just
-    changed — but the artifact is preserved and not regenerated.
+    A content swap on the existing Summary row: no pipeline stage is rerun.
+    Transcript chunks stay intact; the changed note document is invalidated
+    and re-embedded independently. A mind map sourced from the restored note
+    output is marked out of date but is preserved and not regenerated.
     """
+    from ..worker.knowledge_index import (
+        KnowledgeIndexBusyError,
+        lock_summary_for_mutation,
+        sync_summary_document,
+    )
+
     with session_scope() as session:
+        try:
+            row = lock_summary_for_mutation(session, summary_id, file_id)
+        except KnowledgeIndexBusyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
         recording = session.get(PlaudFile, file_id)
+        if recording is not None:
+            session.refresh(recording)
         if recording is not None and _recording_edit_blocked(recording):
             return JSONResponse(
                 {"error": "recording is processing; try again when it finishes"},
                 status_code=409,
             )
-        row = session.get(Summary, summary_id)
         if row is None or row.file_id != file_id:
             # The live output was regenerated (new row id) or removed since render.
             return JSONResponse(
@@ -4379,9 +4618,8 @@ def restore_summary_version_route(
         if target is None:
             return JSONResponse({"error": "version not found"}, status_code=404)
         restore_summary_version(session, row, target)
+        sync_summary_document(session, row)
     safe_tab = tab if tab in {"notes", "mindmap"} else "notes"
     # Land back on the note output that was just restored, not the first one.
     note_param = f"&note=sum-{summary_id}" if safe_tab == "notes" else ""
-    return RedirectResponse(
-        f"/file/{file_id}?tab={safe_tab}{note_param}", status_code=303
-    )
+    return RedirectResponse(f"/file/{file_id}?tab={safe_tab}{note_param}", status_code=303)

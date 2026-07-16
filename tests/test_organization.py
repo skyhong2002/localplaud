@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import create_engine, inspect, text
 
 
@@ -110,15 +112,24 @@ def test_crud_validation_conflicts_and_unknowns(monkeypatch, tmp_path):
 def test_bulk_organization_is_atomic_and_supports_unassign_remove(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed_files()
+    import localplaud.worker.knowledge_index as knowledge_index
+
+    sync_order: list[str] = []
+    monkeypatch.setattr(
+        knowledge_index,
+        "sync_file_knowledge_documents",
+        lambda _session, file_id: sync_order.append(file_id),
+    )
     folder = client.post("/api/folders", json={"name": "Work"}).json()
     tag1 = client.post("/api/tags", json={"name": "One"}).json()
     tag2 = client.post("/api/tags", json={"name": "Two"}).json()
 
     response = client.post(
         "/api/files/organize",
-        json={"file_ids": ["a", "b"], "folder_id": folder["id"], "add_tag_ids": [tag2["id"], tag1["id"]]},
+        json={"file_ids": ["b", "a"], "folder_id": folder["id"], "add_tag_ids": [tag2["id"], tag1["id"]]},
     )
     assert response.json() == {"updated": 2}
+    assert sync_order == ["a", "b"]
     summary = {row["id"]: row for row in client.get("/api/files").json()["files"]}
     assert summary["a"]["folder"]["name"] == "Work"
     assert [tag["name"] for tag in summary["a"]["tags"]] == ["One", "Two"]
@@ -139,6 +150,30 @@ def test_bulk_organization_is_atomic_and_supports_unassign_remove(monkeypatch, t
     cleared = next(row for row in client.get("/api/files").json()["files"] if row["id"] == "a")
     assert cleared["folder"] is None and cleared["tags"] == []
     assert client.post("/api/files/organize", json={"file_ids": ["a"]}).status_code == 422
+
+
+def test_folder_mutations_reject_active_recording_claim(monkeypatch, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    client = _client(monkeypatch, tmp_path)
+    _seed_files()
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+
+    folder = client.post("/api/folders", json={"name": "Protected"}).json()
+    with session_scope() as session:
+        recording = session.get(PlaudFile, "a")
+        recording.processing_token = "active-worker"
+        recording.processing_lease_until = datetime.now(UTC) + timedelta(minutes=5)
+
+    assign = client.post(
+        "/api/files/organize",
+        json={"file_ids": ["a"], "folder_id": folder["id"]},
+    )
+    assert assign.status_code == 409
+    assert "processing" in assign.json()["detail"]
+    with session_scope() as session:
+        assert session.get(PlaudFile, "a").folder_id is None
 
 
 def test_counts_filters_uncategorized_and_delete_cleanup(monkeypatch, tmp_path):
@@ -190,6 +225,8 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert 'aria-label="Rename Research"' in page.text
     assert 'aria-label="Delete Interview"' in page.text
     assert "const organizationModal = organizationBackdrop ? window.localplaudModal" in page.text
+    assert "event.stopImmediatePropagation();organizationModal?.close()" in page.text
+    assert "{capture:true,signal:cleanupController.signal}" in page.text
     assert "background:()=>[document.querySelector('.library-page')" in page.text
     assert "method:'PATCH'" in page.text
     assert "method:'DELETE'" in page.text
@@ -224,3 +261,47 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     trash = client.get("/?view=trash")
     assert 'id="bulkbar"' not in trash.text
     assert "read-only recovery view" in trash.text
+
+
+def test_organization_membership_rejects_active_library_ask(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_files()
+    folder = client.post("/api/folders", json={"name": "Research"}).json()
+    tag = client.post("/api/tags", json={"name": "Priority"}).json()
+    assigned = client.post(
+        "/api/files/organize",
+        json={
+            "file_ids": ["a"],
+            "folder_id": folder["id"],
+            "add_tag_ids": [tag["id"]],
+        },
+    )
+    assert assigned.status_code == 200
+
+    from localplaud.db.models import AskThread, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(
+            AskThread(
+                id="scoped-ask",
+                title="Scoped Ask",
+                retrieval_scope={"tag_id": tag["id"]},
+                request_token="active-request",
+                request_lease_until=datetime.now(UTC) + timedelta(minutes=5),
+            )
+        )
+
+    removed = client.post(
+        "/api/files/organize",
+        json={"file_ids": ["a"], "remove_tag_ids": [tag["id"]]},
+    )
+    assert removed.status_code == 409
+    assert "used by Ask" in removed.json()["detail"]
+    assert client.delete(f"/api/tags/{tag['id']}").status_code == 409
+    assert client.delete(f"/api/folders/{folder['id']}").status_code == 409
+
+    with session_scope() as session:
+        row = session.get(PlaudFile, "a")
+        assert row.folder_id == folder["id"]
+        assert {item.id for item in row.tags} == {tag["id"]}

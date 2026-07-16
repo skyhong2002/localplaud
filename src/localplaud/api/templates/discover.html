@@ -11,7 +11,7 @@
   <section class="autoflow-section">
     <div class="autoflow-section-head"><div><h2>{{ t('Applications & integrations') }}</h2><div class="sub">{{ t('Every rule and destination shows who owns it and where it can be changed.') }}</div></div><a class="sub" href="/settings#webhook-integrations">{{ t('Manage authorizations →') }}</a></div>
     <div class="discover-app-grid">
-      {% for application in application_catalog %}{% if application.href %}<a class="panel" href="{{ application.href }}" style="padding:14px;display:block">{% else %}<div class="panel" style="padding:14px">{% endif %}<div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ application.name }}</strong><span class="chip">{{ application.count }}</span></div><div class="sub" style="font-size:12px;margin-top:7px">{{ application.detail }}</div><div class="sub" style="font-size:11px;margin-top:10px">{{ application.status }}</div>{% if application.href %}</a>{% else %}</div>{% endif %}{% endfor %}
+      {% for application in application_catalog %}{% if application.href %}<a class="panel" href="{{ application.href }}" style="padding:14px;display:block">{% else %}<div class="panel" style="padding:14px">{% endif %}<div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ t(application.name) }}</strong><span class="chip">{{ application.count }}</span></div><div class="sub" style="font-size:12px;margin-top:7px">{{ t(application.detail) }}</div><div class="sub" style="font-size:11px;margin-top:10px">{{ t(application.status) }}</div>{% if application.href %}</a>{% else %}</div>{% endif %}{% endfor %}
     </div>
   </section>
 

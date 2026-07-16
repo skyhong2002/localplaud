@@ -15,6 +15,13 @@ from ..llm.base import build_llm
 
 log = logging.getLogger(__name__)
 
+
+def _llm_provider_model(settings: Settings) -> tuple[str, str | None]:
+    provider = settings.llm.provider
+    config = getattr(settings.llm, provider.replace("-", "_"), None)
+    return provider, getattr(config, "model", None)
+
+
 _SYSTEM = (
     "You are a meticulous meeting-notes assistant. You are given a transcript "
     "(possibly with speaker labels and multiple languages). Produce clear, "
@@ -202,11 +209,12 @@ def summarize(
     system, prompt = render_resolved_prompt(resolved_template, source_text)
     content = llm.complete(prompt, system=system, temperature=0.2, max_tokens=1500)
     title = _extract_title(content)
+    provider, model = _llm_provider_model(settings)
     return {
         "title": title,
         "content_md": content,
-        "provider": settings.llm.provider,
-        "model": getattr(getattr(settings.llm, settings.llm.provider, None), "model", None),
+        "provider": provider,
+        "model": model,
         "template": resolved_template.name,
         "template_version": resolved_template.version,
         "template_snapshot": template_snapshot(resolved_template),

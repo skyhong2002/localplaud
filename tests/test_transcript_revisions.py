@@ -215,6 +215,8 @@ def test_segment_edit_creates_revision_and_invalidates_index(monkeypatch, tmp_pa
         assert chunks == []
         assert run.status == StageStatus.pending
         assert run.error is None
+        assert run.detail["reindex_only"] is True
+        assert run.detail["reason"] == "canonical transcript changed"
 
     deadline = time.monotonic() + 2
     while calls != ["r1"] and time.monotonic() < deadline:
@@ -230,6 +232,72 @@ def test_segment_edit_creates_revision_and_invalidates_index(monkeypatch, tmp_pa
         assert [rev.revision for rev in revs] == [1, 2]
         assert revs[1].segments[0]["text"] == "hello, team!"  # keeps earlier edit
         assert revs[1].segments[1]["text"] == "let us start"
+
+
+def test_transcript_edit_keeps_durable_reindex_queue_when_thread_start_fails(
+    monkeypatch, tmp_path
+):
+    c = _client(monkeypatch, tmp_path)
+    _seed(with_index=True)
+    from localplaud.db.models import Chunk, StageName, StageRun, StageStatus
+    from localplaud.db.session import session_scope
+
+    class BrokenThread:
+        def __init__(self, **_kwargs):
+            raise RuntimeError("thread unavailable")
+
+    monkeypatch.setattr("threading.Thread", BrokenThread)
+    response = c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "durably corrected", "base_revision": 0},
+        headers={"accept": "application/json"},
+    )
+    assert response.status_code == 200
+    assert response.json()["revision"] == 1
+    with session_scope() as session:
+        assert session.query(Chunk).filter_by(file_id="r1").count() == 0
+        run = session.scalar(
+            select(StageRun).where(
+                StageRun.file_id == "r1", StageRun.stage == StageName.index
+            )
+        )
+        assert run.status == StageStatus.pending
+        assert run.detail["reindex_only"] is True
+
+
+def test_transcript_and_speaker_edits_reject_active_ask_lease(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed(with_index=True)
+    from localplaud.db.models import AskThread, Speaker, TranscriptRevision
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(
+            AskThread(
+                id="active-recording-ask",
+                file_id="r1",
+                title="Active recording Ask",
+                request_token="active-request",
+                request_lease_until=datetime.now(UTC) + timedelta(minutes=5),
+            )
+        )
+
+    edit = c.post(
+        "/file/r1/transcript/segments/0",
+        data={"text": "must not commit", "base_revision": 0},
+        headers={"accept": "application/json"},
+    )
+    rename = c.post(
+        "/file/r1/speakers",
+        data={"key": "SPEAKER_00", "name": "Must not commit"},
+        follow_redirects=False,
+    )
+    assert edit.status_code == rename.status_code == 409
+    assert "used by Ask" in edit.json()["detail"]
+    assert "used by Ask" in rename.json()["detail"]
+    with session_scope() as session:
+        assert session.scalar(select(TranscriptRevision.id)) is None
+        assert session.scalar(select(Speaker.id)) is None
 
 
 def test_segment_speaker_correction_preserves_timed_words_and_raw_asr(
@@ -640,6 +708,41 @@ def test_native_segment_form_preserves_workspace_and_has_accessible_error_recove
     assert 'role="alert"' in recovery.text
     assert "Could not save transcript correction" in recovery.text
     assert "Transcript changed. Reload before saving." in recovery.text
+
+
+def test_postgresql_transcript_mutation_locks_recording_row_before_claim_check():
+    from sqlalchemy.dialects import postgresql
+
+    from localplaud.api.app import _serialize_transcript_mutation
+
+    statements: list[str] = []
+
+    class Bind:
+        class dialect:
+            name = "postgresql"
+
+    class Session:
+        def get_bind(self):
+            return Bind()
+
+        def execute(self, statement):
+            statements.append(str(statement))
+
+        def scalar(self, statement):
+            statements.append(
+                str(
+                    statement.compile(
+                        dialect=postgresql.dialect(),
+                        compile_kwargs={"literal_binds": True},
+                    )
+                )
+            )
+            return None
+
+    _serialize_transcript_mutation(Session(), "recording")
+    assert statements[0] == "SELECT pg_advisory_xact_lock_shared(1280330574)"
+    assert "plaud_files.id = 'recording'" in statements[1]
+    assert "FOR UPDATE" in statements[1]
 
 
 @pytest.mark.parametrize("offset", ["inf", "-inf", "Infinity", "1e309"])

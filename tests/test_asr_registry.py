@@ -1,7 +1,9 @@
 """ASR registry: registration, selection, and fallback — no optional deps."""
 
 import builtins
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +12,40 @@ from localplaud.asr.base import AsrUnavailable, Segment, Transcript
 from localplaud.config import AsrConfig
 
 AUDIO = Path("/nonexistent/audio.opus")  # dummies never touch the file
+
+
+def test_assemblyai_reports_the_model_used_by_the_service(monkeypatch):
+    from localplaud.asr.assemblyai_provider import AssemblyAIProvider
+
+    completed = SimpleNamespace(
+        status="completed",
+        utterances=[],
+        audio_duration=2.5,
+        speech_model_used=SimpleNamespace(value="universal-3-pro"),
+    )
+
+    class Transcriber:
+        def transcribe(self, _path, _config):
+            return completed
+
+    fake_aai = SimpleNamespace(
+        settings=SimpleNamespace(api_key=None),
+        TranscriptionConfig=lambda **kwargs: kwargs,
+        Transcriber=Transcriber,
+        TranscriptStatus=SimpleNamespace(error="error"),
+    )
+    monkeypatch.setitem(sys.modules, "assemblyai", fake_aai)
+    provider = AssemblyAIProvider(
+        SimpleNamespace(
+            assemblyai=SimpleNamespace(api_key="secret", speaker_labels=True),
+            language="auto",
+        )
+    )
+
+    result = provider.transcribe(AUDIO)
+
+    assert result.provider == "assemblyai"
+    assert result.model == "universal-3-pro"
 
 
 def _cfg(provider: str, fallback: list[str] | None = None) -> AsrConfig:

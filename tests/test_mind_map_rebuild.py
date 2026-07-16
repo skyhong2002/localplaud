@@ -274,7 +274,7 @@ def test_remote_mind_map_idempotency_includes_effective_note_options(monkeypatch
     class FakeClient:
         def submit_and_wait(self, request, timeout):
             requests.append(request)
-            return SimpleNamespace(artifacts={"result.json": b"{}"})
+            return SimpleNamespace(artifacts={"result.json": b'{"model":"map-model"}'})
 
         def close(self):
             pass
@@ -288,6 +288,7 @@ def test_remote_mind_map_idempotency_includes_effective_note_options(monkeypatch
                 "connection": "worker:test",
                 "model": "map-model",
                 "execution_target": "remote_worker",
+                "configuration": {"base_url": "https://worker.invalid"},
                 "options": {"language": "en"},
             }
         }
@@ -624,7 +625,8 @@ def test_rebuild_failure_keeps_stale_state_and_schedules_scoped_retry(monkeypatc
 
     # The scanner resumes this recording at mind-map-only scope: the fixed
     # provider rebuilds the map; notes and index are still never executed.
-    monkeypatch.undo()  # restore the working fake installed above
+    # Replace only the broken provider. Calling monkeypatch.undo() here also
+    # restores the prior global DB engine and can silently switch databases.
     counters = _install_llm_fakes(monkeypatch, {"sum": 0, "mm": 0, "emb": 0})
     with session_scope() as s:
         recording = s.get(PlaudFile, "r1")
@@ -944,6 +946,9 @@ def test_rebuild_route_queues_only_the_mind_map_stage(monkeypatch, tmp_path):
         recording.pipeline_retry_count = 2
         recording.pipeline_next_retry_at = unrelated_due
     started = _deferred_threads(monkeypatch)
+    monkeypatch.setattr(
+        "localplaud.poller.poll.current_daemon_owner", lambda: "web-daemon-owner"
+    )
 
     queued = c.post("/file/r1/rebuild-mind-map")
     assert queued.status_code == 200
@@ -962,6 +967,7 @@ def test_rebuild_route_queues_only_the_mind_map_stage(monkeypatch, tmp_path):
         assert recording.pipeline_retry_count == 2
         assert recording.pipeline_next_retry_at.replace(tzinfo=UTC) == unrelated_due
         assert recording.processing_token is not None
+        assert recording.processing_token.startswith("daemon:web-daemon-owner:")
         assert started[0]["kwargs"]["claim_token"] == recording.processing_token
         runs = {run.stage: run for run in recording.stage_runs}
         map_detail = runs[StageName.mind_map].detail
@@ -1070,6 +1076,36 @@ def test_rebuild_route_revalidates_current_state_after_claim(monkeypatch, tmp_pa
         assert row.processing_token is None
         assert run.status == StageStatus.completed
         assert not (run.detail or {}).get("stale")
+
+
+def test_rebuild_route_cannot_queue_after_claim_takeover(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.db.models import PlaudFile, StageName
+    from localplaud.db.session import session_scope
+    from localplaud.worker import pipeline
+
+    _seed(audio_path=None)
+    original_claim = pipeline.claim_mind_map_rebuild
+
+    def claim_then_take_over(file_id):
+        token = original_claim(file_id)
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            row.processing_token = "replacement-owner"
+            row.processing_lease_until = datetime.now(UTC) + timedelta(minutes=5)
+        return token
+
+    monkeypatch.setattr(pipeline, "claim_mind_map_rebuild", claim_then_take_over)
+    response = c.post("/file/r1/rebuild-mind-map")
+    assert response.status_code == 409
+    assert response.text == "already processing"
+    with session_scope() as session:
+        row = session.get(PlaudFile, "r1")
+        run = next(item for item in row.stage_runs if item.stage == StageName.mind_map)
+        assert row.processing_token == "replacement-owner"
+        assert run.detail.get("reason") != "user requested mind map rebuild"
 
 
 def test_scope_markers_supersede_each_other(monkeypatch, tmp_path):

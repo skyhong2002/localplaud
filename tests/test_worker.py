@@ -67,6 +67,7 @@ def test_retrieve_ranks_by_cosine(monkeypatch, tmp_path):
     from localplaud.config import get_settings
     from localplaud.db.models import Chunk, PlaudFile
     from localplaud.db.session import init_db, session_scope
+    from localplaud.providers.service import resolve_recording_profile
 
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'qa.db'}")
     monkeypatch.setattr(db_session, "_engine", None)
@@ -79,8 +80,12 @@ def test_retrieve_ranks_by_cosine(monkeypatch, tmp_path):
     b = np.array([0.0, 1.0, 0.0], dtype=np.float32)
     with session_scope() as s:
         s.add(PlaudFile(id="f1", filename="rec"))
-        s.add(Chunk(file_id="f1", idx=0, text="about apples", embedding=a.tobytes(), dim=3))
-        s.add(Chunk(file_id="f1", idx=1, text="about oranges", embedding=b.tobytes(), dim=3))
+        s.flush()
+        snapshot = resolve_recording_profile(s, "f1").to_dict()
+        s.add(Chunk(file_id="f1", idx=0, text="about apples", embedding=a.tobytes(), dim=3,
+                    resolved_profile_snapshot=snapshot))
+        s.add(Chunk(file_id="f1", idx=1, text="about oranges", embedding=b.tobytes(), dim=3,
+                    resolved_profile_snapshot=snapshot))
 
     class FakeEmbedder:
         name = "fake"
@@ -107,6 +112,7 @@ def test_retrieve_ignores_mismatched_embedding_dims(monkeypatch, tmp_path):
     from localplaud.config import get_settings
     from localplaud.db.models import Chunk, PlaudFile
     from localplaud.db.session import init_db, session_scope
+    from localplaud.providers.service import resolve_recording_profile
 
     monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'qa2.db'}")
     monkeypatch.setattr(db_session, "_engine", None)
@@ -116,8 +122,12 @@ def test_retrieve_ignores_mismatched_embedding_dims(monkeypatch, tmp_path):
 
     with session_scope() as s:
         s.add(PlaudFile(id="f1", filename="rec"))
-        s.add(Chunk(file_id="f1", idx=0, text="old model", embedding=np.ones(5, np.float32).tobytes(), dim=5))
-        s.add(Chunk(file_id="f1", idx=1, text="new model", embedding=np.ones(3, np.float32).tobytes(), dim=3))
+        s.flush()
+        snapshot = resolve_recording_profile(s, "f1").to_dict()
+        s.add(Chunk(file_id="f1", idx=0, text="old model", embedding=np.ones(5, np.float32).tobytes(), dim=5,
+                    resolved_profile_snapshot=snapshot))
+        s.add(Chunk(file_id="f1", idx=1, text="new model", embedding=np.ones(3, np.float32).tobytes(), dim=3,
+                    resolved_profile_snapshot=snapshot))
 
     class FakeEmbedder:
         name = "fake"

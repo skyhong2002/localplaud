@@ -484,7 +484,31 @@ matches open the player at the matching moment; note and mind-map matches open t
 exact artifact, and note selection survives refresh and browser navigation. Search
 and new Ask citations resolve stable speaker keys to the user's recording-local
 display names without changing stored transcript/chunk identity. Semantic hits are
-blended in when an embedding index is available.
+blended in when an embedding index is available. Recording and library Ask use that
+same knowledge boundary: corrected transcript chunks are ranked with current,
+proven-local generated notes and user-owned Saved notes. Note evidence keeps its
+artifact id/version and opens the exact note without a fake timestamp;
+speaker-scoped Ask deliberately excludes notes. Generated-note eligibility is
+rechecked against current transcript lineage and stale stage state at retrieval, and
+cloud/Plaud or ambiguous legacy artifacts fail closed. Note embeddings have a
+separate durable document queue, so note edits remove stale note chunks immediately,
+concurrent old publishes are fenced, and provider failure leaves transcript, notes,
+recording status, and stage state intact for a later retry. Database startup only
+discovers pending note documents and fail-closed transcript reindexes; no embedding
+runs and no queued remote job resumes unless automatic processing is enabled,
+`localplaud work` is invoked, or the recording pipeline is already active. Transcript and note vectors must carry the
+resolved embedding identity: configured fallback spaces remain valid, while legacy
+or changed identities are excluded and durably requeued without rerunning ASR.
+Transcript-only reindex uses the same profile, fallback, remote-worker, fencing, and
+cost contracts as the main pipeline. Pipeline stages, note indexing, and Ask reserve
+against one serialized recording/library provider-cost ledger so concurrent work
+cannot independently spend the same remaining ceiling. Ask queries every configured
+current embedding space, and an existing thread takes a durable request lease before
+provider egress so separate clients cannot append competing follow-ups. Daemon-owned
+download, processing, and Ask claims carry a durable owner epoch: restart recovery
+reclaims only the replaced daemon's live-looking work plus globally expired leases,
+while unrelated CLI/backfill work remains fenced. Download publication is token- and
+lease-conditional, so a displaced late response cannot overwrite newer raw audio.
 MLX large-v3-turbo is smoke-tested on SkyLabMac, and
 the code targets pyannote Community-1. Optional VAD groundwork now exists behind a
 default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-timestamp
@@ -500,10 +524,11 @@ default-off until owned Taiwan Mandarin and Mandarin/English recordings validate
 language models, accuracy, timestamps, speed, and memory. The subscription-
 independence gate requires this `forced_alignment=true` evidence. Authenticated
 real-audio diarization is verified on SkyLabMac, including
-durable speaker output and resume behavior. Single-file
-Ask now answers grounded only in one recording and renders each citation as a
-playable timestamp that seeks the player, and whole-library Ask citations deep-link
-to the cited moment (`/file/{id}?t=`). Long transcripts are summarized with full
+durable speaker output and resume behavior. Single-file Ask answers only from the
+selected recording's transcript and notes: transcript citations seek the player,
+while note citations open the exact generated or Saved note. Whole-library Ask uses
+the same distinction and deep-links transcript evidence to the cited moment
+(`/file/{id}?t=`). Long transcripts are summarized with full
 coverage through bounded hierarchical map/reduce. Mind maps are generated from the
 canonical transcript as full-coverage Markdown outlines, rendered as a collapsible
 tree in the recording workspace, included in Markdown export, and downloadable as

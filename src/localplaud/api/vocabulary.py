@@ -7,10 +7,9 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from ..db.models import PlaudFile, VocabularyTerm
+from ..db.models import VocabularyTerm
 from ..db.session import session_scope
-from ..vocabulary import apply_vocabulary_to_library
-from ..worker.pipeline import processing_claim_active
+from ..vocabulary import VocabularyBusyError, apply_vocabulary_to_library
 
 router = APIRouter(prefix="/api/vocabulary", tags=["vocabulary"])
 
@@ -117,16 +116,10 @@ def delete_vocabulary(term_id: int) -> dict:
 
 @router.post("/apply-library")
 def apply_library_vocabulary() -> dict:
-    with session_scope() as session:
-        active = any(
-            processing_claim_active(row)
-            for row in session.scalars(
-                select(PlaudFile).where(PlaudFile.processing_token.is_not(None))
-            )
-        )
-    if active:
+    try:
+        return apply_vocabulary_to_library()
+    except VocabularyBusyError as exc:
         raise HTTPException(
             status_code=409,
-            detail="a recording is processing; apply vocabulary when processing finishes",
-        )
-    return apply_vocabulary_to_library()
+            detail=str(exc),
+        ) from exc

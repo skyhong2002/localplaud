@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db.models import ModelCatalogEntry, ProviderConnection, RemoteWorker
 from ..providers.contracts import Capability, Health, StageCapabilities
-from .client import RemoteWorkerClient
+from .client import RemoteWorkerClient, validate_provider_timeout
 
 
 def list_workers(session: Session) -> list[dict]:
@@ -33,6 +33,44 @@ def save_worker(session: Session, data: dict, worker_id: int | None = None) -> d
     row = session.get(RemoteWorker, worker_id) if worker_id else None
     if worker_id and row is None:
         raise LookupError("remote worker not found")
+    old_key = row.key if row is not None else None
+    new_key = data.get("key", old_key)
+    if new_key is None:
+        raise ValueError("remote worker key is required")
+    conflicting_worker = session.scalar(
+        select(RemoteWorker).where(
+            RemoteWorker.key == new_key,
+            *([RemoteWorker.id != row.id] if row is not None else []),
+        )
+    )
+    if conflicting_worker is not None:
+        if row is not None:
+            from ..providers.service import ProfileMutationBusyError
+
+            raise ProfileMutationBusyError(f"remote worker key already exists: {new_key}")
+        raise ValueError(f"remote worker key already exists: {new_key}")
+    if row is not None:
+        from ..providers.service import lock_library_profile_change
+
+        lock_library_profile_change(session)
+    old_connection = (
+        session.scalar(
+            select(ProviderConnection).where(ProviderConnection.key == f"worker:{old_key}")
+        )
+        if old_key is not None
+        else None
+    )
+    target_connection = session.scalar(
+        select(ProviderConnection).where(ProviderConnection.key == f"worker:{new_key}")
+    )
+    if target_connection is not None and target_connection is not old_connection:
+        if row is not None:
+            from ..providers.service import ProfileMutationBusyError
+
+            raise ProfileMutationBusyError(
+                f"provider connection key already exists: worker:{new_key}"
+            )
+        raise ValueError(f"provider connection key already exists: worker:{new_key}")
     if row is None:
         row = RemoteWorker(key=data["key"], name=data["name"], base_url=data["base_url"])
         session.add(row)
@@ -42,14 +80,14 @@ def save_worker(session: Session, data: dict, worker_id: int | None = None) -> d
     session.flush()
 
     connection_key = f"worker:{row.key}"
-    connection = session.scalar(
-        select(ProviderConnection).where(ProviderConnection.key == connection_key)
-    )
+    connection = old_connection or target_connection
     config = {
         "base_url": row.base_url,
         "token_env": row.token_env,
-        "timeout": data.get("timeout", 120),
-        "job_timeout": data.get("job_timeout", 3600),
+        "timeout": validate_provider_timeout(data.get("timeout", 120), field="timeout"),
+        "job_timeout": validate_provider_timeout(
+            data.get("job_timeout", 3600), field="job_timeout"
+        ),
     }
     if connection is None:
         connection = ProviderConnection(
@@ -63,6 +101,7 @@ def save_worker(session: Session, data: dict, worker_id: int | None = None) -> d
         )
         session.add(connection)
     else:
+        connection.key = connection_key
         connection.name = row.name
         connection.secret_ref = f"env:{row.token_env}"
         connection.config = config
@@ -127,6 +166,9 @@ def delete_worker(session: Session, worker_id: int) -> None:
     row = session.get(RemoteWorker, worker_id)
     if row is None:
         raise LookupError("remote worker not found")
+    from ..providers.service import lock_library_profile_change
+
+    lock_library_profile_change(session)
     connection = session.scalar(
         select(ProviderConnection).where(ProviderConnection.key == f"worker:{row.key}")
     )

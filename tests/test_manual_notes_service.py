@@ -105,6 +105,41 @@ def test_manual_note_rejects_unknown_and_trashed_recordings(client):
     assert trashed.status_code == 409
 
 
+def test_active_note_index_blocks_edit_and_delete_without_mutation(client):
+    _add_recording("index-busy")
+    created = client.post(
+        "/api/files/index-busy/notes",
+        json={"title": "Original", "content_md": "Original body"},
+    )
+    assert created.status_code == 201
+    note_id = created.json()["id"]
+
+    from localplaud.db.models import KnowledgeDocument, UserNote, UserNoteRevision
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        document = session.query(KnowledgeDocument).filter_by(user_note_id=note_id).one()
+        document.status = "running"
+        document.lease_token = "active-index"
+        document.lease_until = datetime.now(UTC) + timedelta(minutes=5)
+
+    edited = client.put(
+        f"/api/notes/{note_id}",
+        json={"title": "Changed", "content_md": "Changed body", "base_version": 1},
+    )
+    deleted = client.delete(f"/api/notes/{note_id}")
+    assert edited.status_code == deleted.status_code == 409
+    assert edited.json()["detail"] == deleted.json()["detail"]
+    assert "currently indexing" in edited.json()["detail"]
+    with session_scope() as session:
+        note = session.get(UserNote, note_id)
+        assert note.title == "Original"
+        assert note.content_md == "Original body"
+        assert note.version == 1
+        assert session.query(UserNoteRevision).filter_by(note_id=note_id).count() == 0
+        assert session.query(KnowledgeDocument).filter_by(user_note_id=note_id).count() == 1
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -242,6 +277,25 @@ def test_manual_note_list_update_delete_continuity_and_shared_contract(client):
     assert client.get("/api/notes?file_id=crud").json()["notes"] == []
 
 
+def test_legacy_note_update_without_base_version_preserves_history(client):
+    _add_recording("legacy-update")
+    created = client.post(
+        "/api/files/legacy-update/notes",
+        json={"title": "Original", "content_md": "Original body"},
+    ).json()
+
+    updated = client.put(
+        f"/api/notes/{created['id']}",
+        json={"title": "Legacy client", "content_md": "Updated body"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["version"] == 2
+
+    history = client.get(f"/api/notes/{created['id']}/history").json()["items"]
+    assert history[0]["version"] == 1
+    assert history[0]["title"] == "Original"
+
+
 @pytest.mark.parametrize("journal_mode", ["delete", "wal"])
 def test_manual_note_creation_serializes_with_concurrent_trash_update(
     client, monkeypatch, journal_mode
@@ -317,7 +371,9 @@ def _data_snapshot(connection) -> dict[str, list[tuple]]:
     tables = connection.execute(
         text(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
-            "AND name NOT LIKE 'sqlite_%' AND name != 'user_notes' ORDER BY name"
+            "AND name NOT LIKE 'sqlite_%' "
+            "AND name NOT IN ('user_notes', 'knowledge_documents', 'knowledge_chunks') "
+            "ORDER BY name"
         )
     ).scalars()
     return {

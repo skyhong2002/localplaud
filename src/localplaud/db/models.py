@@ -14,11 +14,13 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     JSON,
     BigInteger,
+    CheckConstraint,
     Column,
     DateTime,
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -204,6 +206,10 @@ class PlaudFile(Base):
     processing_lease_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, index=True
     )
+    download_token: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
+    download_lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, index=True
+    )
     origin: Mapped[str] = mapped_column(String(32), default="plaud", index=True)
     folder_id: Mapped[int | None] = mapped_column(
         ForeignKey("folders.id", ondelete="SET NULL"), default=None, index=True
@@ -248,6 +254,9 @@ class PlaudFile(Base):
     )
     user_notes: Mapped[list[UserNote]] = relationship(
         back_populates="file", cascade="all, delete-orphan", order_by="UserNote.id"
+    )
+    knowledge_documents: Mapped[list[KnowledgeDocument]] = relationship(
+        back_populates="file", cascade="all, delete-orphan", order_by="KnowledgeDocument.id"
     )
     folder: Mapped[Folder | None] = relationship(back_populates="recordings")
     tags: Mapped[list[Tag]] = relationship(
@@ -415,6 +424,9 @@ class Summary(Base):
     restored_from_revision: Mapped[int | None] = mapped_column(Integer, default=None)
 
     file: Mapped[PlaudFile] = relationship(back_populates="summaries")
+    knowledge_document: Mapped[KnowledgeDocument | None] = relationship(
+        back_populates="summary", cascade="all, delete-orphan", single_parent=True
+    )
 
     __table_args__ = (UniqueConstraint("file_id", "template", name="uq_summary_file_template"),)
 
@@ -508,6 +520,11 @@ class AskThread(Base):
     )
     title: Mapped[str] = mapped_column(String(200))
     retrieval_scope: Mapped[dict] = mapped_column(JSON, default=dict)
+    request_token: Mapped[str | None] = mapped_column(String(64), default=None)
+    request_lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    request_owner: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
@@ -572,6 +589,9 @@ class UserNote(Base):
         cascade="all, delete-orphan",
         order_by="UserNoteRevision.version",
     )
+    knowledge_document: Mapped[KnowledgeDocument | None] = relationship(
+        back_populates="user_note", cascade="all, delete-orphan", single_parent=True
+    )
 
 
 class UserNoteRevision(Base):
@@ -593,6 +613,181 @@ class UserNoteRevision(Base):
 
     __table_args__ = (
         UniqueConstraint("note_id", "version", name="uq_user_note_revision_note_version"),
+    )
+
+
+class KnowledgeDocument(Base):
+    """Durable indexing state for one current note artifact."""
+
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    file_id: Mapped[str | None] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), default=None, index=True
+    )
+    summary_id: Mapped[int | None] = mapped_column(
+        ForeignKey("summaries.id", ondelete="CASCADE"), default=None
+    )
+    user_note_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user_notes.id", ondelete="CASCADE"), default=None
+    )
+    artifact_version: Mapped[int | None] = mapped_column(Integer, default=None)
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    generation: Mapped[str] = mapped_column(String(64))
+
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", server_default="pending"
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    lease_token: Mapped[str | None] = mapped_column(String(64), default=None)
+    lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    dim: Mapped[int | None] = mapped_column(Integer, default=None)
+    profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
+    file: Mapped[PlaudFile | None] = relationship(back_populates="knowledge_documents")
+    summary: Mapped[Summary | None] = relationship(back_populates="knowledge_document")
+    user_note: Mapped[UserNote | None] = relationship(back_populates="knowledge_document")
+    chunks: Mapped[list[KnowledgeChunk]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+        order_by="KnowledgeChunk.idx",
+    )
+    index_attempts: Mapped[list[KnowledgeIndexAttempt]] = relationship(
+        back_populates="document",
+        order_by="KnowledgeIndexAttempt.id",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('generated_summary', 'user_note')",
+            name="ck_knowledge_documents_kind",
+        ),
+        CheckConstraint(
+            "(summary_id IS NOT NULL AND user_note_id IS NULL) OR "
+            "(summary_id IS NULL AND user_note_id IS NOT NULL)",
+            name="ck_knowledge_documents_exactly_one_artifact",
+        ),
+        UniqueConstraint("summary_id", name="uq_knowledge_documents_summary_id"),
+        UniqueConstraint("user_note_id", name="uq_knowledge_documents_user_note_id"),
+        Index(
+            "ix_knowledge_documents_status_next_retry_at", "status", "next_retry_at"
+        ),
+    )
+
+
+class KnowledgeChunk(Base):
+    """One embedded text span belonging to a versioned knowledge document."""
+
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True
+    )
+    idx: Mapped[int] = mapped_column(Integer, default=0)
+    text: Mapped[str] = mapped_column(Text, default="")
+    embedding_model: Mapped[str | None] = mapped_column(String(128), default=None)
+    dim: Mapped[int | None] = mapped_column(Integer, default=None)
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id", "idx", name="uq_knowledge_chunks_document_idx"
+        ),
+        Index("ix_knowledge_chunks_dim_document_id", "dim", "document_id"),
+    )
+
+
+class KnowledgeIndexAttempt(Base):
+    """Immutable-cost ledger for one note-index claim attempt."""
+
+    __tablename__ = "knowledge_index_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    document_id: Mapped[int | None] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="SET NULL"),
+        default=None,
+        index=True,
+    )
+    file_id: Mapped[str | None] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), default=None, index=True
+    )
+    generation: Mapped[str] = mapped_column(String(64))
+    attempt: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
+    document: Mapped[KnowledgeDocument | None] = relationship(
+        back_populates="index_attempts"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "generation",
+            "attempt",
+            name="uq_knowledge_index_attempt_document_generation_attempt",
+        ),
+        Index("ix_knowledge_index_attempts_file_status", "file_id", "status"),
+    )
+
+
+class ProviderCostReservation(Base):
+    """Durable in-flight/direct-call provider cost charged to one budget scope."""
+
+    __tablename__ = "provider_cost_reservations"
+
+    id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    scope_key: Mapped[str] = mapped_column(String(128), index=True)
+    file_id: Mapped[str | None] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), default=None, index=True
+    )
+    operation: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    owner: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
+    lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, index=True
+    )
+    profile_fingerprint: Mapped[str | None] = mapped_column(String(64), default=None)
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
     )
 
 

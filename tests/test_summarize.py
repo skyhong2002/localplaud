@@ -113,6 +113,25 @@ def test_long_transcript_uses_every_chunk_before_final_summary(monkeypatch):
     assert result["title"] == "Complete note"
 
 
+def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import summarize
+
+    class FakeLlm:
+        def complete(self, *_args, **_kwargs):
+            return "# Result\n\n## Summary\nGrounded."
+
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: FakeLlm())
+    settings = Settings(
+        llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-tested"}}
+    )
+
+    result = summarize(_transcript(Segment(text="evidence", start=0, end=1)), settings)
+
+    assert result["provider"] == "opencode-go"
+    assert result["model"] == "qwen-tested"
+
+
 def test_reducer_converges_when_model_fills_each_token_budget(monkeypatch):
     from localplaud.config import Settings
     from localplaud.worker.summarize import summarize

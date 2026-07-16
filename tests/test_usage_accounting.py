@@ -61,6 +61,92 @@ def test_process_peak_memory_normalizes_macos_and_linux_units(monkeypatch):
     monkeypatch.setattr(usage_module.sys, "platform", "darwin")
     assert usage_module.process_peak_memory_mb() == 100.0
 
+
+def test_postgresql_recording_budget_uses_library_first_lock_order():
+    from localplaud.providers.usage import lock_cost_budget
+
+    events: list[str] = []
+
+    class Bind:
+        class dialect:
+            name = "postgresql"
+
+    class Session:
+        def get_bind(self):
+            return Bind()
+
+        def execute(self, statement):
+            events.append(str(statement))
+
+        def scalar(self, statement):
+            events.append(str(statement))
+            return "recording"
+
+    lock_cost_budget(Session(), "recording")
+    assert events[0] == "SELECT pg_advisory_xact_lock_shared(1280330574)"
+    assert "plaud_files.id = :id_1" in events[1]
+    assert "FOR UPDATE" in events[1]
+
+
+def test_zero_cost_external_call_creates_recoverable_dispatch_lease(
+    monkeypatch, tmp_path
+):
+    import resource
+
+    import localplaud.providers.usage as usage_module
+
+    _reset(monkeypatch, tmp_path)
+    from localplaud.db.models import ProviderCostReservation
+    from localplaud.db.session import session_scope
+    from localplaud.providers.usage import (
+        provider_dispatch_fingerprint,
+        recover_provider_dispatch_reservations,
+        reserve_provider_cost,
+    )
+
+    monkeypatch.setattr(
+        "localplaud.poller.poll.current_daemon_owner", lambda: "old-daemon"
+    )
+    snapshot = {
+        "policy": {"no_egress": False},
+        "stages": {
+            "ask": {
+                "connection": "llm:external",
+                "model": "external-model",
+                "execution_target": "cloud",
+                "data_egress": True,
+                "configuration": {"base_url": "https://example.invalid/v1"},
+            }
+        },
+    }
+    with session_scope() as session:
+        projected, pricing = reserve_provider_cost(
+            session,
+            reservation_id="zero-cost:ask",
+            file_id=None,
+            operation="ask",
+            snapshot=snapshot,
+            usage={"input_chars": 10, "requests": 1},
+        )
+        assert projected == 0
+        assert pricing == {}
+
+    with session_scope() as session:
+        row = session.get(ProviderCostReservation, "zero-cost:ask")
+        assert row.status == "active"
+        assert row.owner == "old-daemon"
+        assert row.lease_until is not None
+        assert row.profile_fingerprint == provider_dispatch_fingerprint(
+            snapshot, "ask"
+        )
+
+    assert recover_provider_dispatch_reservations("old-daemon") == 1
+    with session_scope() as session:
+        row = session.get(ProviderCostReservation, "zero-cost:ask")
+        assert row.status == "failed"
+        assert row.lease_until is None
+        assert row.completed_at is not None
+
     monkeypatch.setattr(
         resource,
         "getrusage",
@@ -68,6 +154,203 @@ def test_process_peak_memory_normalizes_macos_and_linux_units(monkeypatch):
     )
     monkeypatch.setattr(usage_module.sys, "platform", "linux")
     assert usage_module.process_peak_memory_mb() == 100.0
+
+
+def test_expired_dispatch_lease_is_recovered_without_matching_owner(
+    monkeypatch, tmp_path
+):
+    _reset(monkeypatch, tmp_path)
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.db.models import ProviderCostReservation
+    from localplaud.db.session import session_scope
+    from localplaud.providers.usage import recover_provider_dispatch_reservations
+
+    with session_scope() as session:
+        session.add(
+            ProviderCostReservation(
+                id="expired:dispatch",
+                scope_key="library",
+                operation="ask",
+                status="active",
+                owner="unrelated-owner",
+                lease_until=datetime.now(UTC) - timedelta(seconds=1),
+                profile_fingerprint="f" * 64,
+            )
+        )
+    assert recover_provider_dispatch_reservations(None) == 1
+    with session_scope() as session:
+        row = session.get(ProviderCostReservation, "expired:dispatch")
+        assert row.status == "failed"
+        assert row.lease_until is None
+
+
+def test_recovery_settles_stage_reservation_without_double_counting(monkeypatch, tmp_path):
+    _reset(monkeypatch, tmp_path)
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        ProviderCostReservation,
+        StageAttempt,
+        StageName,
+        StageStatus,
+    )
+    from localplaud.db.session import session_scope
+    from localplaud.providers.usage import (
+        cost_budget_status,
+        recover_provider_dispatch_reservations,
+    )
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="recovered-cost", status=FileStatus.done))
+        attempt = StageAttempt(
+            file_id="recovered-cost",
+            stage=StageName.index,
+            attempt=1,
+            status=StageStatus.failed,
+            usage={"dispatch_reservation_ids": ["stage:recovered"]},
+            estimated_cost_usd=0.25,
+            started_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
+        )
+        session.add(attempt)
+        session.add(
+            ProviderCostReservation(
+                id="stage:recovered",
+                scope_key="file:recovered-cost",
+                file_id="recovered-cost",
+                operation="embed",
+                status="active",
+                owner="old-daemon",
+                lease_until=datetime.now(UTC) + timedelta(hours=1),
+                estimated_cost_usd=0.25,
+            )
+        )
+
+    assert recover_provider_dispatch_reservations("old-daemon") == 1
+    with session_scope() as session:
+        assert session.get(ProviderCostReservation, "stage:recovered") is None
+        attempt = session.scalar(select(StageAttempt))
+        assert attempt.estimated_cost_usd == 0.25
+        budget = cost_budget_status(session, "recovered-cost", {"policy": {}})
+        assert budget["stage_spent_usd"] == 0.25
+        assert budget["reserved_usd"] == 0
+        assert budget["spent_usd"] == 0.25
+
+
+def test_recovery_locks_library_then_file_budgets_in_deterministic_order(
+    monkeypatch, tmp_path
+):
+    _reset(monkeypatch, tmp_path)
+    from datetime import UTC, datetime, timedelta
+
+    import localplaud.providers.usage as usage_module
+    from localplaud.db.models import FileStatus, PlaudFile, ProviderCostReservation
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        for file_id in ("z-file", "a-file"):
+            session.add(PlaudFile(id=file_id, status=FileStatus.done))
+            session.add(
+                ProviderCostReservation(
+                    id=f"dispatch:{file_id}",
+                    scope_key=f"file:{file_id}",
+                    file_id=file_id,
+                    operation="embed",
+                    status="active",
+                    owner="old-daemon",
+                    lease_until=datetime.now(UTC) + timedelta(hours=1),
+                )
+            )
+
+    real_lock = usage_module.lock_cost_budget
+    locked_scopes: list[str | None] = []
+
+    def observe_lock(session, file_id):
+        locked_scopes.append(file_id)
+        real_lock(session, file_id)
+
+    monkeypatch.setattr(usage_module, "lock_cost_budget", observe_lock)
+    assert usage_module.recover_provider_dispatch_reservations("old-daemon") == 2
+    assert locked_scopes == [None, "a-file", "z-file"]
+
+
+def test_zero_cost_external_pipeline_call_has_active_dispatch_reservation(
+    monkeypatch, tmp_path
+):
+    settings = _reset(monkeypatch, tmp_path)
+    import localplaud.worker.pipeline as pipeline
+    from localplaud.asr.base import Segment, Transcript
+    from localplaud.db.models import (
+        ExecutionProfile,
+        FileStatus,
+        ModelCatalogEntry,
+        PlaudFile,
+        ProviderConnection,
+        ProviderCostReservation,
+    )
+    from localplaud.db.session import session_scope
+
+    audio = tmp_path / "free-external.wav"
+    audio.write_bytes(b"RIFF")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="free-external",
+                status=FileStatus.downloaded,
+                audio_path=str(audio),
+            )
+        )
+        profile = session.scalar(select(ExecutionProfile).where(ExecutionProfile.is_system_default))
+        profile.no_egress = False
+        profile.privacy_policy = "allow-egress"
+        profile.cost_ceiling = None
+        connection = session.scalar(
+            select(ProviderConnection).where(ProviderConnection.key == "asr:faster-whisper")
+        )
+        connection.execution_target = "cloud"
+        connection.data_egress = True
+        model = session.scalar(
+            select(ModelCatalogEntry).where(
+                ModelCatalogEntry.connection_id == connection.id,
+                ModelCatalogEntry.model_key == settings.asr.faster_whisper.model,
+            )
+        )
+        capability = dict(model.capabilities)
+        capability["execution_target"] = "cloud"
+        capability["data_egress"] = True
+        capability["metadata"] = {}
+        model.capabilities = capability
+
+    observed = []
+
+    def external_asr(*_args, **_kwargs):
+        with session_scope() as session:
+            row = session.scalar(
+                select(ProviderCostReservation).where(
+                    ProviderCostReservation.file_id == "free-external",
+                    ProviderCostReservation.operation == "transcribe",
+                    ProviderCostReservation.status == "active",
+                )
+            )
+            observed.append((row.owner, row.lease_until, row.profile_fingerprint))
+        return Transcript(
+            segments=[Segment(text="done", start=0, end=1)],
+            provider="faster-whisper",
+            model=settings.asr.faster_whisper.model,
+        )
+
+    monkeypatch.setattr(pipeline.transcribe, "run_asr", external_asr)
+    pipeline.process_file("free-external", settings)
+    assert observed and observed[0][0] and observed[0][1] and observed[0][2]
+    with session_scope() as session:
+        assert session.scalar(
+            select(ProviderCostReservation).where(
+                ProviderCostReservation.file_id == "free-external"
+            )
+        ) is None
 
 
 def test_pipeline_persists_priced_attempt_and_usage_api(monkeypatch, tmp_path):
@@ -472,3 +755,51 @@ def test_pipeline_blocks_provider_call_then_resumes_under_new_ceiling(monkeypatc
         )
         assert [item.status.value for item in attempts] == ["failed", "completed"]
         assert attempts[1].estimated_cost_usd == pytest.approx(0.02)
+
+
+def test_degraded_stage_keeps_preflight_cost_reservation(monkeypatch, tmp_path):
+    _reset(monkeypatch, tmp_path)
+    from localplaud.db.models import (
+        PlaudFile,
+        StageAttempt,
+        StageName,
+        StageRun,
+        StageStatus,
+    )
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import _set_stage_in_session
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="degraded-cost", filename="Degraded"))
+        session.add(
+            StageRun(
+                file_id="degraded-cost",
+                stage=StageName.diarize,
+                status=StageStatus.running,
+                attempts=1,
+                detail={},
+            )
+        )
+        session.add(
+            StageAttempt(
+                file_id="degraded-cost",
+                stage=StageName.diarize,
+                attempt=1,
+                status=StageStatus.running,
+                usage={"projection": True},
+                estimated_cost_usd=0.06,
+            )
+        )
+    with session_scope() as session:
+        _set_stage_in_session(
+            session,
+            "degraded-cost",
+            StageName.diarize,
+            StageStatus.degraded,
+            error="provider unavailable",
+        )
+    with session_scope() as session:
+        attempt = session.scalar(
+            select(StageAttempt).where(StageAttempt.file_id == "degraded-cost")
+        )
+        assert attempt.estimated_cost_usd == pytest.approx(0.06)

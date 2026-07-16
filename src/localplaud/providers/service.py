@@ -6,24 +6,29 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from ..config import Settings, get_settings
 from ..db.models import (
+    AskThread,
     AutomationRule,
     ExecutionProfile,
     Folder,
+    KnowledgeDocument,
     ModelCatalogEntry,
     NoteTemplate,
     PlaudFile,
     ProfileStageSelection,
     ProviderConnection,
+    ProviderCostReservation,
     RecordingProfileOverride,
     RecordingRuleProfileAssignment,
+    RemoteWorker,
 )
 from .contracts import Capability, Health, ProviderStage, StageCapabilities
 from .resolver import ResolvedProfile, resolve_profile
+from .usage import lock_cost_budget
 
 DEFAULT_PROFILE_KEY = "legacy-settings-default"
 _STAGE_FAMILY = {
@@ -47,6 +52,10 @@ _CREDENTIAL_CONFIG_KEYS = {
     "secret",
     "token",
 }
+
+
+class ProfileMutationBusyError(RuntimeError):
+    pass
 
 
 def _is_cloud(name: str) -> bool:
@@ -527,15 +536,27 @@ def _profile_query():
 
 def _capability_catalog(session: Session) -> dict[tuple[str, str], dict]:
     catalog: dict[tuple[str, str], dict] = {}
+    disabled_workers = {
+        f"worker:{worker.key}"
+        for worker in session.scalars(select(RemoteWorker).where(RemoteWorker.enabled.is_(False)))
+    }
     for model in session.scalars(select(ModelCatalogEntry)):
         connection = session.get(ProviderConnection, model.connection_id)
-        if connection is not None and model.enabled:
+        if (
+            connection is not None
+            and connection.key not in disabled_workers
+            and model.enabled
+        ):
             catalog[(connection.key, model.model_key)] = model.capabilities
     return catalog
 
 
 def _connection_catalog(session: Session) -> dict[str, dict[str, Any]]:
     """Runtime connection identity persisted into each resolved snapshot."""
+    disabled_workers = {
+        f"worker:{worker.key}"
+        for worker in session.scalars(select(RemoteWorker).where(RemoteWorker.enabled.is_(False)))
+    }
     return {
         connection.key: {
             "provider_type": connection.provider_type,
@@ -545,6 +566,7 @@ def _connection_catalog(session: Session) -> dict[str, dict[str, Any]]:
             "secret_ref": connection.secret_ref,
         }
         for connection in session.scalars(select(ProviderConnection))
+        if connection.key not in disabled_workers
     }
 
 
@@ -715,6 +737,115 @@ def resolve_recording_profile(
     return resolve_profile(layers, _capability_catalog(session), _connection_catalog(session))
 
 
+def lock_recording_profile_change(session: Session, file_id: str) -> PlaudFile | None:
+    from ..worker.pipeline import processing_claim_active
+
+    lock_cost_budget(session, file_id)
+    recording = session.get(PlaudFile, file_id)
+    if recording is None:
+        return None
+    session.refresh(recording)
+    if processing_claim_active(recording):
+        raise ProfileMutationBusyError(
+            "recording is processing; change profile when it finishes"
+        )
+    _reject_active_provider_operations(session, file_id=file_id)
+    return recording
+
+
+def lock_library_profile_resolution(session: Session) -> None:
+    """Share the library fence before a PostgreSQL recording/profile lock.
+
+    Global profile and membership mutations take the matching exclusive lock.
+    SQLite serializes these paths through its database write lock instead.
+    """
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(text("SELECT pg_advisory_xact_lock_shared(1280330574)"))
+
+
+def lock_library_profile_membership_change(session: Session) -> None:
+    """Fence profile-affecting membership changes before set enumeration."""
+    lock_cost_budget(session, None)
+
+
+def lock_recording_membership_changes(session: Session, file_ids: list[str]) -> None:
+    """Fence known profile-affecting memberships and lock rows in order."""
+    lock_library_profile_membership_change(session)
+    lock_recording_profile_changes(session, file_ids)
+
+
+def _reject_active_provider_operations(
+    session: Session,
+    *,
+    file_id: str | None,
+) -> None:
+    """Reject mutation while the same profile scope has committed to dispatch."""
+    now = datetime.now(UTC)
+    ask_filter = (
+        or_(AskThread.file_id == file_id, AskThread.file_id.is_(None))
+        if file_id is not None
+        else AskThread.file_id.is_(None)
+    )
+    if session.scalar(
+        select(AskThread.id)
+        .where(
+            ask_filter,
+            AskThread.request_token.is_not(None),
+            AskThread.request_lease_until > now,
+        )
+        .limit(1)
+    ) is not None:
+        raise ProfileMutationBusyError(
+            "Ask is using this provider scope; change the profile when it finishes"
+        )
+    document_filter = (
+        KnowledgeDocument.file_id == file_id
+        if file_id is not None
+        else KnowledgeDocument.file_id.is_(None)
+    )
+    if session.scalar(
+        select(KnowledgeDocument.id)
+        .where(
+            document_filter,
+            KnowledgeDocument.status == "running",
+            KnowledgeDocument.lease_token.is_not(None),
+            KnowledgeDocument.lease_until > now,
+        )
+        .limit(1)
+    ) is not None:
+        raise ProfileMutationBusyError(
+            "note indexing is using this provider scope; change the profile when it finishes"
+        )
+    scope_key = f"file:{file_id}" if file_id is not None else "library"
+    if session.scalar(
+        select(ProviderCostReservation.id)
+        .where(
+            ProviderCostReservation.scope_key == scope_key,
+            ProviderCostReservation.status == "active",
+            ProviderCostReservation.lease_until > now,
+        )
+        .limit(1)
+    ) is not None:
+        raise ProfileMutationBusyError(
+            "a provider request is active; change the profile when it finishes"
+        )
+
+
+def lock_library_profile_change(session: Session) -> list[str]:
+    """Fence a provider/profile mutation against every recording worker."""
+    lock_library_profile_membership_change(session)
+    file_ids = list(session.scalars(select(PlaudFile.id).order_by(PlaudFile.id)))
+    for file_id in file_ids:
+        lock_recording_profile_change(session, file_id)
+    _reject_active_provider_operations(session, file_id=None)
+    return file_ids
+
+
+def lock_recording_profile_changes(session: Session, file_ids: list[str]) -> None:
+    for file_id in sorted(set(file_ids)):
+        lock_recording_profile_change(session, file_id)
+
+
 def select_recording_override(
     session: Session,
     file_id: str,
@@ -723,7 +854,10 @@ def select_recording_override(
     stages: dict | None = None,
     policy: dict | None = None,
 ) -> dict:
-    if session.get(PlaudFile, file_id) is None or session.get(ExecutionProfile, profile_id) is None:
+    if (
+        lock_recording_profile_change(session, file_id) is None
+        or session.get(ExecutionProfile, profile_id) is None
+    ):
         raise LookupError("recording or profile not found")
     row = session.get(RecordingProfileOverride, file_id)
     if row is None:
@@ -733,6 +867,9 @@ def select_recording_override(
     row.stage_overrides = stages or {}
     row.policy_overrides = policy or {}
     session.flush()
+    from ..worker.knowledge_index import sync_file_knowledge_documents
+
+    sync_file_knowledge_documents(session, file_id)
     return {
         "file_id": file_id,
         "profile_id": profile_id,
@@ -742,11 +879,15 @@ def select_recording_override(
 
 
 def clear_recording_override(session: Session, file_id: str) -> dict:
-    if session.get(PlaudFile, file_id) is None:
+    if lock_recording_profile_change(session, file_id) is None:
         raise LookupError("recording not found")
     row = session.get(RecordingProfileOverride, file_id)
     if row is not None:
         session.delete(row)
+        session.flush()
+    from ..worker.knowledge_index import sync_file_knowledge_documents
+
+    sync_file_knowledge_documents(session, file_id)
     return {"file_id": file_id, "profile_id": None}
 
 
@@ -756,8 +897,23 @@ def select_folder_profile(session: Session, folder_id: int, profile_id: int | No
         raise LookupError("folder not found")
     if profile_id is not None and session.get(ExecutionProfile, profile_id) is None:
         raise LookupError("profile not found")
+    # The affected set is dynamic. Fence new claims/membership changes before
+    # enumeration, then lock recording rows in deterministic order.
+    lock_library_profile_membership_change(session)
+    file_ids = list(
+        session.scalars(
+            select(PlaudFile.id)
+            .where(PlaudFile.folder_id == folder_id)
+            .order_by(PlaudFile.id)
+        )
+    )
+    lock_recording_profile_changes(session, file_ids)
     folder.execution_profile_id = profile_id
     session.flush()
+    from ..worker.knowledge_index import sync_file_knowledge_documents
+
+    for file_id in file_ids:
+        sync_file_knowledge_documents(session, file_id)
     return {"folder_id": folder.id, "profile_id": folder.execution_profile_id}
 
 
@@ -767,11 +923,20 @@ def save_connection(session: Session, data: dict, connection_id: int | None = No
         raise ValueError("raw credentials are not accepted; use secret_ref")
     _validate_connection_config(data.get("config", {}))
     row = session.get(ProviderConnection, connection_id) if connection_id else None
+    existing = row is not None
     if connection_id and row is None:
         raise LookupError("provider connection not found")
+    if existing:
+        lock_library_profile_change(session)
     provider_type = data.get("provider_type", getattr(row, "provider_type", None))
     execution_target = data.get("execution_target", getattr(row, "execution_target", None))
     data_egress = data.get("data_egress", getattr(row, "data_egress", None))
+    if execution_target == "remote_worker":
+        from ..remote.client import validate_provider_timeout
+
+        config = data.get("config", getattr(row, "config", {})) or {}
+        validate_provider_timeout(config.get("timeout", 120), field="timeout")
+        validate_provider_timeout(config.get("job_timeout", 3600), field="job_timeout")
     if provider_type == "codex-local" and (
         execution_target != "cloud" or data_egress is not True
     ):
@@ -793,6 +958,10 @@ def save_connection(session: Session, data: dict, connection_id: int | None = No
         if field in data:
             setattr(row, field, data[field])
     session.flush()
+    if existing:
+        from ..worker.knowledge_index import sync_knowledge_documents
+
+        sync_knowledge_documents(session)
     return (
         list_connections(session)[-1]
         if connection_id is None
@@ -804,6 +973,7 @@ def delete_connection(session: Session, connection_id: int) -> None:
     row = session.get(ProviderConnection, connection_id)
     if row is None:
         raise LookupError("provider connection not found")
+    lock_library_profile_change(session)
     if session.scalar(
         select(ModelCatalogEntry.id).where(ModelCatalogEntry.connection_id == connection_id)
     ):
@@ -960,8 +1130,11 @@ def check_model_health(session: Session, model_id: int) -> dict:
 
 def save_model(session: Session, data: dict, model_id: int | None = None) -> dict:
     row = session.get(ModelCatalogEntry, model_id) if model_id else None
+    existing = row is not None
     if model_id and row is None:
         raise LookupError("model not found")
+    if existing:
+        lock_library_profile_change(session)
     connection = session.get(
         ProviderConnection, data.get("connection_id", getattr(row, "connection_id", None))
     )
@@ -996,6 +1169,10 @@ def save_model(session: Session, data: dict, model_id: int | None = None) -> dic
         if field in data:
             setattr(row, field, data[field])
     session.flush()
+    if existing:
+        from ..worker.knowledge_index import sync_knowledge_documents
+
+        sync_knowledge_documents(session)
     return next(item for item in list_models(session) if item["id"] == row.id)
 
 
@@ -1003,6 +1180,7 @@ def delete_model(session: Session, model_id: int) -> None:
     row = session.get(ModelCatalogEntry, model_id)
     if row is None:
         raise LookupError("model not found")
+    lock_library_profile_change(session)
     if session.scalar(
         select(ProfileStageSelection.id).where(ProfileStageSelection.model_id == model_id)
     ):
@@ -1024,6 +1202,7 @@ def create_profile_version(session: Session, data: dict) -> dict:
         + 1
     )
     if data.get("is_system_default"):
+        lock_library_profile_change(session)
         for current in session.scalars(
             select(ExecutionProfile).where(ExecutionProfile.is_system_default)
         ):
@@ -1067,6 +1246,10 @@ def create_profile_version(session: Session, data: dict) -> dict:
     resolve_profile(
         [_profile_layer(row)], _capability_catalog(session), _connection_catalog(session)
     )
+    if row.is_system_default:
+        from ..worker.knowledge_index import sync_knowledge_documents
+
+        sync_knowledge_documents(session)
     return next(item for item in list_profiles(session) if item["id"] == row.id)
 
 
@@ -1074,6 +1257,7 @@ def delete_profile(session: Session, profile_id: int) -> None:
     row = session.get(ExecutionProfile, profile_id)
     if row is None:
         raise LookupError("profile not found")
+    lock_library_profile_change(session)
     if row.is_system_default:
         raise ValueError("cannot delete the system default profile")
     if session.scalar(
@@ -1132,12 +1316,16 @@ def install_hardware_recommendation(
     )
     if existing is not None:
         if make_default and not existing.is_system_default:
+            lock_library_profile_change(session)
             for current in session.scalars(
                 select(ExecutionProfile).where(ExecutionProfile.is_system_default)
             ):
                 current.is_system_default = False
             existing.is_system_default = True
             session.flush()
+            from ..worker.knowledge_index import sync_knowledge_documents
+
+            sync_knowledge_documents(session)
         return next(item for item in list_profiles(session) if item["id"] == existing.id)
 
     connection_key = f"asr:{recommendation['provider']}"

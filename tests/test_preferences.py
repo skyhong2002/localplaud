@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
+
+import pytest
 
 
 def _client(monkeypatch, tmp_path):
@@ -99,12 +102,22 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
 def test_daemon_processing_respects_workspace_preference(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     calls: list[int] = []
+    reindex_calls: list[int] = []
+    note_calls: list[int] = []
 
     def fake_process_pending(_settings, *, limit):
         calls.append(limit)
         return 1
 
     monkeypatch.setattr("localplaud.worker.pipeline.process_pending", fake_process_pending)
+    monkeypatch.setattr(
+        "localplaud.worker.reindex.process_pending_reindexes",
+        lambda _settings, *, limit: reindex_calls.append(limit) or 0,
+    )
+    monkeypatch.setattr(
+        "localplaud.worker.knowledge_index.process_pending_documents",
+        lambda _settings, *, limit: note_calls.append(limit) or 0,
+    )
     from localplaud.cli import process_automatic_pending
     from localplaud.config import get_settings
 
@@ -118,6 +131,47 @@ def test_daemon_processing_respects_workspace_preference(monkeypatch, tmp_path):
         assert response.status_code == 200
         assert process_automatic_pending(get_settings()) == 0
     assert calls == [1]
+    assert reindex_calls == [get_settings().pipeline.files_per_cycle]
+    assert note_calls == [get_settings().pipeline.files_per_cycle * 4]
+
+
+@pytest.mark.parametrize(("enabled", "expected_calls"), [(False, 0), (True, 1)])
+def test_api_startup_resumes_remote_jobs_only_when_auto_processing_is_enabled(
+    monkeypatch, tmp_path, enabled, expected_calls
+):
+    client = _client(monkeypatch, tmp_path)
+    from localplaud.api import app as app_module
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.preferences import (
+        DEFAULT_WORKSPACE_PREFERENCES,
+        save_workspace_preferences,
+    )
+
+    init_db()
+    with session_scope() as session:
+        save_workspace_preferences(
+            session,
+            DEFAULT_WORKSPACE_PREFERENCES
+            | {"auto_process_new_recordings": enabled},
+        )
+
+    calls: list[str] = []
+
+    class ImmediateThread:
+        def __init__(self, *, target, daemon):
+            assert daemon is True
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(
+        app_module, "resume_pending_jobs", lambda: calls.append("resumed")
+    )
+    monkeypatch.setattr(threading, "Thread", ImmediateThread)
+    with client:
+        assert client.get("/healthz").status_code == 200
+    assert calls == ["resumed"] * expected_calls
 
 
 def test_workspace_timezone_and_clock_apply_to_recorded_dates(monkeypatch, tmp_path):

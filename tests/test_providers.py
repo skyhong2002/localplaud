@@ -1,8 +1,9 @@
+from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session
 
 import localplaud.config as config
@@ -20,6 +21,7 @@ from localplaud.db.migrations import (
 from localplaud.db.models import (
     AutomationRule,
     Base,
+    Chunk,
     ExecutionProfile,
     Folder,
     ModelCatalogEntry,
@@ -29,17 +31,22 @@ from localplaud.db.models import (
     ProviderConnection,
     RecordingProfileOverride,
     RecordingRuleProfileAssignment,
+    StageName,
     StageRun,
+    StageStatus,
 )
 from localplaud.providers.contracts import Capability, ProviderStage, StageCapabilities
 from localplaud.providers.resolver import ResolutionError, resolve_profile
 from localplaud.providers.service import (
+    ProfileMutationBusyError,
     bootstrap_default_profile,
     clear_recording_override,
+    create_profile_version,
     delete_profile,
     list_connections,
     list_models,
     list_profiles,
+    lock_library_profile_resolution,
     preview_resolution,
     resolve_recording_profile,
     save_connection,
@@ -155,6 +162,134 @@ def test_bootstrap_rejects_codex_as_a_general_llm_provider(tmp_path):
     settings.llm.provider = "codex-local"
     with Session(engine) as session, pytest.raises(ValueError, match="correction-only"):
         bootstrap_default_profile(session, settings)
+
+
+def test_recording_embed_profile_change_durably_requeues_transcript_index(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'profile-reindex.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        bootstrap_default_profile(session, Settings())
+        session.add(PlaudFile(id="recording", filename="Meeting"))
+        session.flush()
+        original = resolve_recording_profile(session, "recording").to_dict()
+        session.add_all(
+            [
+                Chunk(
+                    file_id="recording",
+                    idx=0,
+                    text="indexed transcript",
+                    dim=1,
+                    embedding=b"\x00\x00\x80?",
+                    resolved_profile_snapshot=original,
+                ),
+                StageRun(
+                    file_id="recording",
+                    stage=StageName.index,
+                    status=StageStatus.completed,
+                    detail={},
+                ),
+            ]
+        )
+        stages = dict(list_profiles(session)[0]["stages"])
+        stages["embed"] = dict(stages["embed"]) | {"options": {"space": "v2"}}
+        changed = create_profile_version(
+            session,
+            {
+                "key": "changed-embed",
+                "name": "Changed embed",
+                "stages": stages,
+                "privacy_policy": "allow-egress",
+                "no_egress": False,
+                "fallback_policy": {},
+            },
+        )
+        select_recording_override(session, "recording", changed["id"])
+        run = session.scalar(
+            select(StageRun).where(
+                StageRun.file_id == "recording", StageRun.stage == StageName.index
+            )
+        )
+        assert session.query(Chunk).filter_by(file_id="recording").count() == 0
+        assert run.status == StageStatus.pending
+        assert run.detail["reindex_only"] is True
+
+
+def test_recording_profile_change_rechecks_active_claim_under_lock(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'profile-busy.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        profile = bootstrap_default_profile(session, Settings())
+        session.add(
+            PlaudFile(
+                id="busy-recording",
+                processing_token="active-worker",
+                processing_lease_until=datetime.now(UTC) + timedelta(minutes=5),
+            )
+        )
+        session.commit()
+        profile_id = profile.id
+
+    with Session(engine) as session:
+        with pytest.raises(ProfileMutationBusyError, match="processing"):
+            select_recording_override(session, "busy-recording", profile_id)
+        session.rollback()
+        assert session.get(RecordingProfileOverride, "busy-recording") is None
+
+
+def test_postgresql_profile_resolution_uses_matching_shared_library_fence():
+    statements: list[str] = []
+
+    class Bind:
+        class dialect:
+            name = "postgresql"
+
+    class FakeSession:
+        def get_bind(self):
+            return Bind()
+
+        def execute(self, statement):
+            statements.append(str(statement))
+
+    lock_library_profile_resolution(FakeSession())
+
+    assert statements == ["SELECT pg_advisory_xact_lock_shared(1280330574)"]
+
+
+def test_provider_mutation_rejects_active_dispatch_but_recovers_expired_lease(
+    tmp_path,
+):
+    from localplaud.db.models import ProviderCostReservation
+    from localplaud.providers.service import lock_recording_profile_change
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'dispatch-busy.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        bootstrap_default_profile(session, Settings())
+        session.add(PlaudFile(id="dispatch-recording"))
+        session.add(
+            ProviderCostReservation(
+                id="active-dispatch",
+                scope_key="file:dispatch-recording",
+                file_id="dispatch-recording",
+                operation="ask",
+                status="active",
+                owner="web-process",
+                lease_until=datetime.now(UTC) + timedelta(minutes=5),
+                profile_fingerprint="f" * 64,
+            )
+        )
+        session.commit()
+
+    with Session(engine) as session:
+        with pytest.raises(ProfileMutationBusyError, match="provider request"):
+            lock_recording_profile_change(session, "dispatch-recording")
+        session.rollback()
+        reservation = session.get(ProviderCostReservation, "active-dispatch")
+        reservation.lease_until = datetime.now(UTC) - timedelta(seconds=1)
+        session.commit()
+
+    with Session(engine) as session:
+        assert lock_recording_profile_change(session, "dispatch-recording") is not None
 
 
 def test_codex_local_is_rejected_outside_correction_at_all_profile_boundaries(tmp_path):
@@ -859,6 +994,34 @@ def test_profile_resolution_schema_migration_is_additive_and_idempotent(tmp_path
         foreign_key["referred_table"]
         for foreign_key in inspector.get_foreign_keys("recording_rule_profile_assignments")
     } == {"plaud_files", "execution_profiles", "automation_runs"}
+
+
+def test_profile_resolution_migration_skips_sqlite_pragma_on_postgresql(monkeypatch):
+    from contextlib import contextmanager
+
+    import localplaud.db.migrations as migrations
+
+    class Inspector:
+        def get_table_names(self):
+            return ["folders", "note_templates", "recording_rule_profile_assignments"]
+
+        def get_columns(self, _table):
+            return [{"name": "execution_profile_id"}]
+
+    class Connection:
+        def exec_driver_sql(self, _statement):
+            raise AssertionError("PostgreSQL migration must not execute SQLite PRAGMA")
+
+    class Engine:
+        class dialect:
+            name = "postgresql"
+
+        @contextmanager
+        def begin(self):
+            yield Connection()
+
+    monkeypatch.setattr(migrations, "inspect", lambda _bind: Inspector())
+    assert migrations.migrate_profile_resolution_schema(Engine()) == []
 
 
 def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, tmp_path):

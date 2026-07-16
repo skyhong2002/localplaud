@@ -13,6 +13,21 @@ import httpx
 
 from .protocol import HandshakeResponse, JobResponse, JobStatus, JobSubmitRequest
 
+MAX_PROVIDER_TIMEOUT_SECONDS = 23 * 60 * 60
+
+
+def validate_provider_timeout(value: object, *, field: str) -> float:
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a number") from exc
+    if not 0 < timeout <= MAX_PROVIDER_TIMEOUT_SECONDS:
+        raise ValueError(
+            f"{field} must be greater than zero and no more than "
+            f"{MAX_PROVIDER_TIMEOUT_SECONDS} seconds"
+        )
+    return timeout
+
 
 class RemoteWorkerError(RuntimeError):
     def __init__(self, message: str, *, retryable: bool = False):
@@ -40,10 +55,11 @@ class RemoteWorkerClient:
         transport: httpx.BaseTransport | None = None,
     ):
         self.base_url = base_url.rstrip("/") + "/"
+        self._request_timeout = validate_provider_timeout(timeout, field="timeout")
         self._client = httpx.Client(
             base_url=self.base_url,
             headers={"authorization": f"Bearer {token}"},
-            timeout=timeout,
+            timeout=self._request_timeout,
             transport=transport,
         )
 
@@ -56,7 +72,7 @@ class RemoteWorkerClient:
         return cls(
             config["base_url"],
             token,
-            timeout=float(config.get("timeout", 120)),
+            timeout=validate_provider_timeout(config.get("timeout", 120), field="timeout"),
         )
 
     def close(self):
@@ -67,13 +83,20 @@ class RemoteWorkerClient:
         response.raise_for_status()
         return HandshakeResponse.model_validate(response.json())
 
-    def submit(self, request: JobSubmitRequest) -> JobResponse:
-        response = self._client.post("api/worker/v1/jobs", json=request.model_dump(mode="json"))
+    def submit(self, request: JobSubmitRequest, *, timeout: float | None = None) -> JobResponse:
+        response = self._client.post(
+            "api/worker/v1/jobs",
+            json=request.model_dump(mode="json"),
+            timeout=self._request_timeout if timeout is None else timeout,
+        )
         response.raise_for_status()
         return JobResponse.model_validate(response.json())
 
-    def status(self, job_id: str) -> JobResponse:
-        response = self._client.get(f"api/worker/v1/jobs/{job_id}")
+    def status(self, job_id: str, *, timeout: float | None = None) -> JobResponse:
+        response = self._client.get(
+            f"api/worker/v1/jobs/{job_id}",
+            timeout=self._request_timeout if timeout is None else timeout,
+        )
         response.raise_for_status()
         return JobResponse.model_validate(response.json())
 
@@ -88,15 +111,24 @@ class RemoteWorkerClient:
         timeout: float = 600,
         initial_backoff: float = 0.2,
         max_backoff: float = 3.0,
+        _deadline: float | None = None,
     ) -> RemoteResult:
-        deadline = time.monotonic() + timeout
+        timeout = validate_provider_timeout(timeout, field="job_timeout")
+        deadline = _deadline if _deadline is not None else time.monotonic() + timeout
         backoff = initial_backoff
-        while job.status in {JobStatus.queued, JobStatus.running}:
-            if time.monotonic() >= deadline:
+
+        def remaining_timeout() -> float:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 raise RemoteWorkerError("remote worker timed out", retryable=True)
-            time.sleep(backoff)
+            return min(self._request_timeout, remaining)
+
+        while job.status in {JobStatus.queued, JobStatus.running}:
+            remaining = remaining_timeout()
+            time.sleep(min(backoff, remaining))
             backoff = min(max_backoff, backoff * 1.7)
-            job = self.status(job.job_id)
+            job = self.status(job.job_id, timeout=remaining_timeout())
+            remaining_timeout()
         if job.status != JobStatus.succeeded:
             error = job.error
             raise RemoteWorkerError(
@@ -106,8 +138,9 @@ class RemoteWorkerClient:
         artifacts: dict[str, bytes] = {}
         for descriptor in job.artifacts:
             url = urljoin(self.base_url, descriptor.download_url.lstrip("/"))
-            response = self._client.get(url)
+            response = self._client.get(url, timeout=remaining_timeout())
             response.raise_for_status()
+            remaining_timeout()
             data = response.content
             digest = hashlib.sha256(data).hexdigest()
             if not hmac.compare_digest(digest, descriptor.sha256):
@@ -116,4 +149,14 @@ class RemoteWorkerClient:
         return RemoteResult(job=job, artifacts=artifacts)
 
     def submit_and_wait(self, request: JobSubmitRequest, **wait_options) -> RemoteResult:
-        return self.wait(self.submit(request), **wait_options)
+        timeout = validate_provider_timeout(
+            wait_options.pop("timeout", 600), field="job_timeout"
+        )
+        deadline = time.monotonic() + timeout
+        submit_timeout = min(self._request_timeout, max(0.0, deadline - time.monotonic()))
+        if submit_timeout <= 0:
+            raise RemoteWorkerError("remote worker timed out", retryable=True)
+        job = self.submit(request, timeout=submit_timeout)
+        if time.monotonic() >= deadline:
+            raise RemoteWorkerError("remote worker timed out", retryable=True)
+        return self.wait(job, timeout=timeout, _deadline=deadline, **wait_options)

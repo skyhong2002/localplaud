@@ -30,12 +30,17 @@
       <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:9px">
         <div class="sub" style="font-size:11px;font-weight:700;margin-bottom:5px">{{ t('Sources') }}</div>
         {% for source in message.sources[:6] %}
-          {% if file_id %}
+          {% if source.target in ('generated_note', 'saved_note') %}
+          <a class="seg" href="{{ source.url }}" style="padding:5px 8px">
+            <div class="ts"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg');width:13px;height:13px"></span></div>
+            <div class="txt"><strong>{{ source.artifact_title or source.filename }}</strong> <span class="sub">· {{ source.label or t('Note') }} · {{ source.text | truncate(110) }}</span></div>
+          </a>
+          {% elif file_id %}
           <button type="button" class="seg" data-seek="{{ source.start or 0 }}" style="width:100%;text-align:left;background:none;border:0;padding:5px 8px">
             <div class="ts">{{ source.start | mmss }}</div><div class="txt">{% if source.speaker %}<strong>{{ source.speaker }}</strong> {% endif %}{{ source.text | truncate(140) }}</div>
           </button>
           {% else %}
-          <a class="seg" href="/file/{{ source.file_id }}{% if source.start is not none %}?t={{ source.start }}{% endif %}" style="padding:5px 8px">
+          <a class="seg" href="{{ source.url or ('/file/' ~ source.file_id) }}" style="padding:5px 8px">
             <div class="ts">{{ source.start | mmss }}</div><div class="txt"><strong>{{ source.filename }}</strong> <span class="sub">· {{ source.text | truncate(110) }}</span></div>
           </a>
           {% endif %}

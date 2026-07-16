@@ -504,6 +504,7 @@
   const organizationStatus = document.getElementById('organization-manager-status');
   const createStatus = document.getElementById('organization-create-status');
   const organizationModal = organizationBackdrop ? window.localplaudModal({backdrop:organizationBackdrop,background:()=>[document.querySelector('.library-page'),document.querySelector('.product-rail'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')],cleanupSignal:cleanupController.signal}) : null;
+  document.addEventListener('keydown',event=>{if(event.key!=='Escape'||organizationBackdrop?.hidden)return;event.preventDefault();event.stopImmediatePropagation();organizationModal?.close();},{capture:true,signal:cleanupController.signal});
   const organizationDetail = (data, fallback) => { const detail=data?.detail,item=Array.isArray(detail)?detail[0]?.msg:detail;return tr(typeof item==='string'?item:fallback); };
   const setOrganizationBusy = value => { organizationModal?.setBusy(value);if(organizationClose)organizationClose.disabled=value;organizationBackdrop?.querySelectorAll('button,input').forEach(control=>{control.disabled=value;}); };
   const resetOrganizationRow = row => { row.querySelector('.organization-manager-view').hidden=false;row.querySelector('.organization-manager-edit').hidden=true;row.querySelector('.organization-manager-confirm').hidden=true; };

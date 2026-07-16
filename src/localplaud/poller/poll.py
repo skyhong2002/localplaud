@@ -9,15 +9,30 @@ Two steps, both read-only against the cloud:
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
+import shutil
+import socket
+import subprocess
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import delete, insert, or_, select, update
+from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
 
 from ..config import Settings, get_settings
-from ..db.models import FileStatus, KeyValue, PlaudFile, StageAttempt, StageRun, StageStatus
+from ..db.models import (
+    FileStatus,
+    KeyValue,
+    PlaudFile,
+    StageAttempt,
+    StageName,
+    StageRun,
+    StageStatus,
+)
 from ..db.session import session_scope
 from ..plaud import make_plaud_client
 from ..plaud.models import PlaudFileDTO
@@ -32,6 +47,12 @@ _ARTIFACT_CHECKED_KEY = "_artifact_checked_name"
 _CATALOG_BASELINE_KEY = "plaud_catalog_baseline_v1"
 _CATALOG_SYNC_LOCK_KEY = "plaud_catalog_sync_lock_v1"
 _CATALOG_SYNC_LOCK_TTL = timedelta(minutes=15)
+_DAEMON_OWNER_KEY = "localplaud_daemon_owner_v1"
+_DAEMON_HEARTBEAT_TTL = timedelta(minutes=5)
+_DAEMON_HEARTBEAT_INTERVAL_SECONDS = 30
+_DOWNLOAD_RECOVERY_TTL = timedelta(hours=1)
+_DOWNLOAD_LEASE = timedelta(hours=1)
+_ACTIVE_DAEMON_OWNER: str | None = None
 
 
 def _insert_key_if_absent(session, *, key: str, value: dict) -> bool:
@@ -41,16 +62,12 @@ def _insert_key_if_absent(session, *, key: str, value: dict) -> bool:
     if dialect == "sqlite":
         from sqlalchemy.dialects.sqlite import insert as dialect_insert
 
-        result = session.execute(
-            dialect_insert(KeyValue).values(**values).on_conflict_do_nothing()
-        )
+        result = session.execute(dialect_insert(KeyValue).values(**values).on_conflict_do_nothing())
         return result.rowcount == 1
     if dialect == "postgresql":
         from sqlalchemy.dialects.postgresql import insert as dialect_insert
 
-        result = session.execute(
-            dialect_insert(KeyValue).values(**values).on_conflict_do_nothing()
-        )
+        result = session.execute(dialect_insert(KeyValue).values(**values).on_conflict_do_nothing())
         return result.rowcount == 1
     try:
         with session.begin_nested():
@@ -145,7 +162,12 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                         PlaudFile.audio_path.is_(None),
                         PlaudFile.status.in_((FileStatus.discovered, FileStatus.error)),
                     )
-                    .values(status=FileStatus.metadata_only, error=None)
+                    .values(
+                        status=FileStatus.metadata_only,
+                        error=None,
+                        download_token=None,
+                        download_lease_until=None,
+                    )
                 )
             for dto in client.iter_files(include_trash=settings.poller.include_trash):
                 row = session.get(PlaudFile, dto.id)
@@ -177,72 +199,145 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
         _release_catalog_sync(sync_token)
 
 
-def reset_inflight(*, force: bool = False) -> int:
+def _processing_reset_statement(
+    *, now: datetime, force: bool, previous_owner: str | None = None
+):
+    from ..worker.claims import daemon_token_pattern
+
+    condition = PlaudFile.status == FileStatus.processing
+    reclaimable = or_(
+        PlaudFile.processing_lease_until.is_(None),
+        PlaudFile.processing_lease_until <= now,
+    )
+    if force and previous_owner:
+        reclaimable = or_(
+            reclaimable,
+            PlaudFile.processing_token.like(daemon_token_pattern(previous_owner)),
+        )
+    condition &= reclaimable
+    return (
+        update(PlaudFile)
+        .where(condition)
+        .values(
+            status=FileStatus.downloaded,
+            processing_token=None,
+            processing_lease_until=None,
+        )
+        .returning(PlaudFile.id)
+    )
+
+
+def reset_inflight(*, force: bool = False, previous_owner: str | None = None) -> int:
     """Recover files stranded mid-flight by a crash/kill: ``downloading`` →
     ``discovered`` and expired ``processing`` → ``downloaded``. A daemon startup
     may force recovery of all in-flight rows from its previous process. Periodic
     polls preserve live leases owned by CLI or other workers. Any affected running
     stage and append-only attempt are closed as interrupted. Returns the number of
     file rows reset."""
-    from sqlalchemy import update
-
     reset = 0
     now = datetime.now(UTC)
     interruption = "Interrupted by application restart; queued for retry."
     with session_scope() as session:
-        if force:
-            reset += session.execute(
-                update(PlaudFile)
-                .where(PlaudFile.status == FileStatus.downloading)
-                .values(status=FileStatus.discovered)
-            ).rowcount
-        processing_condition = PlaudFile.status == FileStatus.processing
-        if not force:
-            processing_condition &= or_(
-                PlaudFile.processing_lease_until.is_(None),
-                PlaudFile.processing_lease_until <= now,
-            )
-        processing_ids = list(
-            session.scalars(select(PlaudFile.id).where(processing_condition))
+        from ..worker.claims import daemon_token_pattern
+
+        download_reclaimable = or_(
+            # New claims use an explicit lease. A missing lease is malformed and
+            # cannot safely retain ownership indefinitely.
+            (
+                PlaudFile.download_token.is_not(None)
+                & or_(
+                    PlaudFile.download_lease_until.is_(None),
+                    PlaudFile.download_lease_until <= now,
+                )
+            ),
+            # Upgrade compatibility for a process that entered ``downloading``
+            # before token columns existed.
+            (
+                PlaudFile.download_token.is_(None)
+                & or_(
+                    PlaudFile.download_lease_until <= now,
+                    (
+                        PlaudFile.download_lease_until.is_(None)
+                        & or_(
+                            PlaudFile.updated_at.is_(None),
+                            PlaudFile.updated_at <= now - _DOWNLOAD_RECOVERY_TTL,
+                        )
+                    ),
+                )
+            ),
         )
+        if force and previous_owner:
+            download_reclaimable = or_(
+                download_reclaimable,
+                PlaudFile.download_token.like(daemon_token_pattern(previous_owner)),
+            )
         reset += session.execute(
             update(PlaudFile)
-            .where(PlaudFile.id.in_(processing_ids))
+            .where(
+                PlaudFile.status == FileStatus.downloading,
+                download_reclaimable,
+            )
             .values(
-                status=FileStatus.downloaded,
-                processing_token=None,
-                processing_lease_until=None,
+                status=FileStatus.discovered,
+                download_token=None,
+                download_lease_until=None,
             )
         ).rowcount
-        # Older workers could persist error/partial before their claim-finally
-        # path ran, leaving a future lease that made an otherwise due retry
-        # unclaimable for up to 24 hours. A live claim always has status
-        # ``processing``; any token on another state is therefore orphaned.
-        reset += session.execute(
-            update(PlaudFile)
-            .where(
-                PlaudFile.status != FileStatus.processing,
-                PlaudFile.processing_token.is_not(None),
+        processing_ids = list(
+            session.scalars(
+                _processing_reset_statement(
+                    now=now,
+                    force=force,
+                    previous_owner=previous_owner,
+                )
             )
-            .values(processing_token=None, processing_lease_until=None)
-        ).rowcount
-        session.execute(
-            update(StageRun)
-            .where(
-                StageRun.file_id.in_(processing_ids),
+        )
+        reset += len(processing_ids)
+        # Reindex-only workers deliberately retain the recording's visible status,
+        # so a non-processing row can still carry a live claim. Only clear claims
+        # whose lease is absent or expired.
+        non_processing_reclaimable = or_(
+            PlaudFile.processing_lease_until.is_(None),
+            PlaudFile.processing_lease_until <= now,
+        )
+        if force and previous_owner:
+            non_processing_reclaimable = or_(
+                non_processing_reclaimable,
+                PlaudFile.processing_token.like(daemon_token_pattern(previous_owner)),
+            )
+        non_processing_ids = list(
+            session.scalars(
+                update(PlaudFile)
+                .where(
+                    PlaudFile.status != FileStatus.processing,
+                    PlaudFile.processing_token.is_not(None),
+                    non_processing_reclaimable,
+                )
+                .values(processing_token=None, processing_lease_until=None)
+                .returning(PlaudFile.id)
+            )
+        )
+        reset += len(non_processing_ids)
+        interrupted_ids = [*processing_ids, *non_processing_ids]
+        for run in session.scalars(
+            select(StageRun).where(
+                StageRun.file_id.in_(interrupted_ids),
                 StageRun.status == StageStatus.running,
             )
-            .values(
-                status=StageStatus.failed,
-                error=interruption,
-                completed_at=now,
-                updated_at=now,
+        ):
+            reindex_retry = (
+                run.file_id in non_processing_ids
+                and run.stage == StageName.index
+                and bool((run.detail or {}).get("reindex_only"))
             )
-        )
+            run.status = StageStatus.pending if reindex_retry else StageStatus.failed
+            run.error = interruption
+            run.completed_at = None if reindex_retry else now
+            run.updated_at = now
         session.execute(
             update(StageAttempt)
             .where(
-                StageAttempt.file_id.in_(processing_ids),
+                StageAttempt.file_id.in_(interrupted_ids),
                 StageAttempt.status == StageStatus.running,
             )
             .values(
@@ -254,6 +349,166 @@ def reset_inflight(*, force: bool = False) -> int:
     if reset:
         log.info("Reset %d in-flight file(s) after restart", reset)
     return reset
+
+
+def _pid_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _process_start_fingerprint(pid: int) -> str | None:
+    """Hash the OS-reported process birth time without persisting command details."""
+    if pid <= 0:
+        return None
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    started = " ".join(result.stdout.split())
+    if result.returncode != 0 or not started:
+        return None
+    return hashlib.sha256(started.encode()).hexdigest()[:24]
+
+
+def _daemon_record_is_live(value: dict, *, now: datetime, hostname: str) -> bool:
+    if value.get("released_at"):
+        return False
+    existing_host = str(value.get("hostname") or "")
+    try:
+        existing_pid = int(value.get("pid") or 0)
+    except (TypeError, ValueError):
+        existing_pid = 0
+    if existing_host == hostname and existing_pid:
+        if not _pid_is_running(existing_pid):
+            return False
+        expected_start = value.get("process_start_fingerprint")
+        if not expected_start:
+            # Preserve a live pre-fingerprint daemon during a rolling upgrade.
+            return True
+        actual_start = _process_start_fingerprint(existing_pid)
+        # Failure to inspect a running process is treated conservatively. A known
+        # mismatch proves PID reuse and must not block a replacement daemon.
+        return actual_start is None or actual_start == expected_start
+    heartbeat_raw = value.get("heartbeat_at")
+    try:
+        heartbeat = datetime.fromisoformat(str(heartbeat_raw))
+        if heartbeat.tzinfo is None:
+            heartbeat = heartbeat.replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        return False
+    return heartbeat > now - _DAEMON_HEARTBEAT_TTL
+
+
+def register_daemon_owner() -> tuple[str, str | None]:
+    """Register this process and return ``(owner, crashed_previous_owner)``."""
+    global _ACTIVE_DAEMON_OWNER
+
+    now = datetime.now(UTC)
+    hostname = socket.gethostname()
+    owner = uuid4().hex[:16]
+    value = {
+        "owner": owner,
+        "hostname": hostname,
+        "pid": os.getpid(),
+        "process_start_fingerprint": _process_start_fingerprint(os.getpid()),
+        "started_at": now.isoformat(),
+        "heartbeat_at": now.isoformat(),
+    }
+    previous_owner = None
+    with session_scope() as session:
+        dialect = session.get_bind().dialect.name
+        if dialect == "sqlite":
+            session.execute(sql_text("BEGIN IMMEDIATE"))
+        stmt = select(KeyValue).where(KeyValue.key == _DAEMON_OWNER_KEY)
+        if dialect == "postgresql":
+            stmt = stmt.with_for_update()
+        row = session.scalar(stmt)
+        if row is None:
+            if _insert_key_if_absent(session, key=_DAEMON_OWNER_KEY, value=value):
+                _ACTIVE_DAEMON_OWNER = owner
+                return owner, None
+            row = session.scalar(stmt)
+        if row is None:
+            raise RuntimeError("could not acquire the daemon ownership record")
+        current = row.value or {}
+        if _daemon_record_is_live(current, now=now, hostname=hostname):
+            raise RuntimeError("another localplaud daemon is already running")
+        previous_owner = current.get("owner") or None
+        row.value = value
+        row.updated_at = now
+    _ACTIVE_DAEMON_OWNER = owner
+    return owner, previous_owner
+
+
+def refresh_daemon_owner(owner: str) -> bool:
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        current = session.scalar(
+            select(KeyValue.value).where(KeyValue.key == _DAEMON_OWNER_KEY)
+        )
+        if current is None or (current or {}).get("owner") != owner:
+            return False
+        refreshed = session.execute(
+            update(KeyValue)
+            .where(
+                KeyValue.key == _DAEMON_OWNER_KEY,
+                KeyValue.value["owner"].as_string() == owner,
+                KeyValue.value["released_at"].as_string().is_(None),
+            )
+            .values(
+                value={**current, "heartbeat_at": now.isoformat()},
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        ).rowcount
+    return refreshed == 1
+
+
+def current_daemon_owner() -> str | None:
+    return _ACTIVE_DAEMON_OWNER
+
+
+def release_daemon_owner(owner: str) -> bool:
+    """Mark a graceful shutdown without erasing the recoverable owner epoch."""
+    global _ACTIVE_DAEMON_OWNER
+
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        current = session.scalar(
+            select(KeyValue.value).where(KeyValue.key == _DAEMON_OWNER_KEY)
+        )
+        if current is None or (current or {}).get("owner") != owner:
+            if _ACTIVE_DAEMON_OWNER == owner:
+                _ACTIVE_DAEMON_OWNER = None
+            return False
+        released = session.execute(
+            update(KeyValue)
+            .where(
+                KeyValue.key == _DAEMON_OWNER_KEY,
+                KeyValue.value["owner"].as_string() == owner,
+            )
+            .values(
+                value={**current, "released_at": now.isoformat()},
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        ).rowcount
+    if _ACTIVE_DAEMON_OWNER == owner:
+        _ACTIVE_DAEMON_OWNER = None
+    return released == 1
 
 
 def reset_download_errors() -> int:
@@ -268,7 +523,12 @@ def reset_download_errors() -> int:
         reset = session.execute(
             update(PlaudFile)
             .where(PlaudFile.status == FileStatus.error, PlaudFile.audio_path.is_(None))
-            .values(status=FileStatus.discovered, error=None)
+            .values(
+                status=FileStatus.discovered,
+                error=None,
+                download_token=None,
+                download_lease_until=None,
+            )
         ).rowcount
     if reset:
         log.info("Retrying %d failed download(s)", reset)
@@ -283,35 +543,74 @@ def _download_one(
     *,
     claim_acquired: bool = False,
 ) -> bool:
+    from ..worker.claims import (
+        current_processing_owner,
+        new_processing_token,
+        processing_owner,
+    )
+
     dest_dir = file_dir(file_id)
     dto = PlaudFileDTO.model_validate(raw or {"id": file_id})
+    claim_owner = current_processing_owner() or current_daemon_owner()
+    with processing_owner(claim_owner):
+        token = new_processing_token()
+    claim_dir = dest_dir / ".download-claims" / hashlib.sha256(token.encode()).hexdigest()
     try:
-        if not claim_acquired:
-            with session_scope() as session:
-                claimed = session.execute(
-                    update(PlaudFile)
-                    .where(
-                        PlaudFile.id == file_id,
-                        PlaudFile.status == FileStatus.discovered,
-                    )
-                    .values(status=FileStatus.downloading)
-                ).rowcount
-            if claimed != 1:
-                return False
-        else:
-            with session_scope() as session:
-                row = session.get(PlaudFile, file_id)
-                if row is None or row.status != FileStatus.downloading:
-                    return False
-        dest = client.download_audio(dto, dest_dir)
+        now = datetime.now(UTC)
         with session_scope() as session:
-            fresh = session.get(PlaudFile, file_id)
-            fresh.audio_path = str(dest)
+            claimable_status = (
+                PlaudFile.status == FileStatus.downloading
+                if claim_acquired
+                else PlaudFile.status == FileStatus.discovered
+            )
+            claimed = session.execute(
+                update(PlaudFile)
+                .where(
+                    PlaudFile.id == file_id,
+                    claimable_status,
+                    PlaudFile.download_token.is_(None),
+                )
+                .values(
+                    status=FileStatus.downloading,
+                    error=None,
+                    download_token=token,
+                    download_lease_until=now + _DOWNLOAD_LEASE,
+                )
+                .execution_options(synchronize_session=False)
+            ).rowcount
+        if claimed != 1:
+            return False
+        claim_dir.mkdir(parents=True, exist_ok=True)
+        dest = Path(client.download_audio(dto, claim_dir))
+        if not dest.resolve().is_relative_to(claim_dir.resolve()):
+            raise ValueError("download client returned a path outside its claim directory")
+        with session_scope() as session:
+            if session.get_bind().dialect.name == "sqlite":
+                session.execute(sql_text("BEGIN IMMEDIATE"))
+                fresh = session.get(PlaudFile, file_id)
+            else:
+                fresh = session.scalar(
+                    select(PlaudFile).where(PlaudFile.id == file_id).with_for_update()
+                )
+            lease = fresh.download_lease_until if fresh is not None else None
+            if lease is not None and lease.tzinfo is None:
+                lease = lease.replace(tzinfo=UTC)
+            if (
+                fresh is None
+                or fresh.download_token != token
+                or lease is None
+                or lease <= datetime.now(UTC)
+            ):
+                return False
+            final_path = dest_dir / dest.name
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(dest, final_path)
+            fresh.audio_path = str(final_path)
             fresh.status = FileStatus.downloaded
-            from datetime import datetime
-
             fresh.downloaded_at = datetime.now(UTC)
             fresh.error = None
+            fresh.download_token = None
+            fresh.download_lease_until = None
         if settings.pipeline.cloud_import_enabled:
             # The official client already fetched (and cached) the detail
             # payload for the presigned URL. Explicit migration mode may retain
@@ -324,10 +623,24 @@ def _download_one(
     except Exception as exc:  # noqa: BLE001
         log.error("Download failed for %s: %s", file_id, exc)
         with session_scope() as session:
-            fresh = session.get(PlaudFile, file_id)
-            fresh.status = FileStatus.error
-            fresh.error = str(exc)[:2000]
+            session.execute(
+                update(PlaudFile)
+                .where(
+                    PlaudFile.id == file_id,
+                    PlaudFile.download_token == token,
+                    PlaudFile.download_lease_until > datetime.now(UTC),
+                )
+                .values(
+                    status=FileStatus.error,
+                    error=str(exc)[:2000],
+                    download_token=None,
+                    download_lease_until=None,
+                )
+                .execution_options(synchronize_session=False)
+            )
         return False
+    finally:
+        shutil.rmtree(claim_dir, ignore_errors=True)
 
 
 def download_pending(client, settings: Settings) -> int:
@@ -341,14 +654,22 @@ def download_pending(client, settings: Settings) -> int:
     if not pending:
         return 0
 
+    from ..worker.claims import current_processing_owner, processing_owner
+
     workers = max(1, settings.poller.max_concurrent_downloads)
+    claim_owner = current_processing_owner()
+
+    def run_download(item: tuple[str, dict]) -> bool:
+        with processing_owner(claim_owner):
+            return _download_one(client, item[0], item[1], settings)
+
     if workers == 1:
-        return sum(_download_one(client, fid, raw, settings) for fid, raw in pending)
+        return sum(run_download(item) for item in pending)
 
     from concurrent.futures import ThreadPoolExecutor
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = pool.map(lambda fr: _download_one(client, fr[0], fr[1], settings), pending)
+        results = pool.map(run_download, pending)
     return sum(results)
 
 

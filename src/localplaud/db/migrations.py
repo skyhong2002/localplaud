@@ -10,7 +10,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy.types import TypeEngine
 
 from ..error_redaction import sanitize_error
-from .models import Chunk, FileStatus, KeyValue, PlaudFile, Transcript
+from .models import (
+    Chunk,
+    FileStatus,
+    KeyValue,
+    KnowledgeChunk,
+    KnowledgeDocument,
+    KnowledgeIndexAttempt,
+    PlaudFile,
+    ProviderCostReservation,
+    Transcript,
+)
 
 INDEPENDENT_MIGRATION_KEY = "migration.independent-artifacts.v1"
 _PLAUD_SOURCES = {"cloud", "plaud"}
@@ -325,16 +335,19 @@ def migrate_profile_resolution_schema(engine: Engine) -> list[str]:
                 )
             """))
             migrated.append("recording_rule_profile_assignments")
-        violations = []
-        for table in ("folders", "note_templates", "recording_rule_profile_assignments"):
-            if table in set(inspect(connection).get_table_names()):
-                violations.extend(connection.exec_driver_sql(
-                    f"PRAGMA foreign_key_check({table})"
-                ).fetchall())
-        if violations:
-            raise RuntimeError(
-                f"profile resolution migration broke foreign keys: {violations}"
-            )
+        if engine.dialect.name == "sqlite":
+            violations = []
+            for table in ("folders", "note_templates", "recording_rule_profile_assignments"):
+                if table in set(inspect(connection).get_table_names()):
+                    violations.extend(
+                        connection.exec_driver_sql(
+                            f"PRAGMA foreign_key_check({table})"
+                        ).fetchall()
+                    )
+            if violations:
+                raise RuntimeError(
+                    f"profile resolution migration broke foreign keys: {violations}"
+                )
     return migrated
 
 
@@ -739,22 +752,39 @@ def migrate_pipeline_retry_schema(engine: Engine) -> list[str]:
 
 
 def migrate_processing_claim_schema(engine: Engine) -> list[str]:
-    """Add the durable per-recording worker claim to legacy libraries."""
-    if engine.dialect.name != "sqlite":
-        return []
+    """Add durable processing and raw-audio download claims to legacy libraries."""
     inspector = inspect(engine)
     if "plaud_files" not in inspector.get_table_names():
         return []
     columns = {item["name"] for item in inspector.get_columns("plaud_files")}
+    adding_download_lease = "download_lease_until" not in columns
     migrated: list[str] = []
     with engine.begin() as connection:
-        for column, ddl in (
-            ("processing_token", "VARCHAR(64)"),
-            ("processing_lease_until", "DATETIME"),
+        for column, type_ in (
+            ("processing_token", String(64)),
+            ("processing_lease_until", DateTime(timezone=True)),
+            ("download_token", String(64)),
+            ("download_lease_until", DateTime(timezone=True)),
         ):
             if column not in columns:
-                connection.execute(text(f"ALTER TABLE plaud_files ADD COLUMN {column} {ddl}"))
+                rendered = type_.compile(dialect=engine.dialect)
+                connection.execute(
+                    text(f"ALTER TABLE plaud_files ADD COLUMN {column} {rendered}")
+                )
                 migrated.append(f"plaud_files.{column}")
+        if adding_download_lease and {"status", "updated_at"} <= columns:
+            lease_expression = (
+                "datetime(COALESCE(updated_at, CURRENT_TIMESTAMP), '+1 hour')"
+                if engine.dialect.name == "sqlite"
+                else "COALESCE(updated_at, CURRENT_TIMESTAMP) + INTERVAL '1 hour'"
+            )
+            connection.execute(
+                text(
+                    "UPDATE plaud_files SET download_lease_until = "
+                    f"{lease_expression} WHERE status = 'downloading' "
+                    "AND download_token IS NULL AND download_lease_until IS NULL"
+                )
+            )
         connection.execute(text("""
             CREATE INDEX IF NOT EXISTS ix_plaud_files_processing_token
             ON plaud_files (processing_token)
@@ -762,6 +792,14 @@ def migrate_processing_claim_schema(engine: Engine) -> list[str]:
         connection.execute(text("""
             CREATE INDEX IF NOT EXISTS ix_plaud_files_processing_lease_until
             ON plaud_files (processing_lease_until)
+        """))
+        connection.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_plaud_files_download_token
+            ON plaud_files (download_token)
+        """))
+        connection.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_plaud_files_download_lease_until
+            ON plaud_files (download_lease_until)
         """))
     return migrated
 
@@ -1184,6 +1222,81 @@ def migrate_speaker_timeline_schema(engine: Engine) -> list[str]:
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE speakers ADD COLUMN timeline JSON"))
     return ["speakers.timeline"]
+
+
+def migrate_knowledge_index_schema(engine: Engine) -> list[str]:
+    """Create the additive note-index tables without indexing or backfilling rows."""
+    existing = set(inspect(engine).get_table_names())
+    created: list[str] = []
+    for table in (
+        KnowledgeDocument.__table__,
+        KnowledgeChunk.__table__,
+        KnowledgeIndexAttempt.__table__,
+        ProviderCostReservation.__table__,
+    ):
+        if table.name in existing:
+            continue
+        table.create(engine, checkfirst=True)
+        created.append(table.name)
+    if "provider_cost_reservations" in existing:
+        columns = {
+            item["name"]
+            for item in inspect(engine).get_columns("provider_cost_reservations")
+        }
+        additions = (
+            ("owner", String(32)),
+            ("lease_until", DateTime(timezone=True)),
+            ("profile_fingerprint", String(64)),
+        )
+        with engine.begin() as connection:
+            for column, type_ in additions:
+                if column in columns:
+                    continue
+                rendered = type_.compile(dialect=engine.dialect)
+                connection.execute(
+                    text(
+                        "ALTER TABLE provider_cost_reservations "
+                        f"ADD COLUMN {column} {rendered}"
+                    )
+                )
+                created.append(f"provider_cost_reservations.{column}")
+            connection.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_provider_cost_reservations_owner
+                ON provider_cost_reservations (owner)
+            """))
+            connection.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_provider_cost_reservations_lease_until
+                ON provider_cost_reservations (lease_until)
+            """))
+    return created
+
+
+def migrate_ask_request_claim_schema(engine: Engine) -> list[str]:
+    """Add the cross-process Ask follow-up claim to deployed thread tables."""
+    inspector = inspect(engine)
+    if "ask_threads" not in set(inspector.get_table_names()):
+        return []
+    columns = {item["name"] for item in inspector.get_columns("ask_threads")}
+    additions = (
+        ("request_token", String(64)),
+        ("request_lease_until", DateTime(timezone=True)),
+        ("request_owner", String(32)),
+    )
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        for column, type_ in additions:
+            if column in columns:
+                continue
+            rendered = type_.compile(dialect=engine.dialect)
+            connection.execute(
+                text(f"ALTER TABLE ask_threads ADD COLUMN {column} {rendered}")
+            )
+            migrated.append(f"ask_threads.{column}")
+        connection.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_ask_threads_request_owner
+            ON ask_threads (request_owner)
+        """))
+    return migrated
 
 
 def migrate_vocabulary_schema(engine: Engine) -> list[str]:

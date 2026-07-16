@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from sqlalchemy import create_engine, inspect, text
 
@@ -68,6 +70,11 @@ def test_builtin_bootstrap_and_versioned_crud(monkeypatch, tmp_path):
         "/api/note-templates", json=created.json()
     ).status_code == 409
 
+    sync_calls: list[bool] = []
+    monkeypatch.setattr(
+        "localplaud.worker.knowledge_index.sync_knowledge_documents",
+        lambda _session: sync_calls.append(True),
+    )
     version = client.put(
         "/api/note-templates/research-interview",
         json={
@@ -79,6 +86,7 @@ def test_builtin_bootstrap_and_versioned_crud(monkeypatch, tmp_path):
     assert version.status_code == 201
     assert version.json()["version"] == 2
     assert version.json()["execution_profile_id"] == profile_id
+    assert sync_calls == [True]
     active = client.get("/api/note-templates").json()["templates"]
     assert next(row for row in active if row["key"] == "research-interview")["version"] == 2
     history = client.get("/api/note-templates?include_history=true").json()["templates"]
@@ -282,6 +290,124 @@ def test_recording_selection_marks_notes_stale_and_archive_resets(monkeypatch, t
     assert client.delete("/api/note-templates/custom").status_code == 200
     with session_scope() as session:
         assert session.get(PlaudFile, "r1").note_template_key is None
+
+
+def test_template_version_and_archive_read_active_row_after_library_fence(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import NoteTemplate
+
+    created = client.post(
+        "/api/note-templates",
+        json={
+            "key": "serialized",
+            "name": "Version one",
+            "system_prompt": "Version one system.",
+            "instructions": "Version one instructions.",
+        },
+    )
+    assert created.status_code == 201
+
+    def advance_to_v2(session):
+        session.query(NoteTemplate).filter(NoteTemplate.key == "serialized").update(
+            {"is_active": False}, synchronize_session="fetch"
+        )
+        session.add(
+            NoteTemplate(
+                key="serialized",
+                version=2,
+                name="Version two",
+                system_prompt="Version two system.",
+                instructions="Version two instructions.",
+                category="Latest category",
+                scenario="Latest scenario",
+                description="Latest description",
+                author="Latest author",
+                provenance="personal",
+                is_builtin=False,
+                is_active=True,
+            )
+        )
+        session.flush()
+
+    monkeypatch.setattr(
+        "localplaud.api.note_templates.lock_library_profile_change",
+        advance_to_v2,
+    )
+    monkeypatch.setattr(
+        "localplaud.worker.knowledge_index.sync_knowledge_documents",
+        lambda _session: [],
+    )
+    version = client.put(
+        "/api/note-templates/serialized",
+        json={
+            "name": "Version three",
+            "system_prompt": "Version three system.",
+            "instructions": "Version three instructions.",
+        },
+    )
+    assert version.status_code == 201
+    assert version.json()["version"] == 3
+    assert version.json()["category"] == "Latest category"
+    assert version.json()["description"] == "Latest description"
+
+    def advance_to_v4(session):
+        session.query(NoteTemplate).filter(NoteTemplate.key == "serialized").update(
+            {"is_active": False}, synchronize_session="fetch"
+        )
+        session.add(
+            NoteTemplate(
+                key="serialized",
+                version=4,
+                name="Version four",
+                system_prompt="Version four system.",
+                instructions="Version four instructions.",
+                is_builtin=False,
+                is_active=True,
+            )
+        )
+        session.flush()
+
+    monkeypatch.setattr(
+        "localplaud.api.note_templates.lock_library_profile_membership_change",
+        advance_to_v4,
+    )
+    archived = client.delete("/api/note-templates/serialized")
+    assert archived.status_code == 200
+    assert not any(
+        row["key"] == "serialized"
+        for row in client.get("/api/note-templates").json()["templates"]
+    )
+
+
+def test_recording_template_change_rejects_active_provider_reservation(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile, ProviderCostReservation
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="reserved", note_template_key="default"))
+        session.add(
+            ProviderCostReservation(
+                id="template-dispatch",
+                scope_key="file:reserved",
+                file_id="reserved",
+                operation="summarize",
+                status="active",
+                lease_until=datetime.now(UTC) + timedelta(minutes=5),
+                profile_fingerprint="f" * 64,
+            )
+        )
+
+    response = client.put("/api/files/reserved/note-template", json={"key": "meeting"})
+
+    assert response.status_code == 409
+    assert "provider request" in response.json()["detail"]
+    with session_scope() as session:
+        assert session.get(PlaudFile, "reserved").note_template_key == "default"
 
 
 def test_settings_renders_template_editor(monkeypatch, tmp_path):

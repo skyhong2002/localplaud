@@ -106,6 +106,9 @@ def match_rule(rule: AutomationRule, recording: PlaudFile) -> tuple[bool, list[s
 
 
 def _mark_notes_stale(session, file_id: str) -> None:
+    from .worker.knowledge_index import invalidate_generated_documents
+
+    invalidate_generated_documents(session, file_id)
     for stage in (StageName.summarize, StageName.mind_map):
         run = session.scalar(
             select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
@@ -125,10 +128,22 @@ def _apply_actions(
 ) -> dict:
     actions = rule.actions or {}
     applied: dict = {}
+    profile_resolution_changed = False
+    if (
+        actions.get("note_template_key")
+        or actions.get("profile_id") is not None
+        or actions.get("folder_id") is not None
+        or actions.get("add_tag_ids")
+    ):
+        from .providers.service import lock_recording_membership_changes
+
+        lock_recording_membership_changes(session, [recording.id])
+        recording = session.get(PlaudFile, recording.id) or recording
     if key := actions.get("note_template_key"):
         recording.note_template_key = key
         _mark_notes_stale(session, recording.id)
         applied["note_template_key"] = key
+        profile_resolution_changed = True
     if actions.get("profile_id") is not None:
         profile_id = int(actions["profile_id"])
         assignment = session.get(
@@ -161,9 +176,11 @@ def _apply_actions(
                 "owner_key": rule.owner_key,
             }
         applied["profile_id"] = profile_id
+        profile_resolution_changed = True
     if actions.get("folder_id") is not None:
         recording.folder_id = int(actions["folder_id"])
         applied["folder_id"] = recording.folder_id
+        profile_resolution_changed = True
     if actions.get("add_tag_ids"):
         existing = {tag.id for tag in recording.tags}
         tags = list(
@@ -171,6 +188,10 @@ def _apply_actions(
         )
         recording.tags.extend(tag for tag in tags if tag.id not in existing)
         applied["add_tag_ids"] = [tag.id for tag in tags]
+    if profile_resolution_changed:
+        from .worker.knowledge_index import sync_file_knowledge_documents
+
+        sync_file_knowledge_documents(session, recording.id)
     return applied
 
 

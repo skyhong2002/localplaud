@@ -200,13 +200,20 @@ def work(
     ),
 ):
     """Run the local pipeline on downloaded recordings."""
+    from .worker.knowledge_index import process_pending_documents
     from .worker.pipeline import process_pending
+    from .worker.reindex import process_pending_reindexes
 
     settings = get_settings()
     while True:
         try:
             n = process_pending(settings, force=force)
-            console.print(f"Processed {n} file(s).")
+            transcript_count = process_pending_reindexes(settings)
+            note_count = process_pending_documents(settings)
+            console.print(
+                f"Processed {n} file(s), reindexed {transcript_count} transcript(s), "
+                f"indexed {note_count} note document(s)."
+            )
         except Exception as exc:  # noqa: BLE001
             console.print(f"[yellow]work error:[/] {exc}")
         if once:
@@ -240,30 +247,66 @@ def run():
 
     from apscheduler.schedulers.background import BackgroundScheduler
 
+    from .ask_threads import recover_ask_request_claims
     from .db.session import init_db
-    from .poller.poll import poll_once, reset_inflight
+    from .poller.poll import (
+        _DAEMON_HEARTBEAT_INTERVAL_SECONDS,
+        poll_once,
+        refresh_daemon_owner,
+        register_daemon_owner,
+        release_daemon_owner,
+        reset_inflight,
+    )
+    from .providers.usage import recover_provider_dispatch_reservations
+    from .worker.claims import processing_owner
 
     settings = get_settings()
     init_db()
-    reset_inflight(force=True)
+    try:
+        daemon_owner, previous_owner = register_daemon_owner()
+    except RuntimeError as exc:
+        console.print(f"[red]✗[/] {exc}")
+        raise typer.Exit(1) from exc
+    try:
+        reset_inflight(force=True, previous_owner=previous_owner)
+        recover_ask_request_claims(previous_owner)
+        recover_provider_dispatch_reservations(previous_owner)
+    except Exception:
+        release_daemon_owner(daemon_owner)
+        raise
 
     # A non-blocking lock guarantees cycles never overlap even if one runs
     # longer than the interval (ASR can take minutes) — a second firing simply
     # skips rather than double-downloading / double-processing.
     lock = threading.Lock()
+    ownership_lost = threading.Event()
+
+    def heartbeat():
+        if not refresh_daemon_owner(daemon_owner):
+            ownership_lost.set()
+            console.print("[red]✗[/] daemon ownership was lost; automatic work is paused")
 
     def cycle():
-        if not lock.acquire(blocking=False):
+        if ownership_lost.is_set() or not lock.acquire(blocking=False):
             return
         try:
-            poll_once(settings)
-            process_automatic_pending(settings)
+            with processing_owner(daemon_owner):
+                poll_once(settings)
+                process_automatic_pending(settings, daemon_owner=daemon_owner)
         except Exception as exc:  # noqa: BLE001
             console.print(f"[yellow]cycle error:[/] {exc}")
         finally:
             lock.release()
 
     scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        heartbeat,
+        "interval",
+        seconds=_DAEMON_HEARTBEAT_INTERVAL_SECONDS,
+        id="daemon-heartbeat",
+        max_instances=1,
+        coalesce=True,
+    )
     # next_run_time fires the first cycle immediately, under the same
     # single-instance governance as the interval (no separate racing thread).
     scheduler.add_job(
@@ -275,23 +318,37 @@ def run():
         coalesce=True,
         next_run_time=datetime.now(),
     )
-    scheduler.start()
-    console.print("[green]✓[/] poller + worker ready; starting web UI…")
-    _serve(settings)
+    try:
+        scheduler.start()
+        console.print("[green]✓[/] poller + worker ready; starting web UI…")
+        _serve(settings)
+    finally:
+        try:
+            if scheduler.running:
+                scheduler.shutdown(wait=True)
+        finally:
+            release_daemon_owner(daemon_owner)
 
 
-def process_automatic_pending(settings=None) -> int:
+def process_automatic_pending(settings=None, *, daemon_owner: str | None = None) -> int:
     """Process the daemon queue only when the durable workspace preference allows it."""
     from .db.session import session_scope
     from .preferences import get_workspace_preferences
+    from .worker.claims import processing_owner
+    from .worker.knowledge_index import process_pending_documents
     from .worker.pipeline import process_pending
+    from .worker.reindex import process_pending_reindexes
 
     settings = settings or get_settings()
     with session_scope() as session:
         enabled = get_workspace_preferences(session)["auto_process_new_recordings"]
     if not enabled:
         return 0
-    return process_pending(settings, limit=settings.pipeline.files_per_cycle)
+    with processing_owner(daemon_owner):
+        count = process_pending(settings, limit=settings.pipeline.files_per_cycle)
+        process_pending_reindexes(settings, limit=settings.pipeline.files_per_cycle)
+        process_pending_documents(settings, limit=settings.pipeline.files_per_cycle * 4)
+    return count
 
 
 # --------------------------------------------------------------------------- #

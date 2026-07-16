@@ -66,6 +66,10 @@ def source_summary_provenance(row: Summary | SummaryRevision) -> dict:
         "template_version": row.template_version,
         "llm_provider": row.llm_provider,
         "model": row.model,
+        "source": row.source,
+        "input_transcript_id": row.input_transcript_id,
+        "input_transcript_revision": row.input_transcript_revision,
+        "input_transcript_source": row.input_transcript_source,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "content_fingerprint": fingerprint_digest(row),
     }
@@ -132,9 +136,9 @@ def restore_summary_version(
 
     The displaced current version is archived first, then the live row is
     updated in place — its identity (and links such as editable-copy
-    provenance) survives. Nothing is queued: the search index is built from
-    the transcript, which a note restore does not change. The mind map is
-    not: it is generated from the transcript *plus* its source note output,
+    provenance) survives. The caller invalidates and requeues this note's
+    independent knowledge document; transcript chunks remain untouched. The
+    mind map is generated from the transcript *plus* its source note output,
     so a mind map sourced from the restored template is marked out of date
     (stale, exactly like a vocabulary or template change) rather than being
     presented as current. Returns True when that marking happened.

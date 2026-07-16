@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
+import pytest
 from sqlalchemy import create_engine, inspect, select, text
 
 
@@ -13,7 +16,7 @@ def _client(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'ask.db'}")
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'ask.db'}")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
@@ -77,6 +80,28 @@ def test_ask_skill_provenance_migration_is_idempotent(tmp_path):
     assert retrieval_scope["nullable"] is False
 
 
+def test_ask_request_claim_migration_is_additive_and_idempotent(tmp_path):
+    from localplaud.db.migrations import migrate_ask_request_claim_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'ask-claim.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE ask_threads (id VARCHAR(36) PRIMARY KEY, "
+                "file_id VARCHAR(64), title VARCHAR(200), retrieval_scope JSON, "
+                "created_at DATETIME, updated_at DATETIME)"
+            )
+        )
+    assert migrate_ask_request_claim_schema(engine) == [
+        "ask_threads.request_token",
+        "ask_threads.request_lease_until",
+        "ask_threads.request_owner",
+    ]
+    assert migrate_ask_request_claim_schema(engine) == []
+    columns = {item["name"] for item in inspect(engine).get_columns("ask_threads")}
+    assert {"request_token", "request_lease_until", "request_owner"} <= columns
+
+
 def test_legacy_deployed_ask_schema_is_rebuilt_without_losing_messages(tmp_path):
     from localplaud.db.migrations import migrate_ask_provenance_schema
 
@@ -84,13 +109,16 @@ def test_legacy_deployed_ask_schema_is_rebuilt_without_losing_messages(tmp_path)
     with engine.begin() as connection:
         connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
         connection.execute(text("INSERT INTO plaud_files (id) VALUES ('recording')"))
-        connection.execute(text("""
+        connection.execute(
+            text("""
             CREATE TABLE ask_threads (
                 id INTEGER PRIMARY KEY, file_id VARCHAR(64), title VARCHAR(256),
                 created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             CREATE TABLE ask_messages (
                 id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL,
                 role VARCHAR(16) NOT NULL, content TEXT NOT NULL,
@@ -98,13 +126,17 @@ def test_legacy_deployed_ask_schema_is_rebuilt_without_losing_messages(tmp_path)
                 profile_snapshot JSON NOT NULL, usage JSON NOT NULL,
                 estimated_cost FLOAT, actual_cost FLOAT, created_at DATETIME NOT NULL
             )
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             INSERT INTO ask_threads
                 (id, file_id, title, created_at, updated_at)
             VALUES (7, 'recording', 'History', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """))
-        connection.execute(text("""
+        """)
+        )
+        connection.execute(
+            text("""
             INSERT INTO ask_messages (
                 id, thread_id, role, content, citations, provider, model,
                 profile_snapshot, usage, estimated_cost, created_at
@@ -112,7 +144,8 @@ def test_legacy_deployed_ask_schema_is_rebuilt_without_losing_messages(tmp_path)
                 9, 7, 'assistant', 'Answer', '[{"second": 12}]', 'ollama', 'qwen',
                 '{"version": 2}', '{"output_tokens": 4}', 0.5, CURRENT_TIMESTAMP
             )
-        """))
+        """)
+        )
 
     assert migrate_ask_provenance_schema(engine) == ["ask_threads", "ask_messages"]
     assert migrate_ask_provenance_schema(engine) == []
@@ -125,11 +158,13 @@ def test_legacy_deployed_ask_schema_is_rebuilt_without_losing_messages(tmp_path)
         thread = connection.execute(
             text("SELECT id, file_id, title, retrieval_scope FROM ask_threads")
         ).one()
-        message = connection.execute(text("""
+        message = connection.execute(
+            text("""
             SELECT id, thread_id, sources, resolved_profile_snapshot, usage,
                    estimated_cost_usd
             FROM ask_messages
-        """)).one()
+        """)
+        ).one()
         assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
     assert tuple(thread) == ("7", "recording", "History", "{}")
     assert message.id == 9 and message.thread_id == "7"
@@ -145,9 +180,7 @@ def test_editable_note_source_migration_is_idempotent(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'legacy-notes.db'}")
     with engine.begin() as connection:
         connection.execute(text("CREATE TABLE user_notes (id INTEGER PRIMARY KEY)"))
-    assert migrate_editable_note_source_schema(engine) == [
-        "user_notes.source_summary_id"
-    ]
+    assert migrate_editable_note_source_schema(engine) == ["user_notes.source_summary_id"]
     assert migrate_editable_note_source_schema(engine) == []
     columns = {item["name"] for item in inspect(engine).get_columns("user_notes")}
     assert "source_summary_id" in columns
@@ -193,13 +226,14 @@ def test_ask_history_api_and_accessible_drawer_contract(monkeypatch, tmp_path):
     library_history = client.get("/api/ask/threads").json()
     recording_history = client.get("/api/ask/threads?file_id=r1").json()
     assert [item["thread_id"] for item in library_history["threads"]] == ["library-history"]
-    assert [item["thread_id"] for item in recording_history["threads"]] == [
-        "recording-history"
-    ]
+    assert [item["thread_id"] for item in recording_history["threads"]] == ["recording-history"]
     assert recording_history["threads"][0]["saved_note_count"] == 1
-    assert client.patch(
-        "/api/ask/threads/recording-history", json={"title": "Wrong surface"}
-    ).status_code == 404
+    assert (
+        client.patch(
+            "/api/ask/threads/recording-history", json={"title": "Wrong surface"}
+        ).status_code
+        == 404
+    )
     renamed = client.patch(
         "/api/ask/threads/recording-history?file_id=r1",
         json={"title": "  Release follow-up  "},
@@ -210,14 +244,17 @@ def test_ask_history_api_and_accessible_drawer_contract(monkeypatch, tmp_path):
         json={"title": f"  {'x' * 200}  "},
     )
     assert trimmed_limit.status_code == 200 and len(trimmed_limit.json()["title"]) == 200
-    assert client.patch(
-        "/api/ask/threads/recording-history?file_id=r1", json={"title": "   "}
-    ).status_code == 422
+    assert (
+        client.patch(
+            "/api/ask/threads/recording-history?file_id=r1", json={"title": "   "}
+        ).status_code
+        == 422
+    )
 
     library_page = client.get("/?ask=true&ask_thread=library-history")
     detail_page = client.get("/file/r1?tab=ask&ask_thread=recording-history")
     for page in (library_page, detail_page):
-        assert 'data-open-ask-history' in page.text
+        assert "data-open-ask-history" in page.text
         assert 'id="ask-history-backdrop" hidden' in page.text
         assert 'role="dialog" aria-modal="true" aria-labelledby="ask-history-title"' in page.text
         assert "region.inert=true" in page.text
@@ -228,7 +265,7 @@ def test_ask_history_api_and_accessible_drawer_contract(monkeypatch, tmp_path):
         assert "-webkit-line-clamp:2" in page.text
         assert "if(!backdrop.hidden)return" in page.text
         assert "candidate.dataset.threadId===item.thread_id" in page.text
-    assert "const fileId=null,selectedId=\"library-history\"" in library_page.text
+    assert 'const fileId=null,selectedId="library-history"' in library_page.text
     assert 'const fileId="r1",selectedId="recording-history"' in detail_page.text
 
     deleted = client.delete("/api/ask/threads/recording-history?file_id=r1")
@@ -267,9 +304,7 @@ def test_single_recording_followup_persists_history_and_sources(monkeypatch, tmp
     assert first.status_code == 200
     thread_id = _thread_id(first.text)
     assert "Save as note" in first.text and 'data-seek="42.0"' in first.text
-    second = client.post(
-        "/file/r1/ask", data={"q": "Who confirmed it?", "thread_id": thread_id}
-    )
+    second = client.post("/file/r1/ask", data={"q": "Who confirmed it?", "thread_id": thread_id})
     assert second.status_code == 200
     assert second.text.count("Grounded answer") == 2
     assert histories[0] == []
@@ -292,9 +327,341 @@ def test_single_recording_followup_persists_history_and_sources(monkeypatch, tmp
             "user",
             "assistant",
         ]
-    assert client.post(
-        "/ask", data={"q": "wrong scope", "thread_id": thread_id}
-    ).status_code == 409
+    assert client.post("/ask", data={"q": "wrong scope", "thread_id": thread_id}).status_code == 409
+
+
+def test_persisted_ask_message_atomically_releases_cost_reservation(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import ProviderCostReservation
+    from localplaud.db.session import session_scope
+
+    def fake_answer(_query, **_kwargs):
+        with session_scope() as session:
+            session.add(
+                ProviderCostReservation(
+                    id="request-1:embed",
+                    scope_key="file:r1",
+                    file_id="r1",
+                    operation="embed",
+                    status="completed",
+                    estimated_cost_usd=0.01,
+                )
+            )
+        return {
+            "answer": "Grounded",
+            "sources": [],
+            "estimated_cost_usd": 0.01,
+            "_cost_reservation_ids": ["request-1:embed"],
+        }
+
+    monkeypatch.setattr("localplaud.worker.qa.answer", fake_answer)
+    assert client.post("/file/r1/ask", data={"q": "What changed?"}).status_code == 200
+    with session_scope() as session:
+        assert session.get(ProviderCostReservation, "request-1:embed") is None
+
+
+def test_follow_up_has_one_durable_provider_claim(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.ask_threads import ask_in_thread, delete_thread
+    from localplaud.db.models import AskThread
+    from localplaud.db.session import session_scope
+
+    monkeypatch.setattr(
+        "localplaud.worker.qa.answer",
+        lambda *_args, **_kwargs: {"answer": "Initial", "sources": []},
+    )
+    initial = ask_in_thread("Initial question", file_id="r1")
+    thread_id = initial["thread_id"]
+    started = Event()
+    release = Event()
+    provider_calls: list[str] = []
+
+    def blocking_answer(query, **_kwargs):
+        provider_calls.append(query)
+        started.set()
+        assert release.wait(3)
+        return {"answer": "Follow-up", "sources": []}
+
+    monkeypatch.setattr("localplaud.worker.qa.answer", blocking_answer)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(
+            ask_in_thread,
+            "First follow-up",
+            file_id="r1",
+            thread_id=thread_id,
+        )
+        assert started.wait(3)
+        with pytest.raises(ValueError, match="already answering"):
+            ask_in_thread("Concurrent follow-up", file_id="r1", thread_id=thread_id)
+        with pytest.raises(ValueError, match="currently answering"):
+            delete_thread(thread_id, "r1")
+        release.set()
+        assert first.result(timeout=3)["messages"][-1]["content"] == "Follow-up"
+
+    assert provider_calls == ["First follow-up"]
+    with session_scope() as session:
+        thread = session.get(AskThread, thread_id)
+        assert thread.request_token is None and thread.request_lease_until is None
+        assert len(thread.messages) == 4
+
+
+def test_active_ask_rejects_no_egress_mutation_before_it_can_commit(
+    monkeypatch, tmp_path
+):
+    _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.ask_threads import ask_in_thread
+    from localplaud.db.session import session_scope
+    from localplaud.providers.service import (
+        ProfileMutationBusyError,
+        lock_recording_profile_change,
+    )
+
+    started = Event()
+    release = Event()
+    provider_calls = 0
+
+    def blocking_provider(*_args, **_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        started.set()
+        assert release.wait(3)
+        return {"answer": "Grounded", "sources": []}
+
+    monkeypatch.setattr("localplaud.worker.qa.answer", blocking_provider)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        request = pool.submit(ask_in_thread, "Race", file_id="r1")
+        assert started.wait(3)
+        with session_scope() as session:
+            with pytest.raises(ProfileMutationBusyError, match="Ask"):
+                lock_recording_profile_change(session, "r1")
+        release.set()
+        assert request.result(timeout=3)["messages"][-1]["content"] == "Grounded"
+    assert provider_calls == 1
+
+
+def test_follow_up_claim_records_current_daemon_owner(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    _seed()
+    import localplaud.poller.poll as poll_module
+    from localplaud.ask_threads import ask_in_thread
+    from localplaud.db.models import AskThread
+    from localplaud.db.session import session_scope
+
+    monkeypatch.setattr(
+        "localplaud.worker.qa.answer",
+        lambda *_args, **_kwargs: {"answer": "Initial", "sources": []},
+    )
+    thread_id = ask_in_thread("Initial", file_id="r1")["thread_id"]
+    observed: list[str | None] = []
+
+    def inspect_owner(*_args, **_kwargs):
+        with session_scope() as session:
+            observed.append(session.get(AskThread, thread_id).request_owner)
+        return {"answer": "Owned", "sources": []}
+
+    monkeypatch.setattr(poll_module, "_ACTIVE_DAEMON_OWNER", "daemon-owner")
+    monkeypatch.setattr("localplaud.worker.qa.answer", inspect_owner)
+    ask_in_thread("Follow-up", file_id="r1", thread_id=thread_id)
+    assert observed == ["daemon-owner"]
+    with session_scope() as session:
+        thread = session.get(AskThread, thread_id)
+        assert thread.request_owner is None
+
+
+def test_startup_recovers_only_previous_daemon_ask_claims(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.ask_threads import recover_ask_request_claims
+    from localplaud.db.models import AskThread
+    from localplaud.db.session import session_scope
+
+    lease = datetime.now(UTC) + timedelta(hours=1)
+    with session_scope() as session:
+        session.add_all(
+            [
+                AskThread(
+                    id="old",
+                    title="Old",
+                    request_token="old-token",
+                    request_lease_until=lease,
+                    request_owner="old-owner",
+                ),
+                AskThread(
+                    id="live",
+                    title="Live",
+                    request_token="live-token",
+                    request_lease_until=lease,
+                    request_owner="live-owner",
+                ),
+            ]
+        )
+    assert recover_ask_request_claims("old-owner") == 1
+    with session_scope() as session:
+        old = session.get(AskThread, "old")
+        live = session.get(AskThread, "live")
+        assert old.request_token is None and old.request_owner is None
+        assert live.request_token == "live-token" and live.request_owner == "live-owner"
+
+
+def test_delete_thread_query_locks_postgresql_row_before_lease_check(monkeypatch, tmp_path):
+    from sqlalchemy.dialects import postgresql
+
+    import localplaud.ask_threads as ask_threads
+    from localplaud.db.models import AskThread
+    from localplaud.db.session import session_scope
+
+    _client(monkeypatch, tmp_path)
+    _seed()
+    with session_scope() as session:
+        session.add(AskThread(id="delete-me", file_id="r1", title="Delete me"))
+
+    calls: list[bool] = []
+    real_thread_for_surface = ask_threads._thread_for_surface
+
+    def observe_lock(session, thread_id, file_id, *, for_update=False):
+        calls.append(for_update)
+        return real_thread_for_surface(session, thread_id, file_id, for_update=for_update)
+
+    monkeypatch.setattr(ask_threads, "_thread_for_surface", observe_lock)
+    ask_threads.delete_thread("delete-me", "r1")
+    assert calls == [True]
+
+    compiled = str(
+        ask_threads._thread_query("thread", "r1", for_update=True).compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "FOR UPDATE" in compiled
+    assert "ask_threads.id = 'thread'" in compiled
+    assert "ask_threads.file_id = 'r1'" in compiled
+
+
+def test_failed_follow_up_releases_request_claim(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.ask_threads import ask_in_thread
+    from localplaud.db.models import AskThread
+    from localplaud.db.session import session_scope
+
+    monkeypatch.setattr(
+        "localplaud.worker.qa.answer",
+        lambda *_args, **_kwargs: {"answer": "Initial", "sources": []},
+    )
+    thread_id = ask_in_thread("Initial", file_id="r1")["thread_id"]
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("provider failed")
+
+    monkeypatch.setattr("localplaud.worker.qa.answer", fail)
+    with pytest.raises(RuntimeError, match="provider failed"):
+        ask_in_thread("Follow-up", file_id="r1", thread_id=thread_id)
+    with session_scope() as session:
+        thread = session.get(AskThread, thread_id)
+        assert thread.request_token is None and thread.request_lease_until is None
+
+
+def test_failed_temporary_thread_cleanup_is_owned_and_atomic(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    from localplaud.ask_threads import _release_thread_request
+    from localplaud.db.models import AskMessage, AskThread
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add_all(
+            [
+                AskThread(id="temporary", title="Temporary", request_token="new-owner"),
+                AskThread(id="nonempty", title="Nonempty", request_token="owner"),
+            ]
+        )
+        session.add(AskMessage(thread_id="nonempty", role="user", content="kept"))
+
+    # A stale finally block must not release or delete a thread claimed by a
+    # newer request between provider failure and cleanup.
+    _release_thread_request("temporary", "stale-owner", delete_if_empty=True)
+    with session_scope() as session:
+        assert session.get(AskThread, "temporary").request_token == "new-owner"
+
+    _release_thread_request("temporary", "new-owner", delete_if_empty=True)
+    _release_thread_request("nonempty", "owner", delete_if_empty=True)
+    with session_scope() as session:
+        assert session.get(AskThread, "temporary") is None
+        nonempty = session.get(AskThread, "nonempty")
+        assert nonempty is not None
+        assert nonempty.request_token is None
+        assert [message.content for message in nonempty.messages] == ["kept"]
+
+
+def test_follow_up_cannot_save_after_request_lease_expires(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    _seed()
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.ask_threads import ask_in_thread
+    from localplaud.db.models import AskThread
+    from localplaud.db.session import session_scope
+
+    monkeypatch.setattr(
+        "localplaud.worker.qa.answer",
+        lambda *_args, **_kwargs: {"answer": "Initial", "sources": []},
+    )
+    thread_id = ask_in_thread("Initial", file_id="r1")["thread_id"]
+
+    def expire_before_return(*_args, **_kwargs):
+        with session_scope() as session:
+            thread = session.get(AskThread, thread_id)
+            thread.request_lease_until = datetime.now(UTC) - timedelta(seconds=1)
+        return {"answer": "Must not persist", "sources": []}
+
+    monkeypatch.setattr("localplaud.worker.qa.answer", expire_before_return)
+    with pytest.raises(ValueError, match="lease changed"):
+        ask_in_thread("Late answer", file_id="r1", thread_id=thread_id)
+    with session_scope() as session:
+        thread = session.get(AskThread, thread_id)
+        assert [message.content for message in thread.messages] == ["Initial", "Initial"]
+        assert thread.request_token is None and thread.request_lease_until is None
+
+
+def test_lost_request_claim_stops_the_next_provider_dispatch(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    _seed()
+    from datetime import UTC, datetime, timedelta
+
+    import localplaud.worker.qa as qa_module
+    from localplaud.ask_threads import ask_in_thread
+    from localplaud.db.models import AskThread
+    from localplaud.db.session import session_scope
+
+    monkeypatch.setattr(
+        "localplaud.worker.qa.answer",
+        lambda *_args, **_kwargs: {"answer": "Initial", "sources": []},
+    )
+    thread_id = ask_in_thread("Initial", file_id="r1")["thread_id"]
+    provider_calls: list[str] = []
+
+    def simulated_answer(*_args, **_kwargs):
+        qa_module._before_provider_dispatch()
+        provider_calls.append("embed")
+        with session_scope() as session:
+            thread = session.get(AskThread, thread_id)
+            thread.request_token = "takeover"
+            thread.request_lease_until = datetime.now(UTC) + timedelta(hours=1)
+        qa_module._before_provider_dispatch()
+        provider_calls.append("llm")
+        return {"answer": "Must not save", "sources": []}
+
+    monkeypatch.setattr("localplaud.worker.qa.answer", simulated_answer)
+    with pytest.raises(ValueError, match="lease changed before provider dispatch"):
+        ask_in_thread("Follow-up", file_id="r1", thread_id=thread_id)
+    assert provider_calls == ["embed"]
+
+    with session_scope() as session:
+        thread = session.get(AskThread, thread_id)
+        assert thread.request_token == "takeover"
+        assert [message.content for message in thread.messages] == ["Initial", "Initial"]
 
 
 def test_ask_answers_render_safe_markdown(monkeypatch, tmp_path):
@@ -353,6 +720,14 @@ def test_save_answer_is_idempotent_editable_and_visible(monkeypatch, tmp_path):
     note_id = first.json()["id"]
     assert first.json()["file_id"] == "r1"
     assert first.json()["citations"][0]["start"] == 12.0
+    from localplaud.db.models import KnowledgeDocument
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        documents = list(session.query(KnowledgeDocument))
+        assert len(documents) == 1
+        assert documents[0].user_note_id == note_id
+        assert documents[0].status == "pending"
 
     notes_page = client.get("/notes")
     assert "The team decided to ship." in notes_page.text
@@ -362,10 +737,13 @@ def test_save_answer_is_idempotent_editable_and_visible(monkeypatch, tmp_path):
     assert f'data-note-panel="saved-{note_id}"' in detail.text
 
     long_title = "L" * 200
-    assert client.put(
-        f"/api/notes/{note_id}",
-        json={"title": long_title, "content_md": "Still grounded.", "base_version": 1},
-    ).status_code == 200
+    assert (
+        client.put(
+            f"/api/notes/{note_id}",
+            json={"title": long_title, "content_md": "Still grounded.", "base_version": 1},
+        ).status_code
+        == 200
+    )
     long_notes_page = client.get("/notes")
     assert long_title in long_notes_page.text
     assert 'class="saved-note-head"' in long_notes_page.text
@@ -416,9 +794,7 @@ def test_oversized_ask_answer_cannot_create_an_uneditable_note(monkeypatch, tmp_
         assert session.query(UserNote).count() == 0
 
 
-def test_oversized_generated_summary_cannot_create_an_uneditable_copy(
-    monkeypatch, tmp_path
-):
+def test_oversized_generated_summary_cannot_create_an_uneditable_copy(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed()
     from localplaud.db.models import Summary, UserNote
@@ -442,9 +818,7 @@ def test_oversized_generated_summary_cannot_create_an_uneditable_copy(
         assert session.query(UserNote).count() == 0
 
 
-def test_blank_ask_and_generated_sources_cannot_create_uneditable_notes(
-    monkeypatch, tmp_path
-):
+def test_blank_ask_and_generated_sources_cannot_create_uneditable_notes(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed()
     from localplaud.db.models import AskMessage, AskThread, Summary, UserNote
@@ -455,9 +829,7 @@ def test_blank_ask_and_generated_sources_cannot_create_uneditable_notes(
         session.add(thread)
         session.flush()
         message = AskMessage(thread_id=thread.id, role="assistant", content=" \n ")
-        summary = Summary(
-            file_id="r1", template="blank", content_md="", source="local"
-        )
+        summary = Summary(file_id="r1", template="blank", content_md="", source="local")
         session.add_all([message, summary])
         session.flush()
         message_id, summary_id = message.id, summary.id
@@ -470,9 +842,7 @@ def test_blank_ask_and_generated_sources_cannot_create_uneditable_notes(
         assert session.query(UserNote).count() == 0
 
 
-def test_generated_summary_becomes_editable_copy_without_mutating_source(
-    monkeypatch, tmp_path
-):
+def test_generated_summary_becomes_editable_copy_without_mutating_source(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed()
     from localplaud.db.models import Summary
@@ -587,12 +957,10 @@ def test_grounded_quick_action_is_durable_versioned_and_non_mutating(monkeypatch
         assert messages[0].content == "Task table"
         assert list(session.scalars(select(UserNote))) == []
 
-    assert client.post(
-        "/file/r1/ask/skill", data={"skill_key": "missing"}
-    ).status_code == 404
-    assert client.post(
-        "/file/missing/ask/skill", data={"skill_key": "task_table"}
-    ).status_code == 404
+    assert client.post("/file/r1/ask/skill", data={"skill_key": "missing"}).status_code == 404
+    assert (
+        client.post("/file/missing/ask/skill", data={"skill_key": "task_table"}).status_code == 404
+    )
 
 
 def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, tmp_path):
@@ -626,7 +994,10 @@ def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, 
     assert 'data-ask-request data-ask-status="library-ask-status"' in page.text
     assert 'hx-sync="#answer:drop"' in page.text
     assert page.text.count('hx-sync="#answer:drop"') >= 2
-    assert 'id="library-ask-status" class="ask-request-status" role="status" aria-live="polite"' in page.text
+    assert (
+        'id="library-ask-status" class="ask-request-status" role="status" aria-live="polite"'
+        in page.text
+    )
     assert 'id="answer" role="region" aria-label="Answer"' in page.text
     assert "askErrorMessage" in page.text
     assert "if(question?.isConnected)question.value=''" in page.text
@@ -647,7 +1018,10 @@ def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, 
     assert 'placeholder="Ask a follow-up…"' in response.text
     assert ">Follow up</button>" in response.text
     assert "if(button.disabled)return" in response.text
-    assert "if(!Number.isInteger(data.id)||typeof data.title!=='string'||!data.title.trim())" in response.text
+    assert (
+        "if(!Number.isInteger(data.id)||typeof data.title!=='string'||!data.title.trim())"
+        in response.text
+    )
     assert "error.name==='TypeError'?tr('Could not save')" in response.text
     assert calls[0][1]["file_id"] is None
     assert "across the retrieved recordings" in calls[0][1]["instruction"]
@@ -739,10 +1113,13 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
     assert "Timezone · Asia/Taipei" in first.text
 
     preferences = client.get("/api/preferences/workspace").json()
-    assert client.put(
-        "/api/preferences/workspace",
-        json=preferences | {"timezone": "UTC"},
-    ).status_code == 200
+    assert (
+        client.put(
+            "/api/preferences/workspace",
+            json=preferences | {"timezone": "UTC"},
+        ).status_code
+        == 200
+    )
 
     followup = client.post("/ask", data={"q": "And next?", "thread_id": thread_id})
     assert followup.status_code == 200
@@ -751,9 +1128,7 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
         "localplaud.worker.qa.answer",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("provider unavailable")),
     )
-    unavailable = client.post(
-        "/ask", data={"q": "Provider down", "thread_id": thread_id}
-    )
+    unavailable = client.post("/ask", data={"q": "Provider down", "thread_id": thread_id})
     assert unavailable.status_code == 200
     assert "Timezone · Asia/Taipei" in unavailable.text
     changed = client.post(
@@ -771,9 +1146,7 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
         assert session.get(AskThread, thread_id).retrieval_scope == expected
 
 
-def test_legacy_ask_date_scope_remains_utc_after_workspace_timezone_change(
-    monkeypatch, tmp_path
-):
+def test_legacy_ask_date_scope_remains_utc_after_workspace_timezone_change(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed()
     from localplaud.db.models import AskThread
@@ -793,20 +1166,22 @@ def test_legacy_ask_date_scope_remains_utc_after_workspace_timezone_change(
         )
 
     preferences = client.get("/api/preferences/workspace").json()
-    assert client.put(
-        "/api/preferences/workspace",
-        json=preferences | {"timezone": "America/New_York"},
-    ).status_code == 200
+    assert (
+        client.put(
+            "/api/preferences/workspace",
+            json=preferences | {"timezone": "America/New_York"},
+        ).status_code
+        == 200
+    )
     scopes = []
     monkeypatch.setattr(
         "localplaud.worker.qa.answer",
-        lambda query, **kwargs: scopes.append(kwargs["retrieval_scope"])
-        or {"answer": "Legacy answer", "sources": []},
+        lambda query, **kwargs: (
+            scopes.append(kwargs["retrieval_scope"]) or {"answer": "Legacy answer", "sources": []}
+        ),
     )
 
-    response = client.post(
-        "/ask", data={"q": "Follow up", "thread_id": "legacy-date-thread"}
-    )
+    response = client.post("/ask", data={"q": "Follow up", "thread_id": "legacy-date-thread"})
     assert response.status_code == 200
     assert scopes == [
         {

@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..db.session import session_scope
 from ..providers.service import (
+    ProfileMutationBusyError,
     check_connection_health,
     check_model_health,
     clear_recording_override,
@@ -83,8 +84,8 @@ class WorkerRequest(BaseModel):
     name: str
     base_url: str
     token_env: str = "LOCALPLAUD_WORKER_TOKEN"
-    timeout: float = 120
-    job_timeout: float = 3600
+    timeout: float = Field(default=120, gt=0, le=23 * 60 * 60)
+    job_timeout: float = Field(default=3600, gt=0, le=23 * 60 * 60)
     enabled: bool = True
 
 
@@ -110,7 +111,7 @@ def install_recommendation(
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
+        except (ProfileMutationBusyError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -136,6 +137,8 @@ def update_connection(connection_id: int, body: ConnectionRequest):
             return save_connection(session, body.model_dump(), connection_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -156,7 +159,7 @@ def remove_connection(connection_id: int):
             delete_connection(session, connection_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
+        except (ProfileMutationBusyError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -184,6 +187,8 @@ def update_model(model_id: int, body: ModelRequest):
             return save_model(session, body.model_dump(exclude_none=True), model_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -204,7 +209,7 @@ def remove_model(model_id: int):
             delete_model(session, model_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
+        except (ProfileMutationBusyError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -221,6 +226,8 @@ def create_profile(body: ProfileRequest):
             return create_profile_version(session, body.model_dump(exclude_none=True))
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -232,7 +239,7 @@ def remove_profile(profile_id: int):
             delete_profile(session, profile_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
+        except (ProfileMutationBusyError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -257,6 +264,8 @@ def recording_override(file_id: str, body: OverrideRequest):
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.delete("/recordings/{file_id}/override")
@@ -266,6 +275,8 @@ def remove_recording_override(file_id: str):
             return clear_recording_override(session, file_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/recordings/{file_id}/resolution")
@@ -290,6 +301,8 @@ def folder_profile(folder_id: int, body: ProfileSelectionRequest):
             return select_folder_profile(session, folder_id, body.profile_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/workers")
@@ -311,6 +324,8 @@ def update_worker(worker_id: int, body: WorkerRequest):
             return save_worker(session, body.model_dump(), worker_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/workers/{worker_id}/health")
@@ -329,5 +344,5 @@ def remove_worker(worker_id: int):
             delete_worker(session, worker_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
+        except (ProfileMutationBusyError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

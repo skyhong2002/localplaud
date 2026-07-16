@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import create_engine, inspect, select, text
 
 
@@ -172,6 +174,51 @@ def test_explicit_apply_stacks_on_existing_revision(monkeypatch, tmp_path):
         corrected = session.get(PlaudFile, "meeting").corrected_transcript_for_source("local")
         assert corrected.text == "OmniObserve 採用 OpenAI"
         assert corrected.note.startswith("vocabulary:manual")
+
+
+def test_library_vocabulary_rechecks_claim_under_recording_lock(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import Chunk, PlaudFile, TranscriptRevision
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, "meeting")
+        recording.processing_token = "active-worker"
+        recording.processing_lease_until = datetime.now(UTC) + timedelta(minutes=5)
+
+    response = client.post("/api/vocabulary/apply-library")
+    assert response.status_code == 409
+    assert "processing" in response.json()["detail"]
+    with session_scope() as session:
+        recording = session.get(PlaudFile, "meeting")
+        assert recording.corrected_transcript is None
+        assert session.query(TranscriptRevision).filter_by(file_id="meeting").count() == 0
+        assert session.query(Chunk).filter_by(file_id="meeting").count() == 1
+
+
+def test_explicit_vocabulary_rejects_active_ask_evidence_lease(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import AskThread, Chunk, TranscriptRevision
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(
+            AskThread(
+                id="active-library-ask",
+                title="Active Ask",
+                request_token="active-request",
+                request_lease_until=datetime.now(UTC) + timedelta(minutes=5),
+            )
+        )
+
+    response = client.post("/api/vocabulary/apply-library")
+    assert response.status_code == 409
+    assert "used by Ask" in response.json()["detail"]
+    with session_scope() as session:
+        assert session.scalar(select(TranscriptRevision.id)) is None
+        assert session.query(Chunk).filter_by(file_id="meeting").count() == 1
 
 
 def test_vocabulary_api_and_settings_surface(monkeypatch, tmp_path):

@@ -124,6 +124,23 @@ def test_summary_context_is_passed_to_final_prompt(monkeypatch):
     assert "short recording" in final
 
 
+def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
+    from localplaud.config import Settings
+
+    llm = _FakeLlm()
+    monkeypatch.setattr("localplaud.worker.mindmap.build_llm", lambda _cfg: llm)
+    settings = Settings(
+        llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-map"}}
+    )
+
+    result = generate_mind_map(
+        _transcript(Segment(text="grounded", start=0.0, end=1.0)), settings
+    )
+
+    assert result["provider"] == "opencode-go"
+    assert result["model"] == "qwen-map"
+
+
 def test_fallback_wraps_malformed_llm_output(monkeypatch):
     from localplaud.config import Settings
 

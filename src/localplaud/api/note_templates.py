@@ -18,7 +18,13 @@ from ..db.models import (
     StageStatus,
 )
 from ..db.session import session_scope
-from ..worker.pipeline import processing_claim_active
+from ..providers.service import (
+    ProfileMutationBusyError,
+    lock_library_profile_change,
+    lock_library_profile_membership_change,
+    lock_recording_profile_change,
+    lock_recording_profile_changes,
+)
 
 router = APIRouter(prefix="/api", tags=["note-templates"])
 _KEY = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -142,6 +148,14 @@ def copy_note_template(key: str, body: CopyTemplateBody) -> dict:
         )
         session.add(row)
         session.flush()
+        from ..worker.knowledge_index import sync_file_knowledge_documents
+
+        for file_id in session.scalars(
+            select(PlaudFile.id)
+            .where(PlaudFile.note_template_key == key)
+            .order_by(PlaudFile.id)
+        ):
+            sync_file_knowledge_documents(session, file_id)
         return _item(row)
 
 
@@ -176,10 +190,15 @@ def create_note_template(body: TemplateBody) -> dict:
 @router.put("/note-templates/{key}", status_code=201)
 def create_note_template_version(key: str, body: TemplateBody) -> dict:
     with session_scope() as session:
+        try:
+            lock_library_profile_change(session)
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         current = session.scalar(
             select(NoteTemplate)
             .where(NoteTemplate.key == key, NoteTemplate.is_active.is_(True))
             .order_by(NoteTemplate.version.desc())
+            .with_for_update()
         )
         if current is None:
             raise HTTPException(status_code=404, detail="template not found")
@@ -211,6 +230,9 @@ def create_note_template_version(key: str, body: TemplateBody) -> dict:
         )
         session.add(row)
         session.flush()
+        from ..worker.knowledge_index import sync_knowledge_documents
+
+        sync_knowledge_documents(session)
         return _item(row)
 
 
@@ -219,33 +241,47 @@ def archive_note_template(key: str) -> dict:
     if key == "default":
         raise HTTPException(status_code=409, detail="the default template cannot be archived")
     with session_scope() as session:
+        # The selected recordings are a dynamic set. Fence concurrent version
+        # creation/archive before reading which version is currently active.
+        lock_library_profile_membership_change(session)
         current = session.scalar(
             select(NoteTemplate).where(
                 NoteTemplate.key == key, NoteTemplate.is_active.is_(True)
-            )
+            ).with_for_update()
         )
         if current is None:
             raise HTTPException(status_code=404, detail="template not found")
+        file_ids = sorted(
+            session.scalars(
+                select(PlaudFile.id).where(PlaudFile.note_template_key == key)
+            )
+        )
+        try:
+            lock_recording_profile_changes(session, file_ids)
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         current.is_active = False
         session.execute(
             update(PlaudFile)
             .where(PlaudFile.note_template_key == key)
             .values(note_template_key=None)
         )
+        from ..worker.knowledge_index import sync_file_knowledge_documents
+
+        for file_id in file_ids:
+            sync_file_knowledge_documents(session, file_id)
     return {"archived": True}
 
 
 @router.put("/files/{file_id}/note-template")
 def select_recording_note_template(file_id: str, body: RecordingTemplateBody) -> dict:
     with session_scope() as session:
-        recording = session.get(PlaudFile, file_id)
+        try:
+            recording = lock_recording_profile_change(session, file_id)
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if recording is None:
             raise HTTPException(status_code=404, detail="recording not found")
-        if processing_claim_active(recording):
-            raise HTTPException(
-                status_code=409,
-                detail="recording is processing; change template when it finishes",
-            )
         if body.key is not None and body.key != "auto":
             exists = session.scalar(
                 select(NoteTemplate.id).where(
@@ -255,6 +291,9 @@ def select_recording_note_template(file_id: str, body: RecordingTemplateBody) ->
             if exists is None:
                 raise HTTPException(status_code=404, detail="template not found")
         recording.note_template_key = body.key
+        from ..worker.knowledge_index import invalidate_generated_documents
+
+        invalidate_generated_documents(session, file_id)
         stale_generation = secrets.token_hex(16)
         for stage in (StageName.summarize, StageName.mind_map, StageName.index):
             run = session.scalar(
@@ -268,6 +307,9 @@ def select_recording_note_template(file_id: str, body: RecordingTemplateBody) ->
                     "reason": "note template changed",
                 }
                 run.error = None
+        from ..worker.knowledge_index import sync_file_knowledge_documents
+
+        sync_file_knowledge_documents(session, file_id)
     return {"file_id": file_id, "key": body.key}
 
 

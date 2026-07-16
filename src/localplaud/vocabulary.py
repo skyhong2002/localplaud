@@ -20,7 +20,12 @@ from .db.models import (
     VocabularyTerm,
 )
 from .db.session import session_scope
-from .worker.pipeline import _select_raw_transcript
+from .providers.usage import lock_cost_budget
+from .worker.pipeline import _select_raw_transcript, processing_claim_active
+
+
+class VocabularyBusyError(RuntimeError):
+    pass
 
 
 def _language_matches(rule_language: str | None, transcript_language: str | None) -> bool:
@@ -89,6 +94,9 @@ def correct_segments(
 
 def _mark_derived_stale(session, file_id: str, *, reason: str = "vocabulary") -> None:
     session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+    from .worker.knowledge_index import invalidate_generated_documents
+
+    invalidate_generated_documents(session, file_id)
     stale_generation = secrets.token_hex(16)
     for stage in (StageName.summarize, StageName.mind_map, StageName.index):
         run = session.scalar(
@@ -112,6 +120,7 @@ def apply_vocabulary(
     *,
     automatic: bool = False,
     settings: Settings | None = None,
+    claim_token: str | None = None,
 ) -> dict:
     """Apply current rules as one immutable revision.
 
@@ -121,77 +130,119 @@ def apply_vocabulary(
     """
     settings = settings or get_settings()
     with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
-        if row is None:
-            raise ValueError("recording not found")
-        raw = _select_raw_transcript(row, settings)
-        if raw is None or raw.source != "local":
-            return {"file_id": file_id, "replacements": 0, "revision": None, "rules": []}
-        current = row.corrected_transcript_for_source(raw.source)
-        if automatic and current is not None:
-            return {
-                "file_id": file_id,
-                "replacements": 0,
-                "revision": current.revision,
-                "rules": [],
-                "skipped": "existing correction",
-            }
-        base_segments = current.segments if current is not None else raw.segments
-        terms = list(
-            session.scalars(
-                select(VocabularyTerm)
-                .where(VocabularyTerm.enabled.is_(True))
-                .order_by(VocabularyTerm.id)
-            )
+        return _apply_vocabulary_in_session(
+            session,
+            file_id,
+            automatic=automatic,
+            settings=settings,
+            claim_token=claim_token,
         )
-        segments, replacements, rule_ids = correct_segments(base_segments, terms, raw.language)
-        if not replacements:
-            return {"file_id": file_id, "replacements": 0, "revision": None, "rules": []}
-        next_revision = max((item.revision for item in row.transcript_revisions), default=0) + 1
-        text = "\n".join(
-            str(segment.get("text") or "").strip()
-            for segment in segments
-            if str(segment.get("text") or "").strip()
-        )
-        mode = "auto" if automatic else "manual"
-        session.add(
-            TranscriptRevision(
-                file_id=file_id,
-                base_transcript_id=raw.id,
-                revision=next_revision,
-                source=raw.source,
-                segments=segments,
-                text=text,
-                has_speakers=current.has_speakers if current is not None else raw.has_speakers,
-                note=f"vocabulary:{mode} rules={','.join(map(str, rule_ids))}",
-                kind="vocabulary",
-                provider="local-vocabulary",
-                prompt_version="vocabulary/v1",
-            )
-        )
-        _mark_derived_stale(session, file_id)
+
+
+def _apply_vocabulary_in_session(
+    session,
+    file_id: str,
+    *,
+    automatic: bool,
+    settings: Settings,
+    claim_token: str | None,
+) -> dict:
+    lock_cost_budget(session, file_id)
+    from .worker.knowledge_index import (
+        KnowledgeIndexBusyError,
+        reject_active_ask_evidence_mutation,
+    )
+
+    try:
+        reject_active_ask_evidence_mutation(session, file_id)
+    except KnowledgeIndexBusyError as exc:
+        raise VocabularyBusyError(str(exc)) from exc
+    row = session.get(PlaudFile, file_id)
+    if row is None:
+        raise ValueError("recording not found")
+    session.refresh(row)
+    active = processing_claim_active(row)
+    if claim_token is not None:
+        if not active or row.processing_token != claim_token:
+            raise VocabularyBusyError("the pipeline no longer owns this recording")
+    elif active:
+        raise VocabularyBusyError("recording is processing; apply vocabulary when it finishes")
+    raw = _select_raw_transcript(row, settings)
+    if raw is None or raw.source != "local":
+        return {"file_id": file_id, "replacements": 0, "revision": None, "rules": []}
+    current = row.corrected_transcript_for_source(raw.source)
+    if automatic and current is not None:
         return {
             "file_id": file_id,
-            "replacements": replacements,
-            "revision": next_revision,
-            "rules": rule_ids,
+            "replacements": 0,
+            "revision": current.revision,
+            "rules": [],
+            "skipped": "existing correction",
         }
+    base_segments = current.segments if current is not None else raw.segments
+    terms = list(
+        session.scalars(
+            select(VocabularyTerm)
+            .where(VocabularyTerm.enabled.is_(True))
+            .order_by(VocabularyTerm.id)
+        )
+    )
+    segments, replacements, rule_ids = correct_segments(base_segments, terms, raw.language)
+    if not replacements:
+        return {"file_id": file_id, "replacements": 0, "revision": None, "rules": []}
+    next_revision = max((item.revision for item in row.transcript_revisions), default=0) + 1
+    text = "\n".join(
+        str(segment.get("text") or "").strip()
+        for segment in segments
+        if str(segment.get("text") or "").strip()
+    )
+    mode = "auto" if automatic else "manual"
+    session.add(
+        TranscriptRevision(
+            file_id=file_id,
+            base_transcript_id=raw.id,
+            revision=next_revision,
+            source=raw.source,
+            segments=segments,
+            text=text,
+            has_speakers=current.has_speakers if current is not None else raw.has_speakers,
+            note=f"vocabulary:{mode} rules={','.join(map(str, rule_ids))}",
+            kind="vocabulary",
+            provider="local-vocabulary",
+            prompt_version="vocabulary/v1",
+        )
+    )
+    _mark_derived_stale(session, file_id)
+    return {
+        "file_id": file_id,
+        "replacements": replacements,
+        "revision": next_revision,
+        "rules": rule_ids,
+    }
 
 
 def apply_vocabulary_to_library(settings: Settings | None = None) -> dict:
     """Explicitly apply current rules to every local canonical transcript."""
     settings = settings or get_settings()
     with session_scope() as session:
-        file_ids = list(
+        file_ids = sorted(
             session.scalars(
                 select(Transcript.file_id)
                 .join(PlaudFile, PlaudFile.id == Transcript.file_id)
                 .where(PlaudFile.is_trash.is_(False), Transcript.source == "local")
                 .distinct()
-                .order_by(PlaudFile.start_time_ms.desc().nullslast())
             )
         )
-    results = [apply_vocabulary(file_id, settings=settings) for file_id in file_ids]
+        results = [
+            _apply_vocabulary_in_session(
+                session,
+                file_id,
+                automatic=False,
+                settings=settings,
+                claim_token=None,
+            )
+            for file_id in file_ids
+        ]
     changed = [item for item in results if item["replacements"]]
     return {
         "scanned": len(results),

@@ -162,7 +162,11 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
             audio.write(inputs["audio"])
             audio.flush()
             result = diarize(Path(audio.name), transcript, settings.diarize)
-        payload = {"segments": segments_to_json(result), "has_speakers": result.has_speakers}
+        payload = {
+            "segments": segments_to_json(result),
+            "has_speakers": result.has_speakers,
+            "model": settings.diarize.model,
+        }
     elif request.stage == JobStage.summarize:
         from ..worker.summarize import summarize
 

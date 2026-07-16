@@ -17,7 +17,6 @@ import json
 import logging
 import math
 import os
-import uuid
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -31,7 +30,6 @@ from ..db.models import (
     Chunk,
     FileStatus,
     PlaudFile,
-    ProviderConnection,
     StageAttempt,
     StageName,
     StageRun,
@@ -42,13 +40,17 @@ from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
 from ..providers.fallback import candidate_snapshots, is_retryable_fallback_error
-from ..providers.service import resolve_recording_profile
+from ..providers.service import lock_library_profile_resolution, resolve_recording_profile
 from ..providers.usage import (
     enforce_cost_ceiling,
     estimate_cost,
+    finalize_provider_cost_reservations,
+    lock_cost_budget,
     normalize_usage,
     pricing_for_stage,
     process_peak_memory_mb,
+    provider_cost_reservation_total,
+    reserve_provider_cost,
 )
 from ..remote.client import RemoteWorkerClient
 from ..remote.protocol import InputReference, JobStage, JobSubmitRequest
@@ -60,6 +62,13 @@ from ..store.speakers import (
     sync_speakers,
 )
 from . import align, convert, index, mindmap, polish, summarize, summary_templates, transcribe
+from .claims import (
+    current_processing_claim,
+    current_processing_owner,
+    new_processing_token,
+    processing_claim,
+    processing_owner,
+)
 from .diarize import DiarizationUnavailable, diarize, group_speaker_segments
 
 log = logging.getLogger(__name__)
@@ -96,9 +105,10 @@ def _claim_processing(
     mark_processing: bool = True,
 ) -> str:
     """Atomically claim one recording so UI and daemon work cannot overlap."""
-    token = uuid.uuid4().hex
+    token = new_processing_token()
     now = datetime.now(UTC)
     with session_scope() as session:
+        lock_library_profile_resolution(session)
         row = session.get(PlaudFile, file_id)
         if row is None:
             raise ValueError(f"unknown file {file_id}")
@@ -114,6 +124,7 @@ def _claim_processing(
             update(PlaudFile)
             .where(
                 PlaudFile.id == file_id,
+                *([PlaudFile.audio_path.is_not(None)] if require_audio else []),
                 or_(
                     PlaudFile.processing_token.is_(None),
                     PlaudFile.processing_lease_until.is_(None),
@@ -132,20 +143,76 @@ def _claim_processing(
                 )
             )
             if run is None:
-                run = StageRun(
-                    file_id=file_id, stage=StageName.mind_map, attempts=0, detail={}
-                )
+                run = StageRun(file_id=file_id, stage=StageName.mind_map, attempts=0, detail={})
                 session.add(run)
     return token
 
 
 def _assert_processing_claim(file_id: str, token: str) -> None:
     with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
-        if row is None:
-            raise ValueError(f"unknown file {file_id}")
-        if row.processing_token != token or not processing_claim_active(row):
-            raise PipelineAlreadyRunning(f"processing claim for {file_id} is no longer active")
+        _assert_processing_claim_in_session(session, file_id, token=token)
+
+
+def _assert_processing_claim_in_session(
+    session,
+    file_id: str,
+    *,
+    token: str | None = None,
+    renew: bool = False,
+) -> PlaudFile:
+    """Lock and verify the active claim before any durable pipeline write."""
+    # Preserve library-first lock order against global profile/membership
+    # mutations before taking this recording's row lock.
+    lock_library_profile_resolution(session)
+    active = current_processing_claim()
+    expected_token = token or (active.token if active is not None else None)
+    if active is not None and active.file_id != file_id:
+        raise PipelineAlreadyRunning(
+            f"processing claim for {active.file_id} cannot write recording {file_id}"
+        )
+    now = datetime.now(UTC)
+    if session.get_bind().dialect.name == "sqlite":
+        predicates = [PlaudFile.id == file_id]
+        if expected_token is not None:
+            predicates.extend(
+                [
+                    PlaudFile.processing_token == expected_token,
+                    PlaudFile.processing_lease_until.is_not(None),
+                    PlaudFile.processing_lease_until > now,
+                ]
+            )
+        locked = session.execute(
+            update(PlaudFile)
+            .where(*predicates)
+            .values(updated_at=PlaudFile.updated_at)
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        row = session.get(PlaudFile, file_id, populate_existing=True)
+        if locked != 1 and row is not None and expected_token is not None:
+            raise PipelineAlreadyRunning(
+                f"processing claim for {file_id} is no longer active"
+            )
+    else:
+        row = session.scalar(
+            select(PlaudFile).where(PlaudFile.id == file_id).with_for_update()
+        )
+    if row is None:
+        raise ValueError(f"unknown file {file_id}")
+    if expected_token is None:
+        return row
+    if row.processing_token != expected_token or not processing_claim_active(row, now=now):
+        raise PipelineAlreadyRunning(f"processing claim for {file_id} is no longer active")
+    if renew:
+        row.processing_lease_until = now + _PROCESSING_LEASE
+    return row
+
+
+def _renew_processing_claim(file_id: str) -> None:
+    active = current_processing_claim()
+    if active is None:
+        return
+    with session_scope() as session:
+        _assert_processing_claim_in_session(session, file_id, renew=True)
 
 
 def _release_processing(file_id: str, token: str) -> None:
@@ -228,13 +295,6 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
     return resolved
 
 
-def _llm_model(settings: Settings) -> str | None:
-    """Return the configured model for the selected LLM provider."""
-    provider = settings.llm.provider.replace("-", "_")
-    config = getattr(settings.llm, provider, None)
-    return getattr(config, "model", None)
-
-
 def _remote_selection(snapshot: dict, stage: str) -> dict | None:
     selection = snapshot.get("stages", {}).get(stage)
     return selection if selection and selection.get("execution_target") == "remote_worker" else None
@@ -284,13 +344,12 @@ def _run_remote_stage(
     selection = _remote_selection(snapshot, stage)
     if selection is None:
         raise ValueError(f"stage is not remote: {stage}")
-    with session_scope() as session:
-        connection = session.scalar(
-            select(ProviderConnection).where(ProviderConnection.key == selection["connection"])
-        )
-        if connection is None:
-            raise ValueError(f"remote connection not found: {selection['connection']}")
-        config = dict(connection.config or {})
+    config = copy.deepcopy(selection.get("configuration") or {})
+    secret_ref = selection.get("secret_ref")
+    if secret_ref:
+        if not str(secret_ref).startswith("env:"):
+            raise ValueError("unsupported remote worker secret reference; expected env:VARIABLE")
+        config.setdefault("token_env", str(secret_ref).removeprefix("env:"))
     effective_options = (selection.get("options") or {}) | (options or {})
     fingerprint = hashlib.sha256(
         json.dumps(
@@ -321,7 +380,25 @@ def _run_remote_stage(
     artifact = result.artifacts.get("transcript.json") or result.artifacts.get("result.json")
     if artifact is None:
         raise ValueError(f"remote {stage} returned no JSON artifact")
-    return json.loads(artifact)
+    payload = json.loads(artifact)
+    if not isinstance(payload, dict):
+        raise ValueError(f"remote {stage} returned an invalid JSON artifact")
+    _validate_remote_returned_model(payload, snapshot, stage)
+    return payload
+
+
+def _validate_remote_returned_model(payload: dict, snapshot: dict, stage: str) -> str:
+    """Require the worker to attest the exact model that produced its result."""
+    selection = (snapshot.get("stages") or {}).get(stage) or {}
+    requested_model = selection.get("model")
+    returned_model = payload.get("model")
+    if not isinstance(requested_model, str) or not requested_model.strip():
+        raise ValueError(f"remote {stage} requested model is missing")
+    if not isinstance(returned_model, str) or not returned_model.strip():
+        raise ValueError(f"remote {stage} returned no model")
+    if returned_model != requested_model:
+        raise ValueError(f"remote {stage} returned a different model than requested")
+    return returned_model
 
 
 def _set_stage_in_session(
@@ -339,6 +416,7 @@ def _set_stage_in_session(
     error: str | None = None,
     expected_stale_generation: object = _STALE_GENERATION_UNSET,
 ) -> None:
+    _assert_processing_claim_in_session(session, file_id)
     now = datetime.now(UTC)
     run = session.scalar(
         select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
@@ -400,6 +478,18 @@ def _set_stage_in_session(
             )
         )
         if attempt is not None:
+            dispatch_reservation_ids = list(
+                (attempt.usage or {}).get("dispatch_reservation_ids") or []
+            )
+            reserved_cost = provider_cost_reservation_total(
+                session, dispatch_reservation_ids
+            )
+            finalize_provider_cost_reservations(
+                session,
+                dispatch_reservation_ids,
+                status="completed",
+                release=True,
+            )
             started = attempt.started_at
             if started.tzinfo is None:
                 started = started.replace(tzinfo=UTC)
@@ -413,7 +503,16 @@ def _set_stage_in_session(
             attempt.provider = run.provider or attempt.provider
             attempt.model = run.model or attempt.model
             attempt.usage = normalized
-            attempt.estimated_cost_usd = cost
+            attempt.estimated_cost_usd = (
+                max(float(attempt.estimated_cost_usd or 0), reserved_cost, cost)
+                if status
+                in {
+                    StageStatus.degraded,
+                    StageStatus.failed,
+                    StageStatus.skipped,
+                }
+                else cost
+            )
             attempt.latency_ms = latency_ms
             attempt.error = run.error
             attempt.completed_at = now
@@ -552,6 +651,49 @@ def _audio_seconds(row: PlaudFile, transcript: Transcript | None = None) -> floa
 
 def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
     with session_scope() as session:
+        selection = (snapshot.get("stages") or {}).get(stage) or {}
+        if selection.get("execution_target") in {"cloud", "remote_worker"}:
+            durable_stage = StageName.index if stage == "embed" else StageName(stage)
+            attempt = session.scalar(
+                select(StageAttempt)
+                .where(
+                    StageAttempt.file_id == file_id,
+                    StageAttempt.stage == durable_stage,
+                    StageAttempt.status == StageStatus.running,
+                )
+                .order_by(StageAttempt.attempt.desc())
+            )
+            if attempt is None:
+                raise RuntimeError(f"{stage} dispatch has no active stage attempt")
+            file_scope = hashlib.sha256(file_id.encode()).hexdigest()[:16]
+            reservation_id = f"stage:{file_scope}:{stage}:{attempt.attempt}"
+            projected, pricing = reserve_provider_cost(
+                session,
+                reservation_id=reservation_id,
+                file_id=file_id,
+                operation=stage,
+                snapshot=snapshot,
+                usage=usage,
+            )
+            reservation_ids = list(
+                (attempt.usage or {}).get("dispatch_reservation_ids") or []
+            )
+            if reservation_id not in reservation_ids:
+                reservation_ids.append(reservation_id)
+            attempt.usage = normalize_usage(usage) | {
+                "projection": True,
+                "dispatch_reservation_ids": reservation_ids,
+            }
+            attempt.estimated_cost_usd = max(
+                float(attempt.estimated_cost_usd or 0), projected
+            )
+            return {
+                "projected_usd": projected,
+                "enforced": (snapshot.get("policy") or {}).get("cost_ceiling")
+                is not None,
+                "pricing": pricing,
+                "dispatch_reservation_id": reservation_id,
+            }
         return enforce_cost_ceiling(session, file_id, stage, snapshot, usage)
 
 
@@ -569,6 +711,7 @@ def _run_fallback_stage(
         token = _PROFILE_SNAPSHOT.set(candidate)
         stale_generation = _begin_stage(file_id, durable_stage)
         try:
+            _renew_processing_claim(file_id)
             outcome = operation(candidate)
             detail = dict(outcome.get("detail") or {}) | {
                 "fallback": candidate["fallback"],
@@ -586,6 +729,28 @@ def _run_fallback_stage(
             )
             return outcome.get("value"), candidate
         except Exception as exc:  # noqa: BLE001 - classified by provider contract
+            with session_scope() as session:
+                run = session.scalar(
+                    select(StageRun).where(
+                        StageRun.file_id == file_id,
+                        StageRun.stage == durable_stage,
+                    )
+                )
+                generation_is_current = bool(
+                    run is not None
+                    and (run.detail or {}).get("stale_generation") == stale_generation
+                )
+            if not generation_is_current:
+                if durable_stage == StageName.index:
+                    from .knowledge_index import sync_transcript_index_profiles
+
+                    with session_scope() as session:
+                        sync_transcript_index_profiles(session, file_ids=[file_id])
+                else:
+                    # Preserve the newer stale-generation detail while closing
+                    # this attempt and keeping scoped retry/error UI actionable.
+                    _fail_stage(file_id, durable_stage, exc)
+                raise
             retryable = is_retryable_fallback_error(exc)
             _fail_stage(file_id, durable_stage, exc)
             selection = candidate["stages"].get(profile_stage) or {}
@@ -643,43 +808,66 @@ def _schedule_pipeline_retry(row: PlaudFile, settings: Settings) -> None:
     row.pipeline_next_retry_at = now + timedelta(seconds=delay)
 
 
-def process_file(file_id: str, settings: Settings | None = None, force: bool = False) -> None:
+def process_file(
+    file_id: str,
+    settings: Settings | None = None,
+    force: bool = False,
+    *,
+    claim_token: str | None = None,
+) -> None:
     """Process one recording under an exclusive durable lease."""
-    token = _claim_processing(file_id)
+    token = claim_token or _claim_processing(file_id)
     try:
-        _process_file_claimed(file_id, settings=settings, force=force)
-    except Exception as exc:
-        # The main pipeline records its own failures. This guard covers setup
-        # errors (for example profile resolution) that occur before its try block.
-        with session_scope() as session:
-            row = session.get(PlaudFile, file_id)
-            if row is not None and row.status == FileStatus.processing:
-                row.status = FileStatus.error
-                row.error = str(exc)[:2000]
-                _schedule_pipeline_retry(row, settings or get_settings())
-        raise
+        with processing_claim(file_id, token):
+            if claim_token is not None:
+                _assert_processing_claim(file_id, claim_token)
+            try:
+                _process_file_claimed(
+                    file_id,
+                    settings=settings,
+                    force=force,
+                    claim_token=token,
+                )
+            except Exception as exc:
+                # This guard covers setup errors before the main pipeline's try block.
+                with session_scope() as session:
+                    row = _assert_processing_claim_in_session(session, file_id)
+                    if row.status == FileStatus.processing:
+                        row.status = FileStatus.error
+                        row.error = str(exc)[:2000]
+                        _schedule_pipeline_retry(row, settings or get_settings())
+                raise
     finally:
         _release_processing(file_id, token)
 
 
-def process_derived_artifacts(file_id: str, settings: Settings | None = None) -> None:
+def process_derived_artifacts(
+    file_id: str,
+    settings: Settings | None = None,
+    *,
+    claim_token: str | None = None,
+) -> None:
     """Resume notes, mind map, and indexing from the canonical local transcript.
 
     This path deliberately does not require retained audio. It uses the same
     durable claim, resolved profiles, fallback policy, cost guard, attempts,
     provenance, and stage state transitions as the full pipeline.
     """
-    token = _claim_processing(file_id, require_audio=False)
+    token = claim_token or _claim_processing(file_id, require_audio=False)
     try:
-        _process_derived_artifacts_claimed(file_id, settings=settings)
-    except Exception as exc:
-        with session_scope() as session:
-            row = session.get(PlaudFile, file_id)
-            if row is not None and row.status == FileStatus.processing:
-                row.status = FileStatus.error
-                row.error = str(exc)[:2000]
-                _schedule_pipeline_retry(row, settings or get_settings())
-        raise
+        with processing_claim(file_id, token):
+            if claim_token is not None:
+                _assert_processing_claim(file_id, claim_token)
+            try:
+                _process_derived_artifacts_claimed(file_id, settings=settings)
+            except Exception as exc:
+                with session_scope() as session:
+                    row = _assert_processing_claim_in_session(session, file_id)
+                    if row.status == FileStatus.processing:
+                        row.status = FileStatus.error
+                        row.error = str(exc)[:2000]
+                        _schedule_pipeline_retry(row, settings or get_settings())
+                raise
     finally:
         _release_processing(file_id, token)
 
@@ -703,26 +891,29 @@ def process_mind_map_only(
         file_id, require_audio=False, retry_scope=StageName.mind_map
     )
     try:
-        if claim_token is not None:
-            _assert_processing_claim(file_id, claim_token)
-        _process_mind_map_only_claimed(file_id, settings=settings)
-    except Exception as exc:
-        with session_scope() as session:
-            row = session.get(PlaudFile, file_id)
-            if row is not None and row.status == FileStatus.processing:
-                row.status = FileStatus.error
-                row.error = str(exc)[:2000]
-                run = next(
-                    (item for item in row.stage_runs if item.stage == StageName.mind_map), None
-                )
-                if run is not None:
-                    run.status = StageStatus.failed
-                    run.error = str(exc)[:2000]
-                    run.completed_at = datetime.now(UTC)
-                    _schedule_mind_map_retry(row, run, settings or get_settings())
-                else:
-                    _schedule_pipeline_retry(row, settings or get_settings())
-        raise
+        with processing_claim(file_id, token):
+            if claim_token is not None:
+                _assert_processing_claim(file_id, claim_token)
+            try:
+                _process_mind_map_only_claimed(file_id, settings=settings)
+            except Exception as exc:
+                with session_scope() as session:
+                    row = _assert_processing_claim_in_session(session, file_id)
+                    if row.status == FileStatus.processing:
+                        row.status = FileStatus.error
+                        row.error = str(exc)[:2000]
+                        run = next(
+                            (item for item in row.stage_runs if item.stage == StageName.mind_map),
+                            None,
+                        )
+                        if run is not None:
+                            run.status = StageStatus.failed
+                            run.error = str(exc)[:2000]
+                            run.completed_at = datetime.now(UTC)
+                            _schedule_mind_map_retry(row, run, settings or get_settings())
+                        else:
+                            _schedule_pipeline_retry(row, settings or get_settings())
+                raise
     finally:
         _release_processing(file_id, token)
 
@@ -736,6 +927,11 @@ def claim_mind_map_rebuild(file_id: str) -> str:
     )
 
 
+def claim_processing_work(file_id: str, *, require_audio: bool) -> str:
+    """Synchronously reserve an API-triggered worker before queue mutation."""
+    return _claim_processing(file_id, require_audio=require_audio)
+
+
 def release_processing_claim(
     file_id: str,
     token: str,
@@ -747,10 +943,19 @@ def release_processing_claim(
     values = {"processing_token": None, "processing_lease_until": None}
     if status is not None:
         values |= {"status": status, "error": error}
+    now = datetime.now(UTC)
+    predicates = [PlaudFile.id == file_id, PlaudFile.processing_token == token]
+    if status is not None:
+        predicates.extend(
+            [
+                PlaudFile.processing_lease_until.is_not(None),
+                PlaudFile.processing_lease_until > now,
+            ]
+        )
     with session_scope() as session:
         session.execute(
             update(PlaudFile)
-            .where(PlaudFile.id == file_id, PlaudFile.processing_token == token)
+            .where(*predicates)
             .values(**values)
             .execution_options(synchronize_session=False)
         )
@@ -759,8 +964,9 @@ def release_processing_claim(
 def abandon_mind_map_rebuild(file_id: str, token: str) -> bool:
     """Atomically release this claim while leaving a daemon-resumable queue."""
     with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
-        if row is None or row.processing_token != token:
+        try:
+            row = _assert_processing_claim_in_session(session, file_id, token=token)
+        except (PipelineAlreadyRunning, ValueError):
             return False
         row.processing_token = None
         row.processing_lease_until = None
@@ -768,9 +974,7 @@ def abandon_mind_map_rebuild(file_id: str, token: str) -> bool:
         row.error = "mind map rebuild is queued for background retry"
         run = next((item for item in row.stage_runs if item.stage == StageName.mind_map), None)
         if run is None:
-            run = StageRun(
-                file_id=file_id, stage=StageName.mind_map, attempts=0, detail={}
-            )
+            run = StageRun(file_id=file_id, stage=StageName.mind_map, attempts=0, detail={})
             session.add(run)
         run.status = StageStatus.pending
         run.error = None
@@ -784,15 +988,16 @@ def abandon_mind_map_rebuild(file_id: str, token: str) -> bool:
 
 
 def _process_file_claimed(
-    file_id: str, settings: Settings | None = None, force: bool = False
+    file_id: str,
+    settings: Settings | None = None,
+    force: bool = False,
+    claim_token: str | None = None,
 ) -> None:
     settings = settings or get_settings()
     pcfg = settings.pipeline
 
     with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
-        if row is None:
-            raise ValueError(f"unknown file {file_id}")
+        row = _assert_processing_claim_in_session(session, file_id)
         if not row.audio_path or not Path(row.audio_path).exists():
             raise FileNotFoundError(f"audio missing for {file_id}: {row.audio_path}")
         row.status = FileStatus.processing
@@ -831,10 +1036,22 @@ def _process_file_claimed(
         if pcfg.convert:
             if force or not wav.exists():
                 _begin_stage(file_id, StageName.convert)
+                staging_wav = wav.with_name(
+                    f".{wav.stem}.{(claim_token or 'claim').replace(':', '-')}.tmp{wav.suffix}"
+                )
                 try:
-                    convert.to_wav(audio, wav)
+                    staging_wav.unlink(missing_ok=True)
+                    convert.to_wav(audio, staging_wav)
                     with session_scope() as session:
-                        session.get(PlaudFile, file_id).wav_path = str(wav)
+                        claimed = _assert_processing_claim_in_session(
+                            session,
+                            file_id,
+                            token=claim_token,
+                            renew=True,
+                        )
+                        session.flush()
+                        os.replace(staging_wav, wav)
+                        claimed.wav_path = str(wav)
                     _finish_stage(
                         file_id,
                         StageName.convert,
@@ -843,6 +1060,7 @@ def _process_file_claimed(
                         usage={"audio_seconds": _audio_seconds(row)},
                     )
                 except Exception as exc:
+                    staging_wav.unlink(missing_ok=True)
                     _fail_stage(file_id, StageName.convert, exc)
                     raise
             else:
@@ -1125,9 +1343,19 @@ def _process_file_claimed(
         # row. This creates a revision and never mutates provider output.
         from ..vocabulary import apply_vocabulary
 
-        vocabulary_result = apply_vocabulary(file_id, automatic=True, settings=settings)
+        vocabulary_result = apply_vocabulary(
+            file_id,
+            automatic=True,
+            settings=settings,
+            claim_token=claim_token,
+        )
         if vocabulary_result.get("replacements"):
             with session_scope() as session:
+                _assert_processing_claim_in_session(
+                    session,
+                    file_id,
+                    token=claim_token,
+                )
                 run = session.scalar(
                     select(StageRun).where(
                         StageRun.file_id == file_id,
@@ -1243,7 +1471,7 @@ def _process_file_claimed(
     except Exception as exc:  # noqa: BLE001
         log.exception("Pipeline failed for %s", file_id)
         with session_scope() as session:
-            r = session.get(PlaudFile, file_id)
+            r = _assert_processing_claim_in_session(session, file_id)
             r.status = FileStatus.error
             r.error = str(exc)[:2000]
             _schedule_pipeline_retry(r, settings)
@@ -1255,9 +1483,7 @@ def _process_file_claimed(
 def _process_derived_artifacts_claimed(file_id: str, settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
-        if row is None:
-            raise ValueError(f"unknown file {file_id}")
+        row = _assert_processing_claim_in_session(session, file_id)
         requested_template_key = row.note_template_key or settings.pipeline.summary_template
         snapshot = resolve_recording_profile(
             session, file_id, template_key=requested_template_key
@@ -1297,9 +1523,7 @@ def mind_map_rebuild_source(session, row: PlaudFile, settings: Settings) -> Summ
     exactly one live output the choice is still unambiguous.
     """
     live = {
-        s.template: s
-        for s in row.summaries
-        if s.source == "local" and s.template != "mind_map"
+        s.template: s for s in row.summaries if s.source == "local" and s.template != "mind_map"
     }
     if not live:
         return None
@@ -1325,7 +1549,7 @@ def _mind_map_rebuild_inputs(file_id: str, settings: Settings) -> dict:
     from ..note_history import source_summary_provenance
 
     with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
+        row = _assert_processing_claim_in_session(session, file_id)
         if row is None:
             raise ValueError(f"unknown file {file_id}")
         if any(
@@ -1477,7 +1701,6 @@ def _mind_map_operation(
                 options={"summary_md": summary_md},
             )
             result.setdefault("provider", "remote-worker")
-            result.setdefault("model", _llm_model(candidate_settings))
         else:
             result = mindmap.generate_mind_map(transcript, candidate_settings, summary_md)
         result["template_snapshot"] = {
@@ -1580,7 +1803,6 @@ def _run_derived_stages(
                                 },
                             )
                             result.setdefault("provider", "remote-worker")
-                            result.setdefault("model", _llm_model(candidate_settings))
                         else:
                             result = summarize.summarize(transcript, candidate_settings)
                         _persist_summary(file_id, result, transcript_lineage)
@@ -1756,12 +1978,29 @@ def _run_derived_stages(
         if derived_profile_token is not None:
             _PROFILE_SNAPSHOT.reset(derived_profile_token)
 
+    # Note embeddings have their own durable lifecycle. A provider failure must
+    # not downgrade the recording or overwrite the transcript index stage.
+    try:
+        from .knowledge_index import process_file_documents
+
+        active_claim = current_processing_claim()
+        if active_claim is None:
+            raise PipelineAlreadyRunning(
+                f"processing claim for {file_id} is missing before note indexing"
+            )
+        _assert_processing_claim(file_id, active_claim.token)
+        process_file_documents(file_id, settings)
+    except PipelineAlreadyRunning:
+        raise
+    except Exception:  # noqa: BLE001 - documents remain pending/failed for retry
+        log.exception("Note knowledge indexing cycle failed for %s", file_id)
+
     return partial_errors
 
 
 def _finish_processing_cycle(file_id: str, settings: Settings, partial_errors: list[str]) -> None:
     with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
+        row = _assert_processing_claim_in_session(session, file_id)
         if partial_errors:
             row.status = FileStatus.partial
             row.error = "; ".join(partial_errors)[:2000]
@@ -1803,7 +2042,7 @@ def _finish_mind_map_cycle(
     up to ``done`` while another stage is still failed.
     """
     with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
+        row = _assert_processing_claim_in_session(session, file_id)
         if partial_errors:
             row.status = FileStatus.partial
             row.error = "; ".join(partial_errors)[:2000]
@@ -1975,6 +2214,10 @@ def _has_chunks(file_id: str, snapshot: dict) -> bool:
 def _persist_transcript(file_id: str, transcript: Transcript) -> dict[str, str]:
     speaker_mapping: dict[str, str] = {}
     with session_scope() as session:
+        _assert_processing_claim_in_session(session, file_id)
+        from .knowledge_index import reject_active_ask_evidence_mutation
+
+        reject_active_ask_evidence_mutation(session, file_id)
         # Preserve imported Plaud transcripts for comparison/migration. Only the
         # canonical local ASR result is replaced. User corrections
         # (TranscriptRevision rows) are never deleted here — edits survive
@@ -2028,6 +2271,10 @@ def _persist_transcript(file_id: str, transcript: Transcript) -> dict[str, str]:
 def _persist_aligned_transcript(file_id: str, transcript: Transcript) -> None:
     """Update timing in place so forced alignment preserves ASR identity and edits."""
     with session_scope() as session:
+        _assert_processing_claim_in_session(session, file_id)
+        from .knowledge_index import reject_active_ask_evidence_mutation
+
+        reject_active_ask_evidence_mutation(session, file_id)
         row = session.scalar(
             select(TranscriptRow)
             .where(TranscriptRow.file_id == file_id, TranscriptRow.source == "local")
@@ -2050,9 +2297,10 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
 
     transcript: Transcript = result["transcript"]
     with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
-        if row is None:
-            raise ValueError("recording not found")
+        row = _assert_processing_claim_in_session(session, file_id)
+        from .knowledge_index import reject_active_ask_evidence_mutation
+
+        reject_active_ask_evidence_mutation(session, file_id)
         raw = _select_raw_transcript(row, settings)
         if raw is None or raw.source != "local":
             raise ValueError("AI polish requires a local raw transcript")
@@ -2093,6 +2341,8 @@ def _persist_summary(
 
     template = result.get("template", "default")
     with session_scope() as session:
+        lock_cost_budget(session, file_id)
+        _assert_processing_claim_in_session(session, file_id)
         if expected_mind_map_inputs is not None:
             file_row = session.get(PlaudFile, file_id)
             transcript_guard = expected_mind_map_inputs.get("transcript") or {}
@@ -2129,9 +2379,8 @@ def _persist_summary(
                     SummaryRow.source == "local",
                 )
             )
-            source_matches = (
-                source is not None
-                and fingerprint_digest(source) == source_note.get("content_fingerprint")
+            source_matches = source is not None and fingerprint_digest(source) == source_note.get(
+                "content_fingerprint"
             )
             source_stage_stale = any(
                 run.stage == StageName.summarize and bool((run.detail or {}).get("stale"))
@@ -2159,13 +2408,24 @@ def _persist_summary(
             **(lineage or {}),
             resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
         )
-        displaced = session.scalars(
-            select(SummaryRow).where(
-                SummaryRow.file_id == file_id,
-                SummaryRow.template == template,
-                SummaryRow.source == "local",
+        displaced = list(
+            session.scalars(
+                select(SummaryRow)
+                .where(
+                    SummaryRow.file_id == file_id,
+                    SummaryRow.template == template,
+                    SummaryRow.source == "local",
+                )
+                .order_by(SummaryRow.id)
             )
-        ).all()
+        )
+        from .knowledge_index import lock_summary_for_mutation
+
+        displaced = [
+            locked
+            for row in displaced
+            if (locked := lock_summary_for_mutation(session, row.id, file_id)) is not None
+        ]
         replacement_fingerprint = content_fingerprint(replacement)
         for row in displaced:
             # Preserve the outgoing version before it leaves the live slot.
@@ -2180,6 +2440,10 @@ def _persist_summary(
         # one-live-row-per-template constraint never trips mid-transaction.
         session.flush()
         session.add(replacement)
+        session.flush()
+        from .knowledge_index import sync_summary_document
+
+        sync_summary_document(session, replacement, allow_running_stage=True)
 
 
 def _persist_chunks(
@@ -2193,6 +2457,10 @@ def _persist_chunks(
         return None
     blobs, model_name, dim = index.embed_chunks(chunks, settings)
     with session_scope() as session:
+        _assert_processing_claim_in_session(session, file_id)
+        from .knowledge_index import reject_active_ask_evidence_mutation
+
+        reject_active_ask_evidence_mutation(session, file_id)
         session.execute(delete(Chunk).where(Chunk.file_id == file_id))
         for i, (c, blob) in enumerate(zip(chunks, blobs, strict=True)):
             session.add(
@@ -2213,14 +2481,19 @@ def _persist_chunks(
     return model_name
 
 
-def _persist_remote_chunks(file_id: str, payload: dict, lineage: dict | None = None) -> str | None:
+def _persist_remote_chunks(file_id: str, payload: dict, lineage: dict | None = None) -> str:
     chunks = payload.get("chunks", [])
     vectors = payload.get("vectors_base64", [])
     if len(chunks) != len(vectors):
         raise ValueError("remote embedding artifact has mismatched chunks and vectors")
-    model_name = payload.get("model")
+    profile_snapshot = _PROFILE_SNAPSHOT.get() or {}
+    model_name = _validate_remote_returned_model(payload, profile_snapshot, "embed")
     dim = payload.get("dim")
     with session_scope() as session:
+        _assert_processing_claim_in_session(session, file_id)
+        from .knowledge_index import reject_active_ask_evidence_mutation
+
+        reject_active_ask_evidence_mutation(session, file_id)
         session.execute(delete(Chunk).where(Chunk.file_id == file_id))
         for idx, (chunk, encoded) in enumerate(zip(chunks, vectors, strict=True)):
             session.add(
@@ -2235,7 +2508,7 @@ def _persist_remote_chunks(file_id: str, payload: dict, lineage: dict | None = N
                     dim=dim,
                     embedding=base64.b64decode(encoded),
                     **(lineage or {}),
-                    resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
+                    resolved_profile_snapshot=profile_snapshot,
                 )
             )
     return model_name
@@ -2290,25 +2563,19 @@ def process_pending(
                     )
                     detail = map_run.detail or {}
                     scoped_count = int(detail.get("mind_map_retry_count") or 0)
-                    scoped_due = _retry_snapshot_datetime(
-                        detail.get("mind_map_next_retry_at")
-                    )
-                    if (
-                        scoped_count >= settings.pipeline.retry_max_attempts
-                        or (scoped_due is not None and scoped_due > now)
+                    scoped_due = _retry_snapshot_datetime(detail.get("mind_map_next_retry_at"))
+                    if scoped_count >= settings.pipeline.retry_max_attempts or (
+                        scoped_due is not None and scoped_due > now
                     ):
                         continue
-                elif (
-                    row.pipeline_retry_count >= settings.pipeline.retry_max_attempts
-                    or (
-                        row.pipeline_next_retry_at is not None
-                        and (
-                            row.pipeline_next_retry_at.replace(tzinfo=UTC)
-                            if row.pipeline_next_retry_at.tzinfo is None
-                            else row.pipeline_next_retry_at
-                        )
-                        > now
+                elif row.pipeline_retry_count >= settings.pipeline.retry_max_attempts or (
+                    row.pipeline_next_retry_at is not None
+                    and (
+                        row.pipeline_next_retry_at.replace(tzinfo=UTC)
+                        if row.pipeline_next_retry_at.tzinfo is None
+                        else row.pipeline_next_retry_at
                     )
+                    > now
                 ):
                     continue
             if row.audio_path is None and not (derived_only or mind_map_only):
@@ -2355,19 +2622,21 @@ def process_pending(
         return 0
 
     workers = max(1, settings.pipeline.concurrency)
+    claim_owner = current_processing_owner()
 
     def _run(job: tuple[str, str]) -> bool:
-        fid, scope = job
-        try:
-            if scope == "derived":
-                process_derived_artifacts(fid, settings)
-            elif scope == "mind_map":
-                process_mind_map_only(fid, settings)
-            else:
-                process_file(fid, settings, force=force)
-            return True
-        except Exception:  # noqa: BLE001
-            return False  # error already recorded on the row
+        with processing_owner(claim_owner):
+            fid, scope = job
+            try:
+                if scope == "derived":
+                    process_derived_artifacts(fid, settings)
+                elif scope == "mind_map":
+                    process_mind_map_only(fid, settings)
+                else:
+                    process_file(fid, settings, force=force)
+                return True
+            except Exception:  # noqa: BLE001
+                return False  # error already recorded on the row
 
     if workers == 1:
         return sum(_run(job) for job in jobs)

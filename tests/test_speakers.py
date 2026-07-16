@@ -250,6 +250,78 @@ def test_rename_endpoint_upsert_clear_and_validation(monkeypatch, tmp_path):
                   follow_redirects=False).status_code == 404
 
 
+def test_speaker_rename_keeps_durable_reindex_queue_when_thread_start_fails(
+    monkeypatch, tmp_path
+):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import StageName, StageRun, StageStatus
+    from localplaud.db.session import session_scope
+
+    eager_calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        "localplaud.api.app._start_transcript_reindex",
+        lambda file_id, **kwargs: eager_calls.append((file_id, kwargs)) and False,
+    )
+    response = c.post(
+        "/file/r1/speakers",
+        data={"key": "SPEAKER_00", "name": "Alice"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert eager_calls == [
+        (
+            "r1",
+            {
+                "expected_revision": 0,
+                "expected_speaker_names": {"SPEAKER_00": "Alice"},
+            },
+        )
+    ]
+    with session_scope() as session:
+        run = session.scalar(
+            select(StageRun).where(
+                StageRun.file_id == "r1", StageRun.stage == StageName.index
+            )
+        )
+        assert run.status == StageStatus.pending
+        assert run.detail["reindex_only"] is True
+        assert run.detail["reason"] == "canonical transcript changed"
+
+
+def test_speaker_rename_does_not_eagerly_index_when_stage_is_disabled(
+    monkeypatch, tmp_path
+):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.config import get_settings
+    from localplaud.db.models import StageName, StageRun, StageStatus
+    from localplaud.db.session import session_scope
+
+    settings = get_settings().model_copy(deep=True)
+    settings.pipeline.index = False
+    monkeypatch.setattr("localplaud.api.app.get_settings", lambda: settings)
+    calls = _mute_reindex(monkeypatch)
+
+    response = c.post(
+        "/file/r1/speakers",
+        data={"key": "SPEAKER_00", "name": "Alice"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    time.sleep(0.02)
+    assert calls == []
+    with session_scope() as session:
+        run = session.scalar(
+            select(StageRun).where(
+                StageRun.file_id == "r1", StageRun.stage == StageName.index
+            )
+        )
+        assert run.status == StageStatus.pending
+        assert run.detail["reindex_only"] is True
+
+
 def test_detail_page_shows_display_name_and_falls_back_to_key(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _mute_reindex(monkeypatch)

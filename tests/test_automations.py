@@ -109,6 +109,37 @@ def test_rule_dry_run_execution_history_and_versioning(monkeypatch, tmp_path):
     assert 'class="sub automation-run-detail"' in history_page.text
 
 
+def test_autoflow_membership_actions_take_library_first_fence(monkeypatch, tmp_path):
+    client, folder_id, tag_id = _seed(monkeypatch, tmp_path)
+    import localplaud.providers.service as provider_service
+
+    calls: list[list[str]] = []
+    real_lock = provider_service.lock_recording_membership_changes
+
+    def observed_lock(session, file_ids):
+        calls.append(list(file_ids))
+        return real_lock(session, file_ids)
+
+    monkeypatch.setattr(
+        provider_service, "lock_recording_membership_changes", observed_lock
+    )
+    response = client.post(
+        "/api/automations/rules",
+        json={
+            "name": "Organize",
+            "enabled": True,
+            "priority": 10,
+            "trigger": {"origin": "plaud"},
+            "actions": {"folder_id": folder_id, "add_tag_ids": [tag_id]},
+            "notify": False,
+        },
+    )
+    assert response.status_code == 201
+
+    assert client.post("/api/automations/run").json()["recordings_changed"] == 1
+    assert calls == [["match"]]
+
+
 def test_lower_priority_number_wins_and_toggle_stops_execution(monkeypatch, tmp_path):
     client, _folder_id, _tag_id = _seed(monkeypatch, tmp_path)
     broad = {
@@ -292,6 +323,16 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     ).status_code == 200
     translated = client.get("/discover")
     assert "多項規則設定同一欄位時，優先序數字較小者優先" in translated.text
+    assert "本機 AutoFlow" in translated.text
+    assert "在此 Web App 建立並可完整編輯的規則。" in translated.text
+    assert "外部規則擁有者" in translated.text
+    assert "同步的規則仍會顯示，但只能由其擁有者編輯。" in translated.text
+    assert "限定範圍的 HTTPS 或明確允許的私有目的地。" in translated.text
+    assert "限定範圍的 SMTP 目的地，密碼僅由環境提供。" in translated.text
+    assert ">可用<" in translated.text
+    assert ">閒置<" in translated.text
+    assert ">待設定<" in translated.text
+    assert ">Rules created and fully editable in this Web App.<" not in translated.text
     assert "dirtyMessage:tr('Discard these AutoFlow changes?')" in translated.text
     from localplaud.i18n import catalog
 

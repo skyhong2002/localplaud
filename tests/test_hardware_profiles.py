@@ -107,11 +107,17 @@ def test_install_recommendation_clones_policy_and_other_stages(monkeypatch, tmp_
         for stage in ("diarize", "summarize", "mind_map", "embed", "ask"):
             assert created["stages"][stage] == original_profile["stages"][stage]
 
+        sync_calls: list[bool] = []
+        monkeypatch.setattr(
+            "localplaud.worker.knowledge_index.sync_knowledge_documents",
+            lambda _session: sync_calls.append(True),
+        )
         again = install_hardware_recommendation(session, "apple-mlx-local", make_default=True)
         session.commit()
         assert again["id"] == created["id"]
         assert again["is_system_default"] is True
         assert len([p for p in list_profiles(session) if p["key"] == created["key"]]) == 1
+        assert sync_calls == [True]
 
 
 def test_unready_recommendation_cannot_be_installed(monkeypatch, tmp_path):

@@ -635,6 +635,10 @@ def test_editable_copy_and_ask_note_provenance_survive_restore(monkeypatch, tmp_
         "template_version": 1,
         "llm_provider": "fake-llm",
         "model": "m-1",
+        "source": "local",
+        "input_transcript_id": 1,
+        "input_transcript_revision": 0,
+        "input_transcript_source": "local",
         "created_at": v2_created.isoformat(),
         "content_fingerprint": v2_digest,
     }
@@ -743,6 +747,42 @@ def test_restore_with_null_legacy_created_at_falls_back(monkeypatch, tmp_path):
         assert live.content_md == "# v2 body"
         # The archival time is the closest truthful bound that still exists.
         assert live.created_at == rev2_archived
+
+
+def test_active_generated_note_index_blocks_restore_without_mutation(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _generate("# Version one")
+    _generate("# Version two")
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.db.models import KnowledgeDocument, Summary
+    from localplaud.db.session import session_scope
+    from localplaud.worker.knowledge_index import sync_summary_document
+
+    with session_scope() as session:
+        summary = _live(session)
+        document = sync_summary_document(session, summary)
+        document.status = "running"
+        document.lease_token = "active-index"
+        document.lease_until = datetime.now(UTC) + timedelta(minutes=5)
+        summary_id = summary.id
+        original = (summary.content_md, summary.restored_from_revision)
+        original_revision_count = len(_revisions(session))
+
+    response = c.post(
+        f"/file/r1/summaries/{summary_id}/versions/1/restore",
+        data={"tab": "notes"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 409
+    assert "currently indexing" in response.json()["error"]
+    with session_scope() as session:
+        summary = session.get(Summary, summary_id)
+        assert (summary.content_md, summary.restored_from_revision) == original
+        assert len(_revisions(session)) == original_revision_count
+        document = session.query(KnowledgeDocument).filter_by(summary_id=summary_id).one()
+        assert document.status == "running" and document.lease_token == "active-index"
 
 
 def test_summary_history_migration_emits_cross_dialect_ddl():
