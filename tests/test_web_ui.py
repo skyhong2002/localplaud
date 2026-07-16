@@ -301,7 +301,46 @@ def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert '[hidden] { display:none !important; }' in response.text
     assert 'id="import-backdrop" hidden' in response.text
-    assert "document.getElementById('import-close').addEventListener('click'" in response.text
+    assert 'aria-expanded="false" aria-haspopup="menu" aria-controls="add-audio-menu"' in response.text
+    assert 'id="add-audio-menu" role="menu" hidden' in response.text
+    assert 'role="tablist" aria-label="Audio source"' in response.text
+    assert 'role="tab" aria-selected="true" aria-controls="device-import-panel"' in response.text
+    assert 'role="tabpanel" aria-labelledby="device-import-tab"' in response.text
+    assert 'id="audio-drop-zone" role="button" tabindex="0"' in response.text
+    assert 'id="local-import-status" role="status" aria-live="polite"' in response.text
+    assert 'role="progressbar" aria-labelledby="plaud-import-progress-label"' in response.text
+    assert "const importModal=window.localplaudModal" in response.text
+    assert "typeof background==='function'?background():background" in response.text
+    assert "background:()=>[document.getElementById('app-view')" in response.text
+    assert "importModal.open(trigger,tabs.find" in response.text
+    assert "event.key==='Enter'||event.key===' '" in response.text
+    assert "event.key==='ArrowRight'" in response.text
+    assert "else if(event.key==='Home')" in response.text
+    assert "menuItems[0]?.focus()" in response.text
+    assert "['ArrowDown','Enter',' '].includes(event.key)" in response.text
+    assert "menu.addEventListener('focusout'" in response.text
+    assert "choose(item.dataset.importMode,button)" in response.text
+    assert "requestController?.abort()" in response.text
+    assert "if(error.name==='AbortError')throw error" in response.text
+    assert "'Could not start Plaud import',[409]" in response.text
+    assert "setDialogBusy(true)" in response.text
+    assert "input.value=''" in response.text
+    assert "event.stopPropagation();if(!busy)closeImport()" in response.text
+    assert "if(busy)return false" in response.text
+    assert "closeButton.disabled=value" in response.text
+    assert "event.target===backdrop&&!backdrop.hidden&&!busy" in response.text
+    assert "setMenu(false,{restoreFocus:true})" in response.text
+    assert "progress.setAttribute('aria-valuenow',String(pct))" in response.text
+    assert "if(running)progressTimer=setTimeout(pollPlaudImport,1000)" in response.text
+
+    from localplaud.i18n import catalog
+
+    messages = catalog("zh-Hant-TW")
+    assert messages["Audio source"] == "音訊來源"
+    assert messages["Could not upload audio"] == "無法上傳音訊"
+    assert messages["Could not start Plaud import"] == "無法開始 Plaud 匯入"
+    assert messages["unsupported audio/video format"] == "不支援的音訊或影片格式"
+    assert messages["file exceeds 2 GB limit"] == "檔案超過 2 GB 上限"
 
 
 def test_product_pages_use_centered_responsive_layout(monkeypatch, tmp_path):

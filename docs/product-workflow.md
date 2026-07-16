@@ -48,7 +48,10 @@ interaction design:
 - an Add audio entry point with local file upload and Import from Plaud. The latter
   refreshes all recording metadata and existing Plaud transcript/summary artifacts
   without downloading raw audio; a metadata-only recording offers an explicit,
-  per-file Import audio action when opened;
+  per-file Import audio action when opened. The shared dialog is fully keyboard
+  operable, traps and restores focus, makes background content inert, reports upload
+  and catalog progress accessibly, and recovers from interrupted requests without a
+  page reload;
 - a file workspace that keeps the library context available while switching between
   transcript and notes, with file-level Ask and compact share/export/more actions;
 - a transcript reader with a synchronized duration/player, timestamps, speaker

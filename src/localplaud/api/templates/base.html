@@ -27,7 +27,7 @@
       const open=(trigger,preferredFocus)=>{
         if(!backdrop.hidden)return;
         opener=trigger||document.activeElement;backdrop.dataset.busy='false';backdrop.removeAttribute('aria-busy');
-        const regions=[...new Set(background.filter(Boolean))];
+        const regions=[...new Set((typeof background==='function'?background():background).filter(Boolean))];
         inertState=new Map(regions.map(region=>[region,region.inert]));
         regions.forEach(region=>{region.inert=true;});
         backdrop.hidden=false;document.body.classList.add('dialog-open');
@@ -110,6 +110,7 @@
     .add-audio { width:100%;height:31px;display:flex;align-items:center;justify-content:center;gap:7px;padding:0 9px;
       border:1px solid var(--border2);border-radius:5px;background:#FFFFFF;color:var(--fg);font-size:12.5px;font-weight:650;cursor:pointer; }
     .add-audio:hover { background:#F3F3F3; }
+    .add-audio[aria-expanded="true"] { background:#F3F3F3; }
     .add-menu { position:absolute;left:0;right:0;top:44px;z-index:40;padding:5px;background:var(--panel);border:1px solid var(--border2);border-radius:9px;box-shadow:var(--shadow); }
     .add-menu button { width:100%;display:flex;align-items:center;gap:9px;padding:9px 10px;border:0;border-radius:7px;background:none;color:var(--fg);font:inherit;text-align:left;cursor:pointer; }
     .add-menu button:hover { background:var(--panel2); }
@@ -244,6 +245,9 @@
     .import-tabs button.on { color:var(--blue);border-color:var(--blue-br);background:var(--blue-soft); }
     .drop-zone { flex:1;min-height:270px;border:1.5px dashed var(--border2);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;cursor:pointer; }
     .drop-zone:hover,.drop-zone.drag { border-color:var(--blue);background:var(--blue-soft); }
+    .drop-zone:focus-visible { outline:2px solid var(--blue);outline-offset:2px; }
+    .drop-zone[aria-disabled="true"] { cursor:wait;opacity:.62; }
+    .local-import-status { overflow-wrap:anywhere; }
     .import-icon { width:52px;height:52px;border:1px solid var(--border2);border-radius:50%;display:grid;place-items:center;margin-bottom:13px;background:var(--panel);color:var(--muted); }
     .import-icon .nav-icon { width:22px;height:22px;opacity:1; }
     .plaud-import-card { flex:1;min-height:270px;border:1px solid var(--border);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:34px; }
@@ -583,7 +587,7 @@
     <a class="rail-action {% if active=='ask' %}on{% endif %}" href="/?ask=true#library-ask" title="{{ t('Ask localplaud') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span></a>
     <a class="rail-action {% if active=='templates' %}on{% endif %}" href="/templates" title="{{ t('Templates') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/layout-template.svg')"></span></a>
     <a class="rail-action {% if active=='notes' %}on{% endif %}" href="/notes" title="{{ t('Saved notes') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span></a>
-    <button class="rail-action" type="button" data-open-import="device" title="{{ t('Add audio') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span></button>
+    <button class="rail-action" type="button" data-open-import="device" title="{{ t('Add audio') }}" aria-label="{{ t('Add audio') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span></button>
     <span class="rail-spacer"></span>
     <a class="rail-action {% if active=='settings' %}on{% endif %}" href="/settings" title="{{ t('Settings') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/settings.svg')"></span></a>
   </nav>
@@ -597,10 +601,10 @@
     </div>
     <a class="workspace-switcher" href="/settings#workspace"><span class="workspace-avatar">LP</span><span class="workspace-name">{{ workspace_preferences.workspace_name }}</span><span style="margin-left:auto;color:var(--faint)">⌄</span></a>
     <div class="add-wrap">
-      <button class="add-audio" id="add-audio-button" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span><span class="add-label">{{ t('Add audio') }}</span></button>
-      <div class="add-menu" id="add-audio-menu" hidden>
-        <button type="button" data-import-mode="device"><span class="nav-icon" style="--nav-icon:url('/static/lucide/upload.svg')"></span><span><strong>{{ t('Import audio') }}</strong><br><small class="sub">{{ t('From this device') }}</small></span></button>
-        <button type="button" data-import-mode="plaud"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span><span><strong>{{ t('Import from Plaud') }}</strong><br><small class="sub">{{ t('Metadata first · audio on demand') }}</small></span></button>
+      <button class="add-audio" id="add-audio-button" type="button" aria-expanded="false" aria-haspopup="menu" aria-controls="add-audio-menu"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span><span class="add-label">{{ t('Add audio') }}</span></button>
+      <div class="add-menu" id="add-audio-menu" role="menu" hidden>
+        <button type="button" role="menuitem" data-import-mode="device"><span class="nav-icon" style="--nav-icon:url('/static/lucide/upload.svg')"></span><span><strong>{{ t('Import audio') }}</strong><br><small class="sub">{{ t('From this device') }}</small></span></button>
+        <button type="button" role="menuitem" data-import-mode="plaud"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span><span><strong>{{ t('Import from Plaud') }}</strong><br><small class="sub">{{ t('Metadata first · audio on demand') }}</small></span></button>
       </div>
     </div>
     <div class="sidebar-scroll">
@@ -661,22 +665,22 @@
     <section class="import-modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
       <div class="import-head"><span id="import-title">{{ t('Import audio') }}</span><button class="import-close" id="import-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
       <div class="import-body">
-        <div class="import-tabs"><button type="button" data-import-tab="device">{{ t('From this device') }}</button><button type="button" data-import-tab="plaud">{{ t('Import from Plaud') }}</button></div>
-        <div id="device-import-panel">
-          <label class="drop-zone" id="audio-drop-zone">
+        <div class="import-tabs" role="tablist" aria-label="{{ t('Audio source') }}"><button id="device-import-tab" type="button" role="tab" aria-selected="true" aria-controls="device-import-panel" data-import-tab="device">{{ t('From this device') }}</button><button id="plaud-import-tab" type="button" role="tab" aria-selected="false" aria-controls="plaud-import-panel" tabindex="-1" data-import-tab="plaud">{{ t('Import from Plaud') }}</button></div>
+        <div id="device-import-panel" role="tabpanel" aria-labelledby="device-import-tab">
+          <label class="drop-zone" id="audio-drop-zone" role="button" tabindex="0" aria-describedby="local-import-status">
             <span class="import-icon"><span class="nav-icon" style="--nav-icon:url('/static/lucide/upload.svg')"></span></span><strong>{{ t('Click or drag an audio file to import') }}</strong>
             <span class="sub" style="margin-top:7px">MP3, MP4, M4A, WAV, OGG, Opus, WebM, FLAC or AAC · up to 2 GB</span>
             <input id="audio-file-input" type="file" accept="audio/*,video/mp4,video/webm,.opus,.m4a,.flac,.aac" hidden>
           </label>
-          <div class="sub" id="local-import-status" style="text-align:center;margin-top:10px"></div>
+          <div class="sub local-import-status" id="local-import-status" role="status" aria-live="polite" style="text-align:center;margin-top:10px"></div>
         </div>
-        <div class="plaud-import-card" id="plaud-import-panel" hidden>
+        <div class="plaud-import-card" id="plaud-import-panel" role="tabpanel" aria-labelledby="plaud-import-tab" hidden>
           <span class="import-icon"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span></span><strong>{{ t('Mirror your Plaud library') }}</strong>
           <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Imports the latest recording metadata and any existing Plaud transcript or summary. Audio stays in Plaud until you request it from a recording.') }}</p>
           <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">{{ t('Import metadata from Plaud') }}</button>
-          <div id="plaud-import-progress" hidden style="width:100%;max-width:440px">
-            <div class="import-progress"><span style="width:0%"></span></div>
-            <div class="sub" data-progress-label></div>
+          <div id="plaud-import-progress" role="status" aria-live="polite" hidden style="width:100%;max-width:440px">
+            <div class="import-progress" role="progressbar" aria-labelledby="plaud-import-progress-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span style="width:0%"></span></div>
+            <div class="sub" id="plaud-import-progress-label" data-progress-label></div>
           </div>
         </div>
       </div>
@@ -696,42 +700,46 @@
       drawerMedia.addEventListener('change',()=>{document.body.classList.remove('nav-open');syncState(false);});syncDesktopSidebar();syncState(false);
     })();
     (()=>{
-      const tr=window.localplaudT,button=document.getElementById('add-audio-button'),menu=document.getElementById('add-audio-menu'),backdrop=document.getElementById('import-backdrop');
-      const devicePanel=document.getElementById('device-import-panel'),plaudPanel=document.getElementById('plaud-import-panel');let progressTimer=null;
-      function choose(mode){
-        backdrop.hidden=false;menu.hidden=true;devicePanel.hidden=mode!=='device';plaudPanel.hidden=mode!=='plaud';
-        document.querySelectorAll('[data-import-tab]').forEach(tab=>tab.classList.toggle('on',tab.dataset.importTab===mode));
-        document.getElementById('import-title').textContent=tr(mode==='plaud'?'Import from Plaud':'Import audio');
-        if(mode==='plaud')pollPlaudImport(false);
-      }
-      document.addEventListener('click',event=>{const trigger=event.target.closest('[data-open-import]');if(trigger)choose(trigger.dataset.openImport==='plaud'?'plaud':'device');});
-      button.addEventListener('click',()=>menu.hidden=!menu.hidden);
-      document.querySelectorAll('[data-import-mode]').forEach(item=>item.addEventListener('click',()=>choose(item.dataset.importMode)));
-      document.querySelectorAll('[data-import-tab]').forEach(tab=>tab.addEventListener('click',()=>choose(tab.dataset.importTab)));
-      document.getElementById('import-close').addEventListener('click',()=>{backdrop.hidden=true;if(progressTimer)clearTimeout(progressTimer);});
-      backdrop.addEventListener('click',event=>{if(event.target===backdrop)document.getElementById('import-close').click();});
-      const input=document.getElementById('audio-file-input'),drop=document.getElementById('audio-drop-zone'),localStatus=document.getElementById('local-import-status');
-      ['dragenter','dragover'].forEach(name=>drop.addEventListener(name,event=>{event.preventDefault();drop.classList.add('drag');}));
+      const tr=window.localplaudT,button=document.getElementById('add-audio-button'),menu=document.getElementById('add-audio-menu'),backdrop=document.getElementById('import-backdrop'),closeButton=document.getElementById('import-close');
+      const menuItems=[...menu.querySelectorAll('[role="menuitem"]')],tabs=[...document.querySelectorAll('[data-import-tab]')],devicePanel=document.getElementById('device-import-panel'),plaudPanel=document.getElementById('plaud-import-panel'),input=document.getElementById('audio-file-input'),drop=document.getElementById('audio-drop-zone'),localStatus=document.getElementById('local-import-status'),plaudButton=document.getElementById('start-plaud-import');
+      const importModal=window.localplaudModal({backdrop,background:()=>[document.getElementById('app-view'),document.querySelector('.product-rail'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')]});
+      let progressTimer=null,requestController=null,busy=false;
+      const detailMessage=(data,fallback)=>{const detail=data?.detail,item=Array.isArray(detail)?detail[0]?.msg:detail;return tr(typeof item==='string'?item:fallback);};
+      function setMenu(open,{restoreFocus=false}={}){menu.hidden=!open;button.setAttribute('aria-expanded',String(open));if(!open&&restoreFocus)button.focus();}
+      function stopImportWork(){if(progressTimer)clearTimeout(progressTimer);progressTimer=null;requestController?.abort();requestController=null;}
+      function setDialogBusy(value){busy=value;importModal.setBusy(value);closeButton.disabled=value;tabs.forEach(tab=>{tab.disabled=value;});input.disabled=value;drop.setAttribute('aria-disabled',String(value));}
+      function setPlaudBusy(value){plaudButton.disabled=value;plaudButton.textContent=tr(value?'Importing…':'Import metadata from Plaud');}
+      async function requestJson(url,options,fallback,acceptableStatuses=[]){const controller=new AbortController();requestController?.abort();requestController=controller;let response;try{response=await fetch(url,{...options,signal:controller.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr(fallback));}finally{if(requestController===controller)requestController=null;}let data={};try{data=await response.json();}catch(_error){}if(!response.ok&&!acceptableStatuses.includes(response.status))throw new Error(detailMessage(data,fallback));return data;}
+      function selectMode(mode,{focus=false}={}){stopImportWork();setDialogBusy(false);setPlaudBusy(false);devicePanel.hidden=mode!=='device';plaudPanel.hidden=mode!=='plaud';for(const tab of tabs){const active=tab.dataset.importTab===mode;tab.classList.toggle('on',active);tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;if(active&&focus)tab.focus();}document.getElementById('import-title').textContent=tr(mode==='plaud'?'Import from Plaud':'Import audio');if(mode==='plaud')pollPlaudImport();}
+      function choose(mode,trigger){setMenu(false);selectMode(mode);importModal.open(trigger,tabs.find(tab=>tab.dataset.importTab===mode));}
+      function closeImport(){if(busy)return false;stopImportWork();setPlaudBusy(false);return importModal.close();}
+      document.addEventListener('click',event=>{const trigger=event.target.closest('[data-open-import]');if(trigger)choose(trigger.dataset.openImport==='plaud'?'plaud':'device',trigger);if(!menu.hidden&&!event.target.closest('.add-wrap'))setMenu(false);});
+      button.addEventListener('click',()=>setMenu(menu.hidden));
+      button.addEventListener('keydown',event=>{if(['ArrowDown','Enter',' '].includes(event.key)){event.preventDefault();setMenu(true);menuItems[0]?.focus();}});
+      menu.addEventListener('keydown',event=>{const index=menuItems.indexOf(document.activeElement);let next=null;if(event.key==='ArrowDown')next=(index+1)%menuItems.length;else if(event.key==='ArrowUp')next=(index-1+menuItems.length)%menuItems.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=menuItems.length-1;if(next!==null){event.preventDefault();menuItems[next]?.focus();}});
+      menu.addEventListener('focusout',()=>requestAnimationFrame(()=>{if(!menu.contains(document.activeElement))setMenu(false);}));
+      document.querySelectorAll('[data-import-mode]').forEach(item=>item.addEventListener('click',()=>choose(item.dataset.importMode,button)));
+      tabs.forEach((tab,index)=>{tab.addEventListener('click',()=>selectMode(tab.dataset.importTab));tab.addEventListener('keydown',event=>{let next=null;if(event.key==='ArrowRight')next=(index+1)%tabs.length;else if(event.key==='ArrowLeft')next=(index-1+tabs.length)%tabs.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;if(next!==null){event.preventDefault();selectMode(tabs[next].dataset.importTab,{focus:true});}});});
+      closeButton.addEventListener('click',closeImport);
+      backdrop.addEventListener('click',event=>{if(event.target===backdrop&&!backdrop.hidden&&!busy)closeImport();});
+      backdrop.addEventListener('localplaud:modal-close',()=>{stopImportWork();setDialogBusy(false);setPlaudBusy(false);drop.classList.remove('drag');localStatus.textContent='';input.value='';});
+      document.addEventListener('keydown',event=>{if(event.key!=='Escape')return;if(!backdrop.hidden){event.preventDefault();event.stopPropagation();if(!busy)closeImport();}else if(!menu.hidden){event.preventDefault();event.stopPropagation();setMenu(false,{restoreFocus:true});}},true);
+      ['dragenter','dragover'].forEach(name=>drop.addEventListener(name,event=>{event.preventDefault();if(!busy)drop.classList.add('drag');}));
       ['dragleave','drop'].forEach(name=>drop.addEventListener(name,event=>{event.preventDefault();drop.classList.remove('drag');}));
-      drop.addEventListener('drop',event=>{if(event.dataTransfer.files[0])uploadLocal(event.dataTransfer.files[0]);});
-      input.addEventListener('change',()=>{if(input.files[0])uploadLocal(input.files[0]);});
+      drop.addEventListener('keydown',event=>{if(!busy&&(event.key==='Enter'||event.key===' ')){event.preventDefault();input.click();}});
+      drop.addEventListener('drop',event=>{if(!busy&&event.dataTransfer.files[0])uploadLocal(event.dataTransfer.files[0]);});
+      input.addEventListener('change',()=>{if(!busy&&input.files[0])uploadLocal(input.files[0]);});
       async function uploadLocal(file){
-        localStatus.textContent=`${tr('Importing')} ${file.name}…`;const body=new FormData();body.append('file',file);
-        const response=await fetch('/api/imports/local/audio',{method:'POST',body});const data=await response.json();
-        if(response.ok){localStatus.textContent=tr('Imported. Opening recording…');location.href=`/file/${data.id}`;}
-        else localStatus.textContent=data.detail||tr('Import failed');
+        setDialogBusy(true);localStatus.textContent=`${tr('Importing')} ${file.name}…`;const body=new FormData();body.append('file',file);
+        try{const data=await requestJson('/api/imports/local/audio',{method:'POST',body},'Could not upload audio');localStatus.textContent=tr('Imported. Opening recording…');location.href=`/file/${encodeURIComponent(data.id)}`;}catch(error){if(error.name!=='AbortError')localStatus.textContent=error.message||tr('Import failed');}finally{setDialogBusy(false);input.value='';}
       }
-      document.getElementById('start-plaud-import').addEventListener('click',async()=>{
-        const response=await fetch('/api/imports/plaud/metadata',{method:'POST'}),data=await response.json();
-        if(!response.ok&&response.status!==409){showProgress({status:'failed',error:data.detail});return;}pollPlaudImport(true);
-      });
-      async function pollPlaudImport(repeat){
-        const response=await fetch('/api/imports/plaud/metadata/status');if(!response.ok)return;const data=await response.json();showProgress(data);
-        if(repeat&&['queued','running'].includes(data.status))progressTimer=setTimeout(()=>pollPlaudImport(true),1000);
+      plaudButton.addEventListener('click',async()=>{if(plaudButton.disabled)return;setPlaudBusy(true);setDialogBusy(true);try{await requestJson('/api/imports/plaud/metadata',{method:'POST'},'Could not start Plaud import',[409]);setDialogBusy(false);pollPlaudImport();}catch(error){if(error.name!=='AbortError')showProgress({status:'failed',error:error.message});setDialogBusy(false);setPlaudBusy(false);}});
+      async function pollPlaudImport(){
+        try{const data=await requestJson('/api/imports/plaud/metadata/status',{},'Could not check Plaud import status');showProgress(data);const running=['queued','running'].includes(data.status);setPlaudBusy(running);if(running)progressTimer=setTimeout(pollPlaudImport,1000);}catch(error){if(error.name!=='AbortError'){showProgress({status:'failed',error:error.message});setPlaudBusy(false);}}
       }
       function showProgress(data){
-        const box=document.getElementById('plaud-import-progress'),label=box.querySelector('[data-progress-label]'),bar=box.querySelector('span');
-        if(data.status==='idle'){box.hidden=true;return;}box.hidden=false;const pct=data.total?Math.round(data.processed/data.total*100):0;bar.style.width=`${pct}%`;
+        const box=document.getElementById('plaud-import-progress'),label=box.querySelector('[data-progress-label]'),progress=box.querySelector('[role="progressbar"]'),bar=progress.querySelector('span');
+        if(data.status==='idle'){box.hidden=true;progress.setAttribute('aria-valuenow','0');return;}box.hidden=false;const pct=data.total?Math.round(data.processed/data.total*100):0;bar.style.width=`${pct}%`;progress.setAttribute('aria-valuenow',String(pct));
         if(data.status==='completed')label.textContent=`${tr('Complete')} · ${data.processed} ${tr('recordings')} · ${data.transcripts} ${tr('transcripts')} · ${data.summaries} ${tr('summaries')}`;
         else if(data.status==='failed')label.textContent=`${tr('Import stopped')} · ${data.error||tr('Unknown error')}`;
         else label.textContent=`${data.processed||0} ${tr('of')} ${data.total||'…'} · ${tr('metadata only, audio not downloaded')}`;

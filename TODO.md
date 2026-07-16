@@ -419,7 +419,10 @@ embedding raw provider credentials or model settings in each rule.
   paid Plaud transcript/summary, never downloads audio during catalog import, and
   exposes a per-recording Import audio action for metadata-only rows. Scheduled
   polling keeps that first-sync baseline metadata-only, then automatically downloads
-  recordings newly uploaded after the baseline.
+  recordings newly uploaded after the baseline. The shared Add audio dialog now has
+  trapped/restored focus, inert background content, Escape dismissal, keyboard source
+  tabs and file selection, cancellable uploads/polling, live progress semantics, and
+  recoverable network/server errors on desktop and mobile.
 - ✅ (partial) Explicit raw-ASR versus corrected-canonical transcript switch with
   synchronized timestamps/speaker labels is live. Transcript-local search provides
   next/previous navigation, and case-aware replace-all creates one immutable bulk
