@@ -339,6 +339,10 @@ embedding raw provider credentials or model settings in each rule.
   citations remain grounded in the current query. Any assistant answer can be saved
   idempotently as an editable note with source moments; Saved notes has its own page,
   recording tabs, edit/delete controls, deep links, and Markdown export coverage.
+  Library, recording, quick-action, and follow-up requests share a visible busy/error
+  lifecycle that prevents duplicate submission, preserves the current answer and
+  question on failure, and points users to History before retrying an uncertain call.
+  Save-to-note also restores its control after network or malformed-response failures.
 - ✅ Library and recording Ask history now has an exact-surface, searchable and
   paginated drawer with deterministic ordering, metadata, inline rename, and delete.
   Deletion explicitly detaches and preserves Saved notes even when SQLite foreign-key

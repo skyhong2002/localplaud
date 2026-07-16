@@ -302,6 +302,19 @@ def test_detail_page_has_ask_tab_and_deeplink(monkeypatch, tmp_path):
     assert 'data-panel="ask"' in r.text
     assert 'hx-post="/file/r1/ask"' in r.text
     assert 'id="file-answer"' in r.text
+    assert 'data-ask-request data-ask-status="file-ask-status"' in r.text
+    assert 'hx-sync="#file-answer:drop"' in r.text
+    assert r.text.count('hx-sync="#file-answer:drop"') >= 2
+    assert 'id="file-ask-status" class="ask-request-status" role="status" aria-live="polite"' in r.text
+    assert 'id="file-answer" role="region" aria-label="Answer"' in r.text
+    assert "forms.some(candidate=>candidate.dataset.askBusy==='true')" in r.text
+    assert "control.disabled=true" in r.text
+    assert "window.localplaudT('Getting answer…')" in r.text
+    assert "window.localplaudT('Answer ready')" in r.text
+    assert "const askRequests=new WeakMap()" in r.text
+    assert "askRequests.set(xhr,{forms,controls,status,target,question,focusTarget})" in r.text
+    assert "Check History before retrying to avoid a duplicate conversation." in r.text
+    assert "requestAnimationFrame(()=>{(question?.isConnected?question" in r.text
     # Suggested, grounded, non-mutating chips.
     assert "What was decided?" in r.text
     # Delegated seek handler + ?t= deep-link support.

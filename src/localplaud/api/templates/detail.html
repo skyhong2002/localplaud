@@ -319,13 +319,14 @@
 
     <div class="tabpanel" id="recording-panel-ask" role="tabpanel" aria-labelledby="recording-tab-ask" data-panel="ask" {% if active_tab != 'ask' %}hidden{% endif %}>
       <div style="display:flex;justify-content:flex-end;margin:-3px 0 8px"><button class="btn sec" type="button" data-open-ask-history><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span>{{ t('History') }}</button></div>
-      <form class="ask" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-swap="innerHTML"
+      <form class="ask" data-ask-request data-ask-status="file-ask-status" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-sync="#file-answer:drop" hx-swap="innerHTML"
             hx-indicator="#file-ask-spin">
-        <input type="text" name="q" id="ask-q" placeholder="{{ t('Ask a question about this recording…') }}"
+        <input type="text" data-ask-question name="q" id="ask-q" placeholder="{{ t('Ask a question about this recording…') }}"
           autocomplete="off" required {% if not f.has_local_transcript %}disabled{% endif %}>
         <button class="btn" type="submit" {% if not f.has_local_transcript %}disabled{% endif %}>{{ t('Ask') }}</button>
       </form>
       <div id="file-ask-spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% else %}{{ t('thinking…') }}{% endif %}</div>
+      <div id="file-ask-status" class="ask-request-status" role="status" aria-live="polite"></div>
       <div id="ask-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:11px">
         {% for chip in ["What was decided?", "List action items with owners", "What are the key topics?"] %}
         <button type="button" class="btn sec ask-chip" data-q="{{ t(chip) }}"
@@ -334,14 +335,14 @@
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">
         {% for skill in f.ask_skills %}
-        <form hx-post="/file/{{ f.id }}/ask/skill" hx-target="#file-answer" hx-swap="innerHTML" hx-indicator="#file-ask-spin">
+        <form data-ask-request data-ask-status="file-ask-status" hx-post="/file/{{ f.id }}/ask/skill" hx-target="#file-answer" hx-sync="#file-answer:drop" hx-swap="innerHTML" hx-indicator="#file-ask-spin">
           <input type="hidden" name="skill_key" value="{{ skill.key }}">
           <button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px" {% if not f.has_local_transcript %}disabled{% endif %}>{{ skill.name }}</button>
         </form>
         {% endfor %}
       </div>
       {% if f.ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 10px"><span class="sub" style="font-size:11px">{{ t('Recent threads') }}</span>{% for thread in f.ask_threads %}<a class="chip {% if f.selected_ask_thread and f.selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/file/{{ f.id }}?tab=ask&amp;ask_thread={{ thread.id }}&amp;return_to={{ return_to_param }}">{{ thread.title | truncate(34) }}</a>{% endfor %}</div>{% endif %}
-      <div id="file-answer">{% if f.selected_ask_thread %}{% set thread=f.selected_ask_thread %}{% set file_id=f.id %}{% set target='file-answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
+      <div id="file-answer" role="region" aria-label="{{ t('Answer') }}">{% if f.selected_ask_thread %}{% set thread=f.selected_ask_thread %}{% set file_id=f.id %}{% set target='file-answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
     </div>
   </div></section>
 </div>

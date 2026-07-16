@@ -263,6 +263,8 @@
     .tile .k { font-size:11.5px; color:var(--muted); font-weight:600; } .tile .v { font-size:24px; font-weight:750; letter-spacing:0; margin-top:2px; }
     .tile .v small { font-size:13px; color:var(--muted); font-weight:500; }
     .ask { display:flex; gap:8px; margin-bottom:14px; }
+    .ask-request-status { min-height:18px;margin:-7px 2px 9px;color:var(--muted);font-size:11.5px;overflow-wrap:anywhere; }
+    .ask-request-status.error { color:var(--red); }
     .ask input, .search-input { flex:1; background:var(--panel); border:1px solid var(--border2); color:var(--fg);
       border-radius:7px; padding:11px 14px; font-size:14px; outline:none; }
     .ask input:focus, .search-input:focus { border-color:var(--blue); box-shadow:0 0 0 3px var(--blue-soft); }
@@ -843,6 +845,12 @@
       document.addEventListener('htmx:historyRestore',()=>{
         requestAnimationFrame(restoreScroll);setTimeout(restoreScroll,50);setTimeout(restoreScroll,150);
       });
+      const askRequests=new WeakMap();
+      const askFormFromEvent=event=>event.detail?.elt?.closest?.('[data-ask-request]');
+      const askErrorMessage=xhr=>{if([404,409,422].includes(xhr?.status)){const text=(xhr.responseText||'').trim();try{const data=JSON.parse(text||'{}'),detail=data.detail,item=Array.isArray(detail)?detail[0]?.msg:detail;if(typeof item==='string')return window.localplaudT(item);}catch(_error){if(text&&text.length<=300&&!text.includes('<'))return window.localplaudT(text);}}return window.localplaudT('Could not show answer');};
+      const finishAskRequest=(state,event,successful)=>{if(!state)return;const {forms,controls,status,target,question,focusTarget}=state;for(const form of forms)delete form.dataset.askBusy;for(const {control,disabled} of controls)control.disabled=disabled;target?.removeAttribute('aria-busy');if(successful){if(question?.isConnected)question.value='';if(status?.isConnected){status.textContent=window.localplaudT('Answer ready');status.classList.remove('error');}}else{if(status?.isConnected){status.textContent=[askErrorMessage(event.detail?.xhr),window.localplaudT('Check History before retrying to avoid a duplicate conversation.')].join(' ');status.classList.add('error');}requestAnimationFrame(()=>{(question?.isConnected?question:focusTarget?.isConnected?focusTarget:null)?.focus();});}};
+      document.addEventListener('htmx:beforeRequest',event=>{const form=askFormFromEvent(event),xhr=event.detail?.xhr;if(!form||!xhr)return;const statusId=form.dataset.askStatus,forms=[...document.querySelectorAll('[data-ask-request]')].filter(candidate=>candidate.dataset.askStatus===statusId);if(forms.some(candidate=>candidate.dataset.askBusy==='true')){event.preventDefault();return;}const controls=forms.flatMap(candidate=>[...candidate.querySelectorAll('button[type="submit"],input[type="submit"]')]).map(control=>({control,disabled:control.disabled})),status=document.getElementById(statusId),target=event.detail?.target||document.querySelector(form.getAttribute('hx-target')),question=form.querySelector('[data-ask-question]'),focusTarget=question||form.querySelector('[type="submit"]');for(const candidate of forms)candidate.dataset.askBusy='true';for(const {control} of controls)control.disabled=true;askRequests.set(xhr,{forms,controls,status,target,question,focusTarget});if(status){status.textContent=window.localplaudT('Getting answer…');status.classList.remove('error');}target?.setAttribute('aria-busy','true');});
+      document.addEventListener('htmx:afterRequest',event=>{const xhr=event.detail?.xhr,state=xhr?askRequests.get(xhr):null;if(!state)return;askRequests.delete(xhr);const successful=event.detail?.successful===true||(xhr.status>=200&&xhr.status<400);finishAskRequest(state,event,successful);});
       document.addEventListener('htmx:responseError',event=>{
         if(event.detail?.elt?.matches?.('[data-progressive-loader]'))document.body.classList.add('progressive-failed');
       });

@@ -139,6 +139,10 @@ accessibility require a different design.
   note. Saved notes retain source moments, link back to recordings, appear in the
   recording workspace, and can be copied or exported as Markdown, edited, or deleted
   independently without altering the original Ask thread.
+- Ask submission, quick actions, and follow-ups expose one accessible busy/error
+  lifecycle: controls cannot double-submit an expensive request, failed requests keep
+  the existing answer and composer text, and uncertain failures direct the user to
+  History before retrying.
 - Suggested questions and versioned quick actions for action items, cross-recording
   task tables, and recurring insights run through this same library-scoped retrieval.
   Their scope-specific prompt snapshot is durable; execution creates only an Ask

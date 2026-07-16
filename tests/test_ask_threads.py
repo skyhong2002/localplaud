@@ -623,6 +623,14 @@ def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, 
     monkeypatch.setattr("localplaud.worker.qa.answer", fake_answer)
     page = client.get("/?ask=true")
     assert 'hx-post="/ask/skill"' in page.text
+    assert 'data-ask-request data-ask-status="library-ask-status"' in page.text
+    assert 'hx-sync="#answer:drop"' in page.text
+    assert page.text.count('hx-sync="#answer:drop"') >= 2
+    assert 'id="library-ask-status" class="ask-request-status" role="status" aria-live="polite"' in page.text
+    assert 'id="answer" role="region" aria-label="Answer"' in page.text
+    assert "askErrorMessage" in page.text
+    assert "if(question?.isConnected)question.value=''" in page.text
+    assert "text.length<=300&&!text.includes('<')" in page.text
     assert "What decisions were made recently?" in page.text
     assert "creates an Ask thread; recordings and notes stay unchanged" in page.text
 
@@ -634,6 +642,13 @@ def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, 
     response = client.post("/ask/skill", data={"skill_key": "task_table"})
     assert response.status_code == 200
     assert "Cross-recording task table." in response.text
+    assert 'data-ask-request data-ask-status="library-ask-status"' in response.text
+    assert 'hx-sync="#answer:drop"' in response.text
+    assert 'placeholder="Ask a follow-up…"' in response.text
+    assert ">Follow up</button>" in response.text
+    assert "if(button.disabled)return" in response.text
+    assert "if(!Number.isInteger(data.id)||typeof data.title!=='string'||!data.title.trim())" in response.text
+    assert "error.name==='TypeError'?tr('Could not save')" in response.text
     assert calls[0][1]["file_id"] is None
     assert "across the retrieved recordings" in calls[0][1]["instruction"]
 
@@ -746,10 +761,12 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
         data={"q": "Change scope", "thread_id": thread_id, "ask_origin": "local"},
     )
     assert changed.status_code == 409
+    assert changed.text.strip() and "<" not in changed.text
     unknown_speaker = client.post(
         "/ask", data={"q": "Unknown", "ask_speaker_name": "Not a named speaker"}
     )
     assert unknown_speaker.status_code == 409
+    assert unknown_speaker.text.strip() and "<" not in unknown_speaker.text
     with session_scope() as session:
         assert session.get(AskThread, thread_id).retrieval_scope == expected
 

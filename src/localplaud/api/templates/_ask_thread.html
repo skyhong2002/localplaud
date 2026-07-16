@@ -43,27 +43,25 @@
       </div>
       {% endif %}
       {% if message.id %}<div style="display:flex;align-items:center;gap:8px;margin-top:9px">
-        <button class="btn sec" type="button" style="padding:6px 9px;font-size:12px" onclick="saveAskNote({{ message.id }},this)">Save as note</button>
-        <span class="sub" data-save-status style="font-size:11px"></span>
+        <button class="btn sec" type="button" style="padding:6px 9px;font-size:12px" onclick="saveAskNote({{ message.id }},this)">{{ t('Save as note') }}</button>
+        <span class="sub" data-save-status role="status" aria-live="polite" style="font-size:11px"></span>
       </div>{% endif %}
     </div>
     {% endif %}
   {% endfor %}
 
   {% if thread.thread_id %}
-  <form class="ask" hx-post="{% if file_id %}/file/{{ file_id }}/ask{% else %}/ask{% endif %}" hx-target="#{{ target }}" hx-swap="innerHTML" style="margin:2px 0 0">
+  <form class="ask" data-ask-request data-ask-status="{{ 'file-ask-status' if file_id else 'library-ask-status' }}" hx-post="{% if file_id %}/file/{{ file_id }}/ask{% else %}/ask{% endif %}" hx-target="#{{ target }}" hx-sync="#{{ target }}:drop" hx-swap="innerHTML" style="margin:2px 0 0">
     <input type="hidden" name="thread_id" value="{{ thread.thread_id }}">
-    <input name="q" placeholder="Ask a follow-up…" autocomplete="off" required>
-    <button class="btn" type="submit">Follow up</button>
+    <input data-ask-question name="q" placeholder="{{ t('Ask a follow-up…') }}" autocomplete="off" required>
+    <button class="btn" type="submit">{{ t('Follow up') }}</button>
   </form>
   {% endif %}
 </div>
 <script>
 window.saveAskNote=async function(messageId,button){
-  const tr=window.localplaudT,status=button.parentElement.querySelector('[data-save-status]');button.disabled=true;status.textContent=tr('Saving…');
-  const response=await fetch(`/api/ask/messages/${messageId}/save-note`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
-  const data=await response.json();
-  if(response.ok){status.textContent=`${tr('Saved to Notes')} · ${data.title}`;button.textContent=tr('Saved');}
-  else{status.textContent=tr(data.detail||'Could not save');button.disabled=false;}
+  if(button.disabled)return;const tr=window.localplaudT,status=button.parentElement.querySelector('[data-save-status]');button.disabled=true;status.textContent=tr('Saving…');
+  try{const response=await fetch(`/api/ask/messages/${messageId}/save-note`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});let data;try{data=await response.json();}catch(_error){throw new Error(tr('Could not save'));}if(!response.ok)throw new Error(tr(typeof data.detail==='string'?data.detail:'Could not save'));if(!Number.isInteger(data.id)||typeof data.title!=='string'||!data.title.trim())throw new Error(tr('Could not save'));status.textContent=`${tr('Saved to Notes')} · ${data.title}`;button.textContent=tr('Saved');}
+  catch(error){status.textContent=error.name==='TypeError'?tr('Could not save'):(error.message||tr('Could not save'));button.disabled=false;}
 };
 </script>
