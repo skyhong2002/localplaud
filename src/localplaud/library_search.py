@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .config import Settings, get_settings
 from .db.models import PlaudFile, StageName, Tag
@@ -42,7 +42,9 @@ def lexical_search(
             stmt = stmt.where(PlaudFile.folder_id == folder_id)
         if tag_id is not None:
             stmt = stmt.where(PlaudFile.tags.any(Tag.id == tag_id))
-        if origin in {"plaud", "local"}:
+        if origin == "plaud":
+            stmt = stmt.where(or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None)))
+        elif origin == "local":
             stmt = stmt.where(PlaudFile.origin == origin)
         if date_from_ms is not None:
             stmt = stmt.where(PlaudFile.start_time_ms >= date_from_ms)

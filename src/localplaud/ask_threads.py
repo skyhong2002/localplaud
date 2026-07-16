@@ -43,12 +43,19 @@ def _message(row: AskMessage) -> dict:
     }
 
 
+def _scope_for_display(value: dict | None) -> dict:
+    try:
+        return qa.normalize_library_scope(value or {})
+    except ValueError:
+        return value or {}
+
+
 def thread_to_dict(row: AskThread) -> dict:
     return {
         "thread_id": row.id,
         "file_id": row.file_id,
         "title": row.title,
-        "retrieval_scope": row.retrieval_scope or {},
+        "retrieval_scope": _scope_for_display(row.retrieval_scope),
         "messages": [_message(message) for message in row.messages],
     }
 
@@ -182,7 +189,7 @@ def list_threads(
                 "thread_id": row["thread_id"],
                 "title": row["title"],
                 "file_id": row["file_id"],
-                "retrieval_scope": row["retrieval_scope"] or {},
+                "retrieval_scope": _scope_for_display(row["retrieval_scope"]),
                 "created_at": _utc_iso(row["created_at"]),
                 "updated_at": _utc_iso(row["updated_at"]),
                 "message_count": int(row["message_count"]),
@@ -281,7 +288,11 @@ def ask_in_thread(
             raise LookupError("thread not found")
         if thread is not None and thread.file_id != file_id:
             raise ValueError("thread scope does not match this Ask surface")
-        stored_scope = (thread.retrieval_scope or {}) if thread is not None else {}
+        stored_scope = (
+            qa.normalize_library_scope(thread.retrieval_scope or {})
+            if thread is not None
+            else {}
+        )
         if thread is not None and requested_scope is not None and requested_scope != stored_scope:
             raise ValueError("thread retrieval scope cannot change during follow-up")
         effective_scope = stored_scope if thread is not None else (requested_scope or {})

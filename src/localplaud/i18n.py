@@ -43,6 +43,8 @@ _ZH_HANT_TW = {
     "Apply filters": "套用篩選",
     "active filters": "個啟用中的篩選條件",
     "Start date must not follow end date.": "起始日期不可晚於結束日期。",
+    "Enter a valid recorded date in the supported range.": "請輸入支援範圍內的有效錄製日期。",
+    "legacy": "舊版",
     "Minimum duration must not exceed maximum duration.": "最短長度不可超過最長長度。",
     "Ask & Search": "詢問與搜尋",
     "Saved notes": "已儲存筆記",

@@ -441,6 +441,11 @@ embedding raw provider credentials or model settings in each rule.
   provenance-correct canonical transcript, generated notes, and Saved notes, with
   folder/tag/source/date filters and playable timestamp links. Available semantic
   hits are merged and deduplicated without weakening those filters.
+- ✅ Search and whole-library Ask now share exact workspace-calendar date semantics.
+  Search resolves the current workspace timezone before lexical and vector ranking;
+  new Ask threads persist a v2 timezone plus UTC-boundary snapshot so later preference
+  changes cannot move the scope. Legacy threads retain their prior UTC meaning, Trash
+  is excluded before ranking, and unsafe dates fail before any provider call.
 - ✅ Added suggested questions and versioned, inspectable local quick actions for
   action items, task tables, and insights at both recording and whole-library scope.
   Each scope has an explicit prompt snapshot and uses its matching grounded retrieval,

@@ -711,16 +711,36 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
         "tag_id": tag_id,
         "origin": "plaud",
         "speaker_name": "Sky",
+        "scope_version": 2,
+        "date_timezone": "Asia/Taipei",
         "date_from": "2026-07-01",
+        "date_from_ms": 1_782_835_200_000,
         "date_to": "2026-07-31",
+        "date_to_ms_exclusive": 1_785_513_600_000,
         "file_ids": ["r1"],
     }
     assert scopes == [expected]
     assert "Named speaker · Sky" in first.text
+    assert "Timezone · Asia/Taipei" in first.text
+
+    preferences = client.get("/api/preferences/workspace").json()
+    assert client.put(
+        "/api/preferences/workspace",
+        json=preferences | {"timezone": "UTC"},
+    ).status_code == 200
 
     followup = client.post("/ask", data={"q": "And next?", "thread_id": thread_id})
     assert followup.status_code == 200
     assert scopes == [expected, expected]
+    monkeypatch.setattr(
+        "localplaud.worker.qa.answer",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("provider unavailable")),
+    )
+    unavailable = client.post(
+        "/ask", data={"q": "Provider down", "thread_id": thread_id}
+    )
+    assert unavailable.status_code == 200
+    assert "Timezone · Asia/Taipei" in unavailable.text
     changed = client.post(
         "/ask",
         data={"q": "Change scope", "thread_id": thread_id, "ask_origin": "local"},
@@ -732,3 +752,76 @@ def test_library_ask_scope_is_durable_and_cannot_change_on_followup(monkeypatch,
     assert unknown_speaker.status_code == 409
     with session_scope() as session:
         assert session.get(AskThread, thread_id).retrieval_scope == expected
+
+
+def test_legacy_ask_date_scope_remains_utc_after_workspace_timezone_change(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import AskThread
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(
+            AskThread(
+                id="legacy-date-thread",
+                file_id=None,
+                title="Legacy dates",
+                retrieval_scope={
+                    "date_from": "2026-07-01",
+                    "date_to": "2026-07-31",
+                },
+            )
+        )
+
+    preferences = client.get("/api/preferences/workspace").json()
+    assert client.put(
+        "/api/preferences/workspace",
+        json=preferences | {"timezone": "America/New_York"},
+    ).status_code == 200
+    scopes = []
+    monkeypatch.setattr(
+        "localplaud.worker.qa.answer",
+        lambda query, **kwargs: scopes.append(kwargs["retrieval_scope"])
+        or {"answer": "Legacy answer", "sources": []},
+    )
+
+    response = client.post(
+        "/ask", data={"q": "Follow up", "thread_id": "legacy-date-thread"}
+    )
+    assert response.status_code == 200
+    assert scopes == [
+        {
+            "scope_version": 1,
+            "date_timezone": "UTC",
+            "date_from": "2026-07-01",
+            "date_from_ms": 1_782_864_000_000,
+            "date_to": "2026-07-31",
+            "date_to_ms_exclusive": 1_785_542_400_000,
+        }
+    ]
+    assert "Timezone · UTC · legacy" in response.text
+    with session_scope() as session:
+        assert session.get(AskThread, "legacy-date-thread").retrieval_scope == {
+            "date_from": "2026-07-01",
+            "date_to": "2026-07-31",
+        }
+
+
+def test_invalid_ask_date_scope_never_reaches_provider(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    calls = []
+    monkeypatch.setattr(
+        "localplaud.worker.qa.answer",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    response = client.post(
+        "/ask",
+        data={"q": "Unsafe date", "ask_date_to": "9999-12-31"},
+    )
+    assert response.status_code == 409
+    assert "supported range" in response.text
+    assert calls == []

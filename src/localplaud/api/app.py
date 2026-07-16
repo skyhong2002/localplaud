@@ -10,7 +10,7 @@ import re
 import secrets
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Annotated, Literal
@@ -38,6 +38,7 @@ from starlette.background import BackgroundTask
 from ..ask_skills import get_ask_skill, list_ask_skills
 from ..ask_threads import thread_to_dict
 from ..config import get_settings
+from ..date_filters import calendar_date_ms, normalize_calendar_date, resolve_date_scope
 from ..db.models import (
     AskThread,
     AutomationRun,
@@ -591,6 +592,11 @@ def _base_ctx(request: Request, active: str) -> dict:
     }
 
 
+def _workspace_timezone_name() -> str:
+    with session_scope() as session:
+        return str(get_workspace_preferences(session)["timezone"])
+
+
 # --------------------------------------------------------------------------- #
 # library sorting / filtering
 # --------------------------------------------------------------------------- #
@@ -669,16 +675,12 @@ def _parse_library_params(
             return None
 
     def optional_date(value: str | None) -> str | None:
-        if value in (None, "") or re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) is None:
+        if value in (None, ""):
             return None
         try:
-            parsed = date.fromisoformat(value)
-        except (TypeError, ValueError):
+            return normalize_calendar_date(value)
+        except ValueError:
             return None
-        # Leave room for every valid IANA offset and date_to's next-day bound.
-        if not date(1, 1, 2) <= parsed <= date(9999, 12, 30):
-            return None
-        return parsed.isoformat()
 
     def optional_minutes(value: str | None) -> float | None:
         if value in (None, ""):
@@ -894,12 +896,7 @@ def _library_context_title(params: dict, organization: dict) -> str:
 
 def _library_date_ms(value: str, timezone_name: str, *, exclusive_end: bool = False) -> int:
     """Convert a workspace-local calendar day to a UTC millisecond boundary."""
-    local_day = date.fromisoformat(value)
-    timezone = ZoneInfo(timezone_name)
-    boundary = datetime.combine(local_day, datetime.min.time(), tzinfo=timezone)
-    if exclusive_end:
-        boundary += timedelta(days=1)
-    return int(boundary.astimezone(UTC).timestamp() * 1000)
+    return calendar_date_ms(value, timezone_name, exclusive_end=exclusive_end)
 
 
 def _library_query(params: dict, timezone_name: str = "UTC"):
@@ -1831,38 +1828,70 @@ def search(
     date_from: str | None = None,
     date_to: str | None = None,
 ):
-    from datetime import datetime, timedelta
-
     def optional_int(value: str | None) -> int | None:
         try:
             return int(value) if value else None
         except ValueError:
             return None
 
-    def date_ms(value: str | None, *, exclusive_end: bool = False) -> int | None:
+    def optional_date(value: str | None) -> str | None:
+        if value in (None, ""):
+            return None
         try:
-            parsed = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=UTC)
-            if exclusive_end:
-                parsed += timedelta(days=1)
-            return int(parsed.timestamp() * 1000)
-        except (TypeError, ValueError):
+            return normalize_calendar_date(value)
+        except ValueError:
             return None
 
+    normalized_from = optional_date(date_from)
+    normalized_to = optional_date(date_to)
+    invalid_date_filter = bool(
+        (date_from not in (None, "") and normalized_from is None)
+        or (date_to not in (None, "") and normalized_to is None)
+    )
+    invalid_date_range = bool(
+        not invalid_date_filter
+        and normalized_from
+        and normalized_to
+        and normalized_from > normalized_to
+    )
+    timezone_name = _workspace_timezone_name()
+    date_scope = (
+        {}
+        if invalid_date_filter or invalid_date_range
+        else resolve_date_scope(
+            normalized_from,
+            normalized_to,
+            timezone_name,
+        )
+    )
     filters = {
         "folder_id": optional_int(folder),
         "tag_id": optional_int(tag),
         "origin": origin if origin in {"plaud", "local"} else None,
-        "date_from_ms": date_ms(date_from),
-        "date_to_ms": date_ms(date_to, exclusive_end=True),
+        "date_from_ms": date_scope.get("date_from_ms"),
+        "date_to_ms": date_scope.get("date_to_ms_exclusive"),
     }
     groups: list[dict] = []
-    if q:
+    if q and not invalid_date_filter and not invalid_date_range:
         from ..library_search import lexical_search
         from ..worker.qa import retrieve
 
         hits = lexical_search(q, **filters, limit=100)
+        semantic_scope = {
+            key: value
+            for key, value in {
+                "folder_id": filters["folder_id"],
+                "tag_id": filters["tag_id"],
+                "origin": filters["origin"],
+            }.items()
+            if value is not None
+        } | date_scope
         try:
-            semantic_hits = retrieve(q, top_k=30)
+            semantic_hits = retrieve(
+                q,
+                top_k=30,
+                retrieval_scope=semantic_scope or None,
+            )
         except Exception:  # noqa: BLE001 - embeddings/provider may be unavailable
             semantic_hits = []
         with session_scope() as session:
@@ -1871,7 +1900,11 @@ def search(
                 stmt = stmt.where(PlaudFile.folder_id == filters["folder_id"])
             if filters["tag_id"] is not None:
                 stmt = stmt.where(PlaudFile.tags.any(Tag.id == filters["tag_id"]))
-            if filters["origin"] is not None:
+            if filters["origin"] == "plaud":
+                stmt = stmt.where(
+                    or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None))
+                )
+            elif filters["origin"] == "local":
                 stmt = stmt.where(PlaudFile.origin == filters["origin"])
             if filters["date_from_ms"] is not None:
                 stmt = stmt.where(PlaudFile.start_time_ms >= filters["date_from_ms"])
@@ -1926,8 +1959,11 @@ def search(
             "folder": filters["folder_id"],
             "tag": filters["tag_id"],
             "origin": filters["origin"],
-            "date_from": date_from or "",
-            "date_to": date_to or "",
+            "date_from": normalized_from or "",
+            "date_to": normalized_to or "",
+            "date_timezone": date_scope.get("date_timezone") or timezone_name,
+            "invalid_date_filter": invalid_date_filter,
+            "invalid_date_range": invalid_date_range,
         },
     }
     return templates.TemplateResponse(request=request, name="search.html", context=ctx)
@@ -3235,6 +3271,7 @@ def _library_ask_scope(
     speaker_name: str | None,
     date_from: str | None,
     date_to: str | None,
+    date_timezone: str,
     file_ids: list[str] | None = None,
 ) -> dict | None:
     values = {
@@ -3242,10 +3279,9 @@ def _library_ask_scope(
         "tag_id": tag_id,
         "origin": origin,
         "speaker_name": speaker_name,
-        "date_from": date_from,
-        "date_to": date_to,
         "file_ids": file_ids or [],
     }
+    values.update(resolve_date_scope(date_from, date_to, date_timezone))
     has_scope = any(
         values[key] not in (None, "")
         for key in (
@@ -3253,10 +3289,8 @@ def _library_ask_scope(
             "tag_id",
             "origin",
             "speaker_name",
-            "date_from",
-            "date_to",
         )
-    ) or bool(file_ids)
+    ) or bool(file_ids) or bool(values.get("scope_version"))
     return values if has_scope else None
 
 
@@ -3283,18 +3317,20 @@ def ask(
     ask_date_to: str | None = Form(None),
     ask_file_ids: Annotated[list[str] | None, Form()] = None,
 ):
-    from ..ask_threads import ask_in_thread
+    from ..ask_threads import ask_in_thread, get_thread
 
-    retrieval_scope = _library_ask_scope(
-        ask_folder_id,
-        ask_tag_id,
-        ask_origin,
-        ask_speaker_name,
-        ask_date_from,
-        ask_date_to,
-        ask_file_ids,
-    )
+    retrieval_scope = None
     try:
+        retrieval_scope = _library_ask_scope(
+            ask_folder_id,
+            ask_tag_id,
+            ask_origin,
+            ask_speaker_name,
+            ask_date_from,
+            ask_date_to,
+            _workspace_timezone_name(),
+            ask_file_ids,
+        )
         thread = ask_in_thread(
             q,
             thread_id=thread_id,
@@ -3307,10 +3343,16 @@ def ask(
     except Exception:  # noqa: BLE001 - provider may be unavailable
         from ..worker.qa import normalize_library_scope
 
+        fallback_scope = normalize_library_scope(retrieval_scope)
+        if thread_id:
+            try:
+                fallback_scope = get_thread(thread_id, file_id=None)["retrieval_scope"]
+            except LookupError:
+                pass
         thread = _unavailable_ask_thread(
             q,
             thread_id,
-            retrieval_scope=normalize_library_scope(retrieval_scope),
+            retrieval_scope=fallback_scope,
         )
     return templates.TemplateResponse(
         request=request,
@@ -3375,16 +3417,18 @@ def library_ask_skill(
         return HTMLResponse(str(exc), status_code=404)
     from ..ask_threads import ask_in_thread
 
-    retrieval_scope = _library_ask_scope(
-        ask_folder_id,
-        ask_tag_id,
-        ask_origin,
-        ask_speaker_name,
-        ask_date_from,
-        ask_date_to,
-        ask_file_ids,
-    )
+    retrieval_scope = None
     try:
+        retrieval_scope = _library_ask_scope(
+            ask_folder_id,
+            ask_tag_id,
+            ask_origin,
+            ask_speaker_name,
+            ask_date_from,
+            ask_date_to,
+            _workspace_timezone_name(),
+            ask_file_ids,
+        )
         thread = ask_in_thread(
             skill["retrieval_query"],
             display_query=skill["name"],

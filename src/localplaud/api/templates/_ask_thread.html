@@ -8,6 +8,7 @@
     {% if thread.retrieval_scope.speaker_name %}<span class="chip">{{ t('Named speaker') }} · {{ thread.retrieval_scope.speaker_name }}</span>{% endif %}
     {% if thread.retrieval_scope.date_from %}<span class="chip">{{ t('From') }} · {{ thread.retrieval_scope.date_from }}</span>{% endif %}
     {% if thread.retrieval_scope.date_to %}<span class="chip">{{ t('To') }} · {{ thread.retrieval_scope.date_to }}</span>{% endif %}
+    {% if thread.retrieval_scope.date_timezone %}<span class="chip">{{ t('Timezone') }} · {{ thread.retrieval_scope.date_timezone }}{% if thread.retrieval_scope.scope_version == 1 %} · {{ t('legacy') }}{% endif %}</span>{% endif %}
     {% if thread.retrieval_scope.file_ids %}<span class="chip">{{ thread.retrieval_scope.file_ids|length }} {{ t('recordings') }}</span>{% endif %}
     <span>{{ t('Follow-ups keep this scope.') }}</span>
   </div>

@@ -465,7 +465,8 @@ processing artifacts removed in one validated operation. Active claims are rejec
 original audio, Plaud data, organization, Ask history, and editable notes remain.
 Search now works without an embedding provider across local titles, the
 provenance-correct canonical transcript, generated notes, and saved notes. Folder,
-tag, source, and recording-date filters apply consistently; timestamped transcript
+tag, source, and recording-date filters apply consistently; date boundaries use the
+workspace timezone before lexical and semantic ranking. Timestamped transcript
 matches open the player at the matching moment, while semantic hits are blended in
 when an embedding index is available.
 MLX large-v3-turbo is smoke-tested on SkyLabMac, and
@@ -519,6 +520,10 @@ Saved Ask answers are editable note bodies with durable follow-up threads. Libra
 and recording Ask surfaces expose exact-scope conversation history through a
 searchable, paginated desktop/mobile drawer. Threads can be renamed or deleted;
 deleting one preserves Saved notes and their citations as independent local data.
+New date-scoped library threads freeze the workspace timezone and exact UTC
+millisecond boundaries in a versioned retrieval scope; changing display preferences
+cannot move later follow-ups. Existing date scopes retain their legacy UTC meaning,
+and whole-library retrieval excludes Trash before vector ranking.
 Generated notes can be promoted idempotently to a provenance-linked editable copy
 inside the same recording workspace. User edits affect only that copy; the original
 AI artifact and its model/template/transcript lineage remain immutable.

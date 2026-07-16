@@ -116,11 +116,45 @@ def test_retrieve_applies_combined_library_scope(monkeypatch, tmp_path):
     }
     hits = retrieve("q", top_k=6, retrieval_scope=scope)
     assert hits and {item["file_id"] for item in hits} == {"r1"}
-    assert normalize_library_scope(scope) == scope
+    assert normalize_library_scope(scope) == scope | {
+        "scope_version": 1,
+        "date_timezone": "UTC",
+        "date_from_ms": 1_767_225_600_000,
+        "date_to_ms_exclusive": 1_798_761_600_000,
+    }
     with pytest.raises(ValueError, match="origin"):
         normalize_library_scope({"origin": "external"})
     with pytest.raises(ValueError, match="date_from"):
         normalize_library_scope({"date_from": "2026-12-31", "date_to": "2026-01-01"})
+    with pytest.raises(ValueError, match="supported range"):
+        normalize_library_scope({"date_to": "9999-12-31"})
+    frozen = {
+        "scope_version": 2,
+        "date_timezone": "Asia/Taipei",
+        "date_from": "2026-07-01",
+        "date_from_ms": 1_782_835_200_000,
+    }
+    assert normalize_library_scope(frozen) == frozen
+    with pytest.raises(ValueError, match="does not match"):
+        normalize_library_scope(frozen | {"date_from_ms": 1_782_835_200_001})
+
+
+def test_retrieve_excludes_trash_before_ranking(monkeypatch, tmp_path):
+    _fresh_db(monkeypatch, tmp_path)
+    _seed_two_files()
+    monkeypatch.setattr("localplaud.worker.qa.build_embedder", lambda cfg: _FakeEmbedder())
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker.qa import retrieve
+
+    with session_scope() as session:
+        session.get(PlaudFile, "r1").is_trash = True
+
+    hits = retrieve("q", top_k=6)
+    assert [item["file_id"] for item in hits] == ["r2"]
+    single_file_hits = retrieve("q", file_id="r1", top_k=6)
+    assert single_file_hits
+    assert {item["file_id"] for item in single_file_hits} == {"r1"}
 
 
 def test_answer_source_shape_and_scope(monkeypatch, tmp_path):

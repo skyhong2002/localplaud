@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import copy
 import logging
-from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, or_, select
 
 from ..config import Settings, get_settings
+from ..date_filters import normalize_calendar_date, resolve_date_scope
 from ..db.models import Chunk, PlaudFile, Speaker, Tag
 from ..db.session import session_scope
 from ..embeddings.base import build_embedder
@@ -43,6 +43,10 @@ def normalize_library_scope(value: dict | None) -> dict:
             "speaker_name",
             "date_from",
             "date_to",
+            "scope_version",
+            "date_timezone",
+            "date_from_ms",
+            "date_to_ms_exclusive",
             "file_ids",
         }
     )
@@ -72,18 +76,53 @@ def normalize_library_scope(value: dict | None) -> dict:
         if not speaker_name or len(speaker_name) > 128:
             raise ValueError("speaker_name must contain 1 to 128 characters")
         scope["speaker_name"] = speaker_name
-    parsed_dates = {}
+    normalized_dates = {}
     for key in ("date_from", "date_to"):
         raw = value.get(key)
         if raw not in (None, ""):
             try:
-                parsed_dates[key] = date.fromisoformat(str(raw))
+                normalized_dates[key] = normalize_calendar_date(raw)
             except ValueError as exc:
-                raise ValueError(f"{key} must use YYYY-MM-DD") from exc
-            scope[key] = parsed_dates[key].isoformat()
-    if parsed_dates.get("date_from") and parsed_dates.get("date_to"):
-        if parsed_dates["date_from"] > parsed_dates["date_to"]:
-            raise ValueError("date_from must not follow date_to")
+                raise ValueError(f"invalid {key}: {exc}") from exc
+    date_metadata = {
+        "scope_version",
+        "date_timezone",
+        "date_from_ms",
+        "date_to_ms_exclusive",
+    }
+    if normalized_dates:
+        version = value.get("scope_version")
+        if version is None:
+            resolved_dates = resolve_date_scope(
+                normalized_dates.get("date_from"),
+                normalized_dates.get("date_to"),
+                "UTC",
+                scope_version=1,
+            )
+        else:
+            if not isinstance(version, int) or isinstance(version, bool) or version not in {1, 2}:
+                raise ValueError("scope_version must be 1 or 2")
+            timezone = value.get("date_timezone")
+            if version == 1 and timezone != "UTC":
+                raise ValueError("legacy date scope timezone must be UTC")
+            resolved_dates = resolve_date_scope(
+                normalized_dates.get("date_from"),
+                normalized_dates.get("date_to"),
+                timezone,
+                scope_version=version,
+            )
+            for key in ("date_from_ms", "date_to_ms_exclusive"):
+                expected = resolved_dates.get(key)
+                raw = value.get(key)
+                if expected is None:
+                    if raw is not None:
+                        raise ValueError(f"{key} has no matching calendar bound")
+                    continue
+                if not isinstance(raw, int) or isinstance(raw, bool) or raw != expected:
+                    raise ValueError(f"{key} does not match the date scope")
+        scope.update(resolved_dates)
+    elif any(value.get(key) is not None for key in date_metadata):
+        raise ValueError("date scope metadata requires date_from or date_to")
     file_ids = value.get("file_ids")
     if file_ids not in (None, []):
         if not isinstance(file_ids, list) or not all(
@@ -97,13 +136,6 @@ def normalize_library_scope(value: dict | None) -> dict:
     return scope
 
 
-def _date_ms(value: str, *, exclusive_end: bool = False) -> int:
-    parsed = datetime.combine(date.fromisoformat(value), datetime.min.time(), tzinfo=UTC)
-    if exclusive_end:
-        parsed += timedelta(days=1)
-    return int(parsed.timestamp() * 1000)
-
-
 def _load_matrix(
     session,
     dim: int,
@@ -114,19 +146,26 @@ def _load_matrix(
     # (e.g. after switching embeddings.provider) would crash np.stack / the dot
     # product. Filter to the current embedder's dimension. When ``file_id`` is
     # set, scope retrieval to a single recording (single-file Ask).
-    stmt = select(Chunk).where(Chunk.embedding.is_not(None), Chunk.dim == dim)
+    stmt = (
+        select(Chunk)
+        .join(PlaudFile, PlaudFile.id == Chunk.file_id)
+        .where(Chunk.embedding.is_not(None), Chunk.dim == dim)
+    )
     if file_id is not None:
         stmt = stmt.where(Chunk.file_id == file_id)
+    else:
+        stmt = stmt.where(PlaudFile.is_trash.is_(False))
     scope = normalize_library_scope(retrieval_scope)
     if file_id is not None and scope:
         raise ValueError("single-recording Ask cannot use a library scope")
     if scope:
-        stmt = stmt.join(PlaudFile, PlaudFile.id == Chunk.file_id)
         if scope.get("folder_id"):
             stmt = stmt.where(PlaudFile.folder_id == scope["folder_id"])
         if scope.get("tag_id"):
             stmt = stmt.where(PlaudFile.tags.any(Tag.id == scope["tag_id"]))
-        if scope.get("origin"):
+        if scope.get("origin") == "plaud":
+            stmt = stmt.where(or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None)))
+        elif scope.get("origin") == "local":
             stmt = stmt.where(PlaudFile.origin == scope["origin"])
         if scope.get("speaker_name"):
             stmt = stmt.where(
@@ -140,12 +179,10 @@ def _load_matrix(
                     )
                 )
             )
-        if scope.get("date_from"):
-            stmt = stmt.where(PlaudFile.start_time_ms >= _date_ms(scope["date_from"]))
-        if scope.get("date_to"):
-            stmt = stmt.where(
-                PlaudFile.start_time_ms < _date_ms(scope["date_to"], exclusive_end=True)
-            )
+        if scope.get("date_from_ms") is not None:
+            stmt = stmt.where(PlaudFile.start_time_ms >= scope["date_from_ms"])
+        if scope.get("date_to_ms_exclusive") is not None:
+            stmt = stmt.where(PlaudFile.start_time_ms < scope["date_to_ms_exclusive"])
         if scope.get("file_ids"):
             stmt = stmt.where(PlaudFile.id.in_(scope["file_ids"]))
     chunks = list(session.scalars(stmt))

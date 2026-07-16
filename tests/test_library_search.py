@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -156,18 +158,123 @@ def test_search_page_applies_filters_to_semantic_hits(monkeypatch, tmp_path):
 
     import localplaud.worker.qa as qa
 
-    monkeypatch.setattr(
-        qa,
-        "retrieve",
-        lambda *args, **kwargs: [
+    calls = []
+
+    def fake_retrieve(*args, **kwargs):
+        calls.append(kwargs)
+        return [
             {"file_id": "cloud-recording", "filename": "Plaud interview", "text": "meaning", "start": 2.0, "end": 3.0, "speaker": None, "score": 0.8},
             {"file_id": "local-recording", "filename": "Launch meeting", "text": "meaning", "start": 2.0, "end": 3.0, "speaker": None, "score": 0.7},
-        ],
-    )
+        ]
+
+    monkeypatch.setattr(qa, "retrieve", fake_retrieve)
     response = client.get("/search", params={"q": "meaning", "origin": "local"})
     assert response.status_code == 200
     assert "Launch meeting" in response.text
     assert "Plaud interview" not in response.text
+    assert calls == [{"top_k": 30, "retrieval_scope": {"origin": "local"}}]
     # Semantic blends get a quiet Related label instead of provider jargon.
     assert ">Related<" in response.text
     assert ">Semantic<" not in response.text
+
+
+def test_search_date_filter_uses_workspace_timezone_before_semantic_ranking(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add_all(
+            [
+                PlaudFile(
+                    id="before",
+                    filename="Boundary before",
+                    start_time_ms=1_784_131_199_000,
+                ),
+                PlaudFile(
+                    id="lower",
+                    filename="Boundary lower",
+                    start_time_ms=1_784_131_200_000,
+                ),
+                PlaudFile(
+                    id="upper",
+                    filename="Boundary upper",
+                    start_time_ms=1_784_217_599_999,
+                ),
+                PlaudFile(
+                    id="after",
+                    filename="Boundary after",
+                    start_time_ms=1_784_217_600_000,
+                ),
+            ]
+        )
+
+    scopes = []
+    import localplaud.worker.qa as qa
+
+    def unavailable(*args, **kwargs):
+        scopes.append(kwargs["retrieval_scope"])
+        raise RuntimeError("embedding provider unavailable")
+
+    monkeypatch.setattr(qa, "retrieve", unavailable)
+    response = client.get(
+        "/search",
+        params={
+            "q": "Boundary",
+            "date_from": "2026-07-16",
+            "date_to": "2026-07-16",
+        },
+    )
+    assert response.status_code == 200
+    assert "Boundary lower" in response.text and "Boundary upper" in response.text
+    assert "Boundary before" not in response.text and "Boundary after" not in response.text
+    assert scopes == [
+        {
+            "scope_version": 2,
+            "date_timezone": "Asia/Taipei",
+            "date_from": "2026-07-16",
+            "date_from_ms": 1_784_131_200_000,
+            "date_to": "2026-07-16",
+            "date_to_ms_exclusive": 1_784_217_600_000,
+        }
+    ]
+    assert "Recorded date · Asia/Taipei" in response.text
+
+
+def test_search_reversed_date_range_fails_closed(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    import localplaud.worker.qa as qa
+
+    calls = []
+    monkeypatch.setattr(qa, "retrieve", lambda *args, **kwargs: calls.append(kwargs))
+    response = client.get(
+        "/search",
+        params={"q": "approved", "date_from": "2026-07-02", "date_to": "2026-07-01"},
+    )
+    assert response.status_code == 200
+    assert "Start date must not follow end date." in response.text
+    assert "Launch meeting" not in response.text
+    assert calls == []
+
+
+@pytest.mark.parametrize("invalid_date", ["not-a-date", "9999-12-31"])
+def test_search_invalid_date_fails_closed_before_semantic_retrieval(
+    monkeypatch, tmp_path, invalid_date
+):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    import localplaud.worker.qa as qa
+
+    calls = []
+    monkeypatch.setattr(qa, "retrieve", lambda *args, **kwargs: calls.append(kwargs))
+    response = client.get(
+        "/search",
+        params={"q": "approved", "date_to": invalid_date},
+    )
+    assert response.status_code == 200
+    assert "Enter a valid recorded date in the supported range." in response.text
+    assert "Launch meeting" not in response.text
+    assert calls == []
