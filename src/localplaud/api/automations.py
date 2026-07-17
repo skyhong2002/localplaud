@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, select, update
 
 from ..automations import (
@@ -44,6 +44,13 @@ class TriggerBody(BaseModel):
     max_duration_minutes: float | None = Field(default=None, ge=0, le=24 * 60)
     folder_id: int | None = Field(default=None, gt=0)
     tag_id: int | None = Field(default=None, gt=0)
+
+    @field_validator("title_contains", "transcript_contains", mode="before")
+    @classmethod
+    def normalize_keyword(cls, value):
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
     @model_validator(mode="after")
     def duration_order(self):

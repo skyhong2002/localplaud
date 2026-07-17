@@ -214,7 +214,12 @@ def _mark_notes_stale(session, file_id: str) -> None:
 
 
 def _apply_actions(
-    session, rule: AutomationRule, recording: PlaudFile, *, automation_run_id: int
+    session,
+    rule: AutomationRule,
+    recording: PlaudFile,
+    *,
+    automation_run_id: int,
+    processing_owner_token: str | None = None,
 ) -> dict:
     actions = rule.actions or {}
     applied: dict = {}
@@ -227,7 +232,11 @@ def _apply_actions(
     ):
         from .providers.service import lock_recording_membership_changes
 
-        lock_recording_membership_changes(session, [recording.id])
+        lock_recording_membership_changes(
+            session,
+            [recording.id],
+            processing_owner_token=processing_owner_token,
+        )
         recording = session.get(PlaudFile, recording.id) or recording
     if key := actions.get("note_template_key"):
         recording.note_template_key = key
@@ -285,7 +294,58 @@ def _apply_actions(
     return applied
 
 
-def evaluate_recording(file_id: str) -> list[dict]:
+def deliver_run_downstream(run_id: int, *, notification_requested: bool) -> dict:
+    """Deliver independently retryable actions for one completed AutoFlow run."""
+    result: dict = {}
+    if notification_requested:
+        try:
+            result["notification"] = deliver_local_notification(run_id)
+        except Exception as exc:  # noqa: BLE001 - actions remain committed
+            _record_notification_failure(run_id, exc)
+            result["notification"] = {
+                "status": "failed",
+                "error": sanitize_error(exc),
+            }
+
+    exports = []
+    for fmt in _requested_export_formats(run_id):
+        try:
+            exports.append(deliver_automation_export(run_id, fmt))
+        except Exception as exc:  # noqa: BLE001 - actions remain committed
+            exports.append({"format": fmt, "status": "failed", "error": sanitize_error(exc)})
+    if exports:
+        result["exports"] = exports
+
+    webhooks = []
+    for snapshot in _requested_webhooks(run_id):
+        try:
+            from .integrations import deliver_webhook
+
+            webhooks.append(deliver_webhook(run_id, snapshot))
+        except Exception as exc:  # noqa: BLE001 - actions remain committed
+            webhooks.append({"status": "failed", "error": sanitize_error(exc)})
+    if webhooks:
+        result["webhooks"] = webhooks
+
+    emails = []
+    for snapshot in _requested_emails(run_id):
+        try:
+            from .email_integrations import deliver_email
+
+            emails.append(deliver_email(run_id, snapshot))
+        except Exception as exc:  # noqa: BLE001 - actions remain committed
+            emails.append({"status": "failed", "error": sanitize_error(exc)})
+    if emails:
+        result["emails"] = emails
+    return result
+
+
+def evaluate_recording(
+    file_id: str,
+    *,
+    processing_owner_token: str | None = None,
+    defer_downstream: bool = False,
+) -> list[dict]:
     """Apply every matching enabled rule once per rule version.
 
     Lower numeric priority wins because it executes last and may intentionally
@@ -355,7 +415,11 @@ def evaluate_recording(file_id: str) -> list[dict]:
                 session.flush()
                 with session.begin_nested():
                     applied = _apply_actions(
-                        session, rule, recording, automation_run_id=run.id
+                        session,
+                        rule,
+                        recording,
+                        automation_run_id=run.id,
+                        processing_owner_token=processing_owner_token,
                     )
                 run.status = "completed"
                 run.detail = (run.detail or {}) | {"applied": applied}
@@ -381,47 +445,21 @@ def evaluate_recording(file_id: str) -> list[dict]:
                         )
                     )
                 results.append({"rule_id": rule.id, "status": "failed", "error": error})
-        if downstream_run_id is not None and notification_requested:
-            try:
-                notification = deliver_local_notification(downstream_run_id)
-                results[-1]["notification"] = notification
-            except Exception as exc:  # noqa: BLE001 - actions remain committed
-                _record_notification_failure(downstream_run_id, exc)
-                results[-1]["notification"] = {
-                    "status": "failed",
-                    "error": sanitize_error(exc),
-                }
         if downstream_run_id is not None:
-            exports = []
-            for fmt in _requested_export_formats(downstream_run_id):
-                try:
-                    exports.append(deliver_automation_export(downstream_run_id, fmt))
-                except Exception as exc:  # noqa: BLE001 - actions remain committed
-                    exports.append(
-                        {"format": fmt, "status": "failed", "error": sanitize_error(exc)}
+            if defer_downstream:
+                results[-1].update(
+                    {
+                        "deferred_run_id": downstream_run_id,
+                        "notification_requested": notification_requested,
+                    }
+                )
+            else:
+                results[-1].update(
+                    deliver_run_downstream(
+                        downstream_run_id,
+                        notification_requested=notification_requested,
                     )
-            if exports:
-                results[-1]["exports"] = exports
-            webhooks = []
-            for snapshot in _requested_webhooks(downstream_run_id):
-                try:
-                    from .integrations import deliver_webhook
-
-                    webhooks.append(deliver_webhook(downstream_run_id, snapshot))
-                except Exception as exc:  # noqa: BLE001 - actions remain committed
-                    webhooks.append({"status": "failed", "error": sanitize_error(exc)})
-            if webhooks:
-                results[-1]["webhooks"] = webhooks
-            emails = []
-            for snapshot in _requested_emails(downstream_run_id):
-                try:
-                    from .email_integrations import deliver_email
-
-                    emails.append(deliver_email(downstream_run_id, snapshot))
-                except Exception as exc:  # noqa: BLE001 - actions remain committed
-                    emails.append({"status": "failed", "error": sanitize_error(exc)})
-            if emails:
-                results[-1]["emails"] = emails
+                )
     return results
 
 

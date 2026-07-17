@@ -987,7 +987,7 @@ def abandon_mind_map_rebuild(file_id: str, token: str) -> bool:
         return True
 
 
-def _evaluate_transcript_automations(file_id: str) -> bool:
+def _evaluate_transcript_automations(file_id: str) -> tuple[bool, list[dict]]:
     """Run pending AutoFlow rules now that a canonical transcript exists.
 
     Rule execution is idempotent per (rule, version, recording), so rules that
@@ -996,12 +996,29 @@ def _evaluate_transcript_automations(file_id: str) -> bool:
     """
     from ..automations import evaluate_recording
 
+    claim = current_processing_claim()
+    processing_owner_token = (
+        claim.token if claim is not None and claim.file_id == file_id else None
+    )
+
     try:
-        results = evaluate_recording(file_id)
+        results = evaluate_recording(
+            file_id,
+            processing_owner_token=processing_owner_token,
+            defer_downstream=True,
+        )
     except Exception:  # noqa: BLE001 - automation is subordinate to processing
         log.exception("AutoFlow evaluation failed for %s", file_id)
-        return False
-    return any(item.get("status") == "completed" for item in results)
+        return False, []
+    deferred = [
+        {
+            "run_id": item["deferred_run_id"],
+            "notification_requested": bool(item["notification_requested"]),
+        }
+        for item in results
+        if item.get("deferred_run_id") is not None
+    ]
+    return any(item.get("status") == "completed" for item in results), deferred
 
 
 def _process_file_claimed(
@@ -1476,7 +1493,10 @@ def _process_file_claimed(
         # transcript exists, so pending rules run here — before notes — and a
         # matched template/profile/organization action shapes this same cycle.
         # Completed (rule, version, recording) runs are never repeated.
-        if _evaluate_transcript_automations(file_id):
+        automations_changed, deferred_automation_deliveries = (
+            _evaluate_transcript_automations(file_id)
+        )
+        if automations_changed:
             with session_scope() as session:
                 row = _assert_processing_claim_in_session(session, file_id)
                 requested_template_key = row.note_template_key or pcfg.summary_template
@@ -1496,6 +1516,18 @@ def _process_file_claimed(
                 force=force,
             )
         )
+
+        from ..automations import deliver_run_downstream
+
+        for delivery in deferred_automation_deliveries:
+            try:
+                deliver_run_downstream(
+                    delivery["run_id"],
+                    notification_requested=delivery["notification_requested"],
+                )
+            except Exception as exc:  # noqa: BLE001 - derived artifacts remain usable
+                log.exception("AutoFlow downstream delivery failed for %s", file_id)
+                partial_errors.append(f"automation delivery: {exc}")
 
         _finish_processing_cycle(file_id, settings, partial_errors)
         log.info("Pipeline %s for %s", "partial" if partial_errors else "complete", file_id)

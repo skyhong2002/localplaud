@@ -116,9 +116,9 @@ def test_autoflow_membership_actions_take_library_first_fence(monkeypatch, tmp_p
     calls: list[list[str]] = []
     real_lock = provider_service.lock_recording_membership_changes
 
-    def observed_lock(session, file_ids):
+    def observed_lock(session, file_ids, **kwargs):
         calls.append(list(file_ids))
-        return real_lock(session, file_ids)
+        return real_lock(session, file_ids, **kwargs)
 
     monkeypatch.setattr(
         provider_service, "lock_recording_membership_changes", observed_lock
@@ -503,6 +503,7 @@ def test_pipeline_transcript_automation_hook_is_idempotent_and_safe(monkeypatch,
     from localplaud.db.models import PlaudFile, Transcript
     from localplaud.db.session import session_scope
     from localplaud.worker import pipeline
+    from localplaud.worker.claims import processing_claim
 
     with session_scope() as session:
         session.add(
@@ -515,20 +516,82 @@ def test_pipeline_transcript_automation_hook_is_idempotent_and_safe(monkeypatch,
             )
         )
 
-    assert pipeline._evaluate_transcript_automations("match") is True
+    claim_token = pipeline.claim_processing_work("match", require_audio=False)
+    try:
+        with processing_claim("match", claim_token):
+            changed, deferred = pipeline._evaluate_transcript_automations("match")
+    finally:
+        pipeline.release_processing_claim("match", claim_token)
+    assert changed is True
+    assert len(deferred) == 1
     with session_scope() as session:
         assert session.get(PlaudFile, "match").folder_id == folder_id
     # A second pass finds no pending work.
-    assert pipeline._evaluate_transcript_automations("match") is False
+    assert pipeline._evaluate_transcript_automations("match") == (False, [])
 
     # Automation errors never propagate into the processing cycle.
     import localplaud.automations as automations
 
-    def boom(file_id):
+    def boom(file_id, **_kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(automations, "evaluate_recording", boom)
-    assert pipeline._evaluate_transcript_automations("match") is False
+    assert pipeline._evaluate_transcript_automations("match") == (False, [])
+
+
+def test_automation_downstream_delivery_can_be_deferred(monkeypatch, tmp_path):
+    client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
+    from localplaud.automations import deliver_run_downstream, evaluate_recording
+    from localplaud.db.models import Notification
+    from localplaud.db.session import session_scope
+
+    def create_rule(name):
+        return client.post(
+            "/api/automations/rules",
+            json={
+                "name": name,
+                "trigger": {"title_contains": "sync"},
+                "actions": {"folder_id": folder_id},
+                "notify": True,
+            },
+        )
+
+    assert create_rule("Deferred notification").status_code == 201
+
+    deferred = evaluate_recording("match", defer_downstream=True)[0]
+    assert deferred["status"] == "completed"
+    assert deferred["notification_requested"] is True
+    run_id = deferred["deferred_run_id"]
+    with session_scope() as session:
+        assert session.query(Notification).count() == 0
+
+    delivered = deliver_run_downstream(run_id, notification_requested=True)
+    assert delivered["notification"]["status"] == "delivered"
+    with session_scope() as session:
+        assert session.query(Notification).count() == 1
+
+    assert create_rule("Inline notification").status_code == 201
+    inline = evaluate_recording("match")[0]
+    assert inline["notification"]["status"] == "delivered"
+    assert "deferred_run_id" not in inline
+    with session_scope() as session:
+        assert session.query(Notification).count() == 2
+
+
+def test_blank_trigger_keywords_are_normalized(monkeypatch, tmp_path):
+    client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
+
+    created = client.post(
+        "/api/automations/rules",
+        json={
+            "name": "No accidental match-all keyword",
+            "trigger": {"transcript_contains": "   "},
+            "actions": {"folder_id": folder_id},
+        },
+    )
+
+    assert created.status_code == 201
+    assert "transcript_contains" not in created.json()["trigger"]
 
 
 def test_external_rules_are_idempotent_executable_and_read_only(monkeypatch, tmp_path):

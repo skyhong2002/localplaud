@@ -737,7 +737,12 @@ def resolve_recording_profile(
     return resolve_profile(layers, _capability_catalog(session), _connection_catalog(session))
 
 
-def lock_recording_profile_change(session: Session, file_id: str) -> PlaudFile | None:
+def lock_recording_profile_change(
+    session: Session,
+    file_id: str,
+    *,
+    processing_owner_token: str | None = None,
+) -> PlaudFile | None:
     from ..worker.pipeline import processing_claim_active
 
     lock_cost_budget(session, file_id)
@@ -745,7 +750,10 @@ def lock_recording_profile_change(session: Session, file_id: str) -> PlaudFile |
     if recording is None:
         return None
     session.refresh(recording)
-    if processing_claim_active(recording):
+    if processing_claim_active(recording) and not (
+        processing_owner_token is not None
+        and recording.processing_token == processing_owner_token
+    ):
         raise ProfileMutationBusyError(
             "recording is processing; change profile when it finishes"
         )
@@ -768,10 +776,19 @@ def lock_library_profile_membership_change(session: Session) -> None:
     lock_cost_budget(session, None)
 
 
-def lock_recording_membership_changes(session: Session, file_ids: list[str]) -> None:
+def lock_recording_membership_changes(
+    session: Session,
+    file_ids: list[str],
+    *,
+    processing_owner_token: str | None = None,
+) -> None:
     """Fence known profile-affecting memberships and lock rows in order."""
     lock_library_profile_membership_change(session)
-    lock_recording_profile_changes(session, file_ids)
+    lock_recording_profile_changes(
+        session,
+        file_ids,
+        processing_owner_token=processing_owner_token,
+    )
 
 
 def _reject_active_provider_operations(
@@ -841,9 +858,18 @@ def lock_library_profile_change(session: Session) -> list[str]:
     return file_ids
 
 
-def lock_recording_profile_changes(session: Session, file_ids: list[str]) -> None:
+def lock_recording_profile_changes(
+    session: Session,
+    file_ids: list[str],
+    *,
+    processing_owner_token: str | None = None,
+) -> None:
     for file_id in sorted(set(file_ids)):
-        lock_recording_profile_change(session, file_id)
+        lock_recording_profile_change(
+            session,
+            file_id,
+            processing_owner_token=processing_owner_token,
+        )
 
 
 def select_recording_override(
