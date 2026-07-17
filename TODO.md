@@ -582,8 +582,11 @@ embedding raw provider credentials or model settings in each rule.
   modal lifecycle with focus trapping, Escape, background inertness, focus restoration,
   and dirty-form protection. Mobile rule/history layouts stay within 390px, and every
   mutation or delivery retry checks its response before reload and reports failures in
-  an inline live region. Remaining: additional concrete application adapters beyond
-  the generic external-owner contract.
+  an inline live region. The Discover page now composes AutoFlow rule sentences,
+  integration-card names/details/statuses, and the local owner label through the
+  workspace locale, so zh-Hant-TW shows no catalog-sourced English; the durable rule
+  snapshot and JSON API keep their locale-independent English sentence. Remaining:
+  additional concrete application adapters beyond the generic external-owner contract.
 - ✅ Settings now has a responsive, navigable information architecture for Plaud
   account state, processing recommendations, vocabulary, templates, provider/model/
   profile setup, remote workers, authorized webhooks/email, and system health. The

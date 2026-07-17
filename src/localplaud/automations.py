@@ -6,6 +6,7 @@ import hashlib
 import os
 import secrets
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from sqlalchemy import select
@@ -29,46 +30,85 @@ from .db.session import session_scope
 from .error_redaction import sanitize_error
 
 
-def rule_sentence(rule: AutomationRule | dict) -> str:
+def rule_sentence(
+    rule: AutomationRule | dict,
+    *,
+    translate: Callable[[str], str] | None = None,
+) -> str:
+    t = translate or (lambda value: value)
     trigger = rule.trigger if isinstance(rule, AutomationRule) else rule.get("trigger", {})
     actions = rule.actions if isinstance(rule, AutomationRule) else rule.get("actions", {})
     conditions = []
     if trigger.get("origin"):
-        conditions.append(f"source is {trigger['origin']}")
+        conditions.append(t("source is {value}").format(value=trigger["origin"]))
     if trigger.get("title_contains"):
-        conditions.append(f'title contains “{trigger["title_contains"]}”')
+        conditions.append(
+            t("title contains “{value}”").format(value=trigger["title_contains"])
+        )
     if trigger.get("min_duration_minutes") is not None:
-        conditions.append(f"duration is at least {trigger['min_duration_minutes']} min")
+        conditions.append(
+            t("duration is at least {value} min").format(
+                value=trigger["min_duration_minutes"]
+            )
+        )
     if trigger.get("max_duration_minutes") is not None:
-        conditions.append(f"duration is at most {trigger['max_duration_minutes']} min")
+        conditions.append(
+            t("duration is at most {value} min").format(
+                value=trigger["max_duration_minutes"]
+            )
+        )
     if trigger.get("folder_id") is not None:
-        conditions.append(f"folder is #{trigger['folder_id']}")
+        conditions.append(t("folder is #{value}").format(value=trigger["folder_id"]))
     if trigger.get("tag_id") is not None:
-        conditions.append(f"tag includes #{trigger['tag_id']}")
+        conditions.append(t("tag includes #{value}").format(value=trigger["tag_id"]))
     effects = []
     if actions.get("note_template_key"):
-        effects.append(f"use {actions['note_template_key']} notes")
+        effects.append(
+            t("use {value} notes").format(value=actions["note_template_key"])
+        )
     if actions.get("profile_id") is not None:
-        effects.append(f"use execution profile #{actions['profile_id']}")
+        effects.append(
+            t("use execution profile #{value}").format(value=actions["profile_id"])
+        )
     if actions.get("folder_id") is not None:
-        effects.append(f"move to folder #{actions['folder_id']}")
+        effects.append(t("move to folder #{value}").format(value=actions["folder_id"]))
     if actions.get("add_tag_ids"):
-        effects.append("add tags " + ", ".join(f"#{value}" for value in actions["add_tag_ids"]))
+        effects.append(
+            t("add tags {value}").format(
+                value=t(", ").join(f"#{value}" for value in actions["add_tag_ids"])
+            )
+        )
     if actions.get("export_formats"):
-        effects.append("export " + "/".join(value.upper() for value in actions["export_formats"]))
+        effects.append(
+            t("export {value}").format(
+                value="/".join(value.upper() for value in actions["export_formats"])
+            )
+        )
     if actions.get("webhook_integration_ids"):
         effects.append(
-            "send webhooks "
-            + ", ".join(f"#{value}" for value in actions["webhook_integration_ids"])
+            t("send webhooks {value}").format(
+                value=t(", ").join(
+                    f"#{value}" for value in actions["webhook_integration_ids"]
+                )
+            )
         )
     if actions.get("email_integration_ids"):
         effects.append(
-            "send email " + ", ".join(f"#{value}" for value in actions["email_integration_ids"])
+            t("send email {value}").format(
+                value=t(", ").join(
+                    f"#{value}" for value in actions["email_integration_ids"]
+                )
+            )
         )
     notify = rule.notify if isinstance(rule, AutomationRule) else bool(rule.get("notify"))
     if notify:
-        effects.append("notify you")
-    return f"When {' and '.join(conditions) or 'a recording arrives'}, then {', '.join(effects) or 'record the match'}."
+        effects.append(t("notify you"))
+    condition_text = t(" and ").join(conditions) if conditions else t("a recording arrives")
+    effect_text = t(", ").join(effects) if effects else t("record the match")
+    return t("When {conditions}, then {effects}.").format(
+        conditions=condition_text,
+        effects=effect_text,
+    )
 
 
 def match_rule(rule: AutomationRule, recording: PlaudFile) -> tuple[bool, list[str]]:

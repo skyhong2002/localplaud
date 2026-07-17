@@ -340,6 +340,28 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
         "要捨棄尚未儲存的 AutoFlow 變更嗎？"
     )
     assert catalog("zh-Hant-TW")["Edit AutoFlow"] == "編輯 AutoFlow"
+    assert catalog("zh-Hant-TW")["configured"] == "已設定"
+    # Only the rendered <main> is user-visible page content. The embedded JS
+    # translation catalog legitimately contains English source keys, so English
+    # residue is asserted against the visible region rather than the whole page.
+    visible = translated.text.split('<main class="main">', 1)[1].split("</main>", 1)[0]
+    assert "When a recording arrives" not in visible
+    assert f"當新錄音加入時，移至資料夾 #{folder_id}。" in visible
+    assert "Local workspace" not in visible
+    assert "本機工作區" in visible
+    assert "Rules created and fully editable in this Web App." not in visible
+    assert "在此 Web App 建立並可完整編輯的規則。" in visible
+    assert "Mirrored rules stay visible but can only be edited by their owner." not in (
+        visible
+    )
+    assert "外部規則擁有者" in visible
+    assert "已授權的 Webhook" in visible
+    assert "已授權的電子郵件" in visible
+    # The durable API payload keeps its locale-independent English sentence.
+    api_rules = client.get("/api/automations/rules").json()["rules"]
+    assert api_rules and api_rules[0]["sentence"] == (
+        f"When a recording arrives, then move to folder #{folder_id}."
+    )
 
 
 def test_external_rules_are_idempotent_executable_and_read_only(monkeypatch, tmp_path):

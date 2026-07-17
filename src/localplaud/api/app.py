@@ -36,6 +36,7 @@ from starlette.background import BackgroundTask
 
 from ..ask_skills import get_ask_skill, list_ask_skills
 from ..ask_threads import thread_to_dict
+from ..automations import rule_sentence
 from ..config import get_settings
 from ..date_filters import calendar_date_ms, normalize_calendar_date, resolve_date_scope
 from ..db.models import (
@@ -2108,7 +2109,10 @@ def discover_automations(request: Request):
         ]
         email_integrations = [item for item in list_email_integrations(session) if item["enabled"]]
     automation_rules = list_rules()["rules"]
-    ctx = _base_ctx(request, "discover") | {
+    ctx = _base_ctx(request, "discover")
+    for rule in automation_rules:
+        rule["sentence"] = rule_sentence(rule, translate=ctx["t"])
+    ctx |= {
         "automation_rules": automation_rules,
         "automation_runs": list_runs(limit=50)["runs"],
         "organization": organization,
