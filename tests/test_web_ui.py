@@ -568,7 +568,7 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert "event.detail.path=workspacePathForTab(event.detail.path,activePanelName())" in r.text
     assert "if(next!==current)history.pushState(state,'',url)" in r.text
     assert (
-        "if(name!=='notes'){url.searchParams.delete('note');"
+        "if(requested!=='notes'){url.searchParams.delete('note');"
         "url.searchParams.delete('note_id');}" in r.text
     )
 
@@ -749,6 +749,22 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     audio = tmp_path / "audio.mp3"
     audio.write_bytes(b"audio")
     _seed(str(audio))
+    from localplaud.db.models import PlaudFile, TranscriptRevision
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        recording = session.get(PlaudFile, "r1")
+        session.add(
+            TranscriptRevision(
+                file_id="r1",
+                base_transcript_id=recording.local_transcript.id,
+                revision=2,
+                source="local",
+                segments=recording.local_transcript.segments,
+                text=recording.local_transcript.text,
+                has_speakers=True,
+            )
+        )
     r = c.get("/file/r1")
     assert r.status_code == 200
     assert "SPEAKER_00" in r.text
@@ -782,7 +798,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "event.target.closest('[data-open-import]')" in r.text
     assert "getElementById('add-audio-button')?.click()" not in r.text
     assert 'id="recording-file-list" hx-preserve' in r.text
-    assert 'class="backlink" href="/" hx-get="/" hx-target="#app-view"' in r.text
+    assert 'class="recording-crumb-link" href="/" hx-get="/" hx-target="#app-view"' in r.text
     assert "link.setAttribute('hx-target','#app-view')" in r.text
     assert "(?:api|audio|static|login|logout|oauth)" in r.text
     assert "link.setAttribute('hx-boost','false')" in r.text
@@ -800,8 +816,8 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "#reprocess-msg:empty { display:none; }" in r.text
     assert 'id="reprocess-msg" class="sub" aria-live="polite"' in r.text
     assert 'class="pane recording-pane has-player"' in r.text
-    assert ".recording-pane.has-player .tabs { top:92px; }" in r.text
-    assert ".tabs { position:sticky;top:8px;" in r.text
+    assert ".recording-pane.has-player .tabs { top:0; }" in r.text
+    assert ".tabs { position:sticky;top:0;" in r.text
     assert "Provider word timestamps validated" in r.text
     assert "42 timed words" in r.text
     assert "Forced alignment was not used" in r.text
@@ -814,11 +830,25 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "Execution profile" in r.text and "Current Settings" in r.text
     assert "Find in transcript" in r.text and "Replace all" in r.text
     assert 'id="persistent-player"' in r.text and 'id="waveform"' in r.text
+    assert r.text.index('class="tabs" role="tablist"') < r.text.index('id="persistent-player"')
+    assert 'aria-label="Back 15 seconds" title="Back 15 seconds"' in r.text
+    assert 'aria-label="Forward 15 seconds" title="Forward 15 seconds"' in r.text
+    assert "player.currentTime-15" in r.text and "player.currentTime+15" in r.text
     assert 'id="open-share" type="button" aria-label="Share" title="Share"' in r.text
     assert 'id="open-export" type="button" aria-label="Export" title="Export"' in r.text
+    header = r.text.split('<div class="recording-actions">', 1)[1].split("</details>", 1)[0]
+    assert header.index('id="open-ask-dock"') < header.index('id="open-share"')
+    assert header.index('id="open-share"') < header.index('id="open-export"')
+    assert header.index('id="open-export"') < header.index('class="recording-more"')
     assert 'class="tabs" role="tablist"' in r.text
     assert 'id="recording-tab-transcript" role="tab"' in r.text
     assert 'id="recording-panel-transcript" role="tabpanel"' in r.text
+    assert 'class="tabpanel ask-dock" id="recording-panel-ask"' in r.text
+    assert 'id="open-ask-dock" type="button" aria-controls="recording-panel-ask"' in r.text
+    assert "localplaud:recording-ask-dock" in r.text
+    assert "window.matchMedia('(min-width:1200px)')" in r.text
+    assert ".recording-workspace-layout.ask-dock-open { grid-template-columns:minmax(0,1fr) minmax(280px,360px); }" in r.text
+    assert "if(dockRequest)setAskDock(true)" in r.text
     assert "item.setAttribute('aria-selected',String(active))" in r.text
     assert "item.tabIndex=active?0:-1" in r.text
     assert "function openDialog(backdrop,opener)" in r.text
@@ -861,8 +891,12 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'id="generate-backdrop"' not in r.text  # transcript exists — no pre-generation dialog
     assert '<details class="speaker-pill">' in r.text
     assert '<form class="speaker-editor" method="post" action="/file/r1/speakers">' in r.text
-    assert '<h1>Sync</h1>' in r.text
+    assert '<h1 id="recording-title-display" title="Weekly Sync">Weekly Sync</h1>' in r.text
     assert 'id="recording-title-display"' in r.text and 'id="edit-recording-title"' in r.text
+    assert "Transcript polished." in r.text and "View raw transcript" in r.text
+    assert '<p class="seg-text">' in c.get("/file/r1/transcript-page").text
+    raw = c.get("/file/r1?view=raw")
+    assert "Viewing the raw transcript." in raw.text and "Back to polished view" in raw.text
     assert 'id="benchmark-backdrop"' not in r.text
     assert 'id="open-benchmark"' not in r.text
 
@@ -871,11 +905,11 @@ def test_detail_page_renders(monkeypatch, tmp_path):
         params={"return_to": "/?view=uncategorized&page=2&folder=7"},
     )
     assert (
-        'class="backlink" href="/?view=uncategorized&amp;page=2&amp;folder=7" '
+        'class="recording-crumb-link" href="/?view=uncategorized&amp;page=2&amp;folder=7" '
         'hx-get="/?view=uncategorized&amp;page=2&amp;folder=7"'
     ) in filtered.text
     external = c.get("/file/r1", params={"return_to": "https://example.com/"})
-    assert 'class="backlink" href="/" hx-get="/"' in external.text
+    assert 'class="recording-crumb-link" href="/" hx-get="/"' in external.text
     searched = c.get(
         "/file/r1",
         params={"return_to": "/?q=Weekly&sort=name&dir=asc&page=1", "tab": "notes"},
