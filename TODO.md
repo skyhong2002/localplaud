@@ -547,7 +547,12 @@ embedding raw provider credentials or model settings in each rule.
 - ✅ Added executable local AutoFlow rules matching source, title keyword, duration,
   folder, and tag. Rules have priority, enable/disable, readable trigger/action
   sentences, mutation-free dry-run, versioned idempotency, metadata-sync hooks, and
-  per-recording success/failure history with retry semantics.
+  per-recording success/failure history with retry semantics. Early-transcript
+  keyword triggers match the first 4,000 characters of the provenance-correct
+  canonical transcript only: rules stay pending until local transcription exists,
+  are re-evaluated during processing before notes so matched template/profile/
+  organization actions shape the same cycle, and never repeat a completed
+  (rule, version, recording) run.
 - ✅ Rule actions can select a named execution profile and note template or move/add
   organization metadata; validation prevents dangling references. Profile actions
   use a durable per-rule assignment below manual recording overrides, capture

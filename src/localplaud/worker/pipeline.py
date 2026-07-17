@@ -987,6 +987,23 @@ def abandon_mind_map_rebuild(file_id: str, token: str) -> bool:
         return True
 
 
+def _evaluate_transcript_automations(file_id: str) -> bool:
+    """Run pending AutoFlow rules now that a canonical transcript exists.
+
+    Rule execution is idempotent per (rule, version, recording), so rules that
+    already ran at metadata sync are skipped here. Automation failures must
+    never fail or roll back the processing cycle.
+    """
+    from ..automations import evaluate_recording
+
+    try:
+        results = evaluate_recording(file_id)
+    except Exception:  # noqa: BLE001 - automation is subordinate to processing
+        log.exception("AutoFlow evaluation failed for %s", file_id)
+        return False
+    return any(item.get("status") == "completed" for item in results)
+
+
 def _process_file_claimed(
     file_id: str,
     settings: Settings | None = None,
@@ -1454,6 +1471,21 @@ def _process_file_claimed(
         canonical = _load_transcript(file_id, settings)
         if canonical is not None:
             transcript, _transcript_source = canonical
+
+        # Early-transcript AutoFlow rules can only be judged once the canonical
+        # transcript exists, so pending rules run here — before notes — and a
+        # matched template/profile/organization action shapes this same cycle.
+        # Completed (rule, version, recording) runs are never repeated.
+        if _evaluate_transcript_automations(file_id):
+            with session_scope() as session:
+                row = _assert_processing_claim_in_session(session, file_id)
+                requested_template_key = row.note_template_key or pcfg.summary_template
+                snapshot = resolve_recording_profile(
+                    session, file_id, template_key=requested_template_key
+                ).to_dict()
+            _PROFILE_SNAPSHOT.reset(profile_token)
+            profile_token = _PROFILE_SNAPSHOT.set(snapshot)
+
         partial_errors.extend(
             _run_derived_stages(
                 file_id,

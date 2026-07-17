@@ -29,6 +29,42 @@ from .db.models import (
 from .db.session import session_scope
 from .error_redaction import sanitize_error
 
+# Early-transcript rules read only the opening of a recording, mirroring the
+# audited Plaud behavior of matching how a conversation starts rather than
+# scanning entire transcripts.
+EARLY_TRANSCRIPT_WINDOW_CHARS = 4000
+
+
+def early_transcript_text(recording: PlaudFile) -> str | None:
+    """Opening text of the provenance-correct canonical transcript.
+
+    Returns ``None`` while no transcript satisfying the configured artifact
+    mode exists, so a transcript-keyword rule stays pending (no run row is
+    recorded) and can still match after transcription completes. Plaud-only
+    imports never satisfy independent mode, matching search/export semantics.
+    """
+    from .config import get_settings
+    from .worker.pipeline import _select_raw_transcript
+
+    raw = _select_raw_transcript(recording, get_settings())
+    if raw is None:
+        return None
+    revision = recording.corrected_transcript_for_source(raw.source)
+    segments = (revision.segments if revision is not None else raw.segments) or []
+    parts: list[str] = []
+    total = 0
+    for segment in segments:
+        text = str(segment.get("text") or "").strip()
+        if not text:
+            continue
+        parts.append(text)
+        total += len(text) + 1
+        if total >= EARLY_TRANSCRIPT_WINDOW_CHARS:
+            break
+    if not parts:
+        return None
+    return "\n".join(parts)[:EARLY_TRANSCRIPT_WINDOW_CHARS]
+
 
 def rule_sentence(
     rule: AutomationRule | dict,
@@ -44,6 +80,12 @@ def rule_sentence(
     if trigger.get("title_contains"):
         conditions.append(
             t("title contains “{value}”").format(value=trigger["title_contains"])
+        )
+    if trigger.get("transcript_contains"):
+        conditions.append(
+            t("early transcript contains “{value}”").format(
+                value=trigger["transcript_contains"]
+            )
         )
     if trigger.get("min_duration_minutes") is not None:
         conditions.append(
@@ -142,6 +184,13 @@ def match_rule(rule: AutomationRule, recording: PlaudFile) -> tuple[bool, list[s
         if int(trigger["tag_id"]) not in tag_ids:
             return False, []
         reasons.append(f"tag=#{trigger['tag_id']}")
+    # Transcript loading is the expensive condition, so it runs only after every
+    # cheap metadata condition has already matched.
+    if keyword := str(trigger.get("transcript_contains") or "").strip():
+        early = early_transcript_text(recording)
+        if early is None or keyword.casefold() not in early.casefold():
+            return False, []
+        reasons.append(f'early transcript contains "{keyword}"')
     return True, reasons or ["all recordings"]
 
 

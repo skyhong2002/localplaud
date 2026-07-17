@@ -220,7 +220,15 @@ setting.
 - A failed downstream action can retry without rerunning ASR.
 
 The local AutoFlow foundation now executes source/title/duration/folder/tag rules
-after metadata sync. Actions can select a note template or execution profile and
+after metadata sync, plus early-transcript keyword rules once a canonical local
+transcript exists. A transcript rule stays pending (recording no run) until the
+provenance-correct canonical transcript is available; matching reads only that
+transcript's first 4,000 characters, so Plaud-only imports never trigger
+automation in independent mode. Pending rules are re-evaluated during processing
+after transcript correction and before notes, so a matched template, profile, or
+organization action shapes the same processing cycle, and completed
+(rule, version, recording) runs are never repeated by later polls or Run now.
+Actions can select a note template or execution profile and
 move/tag recordings. Rules are ordered, versioned, idempotent, dry-runnable, locally
 editable, and retain per-recording history. Notification-enabled runs create durable,
 deduplicated local inbox items only after core actions commit; unread state, dismissal,

@@ -39,6 +39,7 @@ router = APIRouter(prefix="/api/automations", tags=["automations"])
 class TriggerBody(BaseModel):
     origin: Literal["plaud", "local"] | None = None
     title_contains: str | None = Field(default=None, max_length=200)
+    transcript_contains: str | None = Field(default=None, max_length=200)
     min_duration_minutes: float | None = Field(default=None, ge=0, le=24 * 60)
     max_duration_minutes: float | None = Field(default=None, ge=0, le=24 * 60)
     folder_id: int | None = Field(default=None, gt=0)

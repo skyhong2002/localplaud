@@ -289,6 +289,7 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert 'id="rule-form"' in page.text and "Run now" in page.text
     assert 'href="/discover"' in page.text
     assert "Create a local inbox notification" in page.text
+    assert 'name="transcript_contains"' in page.text
     assert 'name="webhook_integration_id"' in page.text
     assert 'aria-labelledby="rule-title"' in page.text
     assert 'id="autoflow-status"' in page.text
@@ -341,6 +342,7 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     )
     assert catalog("zh-Hant-TW")["Edit AutoFlow"] == "編輯 AutoFlow"
     assert catalog("zh-Hant-TW")["configured"] == "已設定"
+    assert "逐字稿開頭包含" in translated.text
     # Only the rendered <main> is user-visible page content. The embedded JS
     # translation catalog legitimately contains English source keys, so English
     # residue is asserted against the visible region rather than the whole page.
@@ -362,6 +364,137 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert api_rules and api_rules[0]["sentence"] == (
         f"When a recording arrives, then move to folder #{folder_id}."
     )
+
+
+def test_transcript_keyword_rules_wait_for_canonical_transcript(monkeypatch, tmp_path):
+    client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
+    created = client.post(
+        "/api/automations/rules",
+        json={
+            "name": "File kickoff calls",
+            "trigger": {"transcript_contains": "kickoff"},
+            "actions": {"folder_id": folder_id},
+        },
+    )
+    assert created.status_code == 201
+    assert "early transcript contains “kickoff”" in created.json()["sentence"]
+
+    from sqlalchemy import select
+
+    from localplaud.automations import evaluate_recording
+    from localplaud.db.models import (
+        AutomationRun,
+        PlaudFile,
+        Transcript,
+        TranscriptRevision,
+    )
+    from localplaud.db.session import session_scope
+
+    # Without any transcript the rule stays pending: no run row is recorded,
+    # so a later evaluation after transcription can still match.
+    assert evaluate_recording("match") == []
+    with session_scope() as session:
+        assert session.scalars(select(AutomationRun)).all() == []
+
+    # A Plaud-only import never satisfies independent mode.
+    with session_scope() as session:
+        session.add(
+            Transcript(
+                file_id="match",
+                provider="plaud",
+                source="cloud",
+                text="kickoff agenda from the paid cloud",
+                segments=[{"text": "kickoff agenda from the paid cloud", "start": 0.0, "end": 2.0}],
+            )
+        )
+    assert evaluate_recording("match") == []
+
+    # Local ASR whose keyword sits beyond the early window does not match.
+    filler = "irrelevant opening sentence keeps going. " * 120
+    with session_scope() as session:
+        session.add(
+            Transcript(
+                file_id="match",
+                provider="test",
+                source="local",
+                text=filler + " kickoff",
+                segments=[
+                    {"text": filler, "start": 0.0, "end": 300.0},
+                    {"text": "late kickoff mention", "start": 300.0, "end": 305.0},
+                ],
+            )
+        )
+    assert evaluate_recording("match") == []
+
+    # A corrected canonical revision that fixes the opening does match, and the
+    # revision text wins over raw ASR.
+    with session_scope() as session:
+        raw_id = session.scalar(
+            select(Transcript.id).where(
+                Transcript.file_id == "match", Transcript.source == "local"
+            )
+        )
+        session.add(
+            TranscriptRevision(
+                file_id="match",
+                base_transcript_id=raw_id,
+                revision=1,
+                source="local",
+                text="project kickoff agenda",
+                segments=[{"text": "project kickoff agenda", "start": 0.0, "end": 2.0}],
+            )
+        )
+    results = evaluate_recording("match")
+    assert [item["status"] for item in results] == ["completed"]
+    with session_scope() as session:
+        assert session.get(PlaudFile, "match").folder_id == folder_id
+        run = session.scalars(select(AutomationRun)).one()
+        assert 'early transcript contains "kickoff"' in run.detail["reasons"]
+
+    # Idempotent: the completed (rule, version, recording) run never repeats.
+    assert evaluate_recording("match") == []
+
+
+def test_pipeline_transcript_automation_hook_is_idempotent_and_safe(monkeypatch, tmp_path):
+    client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
+    assert client.post(
+        "/api/automations/rules",
+        json={
+            "name": "Transcript hook",
+            "trigger": {"transcript_contains": "prototype"},
+            "actions": {"folder_id": folder_id},
+        },
+    ).status_code == 201
+
+    from localplaud.db.models import PlaudFile, Transcript
+    from localplaud.db.session import session_scope
+    from localplaud.worker import pipeline
+
+    with session_scope() as session:
+        session.add(
+            Transcript(
+                file_id="match",
+                provider="test",
+                source="local",
+                text="the prototype demo",
+                segments=[{"text": "the prototype demo", "start": 0.0, "end": 2.0}],
+            )
+        )
+
+    assert pipeline._evaluate_transcript_automations("match") is True
+    with session_scope() as session:
+        assert session.get(PlaudFile, "match").folder_id == folder_id
+    # A second pass finds no pending work.
+    assert pipeline._evaluate_transcript_automations("match") is False
+
+    # Automation errors never propagate into the processing cycle.
+    import localplaud.automations as automations
+
+    def boom(file_id):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(automations, "evaluate_recording", boom)
+    assert pipeline._evaluate_transcript_automations("match") is False
 
 
 def test_external_rules_are_idempotent_executable_and_read_only(monkeypatch, tmp_path):
