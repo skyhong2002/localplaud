@@ -419,6 +419,15 @@
       <div class="share-link-row"><input id="share-link" class="search-input" readonly value=""><button class="btn" id="copy-share-link" type="button">{{ t('Copy link') }}</button></div>
       <button class="btn sec" id="system-share" type="button" hidden><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span>{{ t('Share with…') }}</button>
       <div id="share-result" class="sub" role="status"></div>
+      <section class="public-share-section" aria-labelledby="public-share-title">
+        <div><strong id="public-share-title">{{ t('Public share link') }}</strong><div class="sub" style="font-size:12px;margin-top:2px">{{ t('Anyone with this link can view this recording without signing in.') }}</div></div>
+        <div id="public-share-empty" hidden><button class="btn" id="create-public-share" type="button">{{ t('Create public link') }}</button></div>
+        <div id="public-share-active" style="display:grid;gap:8px" hidden>
+          <div class="share-link-row"><input id="public-share-link" class="search-input" readonly value="" aria-label="{{ t('Public share link') }}"><button class="btn" id="copy-public-share" type="button">{{ t('Copy') }}</button></div>
+          <div class="public-share-actions"><button class="btn danger" id="revoke-public-share" type="button">{{ t('Disable link') }}</button><span id="public-share-created" class="sub" style="font-size:12px"></span></div>
+        </div>
+        <div id="public-share-result" class="sub" role="status" aria-live="polite"></div>
+      </section>
     </div>
   </section>
 </div>
@@ -620,14 +629,20 @@
     });
   }
   exportBackdrop?.addEventListener('click',event=>{if(event.target===exportBackdrop)closeDialog(exportBackdrop);});
-  const shareBackdrop=document.getElementById('share-backdrop'),shareInput=document.getElementById('share-link'),shareResult=document.getElementById('share-result'),systemShare=document.getElementById('system-share');
+  const shareBackdrop=document.getElementById('share-backdrop'),shareInput=document.getElementById('share-link'),shareResult=document.getElementById('share-result'),systemShare=document.getElementById('system-share'),publicShareEmpty=document.getElementById('public-share-empty'),publicShareActive=document.getElementById('public-share-active'),publicShareInput=document.getElementById('public-share-link'),publicShareResult=document.getElementById('public-share-result'),publicShareCreated=document.getElementById('public-share-created');
   const recordingUrl=()=>{const url=new URL(location.href);url.searchParams.delete('workspace');url.searchParams.delete('preserve_filelist');url.searchParams.delete('return_to');url.hash='';return url.href;};
-  document.getElementById('open-share')?.addEventListener('click',event=>{shareInput.value=recordingUrl();systemShare.hidden=!navigator.share;openDialog(shareBackdrop,event.currentTarget);});
-  document.getElementById('share-close')?.addEventListener('click',()=>{closeDialog(shareBackdrop);shareResult.textContent='';});
+  async function shareRequestJson(options={}){let response;try{response=await fetch('/api/files/{{ f.id }}/share-link',{...options,signal:cleanupController.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr('Could not update public link'));}let data={};try{data=await response.json();}catch(_error){}if(!response.ok)throw new Error(tr(typeof data.detail==='string'?data.detail:'Could not update public link'));return data;}
+  function renderPublicShare(data){publicShareEmpty.hidden=Boolean(data.active);publicShareActive.hidden=!data.active;publicShareInput.value=data.url||'';publicShareCreated.textContent=data.created_at?`${tr('Created')} · ${new Intl.DateTimeFormat(document.documentElement.lang||undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(data.created_at))}`:'';}
+  async function loadPublicShare(){publicShareEmpty.hidden=true;publicShareActive.hidden=true;publicShareResult.textContent=tr('Loading public link…');try{renderPublicShare(await shareRequestJson());publicShareResult.textContent='';}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not load public link');}}
+  document.getElementById('open-share')?.addEventListener('click',event=>{shareInput.value=recordingUrl();systemShare.hidden=!navigator.share;openDialog(shareBackdrop,event.currentTarget);loadPublicShare();});
+  document.getElementById('share-close')?.addEventListener('click',()=>{closeDialog(shareBackdrop);shareResult.textContent='';publicShareResult.textContent='';});
   shareBackdrop?.addEventListener('click',event=>{if(event.target===shareBackdrop)document.getElementById('share-close').click();});
   async function writeClipboard(text){try{await navigator.clipboard.writeText(text);return;}catch(_error){}const priorFocus=document.activeElement,area=document.createElement('textarea');area.value=text;area.setAttribute('readonly','');area.style.cssText='position:fixed;opacity:0;pointer-events:none';document.body.append(area);area.select();const copied=document.execCommand('copy');area.remove();priorFocus?.focus();if(!copied)throw new Error('clipboard unavailable');}
   function showNoteConflict(form,status){form.querySelector('[data-note-conflict]')?.remove();status.textContent=tr('This note changed elsewhere. Your text is still here. Reload before saving.');const recovery=document.createElement('button');recovery.className='btn sec';recovery.type='button';recovery.dataset.noteConflict='';recovery.textContent=tr('Copy draft and reload');recovery.addEventListener('click',async()=>{recovery.disabled=true;try{await writeClipboard(`# ${form.elements.title.value}\n\n${form.elements.content_md.value}`);location.reload();}catch(_error){status.textContent=tr('Could not copy draft');recovery.disabled=false;}});status.after(recovery);recovery.focus();}
   document.getElementById('copy-share-link')?.addEventListener('click',async()=>{try{await writeClipboard(shareInput.value);shareResult.textContent=tr('Copied');}catch(_error){shareResult.textContent=tr('Copy failed');}});
+  document.getElementById('create-public-share')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;publicShareResult.textContent=tr('Creating public link…');try{renderPublicShare(await shareRequestJson({method:'POST'}));publicShareResult.textContent='';}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not create public link');}finally{event.currentTarget.disabled=false;}});
+  document.getElementById('copy-public-share')?.addEventListener('click',async()=>{try{await writeClipboard(publicShareInput.value);publicShareResult.textContent=tr('Copied');}catch(_error){publicShareResult.textContent=tr('Copy failed');}});
+  document.getElementById('revoke-public-share')?.addEventListener('click',async event=>{if(!confirm(tr('Disable this public link? Anyone using it will immediately lose access.')))return;event.currentTarget.disabled=true;publicShareResult.textContent=tr('Disabling public link…');try{await shareRequestJson({method:'DELETE'});renderPublicShare({active:false});publicShareResult.textContent=tr('Public link disabled');}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not disable public link');}finally{event.currentTarget.disabled=false;}});
   systemShare?.addEventListener('click',async()=>{try{await navigator.share({title:{{ f.filename|tojson }},url:shareInput.value});}catch(error){if(error.name!=='AbortError')shareResult.textContent=tr('Share failed');}});
   document.querySelectorAll('[data-export-group="transcript"] a').forEach(link=>link.addEventListener('click',event=>{
     event.preventDefault();const timestamps=document.getElementById('export-timestamps').checked;

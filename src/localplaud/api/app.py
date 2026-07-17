@@ -19,7 +19,6 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import (
-    FileResponse,
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
@@ -85,10 +84,12 @@ from .automations import router as automations_router
 from .backups import router as backups_router
 from .imports import router as imports_router
 from .integrations import router as integrations_router
+from .media import audio_file_response
 from .note_templates import _item as note_template_item
 from .note_templates import router as note_templates_router
 from .notes import router as notes_router
 from .providers import router as providers_router
+from .share_links import router as share_links_router
 from .system import router as system_router
 from .vocabulary import router as vocabulary_router
 
@@ -135,6 +136,7 @@ app.include_router(automations_router)
 app.include_router(backups_router)
 app.include_router(worker_router)
 app.include_router(system_router)
+app.include_router(share_links_router)
 
 _static = _HERE / "static"
 if _static.exists():
@@ -198,9 +200,11 @@ async def _auth_gate(request: Request, call_next):
     token = settings.auth_token
     login_password = settings.login_password
     public_paths = {"/healthz", "/login"}
+    public_share = request.url.path.startswith("/share/")
     if (
         (token or login_password)
         and request.url.path not in public_paths
+        and not public_share
         and not request.url.path.startswith("/static/")
         and not request.url.path.startswith("/api/worker/v1")
     ):
@@ -227,7 +231,11 @@ async def _auth_gate(request: Request, call_next):
                 if _is_browser_navigation(request):
                     return RedirectResponse(url=login_url, status_code=303)
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    if public_share:
+        response.headers["X-Robots-Tag"] = "noindex"
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -2166,7 +2174,6 @@ def notifications_page(request: Request):
     )
 
 
-_AUDIO_MIME = {"mp3": "audio/mpeg", "opus": "audio/ogg", "wav": "audio/wav", "m4a": "audio/mp4"}
 _waveform_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="localplaud-waveform")
 _waveform_jobs: dict[tuple[str, int, int, int], Future[list[float]]] = {}
 _waveform_jobs_lock = Lock()
@@ -2179,8 +2186,7 @@ def audio(file_id: str):
         path = r.audio_path if r else None
     if not path or not Path(path).exists():
         return JSONResponse({"error": "audio not downloaded"}, status_code=404)
-    ext = Path(path).suffix.lstrip(".").lower()
-    return FileResponse(path, media_type=_AUDIO_MIME.get(ext, "application/octet-stream"))
+    return audio_file_response(path)
 
 
 @app.get("/audio/{file_id}/waveform")
@@ -3861,11 +3867,7 @@ def export_original_audio(file_id: str):
         path = Path(row.audio_path) if row and row.audio_path else None
     if path is None or not path.exists():
         raise HTTPException(status_code=409, detail="recording audio has not been imported")
-    return FileResponse(
-        path,
-        media_type=_AUDIO_MIME.get(path.suffix.lstrip(".").lower(), "application/octet-stream"),
-        filename=f"{file_id}{path.suffix}",
-    )
+    return audio_file_response(path, filename=f"{file_id}{path.suffix}")
 
 
 @app.post("/file/{file_id}/reprocess", response_class=HTMLResponse)

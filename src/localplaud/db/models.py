@@ -258,6 +258,9 @@ class PlaudFile(Base):
     user_notes: Mapped[list[UserNote]] = relationship(
         back_populates="file", cascade="all, delete-orphan", order_by="UserNote.id"
     )
+    share_links: Mapped[list[ShareLink]] = relationship(
+        back_populates="file", cascade="all, delete-orphan", order_by="ShareLink.created_at"
+    )
     knowledge_documents: Mapped[list[KnowledgeDocument]] = relationship(
         back_populates="file", cascade="all, delete-orphan", order_by="KnowledgeDocument.id"
     )
@@ -305,6 +308,23 @@ class PlaudFile(Base):
         """Latest correction derived from the requested artifact source."""
         matches = [row for row in self.transcript_revisions if row.source == source]
         return matches[-1] if matches else None
+
+
+class ShareLink(Base):
+    """Revocable public read-only access to one recording."""
+
+    __tablename__ = "share_links"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), index=True
+    )
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    file: Mapped[PlaudFile] = relationship(back_populates="share_links")
 
 
 class Transcript(Base):

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="{{ workspace_preferences.locale }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{ recording.title }} · localplaud</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <style>
+    :root{color-scheme:light;--bg:#f7f7f8;--panel:#fff;--border:#e4e4e7;--fg:#202124;--muted:#6e7075;--blue:#2563eb;font:14px/1.6 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg)}
+    header{height:58px;display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--panel)}
+    .header-inner,main{width:min(1080px,calc(100% - 40px));margin:0 auto}.brand{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:760;text-transform:uppercase}.brand img{width:26px;height:26px}
+    main{padding:34px 0 64px}.recording-head h1{margin:0;font-size:34px;line-height:1.2;letter-spacing:0;overflow-wrap:anywhere}.meta{margin-top:8px;color:var(--muted)}
+    .player{margin:24px 0 32px;padding:16px 0;border-block:1px solid var(--border)}audio{display:block;width:100%;height:44px}
+    .content{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(280px,.8fr);gap:44px;align-items:start}h2{margin:0 0 16px;font-size:18px;letter-spacing:0}
+    .segments{display:grid;gap:6px}.segment{width:100%;display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;padding:10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.segment:hover,.segment.active{background:#eeeef0}.segment-meta{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}.speaker{display:block;margin-top:3px;color:var(--fg);font-weight:650;overflow:hidden;text-overflow:ellipsis}.speaker::before{content:"";display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:50%;background:var(--speaker-color)}.segment-text{margin:0;overflow-wrap:anywhere}
+    .empty{padding:28px 0;color:var(--muted);border-top:1px solid var(--border)}.notes{display:grid;gap:22px}.note{padding-top:14px;border-top:1px solid var(--border)}.note:first-child{padding-top:0;border-top:0}.note h3{margin:0 0 8px;font-size:15px}.md{overflow-wrap:anywhere}.md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}.md table{width:100%;border-collapse:collapse}.md th,.md td{padding:6px;border:1px solid var(--border);text-align:left}.md pre{overflow:auto}
+    @media(max-width:760px){.header-inner,main{width:min(100% - 28px,1080px)}main{padding-top:24px}.recording-head h1{font-size:26px}.content{grid-template-columns:1fr;gap:34px}.segment{grid-template-columns:62px minmax(0,1fr);padding-inline:4px}}
+  </style>
+</head>
+<body>
+  <header><div class="header-inner"><div class="brand"><img src="/static/logo.svg" alt=""><span>localplaud</span></div></div></header>
+  <main>
+    <section class="recording-head">
+      <h1>{{ recording.title }}</h1>
+      <div class="meta">{% if recording.recorded_at %}{{ recording.recorded_at }} · {% endif %}{{ recording.duration }}</div>
+    </section>
+    {% if recording.has_audio %}<div class="player"><audio id="shared-player" controls preload="metadata" src="{{ audio_url }}"></audio></div>{% endif %}
+    <div class="content">
+      <section aria-labelledby="transcript-title">
+        <h2 id="transcript-title">{{ t('Transcript') }}</h2>
+        {% if segments %}<div class="segments">
+          {% for segment in segments %}<button class="segment" type="button" data-start="{{ segment.get('start', 0) }}" data-end="{{ segment.get('end', 0) }}" style="--speaker-color:{{ speaker_colors.get(segment.get('speaker'), '#989aa0') }}">
+            <span class="segment-meta">{{ ((segment.get('start') or 0) // 60)|int }}:{{ '%02d'|format(((segment.get('start') or 0) % 60)|int) }}{% if segment.get('speaker') %}<span class="speaker">{{ speaker_names.get(segment.get('speaker'), segment.get('speaker')) }}</span>{% endif %}</span>
+            <span class="segment-text">{{ segment.get('text', '') }}</span>
+          </button>{% endfor %}
+        </div>{% else %}<div class="empty">{{ t('Transcript is not available yet.') }}</div>{% endif %}
+      </section>
+      {% if notes %}<section aria-labelledby="notes-title"><h2 id="notes-title">{{ t('Notes') }}</h2><div class="notes">
+        {% for note in notes %}<article class="note"><h3>{{ note.title or note.template|replace('-', ' ')|title }}</h3><div class="md">{{ note.content_md|markdown }}</div></article>{% endfor %}
+      </div></section>{% endif %}
+    </div>
+  </main>
+  <script>
+    const player=document.getElementById('shared-player'),segments=[...document.querySelectorAll('.segment[data-start]')];
+    segments.forEach(segment=>segment.addEventListener('click',()=>{if(!player)return;player.currentTime=Number(segment.dataset.start)||0;player.play();}));
+    player?.addEventListener('timeupdate',()=>{const now=player.currentTime;segments.forEach(segment=>segment.classList.toggle('active',now>=Number(segment.dataset.start||0)&&now<Number(segment.dataset.end||Infinity)));});
+  </script>
+</body>
+</html>
