@@ -71,7 +71,7 @@
 (()=>{
 const tr=window.localplaudT,cleanupController=new AbortController(),RULES={{ automation_rules|tojson }},ruleById=Object.fromEntries(RULES.map(rule=>[rule.id,rule]));
 const backdrop=document.getElementById('rule-backdrop'),form=document.getElementById('rule-form'),status=document.getElementById('rule-status'),pageStatus=document.getElementById('autoflow-status'),saveButton=document.getElementById('rule-save'),page=document.querySelector('#app-view>main');
-const background=[page,document.querySelector('.product-rail'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')].filter(Boolean);
+const background=[page,document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')].filter(Boolean);
 const ruleModal=window.localplaudModal({backdrop,background,cleanupSignal:cleanupController.signal,dirtyMessage:tr('Discard these AutoFlow changes?')});let editing=null;
 document.addEventListener('htmx:beforeCleanupElement',event=>{if(event.detail.elt===page)cleanupController.abort();},{signal:cleanupController.signal});
 function setField(name,value){const field=form.elements[name];if(field)field.value=value??'';}

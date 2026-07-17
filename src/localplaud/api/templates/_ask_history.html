@@ -25,7 +25,7 @@
   const cleanupController=new AbortController();let opener=null,inertState=new Map(),requestController=null,currentPage=1,totalPages=1;
   appView?.addEventListener('htmx:beforeCleanupElement',event=>{if(event.target===appView)cleanupController.abort();});
   const focusables=()=>[...backdrop.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(item=>!item.closest('[hidden]'));
-  const regions=()=>[...document.querySelectorAll('.product-rail,.sidebar,.mobile-bar,.library-page,.shell')];
+  const regions=()=>[...document.querySelectorAll('.sidebar,.mobile-bar,.library-page,.shell')];
   function closeHistory({restoreFocus=true}={}){if(backdrop.hidden)return;backdrop.hidden=true;inertState.forEach((wasInert,region)=>{region.inert=wasInert;});inertState.clear();document.body.classList.remove('dialog-open');if(restoreFocus)opener?.focus();opener=null;requestController?.abort();}
   async function openHistory(button){if(!backdrop.hidden)return;opener=button;inertState=new Map(regions().map(region=>[region,region.inert]));inertState.forEach((_wasInert,region)=>{region.inert=true;});backdrop.hidden=false;document.body.classList.add('dialog-open');requestAnimationFrame(()=>searchInput.focus());await loadHistory(1);}
   function apiUrl(page){const url=new URL('/api/ask/threads',location.origin);if(fileId!==null)url.searchParams.set('file_id',fileId);if(searchInput.value.trim())url.searchParams.set('q',searchInput.value.trim());url.searchParams.set('page',String(page));return url;}

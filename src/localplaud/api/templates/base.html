@@ -62,7 +62,7 @@
       --shadow:0 1px 2px rgba(20,20,24,.04),0 8px 24px rgba(20,20,24,.06);
       --sp0:#F14349; --sp1:#007AFF; --sp2:#16a34a; --sp3:#8F53ED;
       --sp4:#0891b2; --sp5:#db2777; --sp6:#ca8a04; --sp7:#ea580c;
-      --rail-w:41px; --sidebar-w:160px; --list-w:320px;
+      --sidebar-w:160px; --list-w:320px;
     }
     * { box-sizing:border-box; }
     [hidden] { display:none !important; }
@@ -73,17 +73,8 @@
     ::selection { background:var(--blue-soft); }
 
     /* sidebar */
-    .product-rail { width:var(--rail-w);flex:none;background:#191919;color:#B8B8B8;display:flex;flex-direction:column;align-items:center;padding:0 4px;gap:0; }
-    .rail-menu { width:29px;height:29px;display:grid;place-items:center;margin:0;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer; }
-    .rail-menu:hover { background:#333333;color:#FFFFFF; }
-    .rail-menu .nav-icon { width:16px;height:16px; }
-    .rail-action { width:29px;height:29px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer; }
-    .rail-action:hover,.rail-action.on { background:#333333;color:#FFFFFF; }
-    .rail-action .nav-icon { width:16px;height:16px;opacity:1; }
-    .rail-spacer { flex:1; }
     .sidebar { width:var(--sidebar-w);flex:none;background:#FAFAFA;border-right:1px solid var(--border);
       display:flex;flex-direction:column;padding:10px 7px 8px;gap:0;overflow:hidden; }
-    @media (min-width:1121px){ body.sidebar-collapsed .sidebar { display:none; } }
     .brand-row { display:flex;align-items:center;gap:8px;padding:1px 5px 8px; }
     .brand { display:flex;align-items:center;gap:9px;min-width:0;flex:1;padding:2px 3px; }
     .brand img { display:none; }
@@ -509,8 +500,7 @@
     @media (prefers-reduced-motion:reduce){.skeleton-line,.skeleton-field,.skeleton-table-row,.skeleton-stats span,.skeleton-play,.skeleton-wave,.skeleton-time,.skeleton-avatar,.skeleton-tabs span{animation:none}}
 
     @media (min-width:821px) and (max-width:1120px){
-      :root{--sidebar-w:0px;--list-w:280px}
-      .sidebar{display:none}
+      :root{--list-w:280px}
       .recording-header{gap:10px;flex-direction:column}.recording-heading{width:100%}
       #recording-title{min-width:0!important;width:100%}.recording-actions{align-self:flex-end}
     }
@@ -519,7 +509,6 @@
       body { overflow:auto;height:auto;min-height:100vh;display:block;padding-top:55px; }
     body.nav-open { overflow:hidden; }
     body.dialog-open { overflow:hidden; }
-      .product-rail { display:none; }
       #app-view { display:block;min-height:calc(100vh - 55px); }
       .mobile-bar { position:fixed;inset:0 0 auto 0;height:55px;z-index:45;display:flex;align-items:center;gap:9px;padding:0 12px;background:rgba(255,255,255,.96);border-bottom:1px solid var(--border);backdrop-filter:blur(16px); }
       .mobile-bar .mobile-brand { display:flex;align-items:center;gap:8px;min-width:0;flex:1;font-weight:700; }
@@ -582,17 +571,6 @@
   </style>
 </head>
 <body>
-  <nav class="product-rail" aria-label="{{ t('Quick navigation') }}">
-    <button class="rail-menu" type="button" data-sidebar-toggle aria-label="{{ t('Toggle sidebar') }}" aria-expanded="true"><span class="nav-icon" style="--nav-icon:url('/static/lucide/menu.svg')"></span></button>
-    <a class="rail-action {% if active=='recordings' %}on{% endif %}" href="/" title="{{ t('All files') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/files.svg')"></span></a>
-    <a class="rail-action {% if active=='search' %}on{% endif %}" href="/search" title="{{ t('Search') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span></a>
-    <a class="rail-action {% if active=='ask' %}on{% endif %}" href="/?ask=true#library-ask" title="{{ t('Ask localplaud') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span></a>
-    <a class="rail-action {% if active=='templates' %}on{% endif %}" href="/templates" title="{{ t('Templates') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/layout-template.svg')"></span></a>
-    <a class="rail-action {% if active=='notes' %}on{% endif %}" href="/notes" title="{{ t('Saved notes') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span></a>
-    <button class="rail-action" type="button" data-open-import="device" title="{{ t('Add audio') }}" aria-label="{{ t('Add audio') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span></button>
-    <span class="rail-spacer"></span>
-    <a class="rail-action {% if active=='settings' %}on{% endif %}" href="/settings" title="{{ t('Settings') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/settings.svg')"></span></a>
-  </nav>
   <aside class="sidebar" id="workspace-sidebar">
     <div class="brand-row">
       <a class="brand" href="/home">
@@ -690,21 +668,19 @@
   </div>
   <script>
     (()=>{
-      const sidebar=document.getElementById('workspace-sidebar'),opener=document.querySelector('[data-nav-open]'),scrim=document.querySelector('.nav-scrim'),drawerMedia=matchMedia('(max-width:820px)'),railToggle=document.querySelector('[data-sidebar-toggle]');
-      const syncDesktopSidebar=()=>{let collapsed=false;try{collapsed=sessionStorage.getItem('localplaud:sidebar-collapsed')==='true';}catch(_error){}document.body.classList.toggle('sidebar-collapsed',collapsed);railToggle?.setAttribute('aria-expanded',String(!collapsed));};
-      railToggle?.addEventListener('click',()=>{const collapsed=!document.body.classList.contains('sidebar-collapsed');document.body.classList.toggle('sidebar-collapsed',collapsed);railToggle.setAttribute('aria-expanded',String(!collapsed));try{sessionStorage.setItem('localplaud:sidebar-collapsed',String(collapsed));}catch(_error){}});
+      const sidebar=document.getElementById('workspace-sidebar'),opener=document.querySelector('[data-nav-open]'),scrim=document.querySelector('.nav-scrim'),drawerMedia=matchMedia('(max-width:820px)');
       const syncState=open=>{if(drawerMedia.matches){sidebar.toggleAttribute('inert',!open);sidebar.setAttribute('aria-hidden',String(!open));opener.setAttribute('aria-expanded',String(open));scrim.hidden=!open;}else{sidebar.removeAttribute('inert');sidebar.removeAttribute('aria-hidden');opener.setAttribute('aria-expanded','false');scrim.hidden=true;}};
       const close=()=>{const wasOpen=document.body.classList.contains('nav-open');document.body.classList.remove('nav-open');syncState(false);if(wasOpen)opener.focus();};
       document.querySelectorAll('[data-nav-close]').forEach(button=>button.addEventListener('click',close));
       opener?.addEventListener('click',()=>{document.body.classList.add('nav-open');syncState(true);sidebar.querySelector('[data-nav-close]')?.focus();});
       sidebar.addEventListener('click',event=>{if(drawerMedia.matches&&event.target.closest('a.navi[href]'))close();});
       document.addEventListener('keydown',event=>{if(event.key==='Escape'){close();return;}if(event.key!=='Tab'||!drawerMedia.matches||!document.body.classList.contains('nav-open'))return;const focusable=[...sidebar.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])')].filter(item=>!item.closest('[hidden]'));if(!focusable.length)return;const first=focusable[0],last=focusable.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}});
-      drawerMedia.addEventListener('change',()=>{document.body.classList.remove('nav-open');syncState(false);});syncDesktopSidebar();syncState(false);
+      drawerMedia.addEventListener('change',()=>{document.body.classList.remove('nav-open');syncState(false);});syncState(false);
     })();
     (()=>{
       const tr=window.localplaudT,button=document.getElementById('add-audio-button'),menu=document.getElementById('add-audio-menu'),backdrop=document.getElementById('import-backdrop'),closeButton=document.getElementById('import-close');
       const menuItems=[...menu.querySelectorAll('[role="menuitem"]')],tabs=[...document.querySelectorAll('[data-import-tab]')],devicePanel=document.getElementById('device-import-panel'),plaudPanel=document.getElementById('plaud-import-panel'),input=document.getElementById('audio-file-input'),drop=document.getElementById('audio-drop-zone'),localStatus=document.getElementById('local-import-status'),plaudButton=document.getElementById('start-plaud-import');
-      const importModal=window.localplaudModal({backdrop,background:()=>[document.getElementById('app-view'),document.querySelector('.product-rail'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')]});
+      const importModal=window.localplaudModal({backdrop,background:()=>[document.getElementById('app-view'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')]});
       let progressTimer=null,requestController=null,busy=false;
       const detailMessage=(data,fallback)=>{const detail=data?.detail,item=Array.isArray(detail)?detail[0]?.msg:detail;return tr(typeof item==='string'?item:fallback);};
       function setMenu(open,{restoreFocus=false}={}){menu.hidden=!open;button.setAttribute('aria-expanded',String(open));if(!open&&restoreFocus)button.focus();}

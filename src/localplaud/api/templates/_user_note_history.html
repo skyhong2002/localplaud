@@ -14,7 +14,7 @@
 const tr=window.localplaudT,workspaceTimezone={{ workspace_preferences.timezone|tojson }},backdrop=document.getElementById('user-note-history-backdrop');if(!backdrop)return;
 const cleanupController=new AbortController(),appView=document.getElementById('app-view'),list=document.getElementById('user-note-history-list'),empty=document.getElementById('user-note-history-empty'),status=document.getElementById('user-note-history-status'),more=document.getElementById('user-note-history-more'),closeButton=document.getElementById('user-note-history-close'),title=document.getElementById('user-note-history-current-title'),versionLabel=document.getElementById('user-note-history-current-version');
 appView?.addEventListener('htmx:beforeCleanupElement',event=>{if(event.target===appView)cleanupController.abort();});
-const background=[document.querySelector('.shell')||document.querySelector('.notes-page'),...document.querySelectorAll('.product-rail,.sidebar,.mobile-bar')];
+const background=[document.querySelector('.shell')||document.querySelector('.notes-page'),...document.querySelectorAll('.sidebar,.mobile-bar')];
 const modal=window.localplaudModal({backdrop,background,cleanupSignal:cleanupController.signal});
 let active=null,nextBefore=null,requestController=null,previewController=null,confirmation=null,restoreRecovery=null;
 const dateLabel=value=>{if(!value)return tr('Date unavailable');try{return new Intl.DateTimeFormat(document.documentElement.lang||'en',{dateStyle:'medium',timeStyle:'short',timeZone:workspaceTimezone}).format(new Date(value));}catch(_error){return value;}};

@@ -754,9 +754,9 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "SPEAKER_00" in r.text
     assert 'id="app-view" hx-history-elt' in r.text
     assert '<aside class="sidebar" id="workspace-sidebar">' in r.text
-    assert '<nav class="product-rail"' in r.text
-    assert 'data-sidebar-toggle aria-label="Toggle sidebar" aria-expanded="true"' in r.text
-    assert "localplaud:sidebar-collapsed" in r.text
+    assert "product-rail" not in r.text
+    assert "data-sidebar-toggle" not in r.text
+    assert "localplaud:sidebar-collapsed" not in r.text
     assert ".mm-label" in r.text and "overflow-wrap:anywhere" in r.text
     assert "body.nav-open { overflow:hidden; }" in r.text
     assert ".title-edit { width:36px;height:36px;opacity:1; }" in r.text
@@ -764,13 +764,15 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "max-height:calc(100dvh - 24px);overflow:hidden" in r.text
     assert ".import-body { min-height:0;" in r.text and "overflow-y:auto" in r.text
     assert ".ask-user-message" in r.text and ".saved-note-actions" in r.text
-    assert "@media (min-width:1121px){ body.sidebar-collapsed .sidebar { display:none; } }" in r.text
-    assert r.text.index('href="/" title="All files"') < r.text.index('href="/search" title="Search"')
-    assert r.text.index('href="/search" title="Search"') < r.text.index(
-        'href="/?ask=true#library-ask" title="Ask localplaud"'
+    assert ".sidebar{display:none}" not in r.text
+    assert r.text.index('<aside class="sidebar"') < r.text.index('id="app-view"')
+    sidebar_nav = r.text.split('<div class="sidebar-scroll">', 1)[1].split("</aside>", 1)[0]
+    assert sidebar_nav.index('href="/search"') < sidebar_nav.index('href="/home"')
+    assert sidebar_nav.index('href="/home"') < sidebar_nav.index(
+        'href="/?ask=true#library-ask"'
     )
-    assert r.text.index('href="/?ask=true#library-ask" title="Ask localplaud"') < r.text.index(
-        'href="/templates" title="Templates"'
+    assert sidebar_nav.index('href="/?ask=true#library-ask"') < sidebar_nav.index(
+        'href="/templates"'
     )
     assert 'aria-controls="workspace-sidebar" aria-expanded="false"' in r.text
     assert 'class="nav-scrim" type="button" data-nav-close aria-label="Close menu" hidden' in r.text
