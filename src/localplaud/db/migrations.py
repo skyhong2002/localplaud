@@ -724,6 +724,37 @@ def migrate_import_schema(engine: Engine) -> list[str]:
     return ["plaud_files.origin"]
 
 
+def migrate_incremental_import_schema(engine: Engine) -> list[str]:
+    """Add durable per-file artifact checkpoints and skipped-run accounting."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    migrated: list[str] = []
+    with engine.begin() as connection:
+        if "plaud_files" in tables:
+            columns = {item["name"] for item in inspector.get_columns("plaud_files")}
+            if "cloud_artifacts_synced_at" not in columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE plaud_files ADD COLUMN "
+                        "cloud_artifacts_synced_at DATETIME"
+                    )
+                )
+                migrated.append("plaud_files.cloud_artifacts_synced_at")
+        if "import_runs" in tables:
+            columns = {item["name"] for item in inspector.get_columns("import_runs")}
+            if "skipped_count" not in columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE import_runs ADD COLUMN "
+                        "skipped_count INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+                migrated.append("import_runs.skipped_count")
+    return migrated
+
+
 def migrate_pipeline_retry_schema(engine: Engine) -> list[str]:
     """Add durable pipeline retry scheduling to an existing SQLite library."""
     if engine.dialect.name != "sqlite":

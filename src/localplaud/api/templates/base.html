@@ -742,9 +742,10 @@
       function showProgress(data){
         const box=document.getElementById('plaud-import-progress'),label=box.querySelector('[data-progress-label]'),progress=box.querySelector('[role="progressbar"]'),bar=progress.querySelector('span');
         if(data.status==='idle'){box.hidden=true;progress.setAttribute('aria-valuenow','0');return;}box.hidden=false;const pct=data.total?Math.round(data.processed/data.total*100):0;bar.style.width=`${pct}%`;progress.setAttribute('aria-valuenow',String(pct));
-        if(data.status==='completed')label.textContent=`${tr('Complete')} · ${data.processed} ${tr('recordings')} · ${data.transcripts} ${tr('transcripts')} · ${data.summaries} ${tr('summaries')}`;
-        else if(data.status==='failed')label.textContent=`${tr('Import stopped')} · ${data.error||tr('Unknown error')}`;
-        else label.textContent=`${data.processed||0} ${tr('of')} ${data.total||'…'} · ${tr('metadata only, audio not downloaded')}`;
+        const skipped=tr('skipped {value}').replace('{value}',data.skipped||0);
+        if(data.status==='completed')label.textContent=`${tr('Complete')} · ${data.processed} ${tr('recordings')} · ${data.transcripts} ${tr('transcripts')} · ${data.summaries} ${tr('summaries')} · ${skipped}`;
+        else if(data.status==='failed')label.textContent=`${tr('Import stopped')} · ${tr(data.error||'Unknown error')}`;
+        else label.textContent=`${data.processed||0} ${tr('of')} ${data.total||'…'} · ${skipped} · ${tr('metadata only, audio not downloaded')}`;
       }
     })();
     (()=>{

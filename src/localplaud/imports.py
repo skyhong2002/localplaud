@@ -9,7 +9,7 @@ from uuid import uuid4
 from sqlalchemy import select, update
 
 from .config import Settings, get_settings
-from .db.models import FileStatus, ImportRun, PlaudFile
+from .db.models import FileStatus, ImportRun, PlaudFile, Summary, Transcript
 from .db.session import session_scope
 from .plaud import make_plaud_client
 from .poller.poll import _apply_dto, _download_one, refresh_cloud_artifacts_for
@@ -29,6 +29,7 @@ def import_run_to_dict(row: ImportRun) -> dict:
         "transcripts": row.transcript_count,
         "summaries": row.summary_count,
         "failed": row.failed_count,
+        "skipped": row.skipped_count,
         "error": row.error,
     }
 
@@ -40,7 +41,10 @@ def recover_interrupted_imports() -> int:
             .where(ImportRun.status.in_(("queued", "running")))
             .values(
                 status="failed",
-                error="Import interrupted by application restart; start it again.",
+                error=(
+                    "Import interrupted by application restart; start it again; "
+                    "already-synced recordings will be skipped."
+                ),
                 completed_at=datetime.now(UTC),
             )
         ).rowcount
@@ -84,6 +88,8 @@ def _run_plaud_metadata_import(run_id: str, settings: Settings) -> None:
             for dto in files:
                 is_new = False
                 is_changed = False
+                needs_refresh = False
+                has_transcript = has_summary = False
                 with session_scope() as session:
                     row = session.get(PlaudFile, dto.id)
                     if row is None:
@@ -99,21 +105,48 @@ def _run_plaud_metadata_import(run_id: str, settings: Settings) -> None:
                     is_changed = not is_new and any(
                         previous.get(key) != value for key, value in incoming.items()
                     )
+                    needs_refresh = (
+                        is_new or is_changed or row.cloud_artifacts_synced_at is None
+                    )
                     _apply_dto(row, dto)
                     row.origin = "plaud"
                     if not row.audio_path and row.status != FileStatus.downloading:
                         row.status = FileStatus.metadata_only
+                    if needs_refresh:
+                        row.cloud_artifacts_synced_at = None
+                    else:
+                        cloud_sources = ("cloud", "plaud")
+                        has_transcript = session.scalar(
+                            select(Transcript.id)
+                            .where(
+                                Transcript.file_id == dto.id,
+                                Transcript.source.in_(cloud_sources),
+                            )
+                            .limit(1)
+                        ) is not None
+                        has_summary = session.scalar(
+                            select(Summary.id)
+                            .where(
+                                Summary.file_id == dto.id,
+                                Summary.source.in_(cloud_sources),
+                            )
+                            .limit(1)
+                        ) is not None
 
-                has_transcript = has_summary = False
                 failed = False
                 last_error = None
-                try:
-                    has_transcript, has_summary = refresh_cloud_artifacts_for(
-                        client, dto.id
-                    )
-                except Exception as exc:  # noqa: BLE001 - continue the catalog import
-                    failed = True
-                    last_error = f"{dto.id}: {exc}"[:2000]
+                if needs_refresh:
+                    try:
+                        has_transcript, has_summary = refresh_cloud_artifacts_for(
+                            client, dto.id
+                        )
+                        with session_scope() as session:
+                            row = session.get(PlaudFile, dto.id)
+                            if row is not None:
+                                row.cloud_artifacts_synced_at = datetime.now(UTC)
+                    except Exception as exc:  # noqa: BLE001 - continue the catalog import
+                        failed = True
+                        last_error = f"{dto.id}: {exc}"[:2000]
                 try:
                     from .automations import evaluate_recording
 
@@ -127,6 +160,7 @@ def _run_plaud_metadata_import(run_id: str, settings: Settings) -> None:
                     has_transcript=has_transcript,
                     has_summary=has_summary,
                     failed=failed,
+                    skipped=not needs_refresh,
                     last_error=last_error,
                 )
         _update_run(run_id, status="completed", completed_at=datetime.now(UTC))
@@ -153,6 +187,7 @@ def _advance_run(
     has_transcript: bool,
     has_summary: bool,
     failed: bool,
+    skipped: bool,
     last_error: str | None,
 ) -> None:
     with session_scope() as session:
@@ -165,6 +200,7 @@ def _advance_run(
         row.transcript_count += int(has_transcript)
         row.summary_count += int(has_summary)
         row.failed_count += int(failed)
+        row.skipped_count += int(skipped)
         if last_error:
             row.error = last_error
 

@@ -27,12 +27,17 @@ def test_metadata_import_mirrors_artifacts_without_downloading(monkeypatch, tmp_
 
     class FakeClient:
         downloads = 0
+        detail_calls: list[str] = []
+        files = [
+            PlaudFileDTO(id="p1", filename="Cloud meeting", duration=42_000),
+            PlaudFileDTO(id="p2", filename="No intelligence"),
+        ]
 
         def iter_files(self, include_trash=False):
-            yield PlaudFileDTO(id="p1", filename="Cloud meeting", duration=42_000)
-            yield PlaudFileDTO(id="p2", filename="No intelligence")
+            yield from self.files
 
         def get_detail(self, file_id):
+            self.detail_calls.append(file_id)
             return {"id": file_id}
 
         def get_cloud_summary_md(self, file_id, detail):
@@ -59,16 +64,129 @@ def test_metadata_import_mirrors_artifacts_without_downloading(monkeypatch, tmp_
     _run_plaud_metadata_import("run", settings)
 
     with session_scope() as session:
-        assert session.get(PlaudFile, "p1").status == FileStatus.metadata_only
-        assert session.get(PlaudFile, "p1").audio_path is None
-        assert session.get(PlaudFile, "p1").origin == "plaud"
+        p1 = session.get(PlaudFile, "p1")
+        p2 = session.get(PlaudFile, "p2")
+        assert p1.status == FileStatus.metadata_only
+        assert p1.audio_path is None
+        assert p1.origin == "plaud"
+        assert p1.cloud_artifacts_synced_at is not None
+        assert p2.cloud_artifacts_synced_at is not None
         assert session.query(Transcript).filter_by(file_id="p1", source="cloud").count() == 1
         assert session.query(Summary).filter_by(file_id="p1", source="cloud").count() == 1
         run = session.get(ImportRun, "run")
         assert (run.status, run.total, run.processed, run.transcript_count, run.summary_count) == (
             "completed", 2, 2, 1, 1
         )
+        assert run.skipped_count == 0
+    assert fake.detail_calls == ["p1", "p2"]
     assert fake.downloads == 0
+
+    import localplaud.imports as imports
+
+    def run_import(run_id):
+        with session_scope() as session:
+            session.add(ImportRun(id=run_id, source="plaud", status="queued"))
+        _run_plaud_metadata_import(run_id, settings)
+
+    refresh_calls: list[str] = []
+
+    def counted_refresh(_client, file_id):
+        refresh_calls.append(file_id)
+        return (file_id == "p1", file_id == "p1")
+
+    monkeypatch.setattr(imports, "refresh_cloud_artifacts_for", counted_refresh)
+    run_import("unchanged")
+    assert refresh_calls == []
+    with session_scope() as session:
+        run = session.get(ImportRun, "unchanged")
+        assert (run.skipped_count, run.total, run.transcript_count, run.summary_count) == (
+            2,
+            2,
+            1,
+            1,
+        )
+        assert imports.import_run_to_dict(run)["skipped"] == 2
+
+    fake.files[0] = PlaudFileDTO(
+        id="p1", filename="Cloud meeting renamed", duration=42_000
+    )
+    run_import("changed")
+    assert refresh_calls == ["p1"]
+    with session_scope() as session:
+        run = session.get(ImportRun, "changed")
+        assert (run.changed_count, run.skipped_count) == (1, 1)
+
+    fake.files[1] = PlaudFileDTO(id="p2", filename="No intelligence renamed")
+    failed_calls: list[str] = []
+
+    def failed_refresh(_client, file_id):
+        failed_calls.append(file_id)
+        raise RuntimeError("detail unavailable")
+
+    monkeypatch.setattr(imports, "refresh_cloud_artifacts_for", failed_refresh)
+    run_import("failed-refresh")
+    assert failed_calls == ["p2"]
+    with session_scope() as session:
+        assert session.get(PlaudFile, "p2").cloud_artifacts_synced_at is None
+        run = session.get(ImportRun, "failed-refresh")
+        assert (run.failed_count, run.skipped_count) == (1, 1)
+
+    refresh_calls.clear()
+    monkeypatch.setattr(imports, "refresh_cloud_artifacts_for", counted_refresh)
+    run_import("retry-refresh")
+    assert refresh_calls == ["p2"]
+    with session_scope() as session:
+        assert session.get(PlaudFile, "p2").cloud_artifacts_synced_at is not None
+        assert session.get(ImportRun, "retry-refresh").skipped_count == 1
+
+
+def test_incremental_import_migration_is_additive_and_idempotent(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+
+    from localplaud.db.migrations import migrate_incremental_import_schema
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-import.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE import_runs (id VARCHAR(36) PRIMARY KEY)"))
+
+    assert set(migrate_incremental_import_schema(engine)) == {
+        "plaud_files.cloud_artifacts_synced_at",
+        "import_runs.skipped_count",
+    }
+    assert migrate_incremental_import_schema(engine) == []
+    plaud_columns = {
+        column["name"]: column for column in inspect(engine).get_columns("plaud_files")
+    }
+    import_columns = {
+        column["name"]: column for column in inspect(engine).get_columns("import_runs")
+    }
+    assert plaud_columns["cloud_artifacts_synced_at"]["nullable"] is True
+    assert import_columns["skipped_count"]["nullable"] is False
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO import_runs (id) VALUES ('legacy-run')"))
+        assert connection.execute(
+            text("SELECT skipped_count FROM import_runs WHERE id = 'legacy-run'")
+        ).scalar_one() == 0
+
+
+def test_interrupted_import_recovery_explains_incremental_restart(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import ImportRun
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.i18n import translator
+    from localplaud.imports import recover_interrupted_imports
+
+    init_db()
+    with session_scope() as session:
+        session.add(ImportRun(id="interrupted", source="plaud", status="running"))
+
+    assert recover_interrupted_imports() == 1
+    with session_scope() as session:
+        run = session.get(ImportRun, "interrupted")
+        assert run.status == "failed"
+        assert "already-synced recordings will be skipped" in run.error
+        assert translator("zh-Hant-TW")(run.error).startswith("應用程式重新啟動")
 
 
 def test_local_audio_upload_and_metadata_only_ui(monkeypatch, tmp_path):

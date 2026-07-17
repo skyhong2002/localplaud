@@ -183,6 +183,9 @@ class PlaudFile(Base):
     # transcript/summary we could reuse instead of recomputing.
     cloud_is_trans: Mapped[bool] = mapped_column(default=False)
     cloud_is_summary: Mapped[bool] = mapped_column(default=False)
+    cloud_artifacts_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
     # Full raw object as returned by the API, for anything we didn't model.
     raw: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -806,6 +809,7 @@ class ImportRun(Base):
     transcript_count: Mapped[int] = mapped_column(Integer, default=0)
     summary_count: Mapped[int] = mapped_column(Integer, default=0)
     failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
