@@ -283,6 +283,32 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
             "actions": {"folder_id": folder_id},
         },
     ).status_code == 201
+    origin_rule = client.post(
+        "/api/automations/rules",
+        json={
+            "name": "Origin display",
+            "trigger": {"origin": "local"},
+            "actions": {"folder_id": folder_id},
+        },
+    )
+    assert origin_rule.status_code == 201
+    assert "source is Local import" in origin_rule.json()["sentence"]
+    # An external owner label that collides with a catalog key must stay
+    # verbatim — it is another application's proper name, not UI copy.
+    assert client.put(
+        "/api/automations/external-rules",
+        json={
+            "owner_key": "settings-app",
+            "owner_label": "Settings",
+            "external_id": "external-1",
+            "name": "External settings rule",
+            "enabled": True,
+            "priority": 60,
+            "trigger": {},
+            "actions": {"folder_id": folder_id},
+            "notify": False,
+        },
+    ).status_code == 200
     page = client.get("/discover")
     assert page.status_code == 200
     assert "AutoFlow" in page.text and "Run history" in page.text
@@ -331,7 +357,7 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert "限定範圍的 HTTPS 或明確允許的私有目的地。" in translated.text
     assert "限定範圍的 SMTP 目的地，密碼僅由環境提供。" in translated.text
     assert ">可用<" in translated.text
-    assert ">閒置<" in translated.text
+    assert ">已連線<" in translated.text  # the seeded external rule connects the card
     assert ">待設定<" in translated.text
     assert ">Rules created and fully editable in this Web App.<" not in translated.text
     assert "dirtyMessage:tr('Discard these AutoFlow changes?')" in translated.text
@@ -359,10 +385,18 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert "外部規則擁有者" in visible
     assert "已授權的 Webhook" in visible
     assert "已授權的電子郵件" in visible
+    assert "當來源為 本機匯入時" in visible
+    assert "來源為 local" not in visible
+    assert "Settings ·" in visible  # external owner name stays verbatim
+    assert "本機工作區 ·" in visible  # local owner label is still translated
     # The durable API payload keeps its locale-independent English sentence.
     api_rules = client.get("/api/automations/rules").json()["rules"]
-    assert api_rules and api_rules[0]["sentence"] == (
+    by_name = {rule["name"]: rule for rule in api_rules}
+    assert by_name[long_name]["sentence"] == (
         f"When a recording arrives, then move to folder #{folder_id}."
+    )
+    assert by_name["Origin display"]["sentence"] == (
+        f"When source is Local import, then move to folder #{folder_id}."
     )
 
 

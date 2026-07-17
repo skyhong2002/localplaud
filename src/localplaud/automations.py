@@ -76,7 +76,8 @@ def rule_sentence(
     actions = rule.actions if isinstance(rule, AutomationRule) else rule.get("actions", {})
     conditions = []
     if trigger.get("origin"):
-        conditions.append(t("source is {value}").format(value=trigger["origin"]))
+        origin_label = "Plaud" if trigger["origin"] == "plaud" else t("Local import")
+        conditions.append(t("source is {value}").format(value=origin_label))
     if trigger.get("title_contains"):
         conditions.append(
             t("title contains “{value}”").format(value=trigger["title_contains"])
