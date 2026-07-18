@@ -50,22 +50,99 @@ _TRANSCRIPT_TYPE = "transaction"
 _SUMMARY_TYPE = "auto_sum_note"
 
 
+_ASSET_IMAGE = re.compile(r"^!\[[^\]]*\]\((?:permanent|temporary)/[^)]*\)\s*$", re.MULTILINE)
+
+
+def _clean_cloud_markdown(markdown: str) -> str:
+    """Drop Plaud asset-store images whose signed URLs expire within hours."""
+    return _ASSET_IMAGE.sub("", markdown).strip()
+
+
+def _outline_markdown(raw: str) -> str | None:
+    """Render Plaud's chapter outline JSON as a timestamped Markdown list."""
+    try:
+        topics = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    lines = []
+    for topic in topics if isinstance(topics, list) else []:
+        text = str(topic.get("topic") or "").strip() if isinstance(topic, dict) else ""
+        if not text:
+            continue
+        start = int(topic.get("start_time") or 0) // 1000
+        lines.append(f"- [{start // 60}:{start % 60:02d}] {text}")
+    return "\n".join(lines) or None
+
+
 def _cloud_notes(detail: dict) -> list[dict]:
     notes = []
     for item in detail.get("note_list") or []:
         markdown = item.get("data_content")
         if not markdown:
             continue
-        markdown = str(markdown)
+        markdown = _clean_cloud_markdown(str(markdown))
+        if not markdown:
+            continue
         heading = re.search(r"^# (.+?)\s*$", markdown, flags=re.MULTILINE)
+        title = heading.group(1).strip() if heading else None
         notes.append(
             {
                 "key": str(item.get("data_type") or ""),
-                "title": heading.group(1).strip() if heading else None,
+                "title": title or str(item.get("data_title") or "").strip() or None,
                 "markdown": markdown,
             }
         )
+    # Plaud presents its chapter outline alongside notes; mirror it as one.
+    outline_raw = next(
+        (
+            s.get("data_content")
+            for s in detail.get("source_list") or []
+            if s.get("data_type") == "outline" and s.get("data_content")
+        ),
+        None,
+    )
+    if outline_raw:
+        outline_md = _outline_markdown(str(outline_raw))
+        if outline_md:
+            notes.append({"key": "outline", "title": "Outline", "markdown": outline_md})
     return notes
+
+
+def _transcript_from_source_list(source_list: list, *, context: str) -> list[dict] | None:
+    """Normalize Plaud's ``transaction`` source entry to local segment shape.
+
+    Entries carry a JSON string of ``{content, start_time, end_time, speaker,
+    original_speaker}`` objects with millisecond times; the local shape is
+    ``{text, start, end, speaker}`` in seconds.
+    """
+    raw = next(
+        (
+            s.get("data_content")
+            for s in source_list
+            if isinstance(s, dict) and s.get("data_type") == _TRANSCRIPT_TYPE
+        ),
+        None,
+    )
+    if not raw:
+        return None
+    try:
+        segments = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning("Unparsable cloud transcript for %s: %s", context, exc)
+        return None
+    out = []
+    for seg in segments:
+        if not isinstance(seg, dict):
+            continue
+        out.append(
+            {
+                "text": (seg.get("content") or "").strip(),
+                "start": (seg.get("start_time") or 0) / 1000.0,
+                "end": (seg.get("end_time") or 0) / 1000.0,
+                "speaker": seg.get("speaker") or seg.get("original_speaker"),
+            }
+        )
+    return out or None
 
 
 def _parse_iso_ms(value: str | None) -> int | None:
@@ -266,31 +343,6 @@ class PlaudOfficialClient:
         speaker, original_speaker}`` objects (times in ms) inside the
         ``transaction`` entry of ``source_list``."""
         detail = detail if detail is not None else self.get_detail(file_id)
-        raw = next(
-            (
-                s.get("data_content")
-                for s in detail.get("source_list") or []
-                if s.get("data_type") == _TRANSCRIPT_TYPE
-            ),
-            None,
+        return _transcript_from_source_list(
+            detail.get("source_list") or [], context=file_id
         )
-        if not raw:
-            return None
-        try:
-            segments = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            log.warning("Unparsable cloud transcript for %s: %s", file_id, exc)
-            return None
-        out = []
-        for seg in segments:
-            if not isinstance(seg, dict):
-                continue
-            out.append(
-                {
-                    "text": (seg.get("content") or "").strip(),
-                    "start": (seg.get("start_time") or 0) / 1000.0,
-                    "end": (seg.get("end_time") or 0) / 1000.0,
-                    "speaker": seg.get("speaker") or seg.get("original_speaker"),
-                }
-            )
-        return out or None

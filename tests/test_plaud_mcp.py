@@ -92,6 +92,78 @@ def test_mcp_cloud_notes_prefer_every_note_from_file_detail(monkeypatch):
     assert calls == ["get_file"]
 
 
+def test_mcp_normalizes_raw_source_list_payloads(monkeypatch):
+    """The real MCP tools answer with raw note_list/source_list entries.
+
+    get_file carries both lists; the transcript is a JSON string of
+    {content, start_time, end_time} objects in milliseconds, notes may lead
+    with an expiring Plaud asset image, and the chapter outline mirrors in as
+    a timestamped note.
+    """
+    import json
+
+    client = _client_without_process(monkeypatch)
+    transaction = json.dumps(
+        [
+            {"start_time": 4200, "end_time": 19620, "content": "好。你有看到嗎", "speaker": "S1"},
+            {"start_time": 19620, "end_time": 21000, "content": "有"},
+        ]
+    )
+    outline = json.dumps(
+        [
+            {"start_time": 4200, "end_time": 55370, "topic": "確認範本來源"},
+            {"start_time": 55790, "end_time": 121060, "topic": "修正實驗設計"},
+        ]
+    )
+    detail = {
+        "id": "m2",
+        "note_list": [
+            {
+                "data_type": "auto_sum_note",
+                "data_title": "Summary",
+                "data_content": "![PLAUD NOTE](permanent/abc/poster.png)\n## 重點\n內容",
+            }
+        ],
+        "source_list": [
+            {"data_type": "transaction", "data_content": transaction},
+            {"data_type": "outline", "data_content": outline},
+            {"data_type": "transaction_polish", "data_content": ""},
+        ],
+    }
+    monkeypatch.setattr(
+        client, "_call_tool", lambda name, args=None: detail if name == "get_file" else None
+    )
+    segments = client.get_cloud_transcript_segments("m2")
+    assert segments == [
+        {"text": "好。你有看到嗎", "start": 4.2, "end": 19.62, "speaker": "S1"},
+        {"text": "有", "start": 19.62, "end": 21.0, "speaker": None},
+    ]
+    notes = client.get_cloud_notes("m2")
+    assert [note["key"] for note in notes] == ["auto_sum_note", "outline"]
+    # The expiring poster image is stripped; the title falls back to data_title.
+    assert notes[0]["markdown"].startswith("## 重點")
+    assert notes[0]["title"] == "Summary"
+    assert notes[1]["markdown"] == "- [0:04] 確認範本來源\n- [0:55] 修正實驗設計"
+
+
+def test_mcp_get_note_list_fallback_normalizes_entries(monkeypatch):
+    client = _client_without_process(monkeypatch)
+
+    def call(name, args=None):
+        if name == "get_file":
+            return {"id": "m3"}  # no note_list/source_list
+        if name == "get_note":
+            return [
+                {"data_type": "auto_sum_note", "data_title": "Summary", "data_content": "重點"}
+            ]
+        return None
+
+    monkeypatch.setattr(client, "_call_tool", call)
+    assert client.get_cloud_notes("m3") == [
+        {"key": "auto_sum_note", "title": "Summary", "markdown": "重點"}
+    ]
+
+
 def test_mcp_auth_status_does_not_read_or_expose_tokens(tmp_path):
     from localplaud.config import PlaudMcpConfig
     from localplaud.plaud.mcp import PlaudMcpClient

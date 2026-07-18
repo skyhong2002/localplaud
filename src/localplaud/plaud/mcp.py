@@ -22,7 +22,7 @@ from .common import (
     _ext_from_url,
 )
 from .models import PlaudFileDTO
-from .official import _cloud_notes, _parse_iso_ms
+from .official import _cloud_notes, _parse_iso_ms, _transcript_from_source_list
 
 log = logging.getLogger(__name__)
 
@@ -241,6 +241,9 @@ class PlaudMcpClient:
         if "note_list" in detail:
             return _cloud_notes(detail)
         result = self._call_tool("get_note", {"file_id": file_id})
+        # The MCP get_note tool answers with raw note_list entries.
+        if isinstance(result, list):
+            return _cloud_notes({"note_list": result, "source_list": []})
         if isinstance(result, str):
             markdown = result
         elif isinstance(result, dict):
@@ -260,9 +263,17 @@ class PlaudMcpClient:
     def get_cloud_transcript_segments(
         self, file_id: str, detail: dict | None = None
     ) -> list[dict] | None:
-        del detail
+        detail = detail if detail is not None else self.get_detail(file_id)
+        if isinstance(detail, dict) and detail.get("source_list"):
+            return _transcript_from_source_list(detail["source_list"], context=file_id)
+        # The MCP get_transcript tool answers with the raw source_list entries.
         result = self._call_tool("get_transcript", {"file_id": file_id})
-        segments = (
-            result.get("segments", result.get("data", [])) if isinstance(result, dict) else result
-        )
-        return segments or None
+        if isinstance(result, list):
+            return _transcript_from_source_list(result, context=file_id)
+        if isinstance(result, dict):
+            segments = result.get("segments", result.get("data"))
+            if segments:
+                return segments
+            if result.get("source_list"):
+                return _transcript_from_source_list(result["source_list"], context=file_id)
+        return None
