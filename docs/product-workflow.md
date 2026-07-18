@@ -325,6 +325,22 @@ and cached ffmpeg waveform envelopes. Playback state survives tab switches and s
 synchronized with transcript segments; seek, speed, skip, deep links, and keyboard
 controls share one audio element.
 
+The Web shell uses a single white workspace sidebar (the earlier duplicate dark
+utility rail was removed); the sidebar stays visible from tablet widths up and the
+mobile drawer is unchanged. The recording workspace follows Plaud's interaction
+model: a slim breadcrumb top bar with compact Ask/Share/Export/More actions, content
+tabs above the player, a polished/raw transcript notice chip, airy speaker
+paragraphs, and Ask as a closable right dock on wide viewports with the Ask tab
+retained on narrow ones.
+
+A recording can be shared with people outside the workspace: one active revocable
+public link per recording serves an unauthenticated, noindex, read-only page with
+the title, a Range-capable token-scoped audio stream, the canonical local transcript
+with speaker display names and click-to-seek, and current local generated notes.
+Plaud/cloud artifacts never appear on share pages, trash and revoked links return
+404, and the share dialog keeps the authenticated workspace link separate from the
+public link's create/copy/revoke controls.
+
 Recording titles have a separate local override: editing never mutates Plaud and is
 not overwritten by later metadata sync. The latest cloud title remains visible and
 can be restored with one action; every local user-facing/search/export surface uses

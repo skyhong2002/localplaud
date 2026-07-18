@@ -413,6 +413,22 @@ embedding raw provider credentials or model settings in each rule.
   Remaining visual acceptance still requires a fresh read-only official Plaud
   selected-recording/mobile comparison; no proprietary assets or private recording
   content are stored in the repository.
+- ✅ A second fidelity pass (2026-07-18, from a fresh read-only Plaud Web audit)
+  removed the duplicate dark utility rail — the white workspace sidebar is the only
+  navigation, staying visible from tablet widths up while the mobile drawer is
+  unchanged. The recording workspace now matches Plaud's model: slim breadcrumb top
+  bar (All files › title) with compact Ask/Share/Export/More actions, content tabs
+  above a lighter player (waveform strip, round transport, symmetric ±15 s skips),
+  a polished/raw notice chip instead of a segmented switch, airier transcript
+  paragraphs with neutral speaker names and colored dots, and Ask as a closable
+  360 px right dock on ≥1200 px viewports (the Ask tab remains on narrower screens).
+- ✅ Recordings can be shared externally: each recording can hold one active,
+  revocable public link (`secrets.token_urlsafe(32)`) serving an unauthenticated
+  read-only noindex page with the title, player (Range-capable token-scoped audio),
+  the canonical local transcript with speaker names and click-to-seek, and current
+  local generated notes. Plaud/cloud artifacts and trash are excluded, revocation
+  404s immediately, and the share dialog separates the workspace link from the
+  public link with create/copy/revoke controls.
 - Implement `docs/product-workflow.md`: library filters/folders/tags, responsive
   split panes, persistent player, waveform/progress, transcript editing, speaker
   naming, notes, mind map, Ask, processing UI, and actionable recovery.
