@@ -559,12 +559,13 @@ def _base_ctx(request: Request, active: str) -> dict:
             "ready": status_counts.get(FileStatus.done, 0),
             "attention": status_counts.get(FileStatus.error, 0)
             + status_counts.get(FileStatus.partial, 0),
-            # Matches the workspace's pending vocabulary: actively working plus
-            # everything queued for it — downloaded/downloading audio and
-            # discovered rows the poller downloads automatically.
+            # Only work that is actually running counts as "generating";
+            # a downloaded backlog with automatic processing off is not.
             "processing": status_counts.get(FileStatus.processing, 0)
-            + status_counts.get(FileStatus.downloading, 0)
-            + status_counts.get(FileStatus.downloaded, 0)
+            + status_counts.get(FileStatus.downloading, 0),
+            # Audio on disk (or queued for automatic download) awaiting an
+            # explicit Resume or the automatic pipeline.
+            "queued": status_counts.get(FileStatus.downloaded, 0)
             + status_counts.get(FileStatus.discovered, 0),
             # Cloud-only rows are not "caught up" — they stay in Plaud until
             # the user imports audio; only metadata_only truly awaits a manual
@@ -658,14 +659,18 @@ _ATTENTION_STATES = {FileStatus.error.value, FileStatus.partial.value}
 # ops-card bucket, resolved onto the same status filtering as single values.
 _STATE_ALIASES = {
     "attention": [FileStatus.error, FileStatus.partial],
-    # discovered is queued for automatic download (download_pending consumes
-    # it), so it belongs to the pending pipeline, not the manual-import bucket.
+    # "generating" keeps its historical broad meaning for saved links; the
+    # sidebar now distinguishes actively-working from awaiting-processing.
     "generating": [
         FileStatus.processing,
         FileStatus.downloading,
         FileStatus.downloaded,
         FileStatus.discovered,
     ],
+    "active": [FileStatus.processing, FileStatus.downloading],
+    # discovered is queued for automatic download (download_pending consumes
+    # it), so it belongs to the pending pipeline, not the manual-import bucket.
+    "queued": [FileStatus.downloaded, FileStatus.discovered],
     "cloud": [FileStatus.metadata_only],
 }
 

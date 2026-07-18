@@ -781,7 +781,7 @@ def test_sidebar_ops_card_summarizes_workspace(monkeypatch, tmp_path):
     card = r.text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
     # Each count is an individually reachable link into the Library filters,
     # plus a single System status destination.
-    assert '<a class="ops-stat" href="/?state=generating"><strong>1</strong> generating</a>' in card
+    assert '<a class="ops-stat" href="/?state=active"><strong>1</strong> generating</a>' in card
     assert '<a class="ops-stat" href="/?state=attention"><strong class="ops-attn">1</strong> need attention</a>' in card
     assert '<a class="ops-stat" href="/?state=done"><strong>1</strong> ready</a>' in card
     assert '<a class="ops-sub" href="/status">View system status</a>' in card

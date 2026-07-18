@@ -509,13 +509,18 @@ def test_state_aliases_match_ops_card_buckets_exactly(monkeypatch, tmp_path):
     # sums, so a clicked number always lands on that many rows. discovered is
     # queued for automatic download, so it is pending work, not manual import.
     assert ids("generating") == {"s-processing", "s-downloading", "s-downloaded", "s-discovered"}
+    assert ids("active") == {"s-processing", "s-downloading"}
+    assert ids("queued") == {"s-downloaded", "s-discovered"}
     assert ids("attention") == {"s-error", "s-partial"}
     assert ids("cloud") == {"s-metadata"}
     assert ids("done") == {"s-done"}
 
     page = c.get("/")
     card = page.text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
-    assert '<a class="ops-stat" href="/?state=generating"><strong>4</strong> generating</a>' in card
+    # Only actively running work is "generating"; the downloaded backlog is
+    # honestly labelled as awaiting processing.
+    assert '<a class="ops-stat" href="/?state=active"><strong>2</strong> generating</a>' in card
+    assert '<a class="ops-stat" href="/?state=queued"><strong>2</strong> awaiting processing</a>' in card
     assert '<a class="ops-stat" href="/?state=attention"><strong class="ops-attn">2</strong> need attention</a>' in card
     assert '<a class="ops-stat" href="/?state=cloud"><strong>1</strong> in cloud</a>' in card
     assert '<a class="ops-stat" href="/?state=done"><strong>1</strong> ready</a>' in card
@@ -549,8 +554,10 @@ def test_discovered_only_workspace_counts_as_pending_not_manual_import(monkeypat
 
     card = c.get("/").text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
     # The poller downloads discovered rows automatically: pending, never
-    # presented as awaiting a manual import.
-    assert '<a class="ops-stat" href="/?state=generating"><strong>1</strong> generating</a>' in card
+    # presented as awaiting a manual import — but with nothing running it is
+    # awaiting processing, not "generating".
+    assert '<a class="ops-stat" href="/?state=queued"><strong>1</strong> awaiting processing</a>' in card
+    assert "generating" not in card
     assert "in cloud" not in card
     assert "Cloud-only recordings await import" not in card
     assert "View system status" in card

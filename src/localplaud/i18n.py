@@ -271,6 +271,7 @@ _ZH_HANT_TW = {
     "This page updates automatically when results are ready.": "結果就緒後，此頁面會自動更新。",
     "Workspace status": "工作區狀態",
     "generating": "生成中",
+    "awaiting processing": "待處理",
     "need attention": "需要注意",
     "ready": "已就緒",
     "All caught up": "全部處理完成",
