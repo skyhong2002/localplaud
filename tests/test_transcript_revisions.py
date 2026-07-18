@@ -1019,6 +1019,120 @@ def test_revision_history_preview_and_non_destructive_restore(monkeypatch, tmp_p
     assert calls.count("r1") == 3
 
 
+def test_repair_emptied_polish_revision_is_immutable_stale_and_idempotent(
+    monkeypatch, tmp_path
+):
+    c = _client(monkeypatch, tmp_path)
+    _seed(with_index=True)
+    calls = _mute_reindex(monkeypatch)
+    from localplaud.db.models import (
+        Chunk,
+        StageName,
+        StageRun,
+        StageStatus,
+        Summary,
+        Transcript,
+        TranscriptRevision,
+    )
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        raw = session.scalar(select(Transcript).where(Transcript.file_id == "r1"))
+        session.add(
+            TranscriptRevision(
+                file_id="r1",
+                base_transcript_id=raw.id,
+                revision=1,
+                source="local",
+                segments=[dict(SEGMENTS[0]) | {"text": ""}, dict(SEGMENTS[1])],
+                text="let's start",
+                has_speakers=True,
+                note="AI polished",
+                kind="ai_polish",
+            )
+        )
+        session.add(
+            Summary(
+                file_id="r1",
+                template="meeting",
+                content_md="# Existing note",
+                source="local",
+            )
+        )
+        session.add(
+            StageRun(
+                file_id="r1",
+                stage=StageName.summarize,
+                status=StageStatus.completed,
+                attempts=1,
+            )
+        )
+
+    repaired = c.post("/api/files/r1/transcript/repair-empty-polish")
+    assert repaired.status_code == 200
+    assert repaired.json() == {"repaired": True, "restored_segments": 1, "revision": 2}
+    second = c.post("/api/files/r1/transcript/repair-empty-polish")
+    assert second.json() == {"repaired": False, "restored_segments": 0, "revision": None}
+
+    with session_scope() as session:
+        raw = session.scalar(select(Transcript).where(Transcript.file_id == "r1"))
+        revisions = list(
+            session.scalars(
+                select(TranscriptRevision).order_by(TranscriptRevision.revision)
+            )
+        )
+        summarize = session.scalar(
+            select(StageRun).where(
+                StageRun.file_id == "r1", StageRun.stage == StageName.summarize
+            )
+        )
+        assert len(revisions) == 2
+        assert revisions[0].segments[0]["text"] == ""
+        assert revisions[1].segments[0] == SEGMENTS[0]
+        assert revisions[1].segments[1] == SEGMENTS[1]
+        assert revisions[1].note == "restored 1 segments from raw ASR"
+        assert raw.segments == SEGMENTS
+        assert session.query(Chunk).filter_by(file_id="r1").count() == 0
+        assert summarize.status == StageStatus.pending
+        assert summarize.detail["stale"] is True
+    assert calls == ["r1"]
+
+
+def test_repair_emptied_polish_revision_leaves_undamaged_revision_untouched(
+    monkeypatch, tmp_path
+):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _mute_reindex(monkeypatch)
+    from localplaud.db.models import Transcript, TranscriptRevision
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        raw = session.scalar(select(Transcript).where(Transcript.file_id == "r1"))
+        session.add(
+            TranscriptRevision(
+                file_id="r1",
+                base_transcript_id=raw.id,
+                revision=1,
+                source="local",
+                segments=SEGMENTS,
+                text=raw.text,
+                has_speakers=True,
+                note="AI polished",
+                kind="ai_polish",
+            )
+        )
+
+    response = c.post("/api/files/r1/transcript/repair-empty-polish")
+    assert response.json() == {
+        "repaired": False,
+        "restored_segments": 0,
+        "revision": None,
+    }
+    with session_scope() as session:
+        assert session.query(TranscriptRevision).count() == 1
+
+
 def test_revision_restore_rejects_stale_or_unknown_revision(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()

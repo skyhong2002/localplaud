@@ -146,6 +146,11 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
             expected = set(range(start, end))
             if set(by_id) != expected:
                 raise LLMOutputInvalid("transcript polish changed or omitted segment IDs")
+            if any(
+                str(source[index].get("text") or "").strip() and not by_id[index]
+                for index in range(start, end)
+            ):
+                raise LLMOutputInvalid("transcript polish emptied non-empty segment text")
         except LLMOutputInvalid:
             if end - start <= 1:
                 raise

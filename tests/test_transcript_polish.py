@@ -8,7 +8,12 @@ import pytest
 
 from localplaud.asr.base import Segment, Transcript, Word
 from localplaud.config import Settings
-from localplaud.llm.base import LLMError, LLMInputTooLarge, LLMTransientError
+from localplaud.llm.base import (
+    LLMError,
+    LLMInputTooLarge,
+    LLMOutputInvalid,
+    LLMTransientError,
+)
 from localplaud.worker.polish import polish_transcript
 
 
@@ -111,6 +116,65 @@ def test_polish_splits_structurally_invalid_multi_segment_chunks(monkeypatch):
     assert result["detail"]["split_retries"] == 1
     assert result["detail"]["request_input_chars"] > len(transcript.text)
     assert result["detail"]["response_output_chars"] > result["detail"]["output_chars"]
+
+
+def test_polish_splits_and_rejects_emptied_non_empty_segments(monkeypatch):
+    class EmptyingPolisher(FakePolisher):
+        def complete(self, prompt, **kwargs):
+            request = json.loads(prompt)
+            self.requests.append(request)
+            return json.dumps(
+                {
+                    "segments": [
+                        {"id": item["id"], "text": ""}
+                        for item in request["target_segments"]
+                    ]
+                }
+            )
+
+    provider = EmptyingPolisher()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        segments=[
+            Segment(text="first", start=0, end=1),
+            Segment(text="second", start=1, end=2),
+        ]
+    )
+
+    with pytest.raises(
+        LLMOutputInvalid, match="transcript polish emptied non-empty segment text"
+    ):
+        polish_transcript(transcript, Settings())
+
+    assert [len(request["target_segments"]) for request in provider.requests] == [2, 1]
+
+
+def test_polish_allows_shorter_text_and_empty_source_segments(monkeypatch):
+    class ShorteningPolisher(FakePolisher):
+        def complete(self, prompt, **kwargs):
+            request = json.loads(prompt)
+            return json.dumps(
+                {
+                    "segments": [
+                        {"id": item["id"], "text": item["text"].replace("very ", "")}
+                        for item in request["target_segments"]
+                    ]
+                }
+            )
+
+    monkeypatch.setattr(
+        "localplaud.worker.polish.build_llm", lambda _cfg: ShorteningPolisher()
+    )
+    transcript = Transcript(
+        segments=[
+            Segment(text="very concise", start=0, end=1),
+            Segment(text="  ", start=1, end=2),
+        ]
+    )
+
+    result = polish_transcript(transcript, Settings())
+
+    assert [segment.text for segment in result["transcript"].segments] == ["concise", ""]
 
 
 def test_polish_does_not_split_transient_provider_failures(monkeypatch):

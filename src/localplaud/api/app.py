@@ -4525,6 +4525,78 @@ def restore_transcript_revision(
     return RedirectResponse(f"/file/{file_id}?view=corrected", status_code=303)
 
 
+def repair_emptied_polish_revision(file_id: str) -> dict:
+    """Restore text erased by transcript polish as one immutable revision."""
+    import copy
+
+    with session_scope() as session:
+        _serialize_transcript_mutation(session, file_id)
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            raise LookupError("recording not found")
+        if _recording_edit_blocked(row):
+            raise RuntimeError("recording is processing; try again when it finishes")
+        raw = row.local_transcript
+        current = row.corrected_transcript_for_source("local")
+        if raw is None or current is None:
+            return {"repaired": False, "restored_segments": 0, "revision": None}
+
+        segments = copy.deepcopy(current.segments or [])
+        restored_segments = 0
+        for index in range(min(len(segments), len(raw.segments or []))):
+            revision_text = str(segments[index].get("text") or "")
+            raw_text = str(raw.segments[index].get("text") or "")
+            if not revision_text.strip() and raw_text.strip():
+                segments[index] = dict(segments[index]) | {"text": raw_text}
+                restored_segments += 1
+        if not restored_segments:
+            return {"repaired": False, "restored_segments": 0, "revision": None}
+
+        next_revision = max(item.revision for item in row.transcript_revisions) + 1
+        text = "\n".join(
+            str(segment.get("text") or "").strip()
+            for segment in segments
+            if str(segment.get("text") or "").strip()
+        )
+        session.add(
+            TranscriptRevision(
+                file_id=file_id,
+                base_transcript_id=raw.id,
+                revision=next_revision,
+                source="local",
+                segments=segments,
+                text=text,
+                has_speakers=current.has_speakers,
+                note=f"restored {restored_segments} segments from raw ASR",
+                kind="restore",
+            )
+        )
+        session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+        _queue_transcript_reindex(session, file_id)
+        expected_names = display_names(session, file_id)
+
+    _start_transcript_reindex(
+        file_id,
+        expected_revision=next_revision,
+        expected_speaker_names=expected_names,
+    )
+    return {
+        "repaired": True,
+        "restored_segments": restored_segments,
+        "revision": next_revision,
+    }
+
+
+@app.post("/api/files/{file_id}/transcript/repair-empty-polish")
+def repair_empty_polish(file_id: str) -> dict:
+    try:
+        return repair_emptied_polish_revision(file_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.get("/api/files/{file_id}/summaries/{summary_id}/history")
 def summary_history(file_id: str, summary_id: int, limit: int = 50):
     """Archived versions of one generated output, newest first.
