@@ -21,6 +21,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -433,5 +434,10 @@ def get_settings(reload: bool = False) -> Settings:
     """Return the process-wide settings singleton."""
     global _settings
     if _settings is None or reload:
+        # pydantic-settings reads .env only for LOCALPLAUD_* fields; `env:NAME`
+        # secret references (provider connections, the OpenAI budget gate)
+        # resolve through os.environ, so export the same .env into the process
+        # without overriding variables set by the service manager.
+        load_dotenv(override=False)
         _settings = Settings()
     return _settings
