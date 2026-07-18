@@ -536,6 +536,22 @@ embedding raw provider credentials or model settings in each rule.
   mutating AI output. The recording workspace opens that user-owned note tab and
   edits title/Markdown inline; the original generated content, template/model, and
   transcript lineage remain immutable and independently inspectable.
+- ✅ Note generation now takes an optional one-shot execution-profile choice (an
+  "explicit-generation" resolution layer recorded truthfully in stage provenance,
+  never persisted as an override), the Notes "+" control offers 生成 AI 筆記
+  (template + AI, adds a new output tab) with 空白筆記 secondary, and every note
+  body is editable in place — user-owned notes save through the optimistic-version
+  API while AI notes promote seamlessly to their editable copy on first edit.
+- ✅ AI transcript polish rejects provider output that empties non-empty segments
+  (split-retry then honest stage failure; raw ASR stays canonical), and a
+  maintenance endpoint repairs already-damaged polished revisions by restoring the
+  emptied segments from raw ASR as one immutable revision with normal
+  stale/reindex invalidation.
+- ✅ The migration/debug Plaud import now mirrors every cloud note (not just the
+  auto summary) with cloud provenance, read-only Plaud-chip note tabs, a labelled
+  cloud-transcript view when no local transcript exists, and a per-recording
+  「重新整理 Plaud 雲端資料」 action; cloud artifacts stay excluded from
+  subscription-independence evidence.
 - Treat the Web App as the product, not a status viewer. CLI remains setup/ops tooling.
 - Add provider/model/profile management to Settings: connection setup, capability
   and model health, recommended local profiles, cost/privacy policy, remote workers,

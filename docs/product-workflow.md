@@ -592,6 +592,17 @@ and whole-library retrieval excludes Trash before vector ranking.
 Generated notes can be promoted idempotently to a provenance-linked editable copy
 inside the same recording workspace. User edits affect only that copy; the original
 AI artifact and its model/template/transcript lineage remain immutable.
+Note generation accepts a one-shot execution-profile choice recorded as an explicit
+resolution layer in stage provenance without persisting an override; the Notes "+"
+control generates a new AI note (template plus AI) by default with a blank manual
+note as the secondary choice, and note bodies are editable in place — AI notes
+promote seamlessly to their editable copy on first edit. Transcript polish rejects
+provider output that would empty non-empty segments, and damaged polished revisions
+can be repaired by restoring the emptied text from raw ASR as a normal immutable
+revision. The opt-in Plaud import mirrors every cloud note with read-only Plaud
+labelling, shows a labelled cloud transcript only when no local transcript exists,
+and offers a per-recording cloud-artifact refresh; none of it enters
+subscription-independence evidence.
 Manual notes, Saved Ask answers, and editable generated-note copies use optimistic
 versions rather than last-write-wins updates. Every real edit archives the displaced
 title and exact Markdown body; history is bounded and lazy-loaded, and restoring an
