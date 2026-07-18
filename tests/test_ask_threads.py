@@ -881,7 +881,7 @@ def test_generated_summary_becomes_editable_copy_without_mutating_source(monkeyp
         assert session.get(Summary, summary_id).content_md == "# Generated\n\nOriginal AI output."
 
     detail = client.get(f"/file/r1?note_id={note_id}")
-    assert 'data-summary-copy="' in detail.text
+    assert 'data-summary-edit="' in detail.text
     assert f'data-workspace-note-form="{note_id}"' in detail.text
     assert f"const selectedNoteId={note_id}" in detail.text
 

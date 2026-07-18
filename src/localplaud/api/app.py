@@ -3003,6 +3003,22 @@ def file_detail(
             f["profile_resolution_error"] = sanitize_error(exc)
             profile_resolution = preview_resolution(session).to_dict()
         f["profile_resolution"] = profile_resolution
+        resolved_profile_id = next(
+            (
+                layer.get("profile_id")
+                for layer in reversed(profile_resolution.get("layer_provenance") or [])
+                if layer.get("profile_id") is not None
+            ),
+            None,
+        )
+        f["resolved_profile_label"] = next(
+            (
+                profile["label"]
+                for profile in f["profiles"]
+                if profile["id"] == resolved_profile_id
+            ),
+            None,
+        )
         f["budget"] = cost_budget_status(session, file_id, profile_resolution)
         f["note_templates"] = [
             {
@@ -3956,7 +3972,10 @@ def reprocess(file_id: str, force: bool = False):
 
 
 @app.post("/file/{file_id}/generate-notes", response_class=HTMLResponse)
-def generate_recording_notes(file_id: str):
+def generate_recording_notes(
+    file_id: str,
+    profile_id: int | None = Form(None),
+):
     """Regenerate notes, mind map, and index without rerunning completed speech stages."""
     import threading
 
@@ -3977,6 +3996,8 @@ def generate_recording_notes(file_id: str):
             return HTMLResponse("recording not found", status_code=404)
         if recording.local_transcript is None:
             return HTMLResponse("a local transcript is required first", status_code=409)
+        if profile_id is not None and session.get(ExecutionProfile, profile_id) is None:
+            raise HTTPException(status_code=422, detail="unknown execution profile")
         previous_status, previous_error = recording.status, recording.error
     try:
         with processing_owner(current_daemon_owner()):
@@ -4016,7 +4037,7 @@ def generate_recording_notes(file_id: str):
         worker = threading.Thread(
             target=process_derived_artifacts,
             args=(file_id,),
-            kwargs={"claim_token": claim_token},
+            kwargs={"claim_token": claim_token, "profile_id": profile_id},
             daemon=True,
         )
         worker.start()

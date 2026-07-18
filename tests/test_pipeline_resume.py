@@ -242,6 +242,98 @@ def test_derived_artifacts_run_without_audio_and_preserve_upstream_stages(monkey
         assert upstream_attempts == []
 
 
+def test_derived_generation_uses_one_shot_profile_in_run_and_attempt_snapshots(
+    monkeypatch, tmp_path
+):
+    _reset_db(monkeypatch, tmp_path)
+    from sqlalchemy import select
+
+    from localplaud.db.models import (
+        ExecutionProfile,
+        FileStatus,
+        PlaudFile,
+        ProfileStageSelection,
+        RecordingProfileOverride,
+        StageAttempt,
+        StageName,
+        StageRun,
+        Transcript,
+    )
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import process_derived_artifacts
+
+    init_db()
+    with session_scope() as session:
+        system = session.scalar(
+            select(ExecutionProfile).where(ExecutionProfile.is_system_default.is_(True))
+        )
+        explicit = ExecutionProfile(
+            key="one-shot-notes",
+            name="One-shot notes",
+            version=1,
+        )
+        explicit.stage_selections = [
+            ProfileStageSelection(
+                stage=selection.stage,
+                connection_id=selection.connection_id,
+                model_id=selection.model_id,
+                options=dict(selection.options or {}),
+            )
+            for selection in system.stage_selections
+        ]
+        session.add(explicit)
+        session.add(
+            PlaudFile(
+                id="one-shot",
+                filename="one-shot",
+                status=FileStatus.done,
+                transcripts=[
+                    Transcript(
+                        provider="fake-asr",
+                        model="fake-model",
+                        source="local",
+                        language="en",
+                        text="canonical local transcript",
+                        segments=[
+                            {
+                                "text": "canonical local transcript",
+                                "start": 0.0,
+                                "end": 2.0,
+                            }
+                        ],
+                    )
+                ],
+            )
+        )
+        session.flush()
+        explicit_id = explicit.id
+
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
+    _install_fakes(monkeypatch, counters)
+    process_derived_artifacts("one-shot", profile_id=explicit_id)
+
+    with session_scope() as session:
+        assert session.get(RecordingProfileOverride, "one-shot") is None
+        for stage in (StageName.summarize, StageName.mind_map, StageName.index):
+            run = session.scalar(
+                select(StageRun).where(
+                    StageRun.file_id == "one-shot", StageRun.stage == stage
+                )
+            )
+            attempt = session.scalar(
+                select(StageAttempt).where(
+                    StageAttempt.file_id == "one-shot", StageAttempt.stage == stage
+                )
+            )
+            for snapshot in (
+                run.resolved_profile_snapshot,
+                attempt.resolved_profile_snapshot,
+            ):
+                explicit_layer = snapshot["layer_provenance"][-1]
+                assert explicit_layer["kind"] == "explicit_generation"
+                assert explicit_layer["profile_id"] == explicit_id
+
+
 def test_derived_artifacts_require_canonical_local_transcript(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, PlaudFile

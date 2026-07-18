@@ -846,6 +846,7 @@ def process_derived_artifacts(
     settings: Settings | None = None,
     *,
     claim_token: str | None = None,
+    profile_id: int | None = None,
 ) -> None:
     """Resume notes, mind map, and indexing from the canonical local transcript.
 
@@ -859,7 +860,11 @@ def process_derived_artifacts(
             if claim_token is not None:
                 _assert_processing_claim(file_id, claim_token)
             try:
-                _process_derived_artifacts_claimed(file_id, settings=settings)
+                _process_derived_artifacts_claimed(
+                    file_id,
+                    settings=settings,
+                    profile_id=profile_id,
+                )
             except Exception as exc:
                 with session_scope() as session:
                     row = _assert_processing_claim_in_session(session, file_id)
@@ -1544,13 +1549,21 @@ def _process_file_claimed(
         _PROFILE_SNAPSHOT.reset(profile_token)
 
 
-def _process_derived_artifacts_claimed(file_id: str, settings: Settings | None = None) -> None:
+def _process_derived_artifacts_claimed(
+    file_id: str,
+    settings: Settings | None = None,
+    *,
+    profile_id: int | None = None,
+) -> None:
     settings = settings or get_settings()
     with session_scope() as session:
         row = _assert_processing_claim_in_session(session, file_id)
         requested_template_key = row.note_template_key or settings.pipeline.summary_template
         snapshot = resolve_recording_profile(
-            session, file_id, template_key=requested_template_key
+            session,
+            file_id,
+            template_key=requested_template_key,
+            explicit_profile_id=profile_id,
         ).to_dict()
 
     canonical = _load_transcript(file_id, settings)
@@ -1567,6 +1580,7 @@ def _process_derived_artifacts_claimed(file_id: str, settings: Settings | None =
             requested_template_key,
             snapshot,
             force=False,
+            explicit_profile_id=profile_id,
         )
         _finish_processing_cycle(file_id, settings, partial_errors)
         log.info(
@@ -1818,6 +1832,7 @@ def _run_derived_stages(
     snapshot: dict,
     *,
     force: bool,
+    explicit_profile_id: int | None = None,
 ) -> list[str]:
     """Run transcript-derived stages through the normal durable stage machinery."""
     pcfg = settings.pipeline
@@ -1841,7 +1856,10 @@ def _run_derived_stages(
                 )
                 template_key = auto_recommendation["key"]
                 derived_snapshot = resolve_recording_profile(
-                    session, file_id, template_key=template_key
+                    session,
+                    file_id,
+                    template_key=template_key,
+                    explicit_profile_id=explicit_profile_id,
                 ).to_dict()
             derived_profile_token = _PROFILE_SNAPSHOT.set(derived_snapshot)
 

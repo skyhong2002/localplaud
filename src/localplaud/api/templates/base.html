@@ -405,11 +405,17 @@
     /* Wrapping (not hidden horizontal scroll) keeps every output reachable and
        lets the version popover escape the strip without being clipped. */
     .note-tabs { display:flex;align-items:center;gap:5px;flex-wrap:wrap;overflow:visible;padding:2px 0 12px;margin-bottom:12px;border-bottom:1px solid var(--border); }
-    .note-tabs button { flex:none;max-width:min(260px,80vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--border2);border-radius:6px;background:var(--panel);color:var(--muted);padding:6px 10px;font:inherit;font-size:12px;font-weight:600;cursor:pointer; }
+    .note-tabs button,.note-tabs summary.note-add-tab { flex:none;max-width:min(260px,80vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--border2);border-radius:6px;background:var(--panel);color:var(--muted);padding:6px 10px;font:inherit;font-size:12px;font-weight:600;cursor:pointer; }
     .note-tabs button.on { background:var(--panel2);color:var(--fg);border-color:var(--border2); }
     .note-tabs .saved-note-tab,.note-tabs .note-add-tab { display:inline-flex;align-items:center;gap:5px; }
     .note-tabs .saved-note-tab .nav-icon,.note-tabs .note-add-tab .nav-icon { flex:none; }
     .note-tabs .note-add-tab { padding:6px 8px;color:var(--faint); }
+    .note-add-menu { position:relative; }
+    .note-add-menu>summary { list-style:none; }
+    .note-add-menu>summary::-webkit-details-marker { display:none; }
+    .note-add-popover { position:absolute;left:0;top:37px;z-index:25;width:210px;padding:5px;border:1px solid var(--border2);border-radius:7px;background:var(--panel);box-shadow:var(--shadow); }
+    .note-add-popover button { width:100%;max-width:none;display:flex;align-items:center;border:0;background:transparent;color:var(--fg);justify-content:flex-start;gap:8px;text-align:left; }
+    .note-add-popover button:hover { background:var(--panel2); }
     .notes-toolbar { display:grid;grid-template-columns:minmax(220px,1fr) auto auto;align-items:end;gap:9px;margin:2px 0 15px;padding:12px;border:1px solid var(--border);border-radius:7px;background:#FAFAFA; }
     .notes-template-control { display:grid;grid-template-columns:auto minmax(180px,1fr);align-items:center;gap:9px; }
     .notes-template-control label { font-size:12px;font-weight:650;white-space:nowrap; }

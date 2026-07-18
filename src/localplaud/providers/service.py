@@ -625,7 +625,11 @@ def _profile_resolution_layer(
 
 
 def resolve_recording_profile(
-    session: Session, file_id: str, *, template_key: str | None = None
+    session: Session,
+    file_id: str,
+    *,
+    template_key: str | None = None,
+    explicit_profile_id: int | None = None,
 ) -> ResolvedProfile:
     """Resolve system -> folder -> rule -> template -> recording layers."""
     system = session.scalar(
@@ -733,6 +737,16 @@ def resolve_recording_profile(
                 "policy": override.policy_overrides,
                 "provenance": {"kind": "recording_patch", "file_id": file_id},
             }
+        )
+    if explicit_profile_id is not None:
+        layers.append(
+            _profile_resolution_layer(
+                session,
+                explicit_profile_id,
+                "explicit-generation",
+                kind="explicit_generation",
+                source={"file_id": file_id},
+            )
         )
     return resolve_profile(layers, _capability_catalog(session), _connection_catalog(session))
 

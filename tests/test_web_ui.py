@@ -540,10 +540,19 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert f'title="Editable note · {long_title}"' in r.text
     saved_tab = r.text.split('class="note-tab saved-note-tab', 1)[1].split("</button>", 1)[0]
     assert "pencil.svg" in saved_tab
-    # The "+" affordance creates a user-owned note without invoking generation.
+    # The "+" affordance offers AI generation first and preserves blank notes.
     assert "data-open-manual-note" in r.text
     assert 'aria-label="New note"' in r.text
+    assert "data-open-note-generation" in r.text
+    assert "Generate AI note" in r.text and "Blank note" in r.text
     assert 'id="manual-note-backdrop"' in r.text
+    assert 'id="note-profile-select"' in r.text
+    assert 'name="profile_id"' in r.text
+    assert "data-summary-edit" in r.text
+    assert "edit_note=${data.id}" in r.text
+    assert "base_version:Number(data.get('base_version'))" in r.text
+    assert "workspaceNoteDirty" in r.text and "beforeunload" in r.text
+    assert "Discard unsaved note changes?" in r.text
     # Generated-note provenance now carries version and creation time.
     assert _re.search(r"v3 · [A-Z][a-z]{2} \d{2}, \d{4} · \d{2}:\d{2} · Generated from", r.text)
     # Lockstep invariant: the highlighted tab's target is exactly the one
@@ -558,6 +567,53 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     # Note tabs are durable navigation state: exact Search links survive reload,
     # and browser Back restores both the workspace tab and selected note.
     assert "const activateNoteTarget=(target,push=false)" in r.text
+
+
+def test_workspace_inline_manual_note_edit_uses_optimistic_version_api(
+    monkeypatch, tmp_path
+):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    created = c.post(
+        "/api/files/r1/notes",
+        json={"title": "Draft", "content_md": "First version"},
+    ).json()
+    page = c.get(f"/file/r1?tab=notes&note_id={created['id']}")
+    assert f'data-workspace-note-form="{created["id"]}"' in page.text
+    assert 'name="base_version" value="1"' in page.text
+    assert f'data-note-edit="{created["id"]}"' in page.text
+
+    saved = c.put(
+        f"/api/notes/{created['id']}",
+        json={"title": "Draft", "content_md": "Second version", "base_version": 1},
+    )
+    assert saved.status_code == 200 and saved.json()["version"] == 2
+    stale = c.put(
+        f"/api/notes/{created['id']}",
+        json={"title": "Draft", "content_md": "Stale", "base_version": 1},
+    )
+    assert stale.status_code == 409
+
+
+def test_workspace_generated_note_edit_reuses_copy_and_opens_inline_editor(
+    monkeypatch, tmp_path
+):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import Summary
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        summary_id = session.query(Summary.id).filter_by(file_id="r1").scalar()
+    first = c.post(f"/api/files/r1/summaries/{summary_id}/editable-copy").json()
+    second = c.post(f"/api/files/r1/summaries/{summary_id}/editable-copy").json()
+    assert second["id"] == first["id"]
+
+    page = c.get(f"/file/r1?tab=notes&note_id={first['id']}&edit_note={first['id']}")
+    r = page
+    assert f'data-note-edit="{first["id"]}"' in page.text
+    assert "new URLSearchParams(location.search).get('edit_note')" in page.text
+    assert 'form.elements.content_md.focus()' in page.text
     assert "url.searchParams.set('note',target)" in r.text
     assert "url.searchParams.set('note_id',target.slice(6))" in r.text
     assert "window.addEventListener('popstate',syncWorkspaceLocation" in r.text
@@ -884,7 +940,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "zoom:var(--mm-scale)" in r.text
     assert 'id="subscription-independence"' in r.text
     assert "Subscription independence" in r.text
-    assert 'data-summary-copy=' in r.text
+    assert 'data-summary-edit=' in r.text
     assert 'id="open-share"' in r.text and 'id="share-backdrop" hidden' in r.text
     assert 'id="generate-notes"' in r.text
     assert "Choose a template, then generate notes and mind map." not in r.text
@@ -1395,14 +1451,26 @@ def test_generate_notes_only_queues_derived_stages(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "localplaud.poller.poll.current_daemon_owner", lambda: "web-daemon-owner"
     )
-    response = c.post("/file/r1/generate-notes")
+    assert c.post(
+        "/file/r1/generate-notes", data={"profile_id": "999999"}
+    ).status_code == 422
+    from localplaud.db.models import (
+        ExecutionProfile,
+        FileStatus,
+        PlaudFile,
+        StageName,
+        StageStatus,
+    )
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        profile_id = session.query(ExecutionProfile.id).first()[0]
+
+    response = c.post("/file/r1/generate-notes", data={"profile_id": profile_id})
     assert response.status_code == 200
     assert response.text == "notes and mind map queued"
     assert started and started[0][1] == ("r1",)
     assert started[0][0].__name__ == "process_derived_artifacts"
-
-    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
-    from localplaud.db.session import session_scope
 
     with session_scope() as session:
         recording = session.get(PlaudFile, "r1")
@@ -1410,6 +1478,7 @@ def test_generate_notes_only_queues_derived_stages(monkeypatch, tmp_path):
         assert recording.status == FileStatus.processing
         assert recording.processing_token.startswith("daemon:web-daemon-owner:")
         assert started[0][2]["claim_token"] == recording.processing_token
+        assert started[0][2]["profile_id"] == profile_id
         for stage in (StageName.summarize, StageName.mind_map, StageName.index):
             assert stages[stage].status == StageStatus.pending
             assert stages[stage].detail["stale"] is True
