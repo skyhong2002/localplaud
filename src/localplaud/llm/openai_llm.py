@@ -5,6 +5,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ..config import get_settings
+from ..openai_budget import (
+    OpenAIBudgetBlocked,
+    assert_openai_free_pool,
+    is_real_openai_base_url,
+)
 from .base import LLMError, LLMUnavailable
 
 if TYPE_CHECKING:
@@ -42,6 +48,16 @@ class OpenAILLM:
             raise LLMUnavailable(
                 "OpenAI LLM: the 'openai' package is not installed"
             ) from exc
+
+        if is_real_openai_base_url(self.cfg.base_url):
+            try:
+                assert_openai_free_pool(
+                    get_settings(),
+                    model=self.cfg.model,
+                    projected_tokens=(len(prompt) + len(system or "")) // 3 + max_tokens,
+                )
+            except OpenAIBudgetBlocked as exc:
+                raise LLMError(str(exc)) from exc
 
         client = OpenAI(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None)
         messages: list[dict[str, str]] = []

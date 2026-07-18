@@ -21,7 +21,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 # --------------------------------------------------------------------------- #
@@ -322,6 +322,25 @@ class EmbeddingsConfig(BaseModel):
     ollama: OllamaEmbeddingsConfig = Field(default_factory=OllamaEmbeddingsConfig)
 
 
+class OpenAIBudgetConfig(BaseModel):
+    """Fail-closed guard for the operator's daily OpenAI free token pools."""
+
+    enabled: bool = False
+    admin_key: str = ""
+    timezone: str = "Asia/Taipei"
+    high_pool_limit: int = Field(default=250_000, gt=0)
+    mini_pool_limit: int = Field(default=2_500_000, gt=0)
+    mini_model_patterns: list[str] = Field(default_factory=lambda: ["*mini*", "*nano*"])
+    safety_margin_fraction: float = Field(default=0.03, ge=0, lt=1)
+
+    @field_validator("admin_key")
+    @classmethod
+    def admin_key_must_be_an_environment_reference(cls, value: str) -> str:
+        if value and not value.startswith("env:"):
+            raise ValueError("admin_key must be an env:VARIABLE reference")
+        return value
+
+
 class ApiConfig(BaseModel):
     # Loopback by default so an accidental `localplaud run` isn't exposed to the
     # LAN. In Docker this is overridden to 0.0.0.0 (the container sits behind
@@ -386,6 +405,7 @@ class Settings(BaseSettings):
     diarize: DiarizeConfig = Field(default_factory=DiarizeConfig)
     llm: LlmConfig = Field(default_factory=LlmConfig)
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
+    openai_budget: OpenAIBudgetConfig = Field(default_factory=OpenAIBudgetConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
 
     @classmethod

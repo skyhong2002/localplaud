@@ -5,6 +5,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from ..config import get_settings
+from ..openai_budget import (
+    OpenAIBudgetBlocked,
+    assert_openai_free_pool,
+    is_real_openai_base_url,
+)
 from .base import AsrError, AsrUnavailable, Segment, Transcript, Word
 from .registry import register
 
@@ -28,6 +34,14 @@ class OpenAIProvider:
             from openai import OpenAI
         except ImportError as exc:
             raise AsrUnavailable("openai package is not installed") from exc
+
+        if is_real_openai_base_url(self.cfg.base_url):
+            try:
+                assert_openai_free_pool(
+                    get_settings(), model=self.cfg.model, projected_tokens=0
+                )
+            except OpenAIBudgetBlocked as exc:
+                raise AsrError(str(exc)) from exc
 
         client = OpenAI(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None)
         log.info("Transcribing with OpenAI model %s", self.cfg.model)

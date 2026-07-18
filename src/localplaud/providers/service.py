@@ -1124,7 +1124,17 @@ def _probe_connection(row: ProviderConnection, model_key: str | None = None) -> 
     if callable(health):
         result = health()
         return result if isinstance(result, tuple) else (bool(result), "health check completed")
-    return bool(provider.available()), "provider availability check"
+    available = bool(provider.available())
+    detail = "provider availability check"
+    if row.provider_type == "openai":
+        cfg = getattr(settings, family if family != "correct" else "llm").openai
+        from ..openai_budget import is_real_openai_base_url, openai_free_pool_health
+
+        if is_real_openai_base_url(cfg.base_url) and settings.openai_budget.enabled:
+            budget_ok, budget_detail = openai_free_pool_health(settings)
+            available = available and budget_ok
+            detail = f"{detail} · {budget_detail}"
+    return available, detail
 
 
 def check_connection_health(session: Session, connection_id: int) -> dict:

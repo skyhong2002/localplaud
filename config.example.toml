@@ -38,6 +38,21 @@ max_concurrent_downloads = 2
 [store]
 database_url = "sqlite:///./data/localplaud.db"
 
+# --------------------------------------------------------------------------- #
+# OpenAI free-pool budget gate — opt in only when calling the real OpenAI API.
+# It fails closed before egress if organization usage cannot prove the call will
+# remain inside the configured zero-cost daily pool. Compatible relay base URLs
+# are not gated. Store only an environment reference here, never an admin key.
+# --------------------------------------------------------------------------- #
+[openai_budget]
+enabled = false
+admin_key = "env:OPENAI_ADMIN_KEY"
+timezone = "Asia/Taipei"
+high_pool_limit = 250000
+mini_pool_limit = 2500000
+mini_model_patterns = ["*mini*", "*nano*"]
+safety_margin_fraction = 0.03
+
 [pipeline]
 # Local processing stages to run after each download.
 convert = true                   # opus -> 16kHz mono wav (needs ffmpeg)
