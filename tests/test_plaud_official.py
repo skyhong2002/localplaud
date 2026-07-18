@@ -431,7 +431,8 @@ def test_cloud_artifacts_extracted_from_detail(tmp_path):
         ],
         note_list=[
             {"data_type": "auto_sum_note", "data_title": "Summary",
-             "data_content": "# Title\n\nbody"},
+             "data_content": "# Title\n\nbody",
+             "download_link_map": {"permanent/poster.png": "https://assets/poster.png"}},
             {"data_type": "action_items", "data_content": "intro\n# Actions\n\n- One"},
             {"data_type": "empty", "data_content": ""},
         ],
@@ -442,11 +443,17 @@ def test_cloud_artifacts_extracted_from_detail(tmp_path):
     with PlaudOfficialClient(_cfg(tmp_path)) as c:
         assert c.get_cloud_summary_md(fid) == "# Title\n\nbody"
         assert c.get_cloud_notes(fid) == [
-            {"key": "auto_sum_note", "title": "Title", "markdown": "# Title\n\nbody"},
+            {
+                "key": "auto_sum_note",
+                "title": "Title",
+                "markdown": "# Title\n\nbody",
+                "assets": {"permanent/poster.png": "https://assets/poster.png"},
+            },
             {
                 "key": "action_items",
                 "title": "Actions",
                 "markdown": "intro\n# Actions\n\n- One",
+                "assets": {},
             },
         ]
         segs = c.get_cloud_transcript_segments(fid)

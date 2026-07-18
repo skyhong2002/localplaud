@@ -1064,7 +1064,9 @@ def test_safe_markdown_renderer_supports_notes_without_html_or_unsafe_links():
             "| Name | Value |\n| --- | --- |\n| A | ~~B~~ |\n\n"
             "<script>alert('x')</script>\n\n"
             "[unsafe](javascript:alert(1)) [safe](https://example.com/path)\n\n"
-            "![tracking pixel](https://tracker.example/pixel.gif)"
+            "![tracking pixel](https://tracker.example/pixel.gif)\n\n"
+            "![mirrored](/api/files/f/note-assets/0123456789abcdef.png)\n\n"
+            "- [ ] Open\n- [x] Done"
         )
     )
     assert "<h1>Heading</h1>" in rendered
@@ -1073,7 +1075,26 @@ def test_safe_markdown_renderer_supports_notes_without_html_or_unsafe_links():
     assert "&lt;script&gt;" in rendered and "<script>" not in rendered
     assert 'href="javascript:' not in rendered
     assert 'href="https://example.com/path"' in rendered
-    assert "<img" not in rendered and "tracking pixel" in rendered
+    assert 'src="https://tracker.example' not in rendered and "tracking pixel" in rendered
+    assert '<img src="/api/files/f/note-assets/0123456789abcdef.png"' in rendered
+    assert '<input class="task-list-item-checkbox" disabled="disabled" type="checkbox">' in rendered
+    assert (
+        '<input class="task-list-item-checkbox" checked="checked" '
+        'disabled="disabled" type="checkbox">'
+    ) in rendered
+
+
+def test_cloud_rule_normalization_prevents_setext_headings():
+    from localplaud.markdown import render_markdown
+    from localplaud.plaud.official import _normalize_cloud_markdown
+
+    normalized = _normalize_cloud_markdown("  text\n---   \n## H  ")
+    assert normalized == "text\n\n---   \n## H"
+    rendered = str(render_markdown(normalized))
+    assert "<p>text</p>" in rendered
+    assert "<hr" in rendered
+    assert "<h2>H</h2>" in rendered
+    assert "<h2>text</h2>" not in rendered
 
 
 def test_metadata_only_plaud_recording_offers_audio_import(monkeypatch, tmp_path):

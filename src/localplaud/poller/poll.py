@@ -12,13 +12,16 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
+import httpx
 from sqlalchemy import delete, insert, or_, select, update
 from sqlalchemy import text as sql_text
 from sqlalchemy.exc import IntegrityError
@@ -35,8 +38,9 @@ from ..db.models import (
 )
 from ..db.session import session_scope
 from ..plaud import make_plaud_client
+from ..plaud.common import _assert_safe_fetch_url
 from ..plaud.models import PlaudFileDTO
-from ..store.files import file_dir
+from ..store.files import _safe_id, file_dir
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +57,82 @@ _DAEMON_HEARTBEAT_INTERVAL_SECONDS = 30
 _DOWNLOAD_RECOVERY_TTL = timedelta(hours=1)
 _DOWNLOAD_LEASE = timedelta(hours=1)
 _ACTIVE_DAEMON_OWNER: str | None = None
+_MAX_NOTE_ASSET_BYTES = 15 * 1024 * 1024
+_NOTE_ASSET_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_MARKDOWN_IMAGE = re.compile(
+    r"!\[([^\]\n]*)\]\(\s*(?:<([^>\n]+)>|([^\s)\n]+))\s*\)"
+)
+
+
+def _note_asset_extension(path: str, url: str) -> str | None:
+    for value in (path, url):
+        suffix = Path(urlsplit(value).path).suffix.lower()
+        if suffix in _NOTE_ASSET_EXTENSIONS:
+            return suffix
+    return None
+
+
+def _fetch_note_asset(url: str, *, path: str, destination: Path) -> str:
+    _assert_safe_fetch_url(url)
+    extension = _note_asset_extension(path, url)
+    if extension is None:
+        raise ValueError("unsupported note asset image type")
+    content = bytearray()
+    with httpx.Client(timeout=120, follow_redirects=False) as client, client.stream(
+        "GET", url
+    ) as response:
+        response.raise_for_status()
+        for chunk in response.iter_bytes(chunk_size=1 << 16):
+            content.extend(chunk)
+            if len(content) > _MAX_NOTE_ASSET_BYTES:
+                raise ValueError("note asset exceeds 15 MB")
+    name = f"{hashlib.sha256(content).hexdigest()[:16]}{extension}"
+    destination.mkdir(parents=True, exist_ok=True)
+    output = destination / name
+    if not output.exists():
+        temporary = destination / f".{name}.{uuid4().hex}.tmp"
+        try:
+            temporary.write_bytes(content)
+            temporary.replace(output)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return name
+
+
+def _mirror_note_assets(note: dict, *, file_id: str, settings: Settings) -> str:
+    markdown = str(note["markdown"])
+    assets = note.get("assets")
+    if not isinstance(assets, dict) or not assets:
+        return markdown
+    destination = (
+        Path(settings.poller.download_dir) / _safe_id(file_id) / "note-assets"
+    )
+    mirrored: dict[str, str | None] = {}
+
+    def replace(match: re.Match) -> str:
+        alt = match.group(1)
+        path = match.group(2) or match.group(3)
+        key = path if path in assets else unquote(path)
+        url = assets.get(key)
+        if not isinstance(url, str) or not url:
+            return match.group(0)
+        if key not in mirrored:
+            try:
+                mirrored[key] = _fetch_note_asset(url, path=path, destination=destination)
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "note asset import failed for %s (%s): %s",
+                    file_id,
+                    path,
+                    type(exc).__name__,
+                )
+                mirrored[key] = None
+        name = mirrored[key]
+        if name is None:
+            return alt
+        return f"![{alt}](/api/files/{file_id}/note-assets/{name})"
+
+    return _MARKDOWN_IMAGE.sub(replace, markdown)
 
 
 def _insert_key_if_absent(session, *, key: str, value: dict) -> bool:
@@ -758,6 +838,11 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
     detail = client.get_detail(file_id)
     notes = client.get_cloud_notes(file_id, detail)
     segments = client.get_cloud_transcript_segments(file_id, detail)
+    settings = get_settings()
+    mirrored_notes = [
+        {**note, "markdown": _mirror_note_assets(note, file_id=file_id, settings=settings)}
+        for note in notes
+    ]
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
         if row is None:
@@ -773,7 +858,7 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
                 TranscriptRow.source.in_(("cloud", "plaud")),
             )
         )
-        for note in notes:
+        for note in mirrored_notes:
             session.add(
                 SummaryRow(
                     file_id=file_id,
@@ -794,13 +879,13 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
                     segments=segments,
                 )
             )
-        row.cloud_is_summary = bool(notes)
+        row.cloud_is_summary = bool(mirrored_notes)
         row.cloud_is_trans = bool(segments)
         row.raw = {
             **(row.raw or {}),
             _ARTIFACT_CHECKED_KEY: row.filename,
         }
-    return (bool(segments), bool(notes))
+    return (bool(segments), bool(mirrored_notes))
 
 
 def ingest_cloud_artifacts(client, settings: Settings) -> int:

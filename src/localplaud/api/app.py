@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import (
+    FileResponse,
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
@@ -79,6 +80,7 @@ from ..preferences import (
 )
 from ..remote.server import resume_pending_jobs
 from ..remote.server import router as worker_router
+from ..store.files import _safe_id
 from ..store.speakers import display_names, speaker_keys_from_segments
 from .automations import router as automations_router
 from .backups import router as backups_router
@@ -366,6 +368,37 @@ templates.env.filters["dt"] = _fmt_dt
 templates.env.filters["dur"] = _fmt_dur
 templates.env.filters["mmss"] = _mmss
 templates.env.filters["markdown"] = _render_markdown
+
+_NOTE_ASSET_NAME = re.compile(r"[0-9a-f]{16}\.(?:png|jpe?g|gif|webp)")
+_NOTE_ASSET_MEDIA_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+}
+
+
+@app.get("/api/files/{file_id}/note-assets/{name}")
+def note_asset(file_id: str, name: str):
+    if _NOTE_ASSET_NAME.fullmatch(name) is None:
+        raise HTTPException(status_code=404, detail="note asset not found")
+    try:
+        safe_file_id = _safe_id(file_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="note asset not found") from exc
+    with session_scope() as session:
+        if session.get(PlaudFile, safe_file_id) is None:
+            raise HTTPException(status_code=404, detail="note asset not found")
+    path = Path(get_settings().poller.download_dir) / safe_file_id / "note-assets" / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="note asset not found")
+    extension = name.rsplit(".", 1)[-1]
+    return FileResponse(
+        path,
+        media_type=_NOTE_ASSET_MEDIA_TYPES[extension],
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 def _file_summary(r: PlaudFile) -> dict:

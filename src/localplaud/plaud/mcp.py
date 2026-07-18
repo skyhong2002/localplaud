@@ -255,7 +255,15 @@ class PlaudMcpClient:
         return _cloud_notes(
             {
                 "note_list": [
-                    {"data_type": "auto_sum_note", "data_content": markdown}
+                    {
+                        "data_type": "auto_sum_note",
+                        "data_content": markdown,
+                        "download_link_map": (
+                            result.get("download_link_map", {})
+                            if isinstance(result, dict)
+                            else {}
+                        ),
+                    }
                 ]
             }
         )

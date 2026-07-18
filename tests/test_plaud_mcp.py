@@ -64,6 +64,7 @@ def test_mcp_cloud_artifacts_stay_explicit(monkeypatch):
             "key": "auto_sum_note",
             "title": "Imported Plaud note",
             "markdown": "# Imported Plaud note",
+            "assets": {},
         }
     ]
     assert client.get_cloud_transcript_segments("m1") == [{"text": "hello", "start": 0, "end": 1}]
@@ -122,6 +123,9 @@ def test_mcp_normalizes_raw_source_list_payloads(monkeypatch):
                 "data_type": "auto_sum_note",
                 "data_title": "Summary",
                 "data_content": "![PLAUD NOTE](permanent/abc/poster.png)\n## 重點\n內容",
+                "download_link_map": {
+                    "permanent/abc/poster.png": "https://assets.example/poster.png"
+                },
             }
         ],
         "source_list": [
@@ -140,10 +144,13 @@ def test_mcp_normalizes_raw_source_list_payloads(monkeypatch):
     ]
     notes = client.get_cloud_notes("m2")
     assert [note["key"] for note in notes] == ["auto_sum_note", "outline"]
-    # The expiring poster image is stripped; the title falls back to data_title.
-    assert notes[0]["markdown"].startswith("## 重點")
+    assert notes[0]["markdown"].startswith("![PLAUD NOTE](permanent/abc/poster.png)")
+    assert notes[0]["assets"] == {
+        "permanent/abc/poster.png": "https://assets.example/poster.png"
+    }
     assert notes[0]["title"] == "Summary"
     assert notes[1]["markdown"] == "- [0:04] 確認範本來源\n- [0:55] 修正實驗設計"
+    assert notes[1]["assets"] == {}
 
 
 def test_mcp_get_note_list_fallback_normalizes_entries(monkeypatch):
@@ -160,7 +167,7 @@ def test_mcp_get_note_list_fallback_normalizes_entries(monkeypatch):
 
     monkeypatch.setattr(client, "_call_tool", call)
     assert client.get_cloud_notes("m3") == [
-        {"key": "auto_sum_note", "title": "Summary", "markdown": "重點"}
+        {"key": "auto_sum_note", "title": "Summary", "markdown": "重點", "assets": {}}
     ]
 
 

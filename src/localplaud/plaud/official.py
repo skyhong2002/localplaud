@@ -50,12 +50,14 @@ _TRANSCRIPT_TYPE = "transaction"
 _SUMMARY_TYPE = "auto_sum_note"
 
 
-_ASSET_IMAGE = re.compile(r"^!\[[^\]]*\]\((?:permanent|temporary)/[^)]*\)\s*$", re.MULTILINE)
-
-
-def _clean_cloud_markdown(markdown: str) -> str:
-    """Drop Plaud asset-store images whose signed URLs expire within hours."""
-    return _ASSET_IMAGE.sub("", markdown).strip()
+def _normalize_cloud_markdown(markdown: str) -> str:
+    """Keep Plaud rule lines from being parsed as setext headings."""
+    normalized: list[str] = []
+    for line in markdown.splitlines():
+        if re.fullmatch(r"---[ \t]*", line) and normalized and normalized[-1].strip():
+            normalized.append("")
+        normalized.append(line)
+    return "\n".join(normalized).strip()
 
 
 def _outline_markdown(raw: str) -> str | None:
@@ -80,7 +82,7 @@ def _cloud_notes(detail: dict) -> list[dict]:
         markdown = item.get("data_content")
         if not markdown:
             continue
-        markdown = _clean_cloud_markdown(str(markdown))
+        markdown = _normalize_cloud_markdown(str(markdown))
         if not markdown:
             continue
         heading = re.search(r"^# (.+?)\s*$", markdown, flags=re.MULTILINE)
@@ -90,6 +92,11 @@ def _cloud_notes(detail: dict) -> list[dict]:
                 "key": str(item.get("data_type") or ""),
                 "title": title or str(item.get("data_title") or "").strip() or None,
                 "markdown": markdown,
+                "assets": (
+                    dict(item["download_link_map"])
+                    if isinstance(item.get("download_link_map"), dict)
+                    else {}
+                ),
             }
         )
     # Plaud presents its chapter outline alongside notes; mirror it as one.
@@ -104,7 +111,9 @@ def _cloud_notes(detail: dict) -> list[dict]:
     if outline_raw:
         outline_md = _outline_markdown(str(outline_raw))
         if outline_md:
-            notes.append({"key": "outline", "title": "Outline", "markdown": outline_md})
+            notes.append(
+                {"key": "outline", "title": "Outline", "markdown": outline_md, "assets": {}}
+            )
     return notes
 
 

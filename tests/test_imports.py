@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from contextlib import contextmanager
+
+import httpx
+import respx
 
 
 def _reset_db(monkeypatch, tmp_path):
@@ -266,6 +270,126 @@ def test_recording_cloud_refresh_redacts_provider_error(monkeypatch, tmp_path):
     response = TestClient(app).post("/api/files/plaud-file/refresh-cloud-artifacts")
     assert response.status_code == 502
     assert response.json()["detail"] == "refresh failed token=[REDACTED]"
+
+
+@respx.mock
+def test_cloud_note_assets_are_mirrored_served_and_idempotent(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALPLAUD_API__AUTH_TOKEN", "note-asset-token")
+    settings = _reset_db(monkeypatch, tmp_path)
+    from fastapi.testclient import TestClient
+
+    from localplaud.api.app import app
+    from localplaud.db.models import FileStatus, PlaudFile, Summary
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import refresh_cloud_artifacts_for
+
+    init_db()
+    file_id = "asset-file"
+    relative_path = "permanent/poster%20image.png"
+    signed_url = "https://assets.example/signed/poster.png?token=secret"
+    image = b"fake-png-bytes"
+    name = f"{hashlib.sha256(image).hexdigest()[:16]}.png"
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id=file_id,
+                filename="Asset note",
+                origin="plaud",
+                status=FileStatus.metadata_only,
+            )
+        )
+
+    class FakeClient:
+        def get_detail(self, requested_file_id):
+            return {"id": requested_file_id}
+
+        def get_cloud_notes(self, requested_file_id, detail):
+            return [
+                {
+                    "key": "auto_sum_note",
+                    "title": "Summary",
+                    "markdown": f"Before\n\n![Poster]({relative_path})\n\nAfter",
+                    "assets": {
+                        "permanent/poster image.png": signed_url,
+                    },
+                }
+            ]
+
+        def get_cloud_transcript_segments(self, requested_file_id, detail):
+            return []
+
+    safe_urls = []
+    monkeypatch.setattr(
+        "localplaud.poller.poll._assert_safe_fetch_url", lambda url: safe_urls.append(url)
+    )
+    route = respx.get(signed_url).mock(return_value=httpx.Response(200, content=image))
+    assert refresh_cloud_artifacts_for(FakeClient(), file_id) == (False, True)
+    assert refresh_cloud_artifacts_for(FakeClient(), file_id) == (False, True)
+
+    asset_path = settings.poller.download_dir / file_id / "note-assets" / name
+    assert asset_path.read_bytes() == image
+    assert list(asset_path.parent.iterdir()) == [asset_path]
+    with session_scope() as session:
+        note = session.query(Summary).filter_by(file_id=file_id).one()
+        assert note.content_md == (
+            f"Before\n\n![Poster](/api/files/{file_id}/note-assets/{name})\n\nAfter"
+        )
+
+    assert TestClient(app).get(f"/api/files/{file_id}/note-assets/{name}").status_code == 401
+    client = TestClient(app, headers={"x-auth-token": "note-asset-token"})
+    response = client.get(f"/api/files/{file_id}/note-assets/{name}")
+    assert response.status_code == 200
+    assert response.content == image
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["cache-control"] == "private, max-age=86400"
+    assert client.get(
+        f"/api/files/{file_id}/note-assets/../../secret.png"
+    ).status_code == 404
+    assert safe_urls == [signed_url, signed_url]
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_cloud_note_asset_failure_keeps_import_successful(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, Summary
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import refresh_cloud_artifacts_for
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="failed-asset",
+                filename="Failed asset",
+                origin="plaud",
+                status=FileStatus.metadata_only,
+            )
+        )
+
+    class FakeClient:
+        def get_detail(self, file_id):
+            return {"id": file_id}
+
+        def get_cloud_notes(self, file_id, detail):
+            return [
+                {
+                    "key": "auto_sum_note",
+                    "title": "Summary",
+                    "markdown": "Before\n\n![Poster](temporary/poster.png)\n\nAfter",
+                    "assets": {"temporary/poster.png": "https://assets.example/missing.png"},
+                }
+            ]
+
+        def get_cloud_transcript_segments(self, file_id, detail):
+            return []
+
+    monkeypatch.setattr("localplaud.poller.poll._assert_safe_fetch_url", lambda url: None)
+    respx.get("https://assets.example/missing.png").mock(return_value=httpx.Response(503))
+    assert refresh_cloud_artifacts_for(FakeClient(), "failed-asset") == (False, True)
+    with session_scope() as session:
+        note = session.query(Summary).filter_by(file_id="failed-asset").one()
+        assert note.content_md == "Before\n\nPoster\n\nAfter"
 
 
 def test_incremental_import_migration_is_additive_and_idempotent(tmp_path):
