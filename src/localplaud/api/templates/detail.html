@@ -39,6 +39,7 @@
         {% if f.transcript or f.summaries or f.user_notes or f.has_audio %}<button class="icon-action" id="open-export" type="button" aria-label="{{ t('Export') }}" title="{{ t('Export') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span><span class="action-label">{{ t('Export') }}</span></button>{% endif %}
         <details class="recording-more"><summary class="icon-action icon-only" aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></summary><div class="recording-menu">
           {% if not f.has_audio and f.origin == 'plaud' %}<button id="import-recording-audio" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Import audio') }}</button>{% endif %}
+          {% if f.origin == 'plaud' and not f.is_trash %}<button id="refresh-plaud-cloud" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Refresh Plaud cloud artifacts') }}</button>{% endif %}
           {% if f.local_title %}<button id="clear-local-title" type="button">{{ t('Use Plaud title') }}</button>{% endif %}
           <button id="menu-edit-recording-metadata" type="button">{{ t('Folder and tags') }}</button>
           {% if f.has_audio %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>{% endif %}
@@ -234,17 +235,19 @@
          visible panel in lockstep even if either list's ordering changes. #}
       {% set active_note_target = ('saved-' ~ f.selected_note_id) if f.selected_note_id else (('sum-' ~ notes[0].id) if notes else ('saved-' ~ f.user_notes[0].id)) %}
       <div class="note-tabs">
-        {% for s in notes %}<button type="button" data-note-target="sum-{{ s.id }}" class="note-tab {% if ('sum-' ~ s.id) == active_note_target %}on{% endif %}" title="{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.created_at %} · {{ s.created_at }}{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}</button>{% endfor %}
+        {% for s in notes %}<button type="button" data-note-target="sum-{{ s.id }}" class="note-tab {% if ('sum-' ~ s.id) == active_note_target %}on{% endif %}" title="{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.created_at %} · {{ s.created_at }}{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.source in ('cloud', 'plaud') %} <span class="chip plaud-note-chip">Plaud</span>{% endif %}</button>{% endfor %}
         {% for note in f.user_notes %}<button type="button" data-note-target="saved-{{ note.id }}" class="note-tab saved-note-tab {% if ('saved-' ~ note.id) == active_note_target %}on{% endif %}" title="{{ t('Editable note') }} · {{ note.title }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg');width:11px;height:11px"></span>{{ note.title }}</button>{% endfor %}
         {% if not f.is_trash %}<button type="button" class="note-tab note-add-tab" data-open-manual-note aria-label="{{ t('New note') }}" title="{{ t('New note') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg');width:12px;height:12px"></span></button>{% endif %}
       </div>
     {% for s in notes %}
     <div class="note-panel" data-note-panel="sum-{{ s.id }}" {% if ('sum-' ~ s.id) != active_note_target %}hidden{% endif %}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0">
-        <div class="sub" style="font-size:11.5px">{% if s.template_version %}v{{ s.template_version }} · {% endif %}{% if s.created_at %}{{ s.created_at }} · {% endif %}Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}{% if s.restored_from_revision %} · {{ t('restored from version') }} {{ s.restored_from_revision }}{% endif %}</div>
+        <div class="sub" style="font-size:11.5px">{% if s.source in ('cloud', 'plaud') %}<span class="chip plaud-note-chip">Plaud</span> · {{ t('Read-only') }}{% else %}{% if s.template_version %}v{{ s.template_version }} · {% endif %}{% if s.created_at %}{{ s.created_at }} · {% endif %}Generated from {{ s.lineage_label }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}{% if s.restored_from_revision %} · {{ t('restored from version') }} {{ s.restored_from_revision }}{% endif %}{% endif %}</div>
         <div style="display:flex;gap:6px;align-items:center;flex:none">
+          {% if s.source == 'local' %}
           {% set history_summary = s %}{% set history_tab = 'notes' %}{% include '_note_history.html' %}
           <button class="btn sec" type="button" data-summary-copy="{{ s.id }}" style="padding:6px 9px">{{ t('Edit a copy') }}</button>
+          {% endif %}
         </div>
       </div>
       <div class="md">{{ s.content_md | markdown }}</div>
@@ -661,6 +664,10 @@
       if(status.status==='error'){out.textContent=status.error||tr('Audio import failed');button.disabled=false;if(label)label.textContent=tr('Retry audio import');return;}
       out.textContent=tr('Downloading this recording from Plaud…');importTimer=setTimeout(poll,1000);};poll();
   }));
+  document.getElementById('refresh-plaud-cloud')?.addEventListener('click',async event=>{
+    const button=event.currentTarget,out=document.getElementById('reprocess-msg');button.disabled=true;out.textContent=tr('Refreshing Plaud cloud artifacts…');
+    try{const response=await fetch('/api/files/{{ f.id }}/refresh-cloud-artifacts',{method:'POST',signal:cleanupController.signal}),data=await response.json();if(!response.ok)throw new Error(data.detail||tr('Could not refresh Plaud cloud artifacts'));out.textContent=`${tr('Plaud cloud artifacts refreshed.')} ${data.notes} ${tr('notes')}`;setTimeout(()=>location.reload(),700);}catch(error){if(error.name!=='AbortError'){out.textContent=error.message||tr('Could not refresh Plaud cloud artifacts');button.disabled=false;}}
+  });
   // Friendly generation progress: reuse the read-only per-recording status
   // endpoint. The empty state reloads once work reaches a terminal state;
   // when usable content is already on screen only the header label updates.

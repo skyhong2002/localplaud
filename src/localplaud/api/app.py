@@ -2241,6 +2241,36 @@ def recording_acceptance(file_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/files/{file_id}/refresh-cloud-artifacts")
+def refresh_recording_cloud_artifacts(file_id: str) -> dict:
+    settings = get_settings()
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None or row.is_trash:
+            raise HTTPException(status_code=404, detail="recording not found")
+        if (row.origin or "plaud") != "plaud":
+            raise HTTPException(status_code=422, detail="recording is not from Plaud")
+    try:
+        from ..plaud import make_plaud_client
+        from ..poller.poll import refresh_cloud_artifacts_for
+
+        with make_plaud_client(settings.plaud) as client:
+            transcript, _notes_present = refresh_cloud_artifacts_for(client, file_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=sanitize_error(exc)) from exc
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None or row.is_trash:
+            raise HTTPException(status_code=404, detail="recording not found")
+        row.cloud_artifacts_synced_at = datetime.now(UTC)
+        notes = session.scalar(
+            select(func.count())
+            .select_from(Summary)
+            .where(Summary.file_id == file_id, Summary.source.in_(("cloud", "plaud")))
+        ) or 0
+    return {"transcript": transcript, "notes": notes}
+
+
 @app.get("/file/{file_id}/acceptance-panel", response_class=HTMLResponse)
 def recording_acceptance_panel(request: Request, file_id: str):
     from ..acceptance import subscription_independence_report

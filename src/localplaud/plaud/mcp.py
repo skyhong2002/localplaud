@@ -22,7 +22,7 @@ from .common import (
     _ext_from_url,
 )
 from .models import PlaudFileDTO
-from .official import _parse_iso_ms
+from .official import _cloud_notes, _parse_iso_ms
 
 log = logging.getLogger(__name__)
 
@@ -227,13 +227,35 @@ class PlaudMcpClient:
         return dest
 
     def get_cloud_summary_md(self, file_id: str, detail: dict | None = None) -> str | None:
-        del detail
+        notes = self.get_cloud_notes(file_id, detail)
+        summary = next((note for note in notes if note["key"] == "auto_sum_note"), None)
+        if summary is None:
+            summary = next(
+                (note for note in notes if "sum" in note["key"].casefold()),
+                notes[0] if notes else None,
+            )
+        return summary["markdown"] if summary is not None else None
+
+    def get_cloud_notes(self, file_id: str, detail: dict | None = None) -> list[dict]:
+        detail = detail if detail is not None else self.get_detail(file_id)
+        if "note_list" in detail:
+            return _cloud_notes(detail)
         result = self._call_tool("get_note", {"file_id": file_id})
         if isinstance(result, str):
-            return result or None
-        if isinstance(result, dict):
-            return result.get("content") or result.get("markdown") or result.get("note")
-        return None
+            markdown = result
+        elif isinstance(result, dict):
+            markdown = result.get("content") or result.get("markdown") or result.get("note")
+        else:
+            markdown = None
+        if not markdown:
+            return []
+        return _cloud_notes(
+            {
+                "note_list": [
+                    {"data_type": "auto_sum_note", "data_content": markdown}
+                ]
+            }
+        )
 
     def get_cloud_transcript_segments(
         self, file_id: str, detail: dict | None = None

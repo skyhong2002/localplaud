@@ -40,8 +40,21 @@ def test_metadata_import_mirrors_artifacts_without_downloading(monkeypatch, tmp_
             self.detail_calls.append(file_id)
             return {"id": file_id}
 
-        def get_cloud_summary_md(self, file_id, detail):
-            return "# Paid summary\n\n- Decision" if file_id == "p1" else None
+        def get_cloud_notes(self, file_id, detail):
+            if file_id != "p1":
+                return []
+            return [
+                {
+                    "key": "auto_sum_note",
+                    "title": "Paid summary",
+                    "markdown": "# Paid summary\n\n- Decision",
+                },
+                {
+                    "key": "action_items",
+                    "title": "Actions",
+                    "markdown": "# Actions\n\n- Follow up",
+                },
+            ]
 
         def get_cloud_transcript_segments(self, file_id, detail):
             if file_id == "p1":
@@ -72,7 +85,16 @@ def test_metadata_import_mirrors_artifacts_without_downloading(monkeypatch, tmp_
         assert p1.cloud_artifacts_synced_at is not None
         assert p2.cloud_artifacts_synced_at is not None
         assert session.query(Transcript).filter_by(file_id="p1", source="cloud").count() == 1
-        assert session.query(Summary).filter_by(file_id="p1", source="cloud").count() == 1
+        notes = (
+            session.query(Summary)
+            .filter_by(file_id="p1", source="cloud")
+            .order_by(Summary.template)
+            .all()
+        )
+        assert [(note.template, note.title) for note in notes] == [
+            ("action_items", "Actions"),
+            ("auto_sum_note", "Paid summary"),
+        ]
         run = session.get(ImportRun, "run")
         assert (run.status, run.total, run.processed, run.transcript_count, run.summary_count) == (
             "completed", 2, 2, 1, 1
@@ -138,6 +160,112 @@ def test_metadata_import_mirrors_artifacts_without_downloading(monkeypatch, tmp_
     with session_scope() as session:
         assert session.get(PlaudFile, "p2").cloud_artifacts_synced_at is not None
         assert session.get(ImportRun, "retry-refresh").skipped_count == 1
+
+
+def test_recording_cloud_refresh_imports_all_notes_and_stamps_sync(
+    monkeypatch, tmp_path
+):
+    _reset_db(monkeypatch, tmp_path)
+    from fastapi.testclient import TestClient
+
+    from localplaud.api.app import app
+    from localplaud.db.models import FileStatus, PlaudFile, Summary
+    from localplaud.db.session import init_db, session_scope
+
+    init_db()
+    with session_scope() as session:
+        session.add_all(
+            [
+                PlaudFile(
+                    id="plaud-file",
+                    filename="Plaud file",
+                    origin="plaud",
+                    status=FileStatus.metadata_only,
+                ),
+                PlaudFile(
+                    id="local-file",
+                    filename="Local file",
+                    origin="local",
+                    status=FileStatus.downloaded,
+                ),
+                PlaudFile(
+                    id="trashed-file",
+                    filename="Trashed file",
+                    origin="plaud",
+                    is_trash=True,
+                    status=FileStatus.metadata_only,
+                ),
+            ]
+        )
+
+    class FakeClient:
+        def get_detail(self, file_id):
+            return {"id": file_id}
+
+        def get_cloud_notes(self, file_id, detail):
+            return [
+                {"key": "summary", "title": "Summary", "markdown": "# Summary"},
+                {"key": "actions", "title": "Actions", "markdown": "# Actions"},
+            ]
+
+        def get_cloud_transcript_segments(self, file_id, detail):
+            return [{"text": "Cloud words", "start": 0.0, "end": 1.0}]
+
+    @contextmanager
+    def fake_factory(_cfg):
+        yield FakeClient()
+
+    monkeypatch.setattr("localplaud.plaud.make_plaud_client", fake_factory)
+    client = TestClient(app)
+    response = client.post("/api/files/plaud-file/refresh-cloud-artifacts")
+    assert response.status_code == 200
+    assert response.json() == {"transcript": True, "notes": 2}
+    assert client.post(
+        "/api/files/local-file/refresh-cloud-artifacts"
+    ).status_code == 422
+    assert client.post(
+        "/api/files/trashed-file/refresh-cloud-artifacts"
+    ).status_code == 404
+    with session_scope() as session:
+        row = session.get(PlaudFile, "plaud-file")
+        assert row.cloud_artifacts_synced_at is not None
+        assert {
+            (note.template, note.title, note.source)
+            for note in session.query(Summary).filter_by(file_id="plaud-file")
+        } == {
+            ("summary", "Summary", "cloud"),
+            ("actions", "Actions", "cloud"),
+        }
+
+
+def test_recording_cloud_refresh_redacts_provider_error(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from fastapi.testclient import TestClient
+
+    from localplaud.api.app import app
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="plaud-file",
+                filename="Plaud file",
+                origin="plaud",
+                status=FileStatus.metadata_only,
+            )
+        )
+
+    @contextmanager
+    def failed_factory(_cfg):
+        raise RuntimeError("refresh failed token=secret-value")
+        yield
+
+    monkeypatch.setattr("localplaud.plaud.make_plaud_client", failed_factory)
+    response = TestClient(app).post("/api/files/plaud-file/refresh-cloud-artifacts")
+    assert response.status_code == 502
+    assert response.json()["detail"] == "refresh failed token=[REDACTED]"
 
 
 def test_incremental_import_migration_is_additive_and_idempotent(tmp_path):

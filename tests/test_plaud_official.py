@@ -429,14 +429,26 @@ def test_cloud_artifacts_extracted_from_detail(tmp_path):
             {"data_type": "outline", "data_content": "{}"},
             {"data_type": "transaction", "data_content": json.dumps(segments)},
         ],
-        note_list=[{"data_type": "auto_sum_note", "data_title": "Summary",
-                    "data_content": "# Title\n\nbody"}],
+        note_list=[
+            {"data_type": "auto_sum_note", "data_title": "Summary",
+             "data_content": "# Title\n\nbody"},
+            {"data_type": "action_items", "data_content": "intro\n# Actions\n\n- One"},
+            {"data_type": "empty", "data_content": ""},
+        ],
     )
     respx.get(f"{API}/open/third-party/files/{fid}").mock(
         return_value=httpx.Response(200, json=detail)
     )
     with PlaudOfficialClient(_cfg(tmp_path)) as c:
         assert c.get_cloud_summary_md(fid) == "# Title\n\nbody"
+        assert c.get_cloud_notes(fid) == [
+            {"key": "auto_sum_note", "title": "Title", "markdown": "# Title\n\nbody"},
+            {
+                "key": "action_items",
+                "title": "Actions",
+                "markdown": "intro\n# Actions\n\n- One",
+            },
+        ]
         segs = c.get_cloud_transcript_segments(fid)
     assert segs == [
         {"text": "hi", "start": 1.0, "end": 2.5, "speaker": "Sky"},

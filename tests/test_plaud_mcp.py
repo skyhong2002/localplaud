@@ -5,7 +5,11 @@ def _client_without_process(monkeypatch):
     from localplaud.config import PlaudMcpConfig
     from localplaud.plaud.mcp import PlaudMcpClient
 
-    monkeypatch.setattr(PlaudMcpClient, "__init__", lambda self, cfg: setattr(self, "cfg", cfg))
+    def initialize(client, cfg):
+        client.cfg = cfg
+        client._detail_cache = {}
+
+    monkeypatch.setattr(PlaudMcpClient, "__init__", initialize)
     return PlaudMcpClient(PlaudMcpConfig())
 
 
@@ -49,12 +53,43 @@ def test_mcp_listing_normalizes_shared_dto(monkeypatch):
 def test_mcp_cloud_artifacts_stay_explicit(monkeypatch):
     client = _client_without_process(monkeypatch)
     responses = {
+        "get_file": {"id": "m1"},
         "get_note": {"markdown": "# Imported Plaud note"},
         "get_transcript": {"segments": [{"text": "hello", "start": 0, "end": 1}]},
     }
     monkeypatch.setattr(client, "_call_tool", lambda name, args=None: responses[name])
     assert client.get_cloud_summary_md("m1") == "# Imported Plaud note"
+    assert client.get_cloud_notes("m1") == [
+        {
+            "key": "auto_sum_note",
+            "title": "Imported Plaud note",
+            "markdown": "# Imported Plaud note",
+        }
+    ]
     assert client.get_cloud_transcript_segments("m1") == [{"text": "hello", "start": 0, "end": 1}]
+
+
+def test_mcp_cloud_notes_prefer_every_note_from_file_detail(monkeypatch):
+    client = _client_without_process(monkeypatch)
+    calls = []
+
+    def call(name, args=None):
+        calls.append(name)
+        if name == "get_file":
+            return {
+                "note_list": [
+                    {"data_type": "auto_sum_note", "data_content": "# Summary\nBody"},
+                    {"data_type": "outline", "data_content": "# Outline\nBody"},
+                ]
+            }
+        raise AssertionError("get_note fallback must not run when note_list is present")
+
+    monkeypatch.setattr(client, "_call_tool", call)
+    assert [note["key"] for note in client.get_cloud_notes("m1")] == [
+        "auto_sum_note",
+        "outline",
+    ]
+    assert calls == ["get_file"]
 
 
 def test_mcp_auth_status_does_not_read_or_expose_tokens(tmp_path):

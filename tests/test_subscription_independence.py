@@ -278,8 +278,9 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
 def test_cloud_only_recording_fails_gate_with_actionable_checks(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     from localplaud.acceptance import subscription_independence_report
-    from localplaud.db.models import FileStatus, PlaudFile, Transcript
+    from localplaud.db.models import FileStatus, PlaudFile, Summary, Transcript
     from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import refresh_cloud_artifacts_for
 
     init_db()
     with session_scope() as session:
@@ -297,10 +298,30 @@ def test_cloud_only_recording_fails_gate_with_actionable_checks(monkeypatch, tmp
                 ],
             )
         )
+    class CloudClient:
+        def get_detail(self, file_id):
+            return {"id": file_id}
+
+        def get_cloud_notes(self, file_id, detail):
+            return [
+                {
+                    "key": "auto_sum_note",
+                    "title": "Paid note",
+                    "markdown": "# Paid note",
+                }
+            ]
+
+        def get_cloud_transcript_segments(self, file_id, detail):
+            return [{"text": "paid artifact", "start": 0.0, "end": 1.0}]
+
+    assert refresh_cloud_artifacts_for(CloudClient(), "cloud-only") == (True, True)
     report = subscription_independence_report("cloud-only")
+    with session_scope() as session:
+        notes = session.query(Summary).filter_by(file_id="cloud-only").all()
+        assert len(notes) == 1 and notes[0].source == "cloud"
     failed = {item["name"] for item in report["checks"] if not item["passed"]}
     assert report["passed"] is False
-    assert {"raw_audio_local", "local_transcript", "required_exports"} <= failed
+    assert {"raw_audio_local", "local_transcript", "local_notes", "required_exports"} <= failed
 
 
 def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatch, tmp_path):

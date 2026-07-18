@@ -1464,6 +1464,9 @@ def test_independent_ui_labels_imported_transcript_without_treating_it_as_local(
     assert "Plaud import" in detail.text
     assert "canonical result" in detail.text
     assert 'hx-get="/file/cloud/transcript-page?source=imported"' in detail.text
+    assert 'class="chip plaud-note-chip">Plaud</span>' in detail.text
+    assert "Read-only" in detail.text
+    assert 'data-summary-copy=' not in detail.text
     first = c.get("/file/cloud/transcript-page?source=imported")
     assert "imported-0" in first.text and "offset=120" in first.text
     transcript_id = int(re.search(r"page_transcript_id=(\d+)", first.text).group(1))

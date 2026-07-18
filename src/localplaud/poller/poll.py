@@ -756,7 +756,7 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
     from ..db.models import Transcript as TranscriptRow
 
     detail = client.get_detail(file_id)
-    summary_md = client.get_cloud_summary_md(file_id, detail)
+    notes = client.get_cloud_notes(file_id, detail)
     segments = client.get_cloud_transcript_segments(file_id, detail)
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
@@ -773,17 +773,13 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
                 TranscriptRow.source.in_(("cloud", "plaud")),
             )
         )
-        if summary_md:
-            title = next(
-                (line[2:].strip() for line in summary_md.splitlines() if line.startswith("# ")),
-                None,
-            )
+        for note in notes:
             session.add(
                 SummaryRow(
                     file_id=file_id,
-                    template="plaud",
-                    title=title,
-                    content_md=summary_md,
+                    template=note["key"],
+                    title=note["title"],
+                    content_md=note["markdown"],
                     source="cloud",
                 )
             )
@@ -798,13 +794,13 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
                     segments=segments,
                 )
             )
-        row.cloud_is_summary = bool(summary_md)
+        row.cloud_is_summary = bool(notes)
         row.cloud_is_trans = bool(segments)
         row.raw = {
             **(row.raw or {}),
             _ARTIFACT_CHECKED_KEY: row.filename,
         }
-    return (bool(segments), bool(summary_md))
+    return (bool(segments), bool(notes))
 
 
 def ingest_cloud_artifacts(client, settings: Settings) -> int:

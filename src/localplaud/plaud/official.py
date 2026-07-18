@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,6 +48,24 @@ _PAGE_SIZE = 100
 # source_list / note_list entry types we consume.
 _TRANSCRIPT_TYPE = "transaction"
 _SUMMARY_TYPE = "auto_sum_note"
+
+
+def _cloud_notes(detail: dict) -> list[dict]:
+    notes = []
+    for item in detail.get("note_list") or []:
+        markdown = item.get("data_content")
+        if not markdown:
+            continue
+        markdown = str(markdown)
+        heading = re.search(r"^# (.+?)\s*$", markdown, flags=re.MULTILINE)
+        notes.append(
+            {
+                "key": str(item.get("data_type") or ""),
+                "title": heading.group(1).strip() if heading else None,
+                "markdown": markdown,
+            }
+        )
+    return notes
 
 
 def _parse_iso_ms(value: str | None) -> int | None:
@@ -224,11 +243,19 @@ class PlaudOfficialClient:
     def get_cloud_summary_md(self, file_id: str, detail: dict | None = None) -> str | None:
         """Plaud's own summary (markdown), from the ``auto_sum_note`` entry of
         the detail payload's ``note_list``."""
+        notes = self.get_cloud_notes(file_id, detail)
+        summary = next((note for note in notes if note["key"] == _SUMMARY_TYPE), None)
+        if summary is None:
+            summary = next(
+                (note for note in notes if "sum" in note["key"].casefold()),
+                notes[0] if notes else None,
+            )
+        return summary["markdown"] if summary is not None else None
+
+    def get_cloud_notes(self, file_id: str, detail: dict | None = None) -> list[dict]:
+        """Return every Plaud note with explicit cloud provenance metadata."""
         detail = detail if detail is not None else self.get_detail(file_id)
-        for note in detail.get("note_list") or []:
-            if note.get("data_type") == _SUMMARY_TYPE and note.get("data_content"):
-                return note["data_content"]
-        return None
+        return _cloud_notes(detail)
 
     def get_cloud_transcript_segments(
         self, file_id: str, detail: dict | None = None
