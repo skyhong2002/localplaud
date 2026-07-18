@@ -918,6 +918,8 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "const workspacePopovers=" in r.text
     assert "closeWorkspacePopover(open)" in r.text
     assert ".md table { display:block;max-width:100%;overflow-x:auto; }" in r.text
+    # Mirrored note images must never exceed the note column or the viewport.
+    assert ".md img { display:block;max-width:min(100%,560px);height:auto;" in r.text
     # Cells must opt out of the .md overflow-wrap:anywhere default: anywhere
     # collapses every column's min-content width to one character on narrow
     # viewports, so wide tables squeeze into vertical letter stacks instead of
