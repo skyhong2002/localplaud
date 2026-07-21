@@ -1,25 +1,42 @@
 {% extends "base.html" %}
 {% block title %}{{ f.filename }} — localplaud{% endblock %}
 {% block body %}
-<div class="shell">
+<div class="shell recording-shell">
   {% set active_id = f.id %}
+  <header class="detail-topbar">
+    <div class="recording-breadcrumb">
+      <button class="collapse-toggle" type="button" data-collapse-toggle="list" aria-label="{{ t('Hide file list') }}" title="{{ t('Hide file list') }}" aria-controls="recording-file-list" aria-expanded="true"><span class="nav-icon" style="--nav-icon:url('/static/lucide/list-collapse.svg')"></span></button>
+      <a class="recording-crumb-link" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true"><span class="nav-icon" style="--nav-icon:url('/static/lucide/folder.svg')"></span>{{ t('All files') }}</a>
+      <span class="recording-crumb-separator" aria-hidden="true">›</span>
+      <div class="recording-title-row" id="recording-title-display-row">
+        <h1 id="recording-title-display" title="{{ f.filename }}">{{ f.filename }}</h1>
+        <button class="title-edit" id="edit-recording-title" type="button" aria-label="{{ t('Edit title') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></button>
+      </div>
+      <form id="recording-title-form" class="recording-title-row" hidden>
+        <input id="recording-title" value="{{ f.filename }}" maxlength="512" aria-label="{{ t('Recording title') }}">
+        <button class="icon-action icon-only" type="submit" aria-label="{{ t('Save title') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></span></button>
+        <button class="icon-action icon-only" id="cancel-recording-title" type="button" aria-label="{{ t('Cancel') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
+      </form>
+    </div>
+    <div class="recording-actions">
+      <button class="icon-action" id="open-ask-dock" type="button" aria-controls="recording-panel-ask" aria-expanded="false"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span><span class="action-label">{{ t('Ask') }}</span></button>
+      <button class="icon-action" id="open-share" type="button" aria-label="{{ t('Share') }}" title="{{ t('Share') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span><span class="action-label">{{ t('Share') }}</span></button>
+      {% if f.transcript or f.summaries or f.user_notes or f.has_audio %}<button class="icon-action" id="open-export" type="button" aria-label="{{ t('Export') }}" title="{{ t('Export') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span><span class="action-label">{{ t('Export') }}</span></button>{% endif %}
+      <details class="recording-more"><summary class="icon-action icon-only" aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></summary><div class="recording-menu">
+        {% if not f.has_audio and f.origin == 'plaud' %}<button id="import-recording-audio" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Import audio') }}</button>{% endif %}
+        {% if f.origin == 'plaud' and not f.is_trash %}<button id="refresh-plaud-cloud" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Refresh Plaud cloud artifacts') }}</button>{% endif %}
+        {% if f.local_title %}<button id="clear-local-title" type="button">{{ t('Use Plaud title') }}</button>{% endif %}
+        <button id="menu-edit-recording-metadata" type="button">{{ t('Folder and tags') }}</button>
+        {% if f.has_audio %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>{% endif %}
+        <button id="menu-processing-details" type="button">{{ t('Processing details') }}</button>
+      </div></details>
+    </div>
+  </header>
+  <div class="detail-body">
   {% include "_filelist.html" %}
   <section class="pane recording-pane{% if f.has_audio %} has-player{% endif %}"><div class="pane-inner">
     <div class="recording-header">
       <div class="recording-heading">
-        <div class="recording-breadcrumb">
-          <a class="recording-crumb-link" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ t('All files') }}</a>
-          <span class="recording-crumb-separator" aria-hidden="true">›</span>
-          <div class="recording-title-row" id="recording-title-display-row">
-            <h1 id="recording-title-display" title="{{ f.filename }}">{{ f.filename }}</h1>
-            <button class="title-edit" id="edit-recording-title" type="button" aria-label="{{ t('Edit title') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></button>
-          </div>
-          <form id="recording-title-form" class="recording-title-row" hidden>
-            <input id="recording-title" value="{{ f.filename }}" maxlength="512" aria-label="{{ t('Recording title') }}">
-            <button class="icon-action icon-only" type="submit" aria-label="{{ t('Save title') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></span></button>
-            <button class="icon-action icon-only" id="cancel-recording-title" type="button" aria-label="{{ t('Cancel') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
-          </form>
-        </div>
         {% if f.local_title %}<div class="sub" style="font-size:11.5px;margin:2px 5px">{{ t('Plaud title') }}: {{ f.cloud_filename or t('Untitled') }}</div>{% endif %}
         <div class="recording-context">
           <div class="recording-meta">
@@ -32,19 +49,6 @@
             <button type="button" id="edit-recording-metadata" style="border:0;background:none;color:var(--blue);cursor:pointer;font-size:11.5px;padding:2px 4px">{% if f.folder or f.tags %}{{ t('Edit metadata') }}{% else %}{{ t('Add folder or tags') }}{% endif %}</button>
           </div>
         </div>
-      </div>
-      <div class="recording-actions">
-        <button class="icon-action" id="open-ask-dock" type="button" aria-controls="recording-panel-ask" aria-expanded="false"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span><span class="action-label">{{ t('Ask') }}</span></button>
-        <button class="icon-action" id="open-share" type="button" aria-label="{{ t('Share') }}" title="{{ t('Share') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span><span class="action-label">{{ t('Share') }}</span></button>
-        {% if f.transcript or f.summaries or f.user_notes or f.has_audio %}<button class="icon-action" id="open-export" type="button" aria-label="{{ t('Export') }}" title="{{ t('Export') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span><span class="action-label">{{ t('Export') }}</span></button>{% endif %}
-        <details class="recording-more"><summary class="icon-action icon-only" aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></summary><div class="recording-menu">
-          {% if not f.has_audio and f.origin == 'plaud' %}<button id="import-recording-audio" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Import audio') }}</button>{% endif %}
-          {% if f.origin == 'plaud' and not f.is_trash %}<button id="refresh-plaud-cloud" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Refresh Plaud cloud artifacts') }}</button>{% endif %}
-          {% if f.local_title %}<button id="clear-local-title" type="button">{{ t('Use Plaud title') }}</button>{% endif %}
-          <button id="menu-edit-recording-metadata" type="button">{{ t('Folder and tags') }}</button>
-          {% if f.has_audio %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>{% endif %}
-          <button id="menu-processing-details" type="button">{{ t('Processing details') }}</button>
-        </div></details>
       </div>
     </div>
     {% set mindmaps = f.summaries | selectattr('template', 'equalto', 'mind_map') | list %}
@@ -366,6 +370,7 @@
     </aside>
     </div>
   </div></section>
+  </div>
 </div>
 {% if f.has_audio and not f.transcript %}
 <div class="import-backdrop" id="generate-backdrop" hidden>
@@ -430,6 +435,14 @@
       <div id="share-result" class="sub" role="status"></div>
       <section class="public-share-section" aria-labelledby="public-share-title">
         <div><strong id="public-share-title">{{ t('Public share link') }}</strong><div class="sub" style="font-size:12px;margin-top:2px">{{ t('Anyone with this link can view this recording without signing in.') }}</div></div>
+        <div class="share-options" role="group" aria-labelledby="share-options-title">
+          <span class="share-options-title" id="share-options-title">{{ t('Shared content') }}</span>
+          <label><input type="checkbox" id="share-opt-audio" data-share-option="audio" checked>{{ t('Audio') }}</label>
+          <label><input type="checkbox" id="share-opt-transcript" data-share-option="transcript" checked>{{ t('Transcript') }}</label>
+          <label><input type="checkbox" id="share-opt-notes" data-share-option="notes" checked>{{ t('Notes and mind map') }}</label>
+          <label><input type="checkbox" id="share-opt-plaud" data-share-option="plaud_artifacts">{{ t('Plaud-imported content') }}</label>
+          <span class="sub share-options-note">{{ t('Plaud-imported content is published only when enabled, and is always clearly labelled on the public page.') }}</span>
+        </div>
         <div id="public-share-empty" hidden><button class="btn" id="create-public-share" type="button">{{ t('Create public link') }}</button></div>
         <div id="public-share-active" style="display:grid;gap:8px" hidden>
           <div class="share-link-row"><input id="public-share-link" class="search-input" readonly value="" aria-label="{{ t('Public share link') }}"><button class="btn" id="copy-public-share" type="button">{{ t('Copy') }}</button></div>
@@ -641,15 +654,19 @@
   const shareBackdrop=document.getElementById('share-backdrop'),shareInput=document.getElementById('share-link'),shareResult=document.getElementById('share-result'),systemShare=document.getElementById('system-share'),publicShareEmpty=document.getElementById('public-share-empty'),publicShareActive=document.getElementById('public-share-active'),publicShareInput=document.getElementById('public-share-link'),publicShareResult=document.getElementById('public-share-result'),publicShareCreated=document.getElementById('public-share-created');
   const recordingUrl=()=>{const url=new URL(location.href);url.searchParams.delete('workspace');url.searchParams.delete('preserve_filelist');url.searchParams.delete('return_to');url.hash='';return url.href;};
   async function shareRequestJson(options={}){let response;try{response=await fetch('/api/files/{{ f.id }}/share-link',{...options,signal:cleanupController.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr('Could not update public link'));}let data={};try{data=await response.json();}catch(_error){}if(!response.ok)throw new Error(tr(typeof data.detail==='string'?data.detail:'Could not update public link'));return data;}
-  function renderPublicShare(data){publicShareEmpty.hidden=Boolean(data.active);publicShareActive.hidden=!data.active;publicShareInput.value=data.url||'';publicShareCreated.textContent=data.created_at?`${tr('Created')} · ${new Intl.DateTimeFormat(document.documentElement.lang||undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(data.created_at))}`:'';}
+  const shareOptionInputs=[...document.querySelectorAll('[data-share-option]')];
+  const shareOptionValues=()=>Object.fromEntries(shareOptionInputs.map(input=>[input.dataset.shareOption,input.checked]));
+  let publicShareActiveState=false;
+  function renderPublicShare(data){publicShareActiveState=Boolean(data.active);publicShareEmpty.hidden=Boolean(data.active);publicShareActive.hidden=!data.active;publicShareInput.value=data.url||'';publicShareCreated.textContent=data.created_at?`${tr('Created')} · ${new Intl.DateTimeFormat(document.documentElement.lang||undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(data.created_at))}`:'';if(data.options)shareOptionInputs.forEach(input=>{input.checked=Boolean(data.options[input.dataset.shareOption]);});}
   async function loadPublicShare(){publicShareEmpty.hidden=true;publicShareActive.hidden=true;publicShareResult.textContent=tr('Loading public link…');try{renderPublicShare(await shareRequestJson());publicShareResult.textContent='';}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not load public link');}}
+  shareOptionInputs.forEach(input=>input.addEventListener('change',async()=>{if(!publicShareActiveState)return;publicShareResult.textContent=tr('Updating…');try{renderPublicShare(await shareRequestJson({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:shareOptionValues()})}));publicShareResult.textContent=tr('Shared content updated');}catch(error){if(error.name!=='AbortError'){publicShareResult.textContent=error.message||tr('Could not update public link');loadPublicShare();}}}));
   document.getElementById('open-share')?.addEventListener('click',event=>{shareInput.value=recordingUrl();systemShare.hidden=!navigator.share;openDialog(shareBackdrop,event.currentTarget);loadPublicShare();});
   document.getElementById('share-close')?.addEventListener('click',()=>{closeDialog(shareBackdrop);shareResult.textContent='';publicShareResult.textContent='';});
   shareBackdrop?.addEventListener('click',event=>{if(event.target===shareBackdrop)document.getElementById('share-close').click();});
   async function writeClipboard(text){try{await navigator.clipboard.writeText(text);return;}catch(_error){}const priorFocus=document.activeElement,area=document.createElement('textarea');area.value=text;area.setAttribute('readonly','');area.style.cssText='position:fixed;opacity:0;pointer-events:none';document.body.append(area);area.select();const copied=document.execCommand('copy');area.remove();priorFocus?.focus();if(!copied)throw new Error('clipboard unavailable');}
   function showNoteConflict(form,status){form.querySelector('[data-note-conflict]')?.remove();status.textContent=tr('This note changed elsewhere. Your text is still here. Reload before saving.');const recovery=document.createElement('button');recovery.className='btn sec';recovery.type='button';recovery.dataset.noteConflict='';recovery.textContent=tr('Copy draft and reload');recovery.addEventListener('click',async()=>{recovery.disabled=true;try{await writeClipboard(`# ${form.elements.title.value}\n\n${form.elements.content_md.value}`);location.reload();}catch(_error){status.textContent=tr('Could not copy draft');recovery.disabled=false;}});status.after(recovery);recovery.focus();}
   document.getElementById('copy-share-link')?.addEventListener('click',async()=>{try{await writeClipboard(shareInput.value);shareResult.textContent=tr('Copied');}catch(_error){shareResult.textContent=tr('Copy failed');}});
-  document.getElementById('create-public-share')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;publicShareResult.textContent=tr('Creating public link…');try{renderPublicShare(await shareRequestJson({method:'POST'}));publicShareResult.textContent='';}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not create public link');}finally{event.currentTarget.disabled=false;}});
+  document.getElementById('create-public-share')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;publicShareResult.textContent=tr('Creating public link…');try{renderPublicShare(await shareRequestJson({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:shareOptionValues()})}));publicShareResult.textContent='';}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not create public link');}finally{event.currentTarget.disabled=false;}});
   document.getElementById('copy-public-share')?.addEventListener('click',async()=>{try{await writeClipboard(publicShareInput.value);publicShareResult.textContent=tr('Copied');}catch(_error){publicShareResult.textContent=tr('Copy failed');}});
   document.getElementById('revoke-public-share')?.addEventListener('click',async event=>{if(!confirm(tr('Disable this public link? Anyone using it will immediately lose access.')))return;event.currentTarget.disabled=true;publicShareResult.textContent=tr('Disabling public link…');try{await shareRequestJson({method:'DELETE'});renderPublicShare({active:false});publicShareResult.textContent=tr('Public link disabled');}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not disable public link');}finally{event.currentTarget.disabled=false;}});
   systemShare?.addEventListener('click',async()=>{try{await navigator.share({title:{{ f.filename|tojson }},url:shareInput.value});}catch(error){if(error.name!=='AbortError')shareResult.textContent=tr('Share failed');}});

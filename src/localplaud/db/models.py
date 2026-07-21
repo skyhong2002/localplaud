@@ -320,6 +320,9 @@ class ShareLink(Base):
         ForeignKey("plaud_files.id", ondelete="CASCADE"), index=True
     )
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # Per-link content selection ({audio, transcript, notes, plaud_artifacts});
+    # None means the defaults (everything local, no Plaud-imported artifacts).
+    options: Mapped[dict | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

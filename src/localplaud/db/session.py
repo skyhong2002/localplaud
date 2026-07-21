@@ -116,6 +116,7 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
         migrate_processing_claim_schema,
         migrate_profile_resolution_schema,
         migrate_profile_snapshot_columns,
+        migrate_share_link_options_schema,
         migrate_speaker_timeline_schema,
         migrate_stage_attempt_schema,
         migrate_summary_revision_schema,
@@ -150,6 +151,7 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
     migrate_incremental_import_schema(engine)
     migrate_knowledge_index_schema(engine)
     migrate_vocabulary_schema(engine)
+    migrate_share_link_options_schema(engine)
     redact_legacy_error_text(engine)
     with Session(engine) as session:
         bootstrap_default_profile(session, get_settings())

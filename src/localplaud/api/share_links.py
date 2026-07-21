@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from ..db.models import PlaudFile, ShareLink, StageName
@@ -35,6 +36,23 @@ _SPEAKER_COLORS = (
     "#CA8A04",
     "#EA580C",
 )
+
+
+class ShareLinkOptions(BaseModel):
+    """What a public link exposes. Plaud-imported artifacts stay opt-in."""
+
+    audio: bool = True
+    transcript: bool = True
+    notes: bool = True
+    plaud_artifacts: bool = False
+
+
+class ShareLinkUpdate(BaseModel):
+    options: ShareLinkOptions = ShareLinkOptions()
+
+
+def _options(link: ShareLink | None) -> ShareLinkOptions:
+    return ShareLinkOptions(**(link.options or {})) if link is not None else ShareLinkOptions()
 
 
 def _not_found() -> HTTPException:
@@ -88,6 +106,7 @@ def _link_payload(request: Request, link: ShareLink | None) -> dict:
         "url": _url(request, link.token) if link is not None else None,
         "created_at": _iso(link.created_at) if link is not None else None,
         "last_used_at": _iso(link.last_used_at) if link is not None else None,
+        "options": _options(link).model_dump(),
     }
 
 
@@ -112,7 +131,9 @@ def _duration(duration_ms: int | None) -> str:
 
 
 @router.post("/api/files/{file_id}/share-link")
-def create_share_link(request: Request, file_id: str) -> dict:
+def create_share_link(
+    request: Request, file_id: str, payload: ShareLinkUpdate | None = None
+) -> dict:
     with session_scope() as session:
         _visible_recording(session, file_id)
         link = _active_link(session, file_id)
@@ -124,6 +145,8 @@ def create_share_link(request: Request, file_id: str) -> dict:
             )
             session.add(link)
             session.flush()
+        if payload is not None:
+            link.options = payload.options.model_dump()
         return _link_payload(request, link)
 
 
@@ -149,15 +172,19 @@ def public_share(request: Request, token: str):
     with session_scope() as session:
         link = _public_link(session, token)
         recording = link.file
-        raw_transcript = recording.local_transcript
-        corrected = recording.corrected_transcript_for_source("local")
-        segments = list(
-            corrected.segments
-            if corrected is not None
-            else raw_transcript.segments
-            if raw_transcript is not None
-            else []
-        )
+        options = _options(link)
+        segments: list = []
+        transcript_imported = False
+        if options.transcript:
+            corrected = recording.corrected_transcript_for_source("local")
+            raw_transcript = recording.local_transcript
+            if corrected is not None or raw_transcript is not None:
+                segments = list((corrected or raw_transcript).segments)
+            elif options.plaud_artifacts and recording.plaud_transcript is not None:
+                imported = recording.plaud_transcript
+                corrected_imported = recording.corrected_transcript_for_source(imported.source)
+                segments = list((corrected_imported or imported).segments)
+                transcript_imported = True
         names = display_names(session, recording.id)
         speaker_colors: dict[str, str] = {}
         for segment in segments:
@@ -167,16 +194,35 @@ def public_share(request: Request, token: str):
         stale_stages = {
             run.stage for run in recording.stage_runs if (run.detail or {}).get("stale")
         }
-        notes = [
-            summary
-            for summary in sorted(recording.summaries, key=lambda item: (item.template, item.id))
-            if summary.source == "local"
-            and summary.input_transcript_source not in {"cloud", "plaud"}
-            and not (
-                (summary.template == "mind_map" and StageName.mind_map in stale_stages)
-                or (summary.template != "mind_map" and StageName.summarize in stale_stages)
-            )
-        ]
+        notes: list[dict] = []
+        if options.notes:
+            ordered = sorted(recording.summaries, key=lambda item: (item.template, item.id))
+            notes = [
+                {
+                    "title": summary.title,
+                    "template": summary.template,
+                    "content_md": summary.content_md,
+                    "imported": False,
+                }
+                for summary in ordered
+                if summary.source == "local"
+                and summary.input_transcript_source not in {"cloud", "plaud"}
+                and not (
+                    (summary.template == "mind_map" and StageName.mind_map in stale_stages)
+                    or (summary.template != "mind_map" and StageName.summarize in stale_stages)
+                )
+            ]
+            if options.plaud_artifacts:
+                notes += [
+                    {
+                        "title": summary.title,
+                        "template": summary.template,
+                        "content_md": summary.content_md,
+                        "imported": True,
+                    }
+                    for summary in ordered
+                    if summary.source in {"cloud", "plaud"}
+                ]
         preferences = get_workspace_preferences(session)
         link.last_used_at = datetime.now(UTC)
         context = {
@@ -184,8 +230,11 @@ def public_share(request: Request, token: str):
                 "title": recording.display_title,
                 "recorded_at": _recorded_at(recording.start_time_ms, preferences),
                 "duration": _duration(recording.duration_ms),
-                "has_audio": bool(recording.audio_path and Path(recording.audio_path).exists()),
+                "has_audio": options.audio
+                and bool(recording.audio_path and Path(recording.audio_path).exists()),
             },
+            "show_transcript": options.transcript,
+            "transcript_imported": transcript_imported,
             "segments": segments,
             "speaker_names": names,
             "speaker_colors": speaker_colors,
@@ -202,6 +251,8 @@ def public_share(request: Request, token: str):
 def public_share_audio(token: str):
     with session_scope() as session:
         link = _public_link(session, token)
+        if not _options(link).audio:
+            raise _not_found()
         path = link.file.audio_path
     if not path or not Path(path).is_file():
         raise _not_found()

@@ -499,6 +499,21 @@ def migrate_legacy_stage_run_schema(engine: Engine) -> list[str]:
     return ["stage_runs"]
 
 
+def migrate_share_link_options_schema(engine: Engine) -> list[str]:
+    """Add per-link content selection to existing public share links."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "share_links" not in set(inspector.get_table_names()):
+        return []
+    columns = {column["name"] for column in inspector.get_columns("share_links")}
+    if "options" in columns:
+        return []
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE share_links ADD COLUMN options JSON"))
+    return ["share_links.options"]
+
+
 def migrate_automation_ownership_schema(engine: Engine) -> list[str]:
     """Add explicit local/external ownership to existing AutoFlow rules."""
     if engine.dialect.name != "sqlite":

@@ -291,6 +291,109 @@ def test_cloud_only_transcript_never_appears_on_public_share(clients):
     assert "paid cloud summary must stay private" not in page.text
 
 
+def test_share_options_control_public_content(clients):
+    authenticated, public, tmp_path = clients
+    _seed_recording(tmp_path)
+    created = _create_link(authenticated)
+    assert created["options"] == {
+        "audio": True,
+        "transcript": True,
+        "notes": True,
+        "plaud_artifacts": False,
+    }
+    path = _share_path(created)
+
+    disabled = authenticated.post(
+        "/api/files/recording/share-link",
+        json={
+            "options": {
+                "audio": False,
+                "transcript": False,
+                "notes": False,
+                "plaud_artifacts": False,
+            }
+        },
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["url"] == created["url"]
+    assert disabled.json()["options"]["audio"] is False
+
+    page = public.get(path)
+    assert page.status_code == 200
+    assert "Local weekly sync" in page.text
+    assert "corrected canonical line" not in page.text
+    assert "Local generated note" not in page.text
+    assert "<audio" not in page.text
+    assert public.get(f"{path}/audio").status_code == 404
+
+    restored = authenticated.post(
+        "/api/files/recording/share-link",
+        json={
+            "options": {
+                "audio": True,
+                "transcript": True,
+                "notes": True,
+                "plaud_artifacts": False,
+            }
+        },
+    )
+    assert restored.status_code == 200
+    page = public.get(path)
+    assert "corrected canonical line" in page.text
+    assert "Local generated note" in page.text
+    assert public.get(f"{path}/audio").status_code == 200
+
+
+def test_plaud_imported_content_requires_explicit_opt_in_and_label(clients):
+    authenticated, public, tmp_path = clients
+    from localplaud.db.models import FileStatus, PlaudFile, Summary, Transcript
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        recording = PlaudFile(id="cloud-only", filename="Imported", status=FileStatus.done)
+        recording.transcripts.append(
+            Transcript(
+                provider="plaud",
+                source="cloud",
+                text="imported cloud transcript line",
+                segments=[
+                    {"text": "imported cloud transcript line", "start": 0.0, "end": 1.0}
+                ],
+            )
+        )
+        recording.summaries.append(
+            Summary(
+                template="plaud",
+                title="Plaud summary",
+                source="cloud",
+                content_md="imported cloud summary body",
+            )
+        )
+        session.add(recording)
+
+    path = _share_path(_create_link(authenticated, "cloud-only"))
+    page = public.get(path)
+    assert "imported cloud transcript line" not in page.text
+    assert "imported cloud summary body" not in page.text
+
+    enabled = authenticated.post(
+        "/api/files/cloud-only/share-link",
+        json={
+            "options": {
+                "audio": True,
+                "transcript": True,
+                "notes": True,
+                "plaud_artifacts": True,
+            }
+        },
+    )
+    assert enabled.status_code == 200
+    page = public.get(path)
+    assert "imported cloud transcript line" in page.text
+    assert "imported cloud summary body" in page.text
+    assert "Imported from Plaud" in page.text
+
+
 def test_page_view_updates_last_used_at(clients):
     authenticated, public, tmp_path = clients
     _seed_recording(tmp_path)
