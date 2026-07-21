@@ -88,6 +88,11 @@
   .organization-manager-body { gap:17px;overflow-y:auto; }
   .organization-manager-section { min-width:0; }
   .organization-manager-section h3 { margin:0 0 5px;font-size:14px; }
+  .organization-manager-create { display:flex;gap:7px;align-items:center;margin:7px 0 10px;min-width:0; }
+  .organization-manager-create label { flex:1;min-width:0; }
+  .organization-manager-create input { width:100%; }
+  .organization-manager-create .btn { display:inline-flex;align-items:center;gap:6px;flex:none; }
+  .organization-manager-create .nav-icon { width:14px;height:14px; }
   .organization-manager-list { border-top:1px solid var(--border); }
   .organization-manager-row { min-width:0;padding:10px 0;border-bottom:1px solid var(--border); }
   .organization-manager-view { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center; }
@@ -238,6 +243,9 @@
     .bulk-danger-actions { justify-content:flex-end;flex-wrap:wrap; }
     .bulk-export-options { grid-template-columns:1fr; }
     .organization-manager-modal { max-height:calc(100dvh - 24px); }
+    .organization-manager-create { align-items:stretch;flex-wrap:wrap; }
+    .organization-manager-create label { flex-basis:100%; }
+    .organization-manager-create .btn { justify-content:center; }
     .organization-manager-view { align-items:start; }
     .organization-manager-edit { align-items:stretch;flex-wrap:wrap; }
     .organization-manager-edit input { flex-basis:100%; }
@@ -451,6 +459,10 @@
       {% for kind, heading, items in [('folders', t('Folders'), organization.folders), ('tags', t('Tags'), organization.tags)] %}
       <section class="organization-manager-section" data-organization-section="{{ kind }}">
         <h3>{{ heading }}</h3>
+        <form class="organization-manager-create" data-create-kind="{{ kind }}">
+          <label><span class="visually-hidden">{{ t('Folder name') if kind == 'folders' else t('Tag name') }}</span><input class="search-input" name="name" maxlength="80" placeholder="{{ t('Folder name') if kind == 'folders' else t('Tag name') }}" required></label>
+          <button class="btn" type="submit"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span>{{ t('Add') }}</button>
+        </form>
         <div class="organization-manager-list">
           {% for item in items %}
           <div class="organization-manager-row" data-organization-kind="{{ kind }}" data-organization-id="{{ item.id }}" data-organization-color="{{ item.color or '' }}">
@@ -828,19 +840,21 @@
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const button = form.querySelector('button');
+      const status = form.closest('#organization-manager-backdrop') ? organizationStatus : createStatus;
       const name = String(new FormData(form).get('name') || '').trim();
-      if(!name){if(createStatus)createStatus.textContent=tr('Enter a name');form.elements.name.focus();return;}
+      if(!name){if(status)status.textContent=tr('Enter a name');form.elements.name.focus();return;}
       button.disabled = true;
-      if(createStatus)createStatus.textContent = '';
+      if(status)status.textContent = '';
       try {
         const data = await mutateOrganization(`/api/${form.dataset.createKind}`, {
           method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})
         }, 'Could not create item');
+        if(status)status.textContent=tr('Created. Reloading…');
         window.location.href = `/?view=all&${form.dataset.createKind === 'folders' ? 'folder' : 'tag'}=${data.id}`;
       } catch (error) {
         if(error.name==='AbortError')return;
         button.disabled = false;
-        if(createStatus)createStatus.textContent = error.message;
+        if(status)status.textContent = error.message;
         form.elements.name.focus();
       }
     }, {signal:cleanupController.signal});

@@ -222,6 +222,11 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert 'aria-labelledby="organization-manager-title"' in page.text
     assert 'data-organization-kind="folders"' in page.text
     assert 'data-organization-kind="tags"' in page.text
+    assert 'class="organization-manager-create" data-create-kind="folders"' in page.text
+    assert 'class="organization-manager-create" data-create-kind="tags"' in page.text
+    assert page.text.count('class="organization-manager-create"') == 2
+    assert "form.closest('#organization-manager-backdrop') ? organizationStatus : createStatus" in page.text
+    assert "status.textContent=tr('Created. Reloading…')" in page.text
     assert 'aria-label="Rename Research"' in page.text
     assert 'aria-label="Delete Interview"' in page.text
     assert "const organizationModal = organizationBackdrop ? window.localplaudModal" in page.text
