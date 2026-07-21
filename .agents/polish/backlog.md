@@ -17,7 +17,7 @@ Journeys:
 
 ## Findings
 
-- [ ] (P1) Library table: mobile sort and select-all controls overlap the first card, and tapping the apparent header checkbox selects only the first recording instead of all visible recordings — 2026-07-22 browser audit at 390px; `/tmp/localplaud-polish-20260722/discovery/P1-mobile-select-all-overlaps-first-row-390x844.png`
+- [x] (P1) Library table: mobile sort and select-all controls overlap the first card, and tapping the apparent header checkbox selects only the first recording instead of all visible recordings — 2026-07-22 browser audit at 390px; `/tmp/localplaud-polish-20260722/discovery/P1-mobile-select-all-overlaps-first-row-390x844.png` (commit 146eaab)
 - [ ] (P1) Library table: destructive bulk processing deletion is presented in the same menu with the same Apply button as routine folder/tag actions, with no inline warning or visual separation — 2026-07-22 browser audit; `/tmp/localplaud-polish-20260722/discovery/P1-desktop-bulk-delete-option-adjacent-1400x900.png`
 - [ ] (P2) Library table: an empty folder/tag manager is dead-ended because it reports no items but offers no creation action inside the dialog — 2026-07-22 browser audit at desktop and mobile widths
 - [ ] (P2) Library table: active filters are represented only by a count badge, and an empty filtered result offers no visible filter summary or reset action — 2026-07-22 browser audit; `/tmp/localplaud-polish-20260722/discovery/P2-desktop-filter-empty-no-visible-reset-1400x900.png`
