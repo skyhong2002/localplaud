@@ -245,7 +245,21 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert messages["name already exists"] == "名稱已存在"
     assert messages["Could not delete item"] == "無法刪除項目"
     assert '<option value="resume">' in page.text
-    assert '<option value="delete-local-processing">' in page.text
+    assert '<option value="delete-local-processing">' not in page.text
+    assert 'id="bulk-action" aria-label="Organization action"' in page.text
+    assert 'id="bulk-delete-processing" aria-expanded="false"' in page.text
+    assert 'id="bulk-delete-confirm" role="alertdialog"' in page.text
+    assert 'aria-describedby="bulk-delete-description" hidden' in page.text
+    assert "Delete local transcript, corrections, generated notes, mind map, search index, and processing history?" in page.text
+    assert 'class="bulk-danger-preserved"' in page.text
+    for preserved in ("Original audio", "Folders", "Tags", "Ask history", "Editable note"):
+        assert preserved in page.text
+    assert "deleteConfirm.hidden = false" in page.text
+    assert "deleteCancel?.focus()" in page.text
+    assert "if (event.key !== 'Escape' || !deleteConfirm || deleteConfirm.hidden) return" in page.text
+    assert "action:'delete_local_processing'" in page.text
+    assert "const lifecycle = action.value === 'resume';" in page.text
+    assert messages["Delete local processing"] == "刪除本機處理結果"
     assert 'value="a"' in page.text
 
     detail = client.get("/file/a")

@@ -120,9 +120,25 @@
   .bulkbar button { border:0; border-radius:7px; padding:7px 11px; background:var(--blue); color:#fff; font-weight:650; cursor:pointer; }
   .bulkbar .bulk-export { display:inline-flex;align-items:center;gap:6px;background:var(--panel);color:var(--blue);border:1px solid var(--blue-br); }
   .bulkbar .bulk-export .nav-icon { width:14px;height:14px; }
+  .bulkbar .bulk-separator { width:1px;height:24px;background:var(--border2); }
+  .bulkbar .bulk-delete-processing { display:inline-flex;align-items:center;gap:6px;background:var(--panel);color:var(--red);border:1px solid color-mix(in srgb,var(--red) 45%,var(--border)); }
+  .bulkbar .bulk-delete-processing:hover { background:var(--red-soft); }
+  .bulkbar .bulk-delete-processing .nav-icon { width:14px;height:14px; }
   .bulkbar .clear { background:transparent; color:var(--muted); padding-inline:5px; }
   .bulkmsg { width:100%; color:var(--muted); font-size:11.5px; display:none; }
   .bulkmsg.on { display:block; }
+  .bulk-danger-confirm { flex:1 0 100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px;border:1px solid color-mix(in srgb,var(--red) 45%,var(--border));border-radius:7px;background:var(--red-soft); }
+  .bulk-danger-confirm[hidden] { display:none; }
+  .bulk-danger-copy { display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 10px;align-items:start;min-width:0; }
+  .bulk-danger-copy>.nav-icon { grid-row:1/3;width:17px;height:17px;margin-top:1px;color:var(--red); }
+  .bulk-danger-copy strong { margin:0;color:var(--fg); }
+  .bulk-danger-copy p { margin:3px 0 0;color:var(--muted);font-size:11.5px;line-height:1.45;overflow-wrap:anywhere; }
+  .bulk-danger-preserved { display:flex;flex-wrap:wrap;gap:5px;margin-top:8px; }
+  .bulk-danger-preserved span { display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border:1px solid color-mix(in srgb,var(--green) 35%,var(--border));border-radius:5px;background:var(--panel);color:var(--muted);font-size:10.5px;font-weight:600; }
+  .bulk-danger-preserved .nav-icon { width:11px;height:11px;color:var(--green); }
+  .bulk-danger-actions { display:flex;align-items:center;gap:7px; }
+  .bulk-danger-actions .bulk-delete-confirm { background:var(--red); }
+  .bulk-danger-status { grid-column:1/-1;min-height:0;color:var(--red);font-size:11.5px; }
   .bulk-export-options { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
   .bulk-export-option { display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid var(--border);border-radius:8px;min-width:0; }
   .bulk-export-choice { display:flex;align-items:center;gap:8px;font-weight:650; }
@@ -217,6 +233,9 @@
     .rectable tbody td.row-menu-cell { position:absolute;right:7px;top:5px;width:auto;padding:0; }
     .quickadd { min-width:0;flex-basis:100%;margin-left:0; }
     .quickadd form { left:0;right:auto;width:min(260px,100%); }
+    .bulkbar .bulk-separator { display:none; }
+    .bulk-danger-confirm { grid-template-columns:1fr; }
+    .bulk-danger-actions { justify-content:flex-end;flex-wrap:wrap; }
     .bulk-export-options { grid-template-columns:1fr; }
     .organization-manager-modal { max-height:calc(100dvh - 24px); }
     .organization-manager-view { align-items:start; }
@@ -368,13 +387,19 @@
         <option value="add-tag">{{ t('Add tag') }}</option>
         <option value="remove-tag">{{ t('Remove tag') }}</option>
         <option value="resume">{{ t('Resume processing') }}</option>
-        <option value="delete-local-processing">{{ t('Delete local processing') }}</option>
       </select>
       <select id="bulk-target" aria-label="Folder or tag"></select>
       <button type="button" id="bulk-apply">{{ t('Apply') }}</button>
       <button type="button" class="bulk-export" id="bulk-export-open"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>{{ t('Export selected') }}</button>
+      <span class="bulk-separator" aria-hidden="true"></span>
+      <button type="button" class="bulk-delete-processing" id="bulk-delete-processing" aria-expanded="false" aria-controls="bulk-delete-confirm"><span class="nav-icon" style="--nav-icon:url('/static/lucide/trash-2.svg')"></span>{{ t('Delete local processing') }}</button>
       <button type="button" class="clear" id="bulk-clear">{{ t('Clear') }}</button>
       <div class="bulkmsg" id="bulk-message" role="status"></div>
+      <div class="bulk-danger-confirm" id="bulk-delete-confirm" role="alertdialog" aria-labelledby="bulk-delete-title" aria-describedby="bulk-delete-description" hidden>
+        <div class="bulk-danger-copy"><span class="nav-icon" style="--nav-icon:url('/static/lucide/triangle-alert.svg')"></span><div><strong id="bulk-delete-title">{{ t('Delete local processing') }}</strong><p id="bulk-delete-description">{{ t('Delete local transcript, corrections, generated notes, mind map, search index, and processing history? Saved notes and Plaud imports will remain.') }} {{ t('Plaud metadata and imported Plaud transcript/summary are preserved. Saved notes and Ask history are never removed here.') }}</p><div class="bulk-danger-preserved"><span><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Original audio') }}</span><span><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Folders') }}</span><span><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Tags') }}</span><span><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Ask history') }}</span><span><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Editable note') }}</span></div></div></div>
+        <div class="bulk-danger-actions"><button type="button" class="clear" id="bulk-delete-cancel">{{ t('Cancel') }}</button><button type="button" class="bulk-delete-confirm" id="bulk-delete-confirm-button">{{ t('Delete local processing') }}</button></div>
+        <div class="bulk-danger-status" id="bulk-delete-status" role="status" aria-live="polite"></div>
+      </div>
     </div>
     {% endif %}
     <div class="mobile-library-controls">
@@ -549,6 +574,11 @@
   const apply = document.getElementById('bulk-apply');
   const clear = document.getElementById('bulk-clear');
   const message = document.getElementById('bulk-message');
+  const deleteProcessing = document.getElementById('bulk-delete-processing');
+  const deleteConfirm = document.getElementById('bulk-delete-confirm');
+  const deleteCancel = document.getElementById('bulk-delete-cancel');
+  const deleteConfirmButton = document.getElementById('bulk-delete-confirm-button');
+  const deleteStatus = document.getElementById('bulk-delete-status');
   const exportOpen = document.getElementById('bulk-export-open');
   const exportBackdrop = document.getElementById('bulk-export-backdrop');
   const exportForm = document.getElementById('bulk-export-form');
@@ -592,10 +622,11 @@
       control.checked = n > 0 && n === checks.length;
       control.indeterminate = n > 0 && n < checks.length;
     });
+    if (!n) closeDeleteConfirm({restoreFocus:false});
   }
   function targets() {
     if (!target || !action) return;
-    const lifecycle = action.value === 'resume' || action.value === 'delete-local-processing';
+    const lifecycle = action.value === 'resume';
     target.hidden = lifecycle;
     if (lifecycle) { target.disabled = true; if (apply) apply.disabled = false; return; }
     const isFolder = action.value === 'folder';
@@ -611,6 +642,13 @@
     message.textContent = text;
     message.style.color = error ? 'var(--red)' : 'var(--muted)';
     message.classList.add('on');
+  }
+  function closeDeleteConfirm({restoreFocus=true}={}) {
+    if (!deleteConfirm || deleteConfirm.hidden) return;
+    deleteConfirm.hidden = true;
+    deleteProcessing?.setAttribute('aria-expanded','false');
+    if (deleteStatus) deleteStatus.textContent = '';
+    if (restoreFocus) deleteProcessing?.focus();
   }
   checks.forEach(c => c.addEventListener('change', sync));
   [all, mobileAll].filter(Boolean).forEach(control => control.addEventListener('change', () => {
@@ -631,7 +669,20 @@
   };
   window.addEventListener('pageshow', syncMobileSortFromLocation, {signal:cleanupController.signal});
   clear?.addEventListener('click', () => { checks.forEach(c => c.checked = false); sync(); });
-  action?.addEventListener('change', targets);
+  action?.addEventListener('change', () => { closeDeleteConfirm({restoreFocus:false}); targets(); });
+  deleteProcessing?.addEventListener('click', () => {
+    if (!selected().length) return;
+    deleteConfirm.hidden = false;
+    deleteProcessing.setAttribute('aria-expanded','true');
+    if (deleteStatus) deleteStatus.textContent = '';
+    deleteCancel?.focus();
+  });
+  deleteCancel?.addEventListener('click', () => closeDeleteConfirm());
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !deleteConfirm || deleteConfirm.hidden) return;
+    event.preventDefault();
+    closeDeleteConfirm();
+  }, {signal:cleanupController.signal});
   targets();
   sync();
 
@@ -726,13 +777,34 @@
     }
   });
 
+  deleteConfirmButton?.addEventListener('click', async () => {
+    const fileIds = selected();
+    if (!fileIds.length) return;
+    deleteConfirmButton.disabled = true;
+    deleteCancel.disabled = true;
+    deleteProcessing.disabled = true;
+    deleteStatus.textContent = tr('Removing local data…');
+    try {
+      const response = await fetch('/api/files/bulk', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file_ids:fileIds,action:'delete_local_processing'})});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || tr('Could not remove local data'));
+      show(tr('Removed. Reloading…'));
+      window.setTimeout(() => window.location.reload(), 350);
+    } catch (error) {
+      deleteStatus.textContent = error.message;
+      deleteConfirmButton.disabled = false;
+      deleteCancel.disabled = false;
+      deleteProcessing.disabled = false;
+      deleteConfirmButton.focus();
+    }
+  });
+
   apply?.addEventListener('click', async () => {
     const fileIds = selected();
     if (!fileIds.length) return;
-    const lifecycle = action.value === 'resume' || action.value === 'delete-local-processing';
-    if(action.value === 'delete-local-processing' && !confirm(window.localplaudT('Delete local transcripts, corrections, generated notes, indexes, and processing history for the selected recordings? Original audio, Plaud data, organization, Ask history, and editable notes remain.')))return;
+    const lifecycle = action.value === 'resume';
     const body = {file_ids: fileIds};
-    if(lifecycle)body.action=action.value === 'resume'?'resume':'delete_local_processing';
+    if(lifecycle)body.action='resume';
     if (action.value === 'folder') body.folder_id = target.value ? Number(target.value) : null;
     if (action.value === 'add-tag') body.add_tag_ids = [Number(target.value)];
     if (action.value === 'remove-tag') body.remove_tag_ids = [Number(target.value)];
