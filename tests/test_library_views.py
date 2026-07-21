@@ -247,6 +247,38 @@ def test_invalid_ranges_are_safe_and_visible(monkeypatch, tmp_path):
     assert 'role="alert">Minimum duration must not exceed maximum duration.' in duration_page.text
 
 
+def test_empty_filtered_library_summarizes_and_clears_active_filters(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+
+    page = c.get(
+        "/?q=missing&sort=name&dir=asc&state=done&scene=1&origin=plaud&"
+        "date_from=1970-01-01&date_to=1970-01-01&"
+        "min_duration_minutes=2&max_duration_minutes=5"
+    )
+
+    assert page.status_code == 200
+    assert '<strong class="filtered-empty-title">No recordings match these filters.</strong>' in page.text
+    summary = page.text.split('<ul class="active-filter-list"', 1)[1].split("</ul>", 1)[0]
+    for label in (
+        "Search: missing",
+        "State: done",
+        "Source: Capture source 1",
+        "Comes from: Plaud cloud",
+        "From: 1970-01-01",
+        "To: 1970-01-01",
+        "Minimum: 2.0 minutes",
+        "Maximum: 5.0 minutes",
+    ):
+        assert label in summary
+    assert 'aria-label="Active filters"' in page.text
+    assert (
+        'class="btn sec filtered-empty-reset" href="/?sort=name&amp;dir=asc&amp;view=all"'
+        in page.text
+    )
+    assert "Clear all filters" in page.text
+
+
 def test_extreme_iso_dates_do_not_overflow_html_or_api(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
