@@ -111,23 +111,31 @@ def _link_payload(request: Request, link: ShareLink | None) -> dict:
 
 
 def _recorded_at(start_time_ms: int | None, preferences: dict) -> str:
+    """Plaud's share header shows a plain `YYYY-MM-DD HH:MM:SS` stamp."""
     if not start_time_ms:
         return ""
     value = datetime.fromtimestamp(start_time_ms / 1000, tz=UTC).astimezone(
         ZoneInfo(preferences["timezone"])
     )
-    if preferences["locale"] == "zh-Hant-TW":
-        pattern = "%Y年%m月%d日 · %I:%M %p" if preferences["hour_cycle"] == "12" else "%Y年%m月%d日 · %H:%M"
-    else:
-        pattern = "%b %d, %Y · %I:%M %p" if preferences["hour_cycle"] == "12" else "%b %d, %Y · %H:%M"
-    return value.strftime(pattern)
+    return value.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _duration(duration_ms: int | None) -> str:
+def _duration_human(duration_ms: int | None, locale: str) -> str:
     seconds = int((duration_ms or 0) // 1000)
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-    return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
+    if locale == "zh-Hant-TW":
+        parts = [f"{hours}小時"] if hours else []
+        return " ".join(parts + [f"{minutes}分鐘", f"{seconds}秒"])
+    parts = [f"{hours} hr"] if hours else []
+    return " ".join(parts + [f"{minutes} min", f"{seconds} sec"])
+
+
+def _duration_clock(duration_ms: int | None) -> str:
+    seconds = int((duration_ms or 0) // 1000)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 @router.post("/api/files/{file_id}/share-link")
@@ -229,11 +237,15 @@ def public_share(request: Request, token: str):
             "recording": {
                 "title": recording.display_title,
                 "recorded_at": _recorded_at(recording.start_time_ms, preferences),
-                "duration": _duration(recording.duration_ms),
+                "duration_human": _duration_human(
+                    recording.duration_ms, preferences["locale"]
+                ),
+                "duration_clock": _duration_clock(recording.duration_ms),
                 "has_audio": options.audio
                 and bool(recording.audio_path and Path(recording.audio_path).exists()),
             },
             "show_transcript": options.transcript,
+            "show_notes": options.notes,
             "transcript_imported": transcript_imported,
             "segments": segments,
             "speaker_names": names,

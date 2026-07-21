@@ -7,46 +7,247 @@
   <title>{{ recording.title }} · localplaud</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <style>
-    :root{color-scheme:light;--bg:#f7f7f8;--panel:#fff;--border:#e4e4e7;--fg:#202124;--muted:#6e7075;--blue:#2563eb;font:14px/1.6 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg)}
-    header{height:58px;display:flex;align-items:center;border-bottom:1px solid var(--border);background:var(--panel)}
-    .header-inner,main{width:min(1080px,calc(100% - 40px));margin:0 auto}.brand{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:760;text-transform:uppercase}.brand img{width:26px;height:26px}
-    main{padding:34px 0 64px}.recording-head h1{margin:0;font-size:34px;line-height:1.2;letter-spacing:0;overflow-wrap:anywhere}.meta{margin-top:8px;color:var(--muted)}
-    .player{margin:24px 0 32px;padding:16px 0;border-block:1px solid var(--border)}audio{display:block;width:100%;height:44px}
-    .content{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(280px,.8fr);gap:44px;align-items:start}h2{margin:0 0 16px;font-size:18px;letter-spacing:0}
-    .segments{display:grid;gap:6px}.segment{width:100%;display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;padding:10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.segment:hover,.segment.active{background:#eeeef0}.segment-meta{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}.speaker{display:block;margin-top:3px;color:var(--fg);font-weight:650;overflow:hidden;text-overflow:ellipsis}.speaker::before{content:"";display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:50%;background:var(--speaker-color)}.segment-text{margin:0;overflow-wrap:anywhere}
-    .empty{padding:28px 0;color:var(--muted);border-top:1px solid var(--border)}.notes{display:grid;gap:22px}.note{padding-top:14px;border-top:1px solid var(--border)}.note:first-child{padding-top:0;border-top:0}.note h3{margin:0 0 8px;font-size:15px}
-    .import-badge{display:inline-block;margin-left:8px;padding:2px 9px;border:1px solid var(--border);border-radius:999px;background:#f1f1f3;color:var(--muted);font-size:11px;font-weight:600;vertical-align:2px;white-space:nowrap}.md{overflow-wrap:anywhere}.md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}.md img{display:block;max-width:min(100%,560px);height:auto;margin:.6em 0;border:1px solid var(--border);border-radius:10px}.md table{width:100%;border-collapse:collapse}.md th,.md td{padding:6px;border:1px solid var(--border);text-align:left}.md pre{overflow:auto}
-    @media(max-width:760px){.header-inner,main{width:min(100% - 28px,1080px)}main{padding-top:24px}.recording-head h1{font-size:26px}.content{grid-template-columns:1fr;gap:34px}.segment{grid-template-columns:62px minmax(0,1fr);padding-inline:4px}}
+    /* Mirrors the Plaud Web public share page: fixed 55px header, promo band,
+       轉錄/摘要 tabs over a 708px column, each tab an internal scroll region. */
+    :root{color-scheme:light;--fg:#101828;--body:#3D3D3D;--muted:#A3A3A3;--tab-off:#7A7A7A;--line:#EBEBEB;--track:#D6D6D6}
+    *{box-sizing:border-box}
+    [hidden]{display:none!important}
+    html,body{height:100%}
+    body{margin:0;background:#fff;color:var(--fg);display:flex;flex-direction:column;overflow:hidden;
+      font:14px/1.5 Inter,"PingFang TC","Hiragino Sans CNS","Microsoft JhengHei","Noto Sans TC",-apple-system,sans-serif}
+    button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+
+    .page-head{flex:none;height:55px;display:flex;align-items:center;gap:14px;padding:8px 16px;border-bottom:1px solid var(--line)}
+    .page-head img{width:26px;height:26px;flex:none}
+    .page-head .divider{width:1px;height:24px;background:var(--line);flex:none}
+    .head-text{min-width:0}
+    .head-title{font-size:14px;line-height:20px;color:#000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .head-meta{display:flex;align-items:center;gap:10px;font-size:12px;line-height:16px;color:var(--muted)}
+    .head-meta .divider{height:12px}
+
+    .column{width:min(708px,100% - 48px);margin:0 auto}
+    .promo{flex:none;margin-top:12px}
+    .promo-inner{height:60px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 14px;border-radius:5px;
+      background:radial-gradient(120% 190% at 88% 10%,#E2FFE3 0%,#DCF8FC 24%,#E6F3FA 46%,#F4F8FF 70%,#F9F9F9 100%)}
+    .promo-brand{min-width:0}
+    .promo-wordmark{font-size:13px;font-weight:760;letter-spacing:.14em;color:#000;text-transform:uppercase}
+    .promo-tagline{margin-top:2px;font-size:12px;line-height:16px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .promo-cta{flex:none;display:inline-block;padding:6px 14px;border-radius:5px;background:#000;color:#fff;font-size:14px;line-height:21px;text-decoration:none}
+
+    .tabs{flex:none;display:flex;gap:24px;align-items:center;height:39px;margin-top:16px}
+    .tabs button{font-size:14px;color:var(--tab-off);font-weight:400}
+    .tabs button[aria-selected="true"]{color:#000;font-weight:600}
+
+    .panels{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:8px}
+    .panel{flex:1;min-height:0;overflow-y:auto}
+    .panel[hidden]{display:none}
+
+    .import-badge{display:inline-block;padding:2px 9px;border:1px solid var(--line);border-radius:999px;background:#F7F7F8;color:var(--tab-off);font-size:11px;font-weight:600;white-space:nowrap;vertical-align:middle}
+    h2 .import-badge,h1 .import-badge{margin-left:10px;vertical-align:4px}
+
+    /* transcript tab */
+    .player{padding:8px 0 4px}
+    .player-time{font-size:14px;line-height:21px;color:var(--muted);font-variant-numeric:tabular-nums}
+    .player-controls{display:flex;align-items:center;gap:16px;margin-top:12px}
+    .play-btn{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:50%;background:#F2F2F3}
+    .play-btn svg{display:block}
+    .play-btn #pause-icon,.play-btn.playing #play-icon{display:none}
+    .play-btn.playing #pause-icon{display:block}
+    .scrubber{flex:1;height:3px;margin:0;appearance:none;background:linear-gradient(#000 0 0) 0/var(--played,0%) 100% no-repeat,var(--track);border-radius:2px;cursor:pointer}
+    .scrubber::-webkit-slider-thumb{appearance:none;width:9px;height:9px;border-radius:50%;background:#000}
+    .scrubber::-moz-range-thumb{width:9px;height:9px;border:0;border-radius:50%;background:#000}
+    .speed-btn{flex:none;min-width:34px;font-size:12px;font-weight:650;color:#000;text-align:center;padding:5px 6px;border-radius:6px}
+    .speed-btn:hover{background:#F2F2F3}
+
+    .transcript-badge-row{margin:10px 0 0}
+    .segments{padding:18px 0 8px}
+    .segment{display:block;width:100%;text-align:left;padding:8px;border-radius:4px;margin-bottom:24px}
+    .segment.active,.segment:hover{background:var(--line)}
+    .segment-meta{display:flex;align-items:baseline;gap:16px;font-size:14px;line-height:21px}
+    .segment-meta .ts{color:var(--muted);font-variant-numeric:tabular-nums}
+    .segment-meta .who{color:#000}
+    .segment-text{margin:6px 0 0;font-size:16px;line-height:24px;color:var(--body);overflow-wrap:anywhere}
+
+    /* summary tab */
+    .note-title{margin:14px 0 0;padding-bottom:28px;border-bottom:1px solid var(--line);font-size:36px;line-height:44px;font-weight:500;color:var(--fg);overflow-wrap:anywhere}
+    .note-doc{padding:6px 0 10px}
+    .note-section-title{margin:32px 0 0;font-size:28px;line-height:32px;font-weight:500;color:#000;overflow-wrap:anywhere}
+    .md{font-size:16px;line-height:24px;color:var(--body);overflow-wrap:anywhere}
+    .md p{margin:14px 0 0}
+    .md ul,.md ol{margin:14px 0 0;padding-left:1.6em}
+    .md li+li{margin-top:6px}
+    .md h1,.md h2{font-size:28px;line-height:32px;font-weight:500;color:#000;margin:32px 0 0}
+    .md h3,.md h4{font-size:19px;line-height:26px;font-weight:600;color:#000;margin:24px 0 0}
+    .md img{display:block;max-width:100%;height:auto;margin:16px 0 0;border-radius:8px}
+    .md table{width:100%;margin:16px 0 0;border-collapse:collapse;display:block;max-width:100%;overflow-x:auto}
+    .md th,.md td{padding:7px 9px;border:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:break-word}
+    .md pre{max-width:100%;overflow:auto;margin:14px 0 0;padding:10px 12px;border-radius:6px;background:#F5F5F6}
+    .md blockquote{margin:14px 0 0;padding:2px 0 2px 12px;border-left:3px solid var(--track);color:var(--tab-off)}
+    .md a{color:var(--fg);text-decoration:underline;text-underline-offset:2px}
+    .mindmap-frame{margin:28px 0 0;border:1px solid var(--line);border-radius:5px;padding:16px}
+    .mindmap-frame .frame-label{font-size:14px;line-height:21px;color:#000;font-weight:600}
+    .mindmap-frame .md{margin-top:8px;font-size:14px;line-height:22px}
+
+    .empty{padding:36px 0;color:var(--muted);font-size:15px}
+    .page-foot{padding:30px 0 20px;text-align:center;font-size:13px;line-height:1.5;color:var(--muted)}
+
+    /* desktop section outline, fixed at the right like Plaud */
+    .outline{position:fixed;right:40px;top:220px;width:248px;max-height:60vh;overflow-y:auto;display:none}
+    .outline button{display:block;width:100%;min-height:34px;padding:7px 24px 7px 16px;text-align:left;font-size:12px;color:var(--tab-off);border-radius:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .outline button.on{color:#000;font-weight:600}
+    .outline button:hover{background:#F5F5F6}
+    @media (min-width:1220px){.outline.ready{display:block}}
+
+    @media (max-width:760px){
+      .column{width:calc(100% - 48px)}
+      .note-title{font-size:30px;line-height:38px}
+      .promo-tagline{display:none}
+    }
   </style>
 </head>
 <body>
-  <header><div class="header-inner"><div class="brand"><img src="/static/logo.svg" alt=""><span>localplaud</span></div></div></header>
-  <main>
-    <section class="recording-head">
-      <h1>{{ recording.title }}</h1>
-      <div class="meta">{% if recording.recorded_at %}{{ recording.recorded_at }} · {% endif %}{{ recording.duration }}</div>
-    </section>
-    {% if recording.has_audio %}<div class="player"><audio id="shared-player" controls preload="metadata" src="{{ audio_url }}"></audio></div>{% endif %}
-    <div class="content">
-      {% if show_transcript %}<section aria-labelledby="transcript-title">
-        <h2 id="transcript-title">{{ t('Transcript') }}{% if transcript_imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</h2>
-        {% if segments %}<div class="segments">
-          {% for segment in segments %}<button class="segment" type="button" data-start="{{ segment.get('start', 0) }}" data-end="{{ segment.get('end', 0) }}" style="--speaker-color:{{ speaker_colors.get(segment.get('speaker'), '#989aa0') }}">
-            <span class="segment-meta">{{ ((segment.get('start') or 0) // 60)|int }}:{{ '%02d'|format(((segment.get('start') or 0) % 60)|int) }}{% if segment.get('speaker') %}<span class="speaker">{{ speaker_names.get(segment.get('speaker'), segment.get('speaker')) }}</span>{% endif %}</span>
-            <span class="segment-text">{{ segment.get('text', '') }}</span>
-          </button>{% endfor %}
-        </div>{% else %}<div class="empty">{{ t('Transcript is not available yet.') }}</div>{% endif %}
-      </section>{% endif %}
-      {% if notes %}<section aria-labelledby="notes-title"><h2 id="notes-title">{{ t('Notes') }}</h2><div class="notes">
-        {% for note in notes %}<article class="note"><h3>{{ note.title or note.template|replace('-', ' ')|title }}{% if note.imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</h3><div class="md">{{ note.content_md|markdown }}</div></article>{% endfor %}
-      </div></section>{% endif %}
+  <header class="page-head">
+    <img src="/static/logo.svg" alt="localplaud">
+    <span class="divider"></span>
+    <div class="head-text">
+      <div class="head-title">{{ recording.title }}</div>
+      <div class="head-meta">{% if recording.recorded_at %}<span>{{ recording.recorded_at }}</span><span class="divider"></span>{% endif %}<span>{{ recording.duration_human }}</span></div>
     </div>
-  </main>
+  </header>
+
+  <div class="promo"><div class="column promo-inner">
+    <div class="promo-brand"><div class="promo-wordmark">localplaud</div><div class="promo-tagline">{{ t('Self-hosted recording workspace') }}</div></div>
+    <a class="promo-cta" href="/">{{ t('Open workspace') }}</a>
+  </div></div>
+
+  {% set body_notes = notes | rejectattr('template', 'equalto', 'mind_map') | list %}
+  {% set mindmaps = notes | selectattr('template', 'equalto', 'mind_map') | list %}
+  {% set default_tab = 'summary' if (show_notes and notes) or not show_transcript else 'transcript' %}
+
+  <div class="column tabs" role="tablist" aria-label="{{ recording.title }}">
+    {% if show_transcript %}<button id="tab-transcript" role="tab" aria-controls="panel-transcript" aria-selected="{{ 'true' if default_tab == 'transcript' else 'false' }}" data-tab="transcript">{{ t('Transcription') }}</button>{% endif %}
+    {% if show_notes %}<button id="tab-summary" role="tab" aria-controls="panel-summary" aria-selected="{{ 'true' if default_tab == 'summary' else 'false' }}" data-tab="summary">{{ t('Summary') }}</button>{% endif %}
+  </div>
+
+  <div class="panels">
+    {% if show_transcript %}
+    <section class="panel" id="panel-transcript" role="tabpanel" aria-labelledby="tab-transcript" {% if default_tab != 'transcript' %}hidden{% endif %}>
+      <div class="column">
+        {% if recording.has_audio %}
+        <div class="player">
+          <div class="player-time"><span id="player-position">00:00:00</span> / {{ recording.duration_clock }}</div>
+          <div class="player-controls">
+            <button class="play-btn" id="play-toggle" type="button" aria-label="{{ t('Play') }}">
+              <svg id="play-icon" width="14" height="16" viewBox="0 0 14 16" aria-hidden="true"><path d="M1.5 1.6v12.8L12.6 8Z" fill="none" stroke="#000" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <svg id="pause-icon" width="12" height="14" viewBox="0 0 12 14" aria-hidden="true"><path d="M2 1v12M10 1v12" stroke="#000" stroke-width="2.4" stroke-linecap="round"/></svg>
+            </button>
+            <input class="scrubber" id="scrubber" type="range" min="0" max="1000" value="0" aria-label="{{ t('Seek') }}">
+            <button class="speed-btn" id="speed-toggle" type="button" aria-label="{{ t('Playback speed') }}">1x</button>
+          </div>
+          <audio id="shared-audio" preload="metadata" src="{{ audio_url }}"></audio>
+        </div>
+        {% endif %}
+        {% if transcript_imported %}<div class="transcript-badge-row"><span class="import-badge">{{ t('Imported from Plaud') }}</span></div>{% endif %}
+        {% if segments %}
+        <div class="segments" id="segment-list">
+          {% for segment in segments %}{% set start = (segment.get('start') or 0) | int %}
+          <button class="segment" type="button" data-start="{{ segment.get('start', 0) }}" data-end="{{ segment.get('end', 0) }}">
+            <span class="segment-meta"><span class="ts">{{ '%02d:%02d:%02d' | format(start // 3600, (start % 3600) // 60, start % 60) }}</span>{% if segment.get('speaker') %}<span class="who">{{ speaker_names.get(segment.get('speaker'), segment.get('speaker')) }}</span>{% endif %}</span>
+            <p class="segment-text">{{ segment.get('text', '') }}</p>
+          </button>
+          {% endfor %}
+        </div>
+        {% else %}<div class="empty">{{ t('Transcript is not available yet.') }}</div>{% endif %}
+        <div class="page-foot">localplaud · {{ t('self-hosted') }}</div>
+      </div>
+    </section>
+    {% endif %}
+
+    {% if show_notes %}
+    <section class="panel" id="panel-summary" role="tabpanel" aria-labelledby="tab-summary" {% if default_tab != 'summary' %}hidden{% endif %}>
+      <div class="column">
+        <h1 class="note-title">{{ recording.title }}</h1>
+        {% if body_notes or mindmaps %}
+        <div class="note-doc" id="note-doc">
+          {% for note in body_notes %}
+          <h2 class="note-section-title" data-outline>{{ note.title or note.template|replace('-', ' ')|title }}{% if note.imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</h2>
+          <div class="md">{{ note.content_md|markdown }}</div>
+          {% endfor %}
+          {% for map in mindmaps %}
+          <div class="mindmap-frame"><div class="frame-label">{{ t('Mind map') }}{% if map.imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</div><div class="md">{{ map.content_md|markdown }}</div></div>
+          {% endfor %}
+        </div>
+        {% else %}<div class="empty">{{ t('Notes are not available yet.') }}</div>{% endif %}
+        <div class="page-foot">localplaud · {{ t('self-hosted') }}</div>
+      </div>
+    </section>
+    {% endif %}
+  </div>
+
+  <nav class="outline" id="outline" aria-label="{{ t('Summary') }}"></nav>
+
   <script>
-    const player=document.getElementById('shared-player'),segments=[...document.querySelectorAll('.segment[data-start]')];
-    segments.forEach(segment=>segment.addEventListener('click',()=>{if(!player)return;player.currentTime=Number(segment.dataset.start)||0;player.play();}));
-    player?.addEventListener('timeupdate',()=>{const now=player.currentTime;segments.forEach(segment=>segment.classList.toggle('active',now>=Number(segment.dataset.start||0)&&now<Number(segment.dataset.end||Infinity)));});
+    (()=>{
+      const tabs=[...document.querySelectorAll('[data-tab]')],panels={transcript:document.getElementById('panel-transcript'),summary:document.getElementById('panel-summary')},outline=document.getElementById('outline');
+      const select=name=>{tabs.forEach(tab=>tab.setAttribute('aria-selected',String(tab.dataset.tab===name)));for(const [key,panel] of Object.entries(panels))if(panel)panel.hidden=key!==name;outline.classList.toggle('ready',name==='summary'&&outline.childElementCount>0);};
+      tabs.forEach(tab=>tab.addEventListener('click',()=>select(tab.dataset.tab)));
+
+      const summaryPanel=panels.summary,headings=[...document.querySelectorAll('#note-doc [data-outline], #note-doc .md h2')];
+      if(summaryPanel&&headings.length){
+        headings.forEach((heading,index)=>{
+          const item=document.createElement('button');item.type='button';
+          const label=heading.cloneNode(true);label.querySelectorAll('.import-badge').forEach(badge=>badge.remove());
+          item.textContent=label.textContent.trim();
+          item.addEventListener('click',()=>heading.scrollIntoView({block:'start',behavior:'smooth'}));
+          if(!index)item.classList.add('on');
+          outline.appendChild(item);
+        });
+        const items=[...outline.children];
+        summaryPanel.addEventListener('scroll',()=>{
+          const top=summaryPanel.getBoundingClientRect().top+10;let current=0;
+          headings.forEach((heading,index)=>{if(heading.getBoundingClientRect().top<=top+30)current=index;});
+          items.forEach((item,index)=>item.classList.toggle('on',index===current));
+        },{passive:true});
+        if(!panels.summary.hidden)outline.classList.add('ready');
+      }
+
+      const audio=document.getElementById('shared-audio');
+      if(audio){
+        const playToggle=document.getElementById('play-toggle');
+        const scrubber=document.getElementById('scrubber'),position=document.getElementById('player-position'),speedToggle=document.getElementById('speed-toggle');
+        const speeds=[1,1.25,1.5,2,0.5];let speedIndex=0,scrubbing=false;
+        const clock=value=>{const total=Math.max(0,Math.floor(value||0));return [Math.floor(total/3600),Math.floor(total/60)%60,total%60].map(part=>String(part).padStart(2,'0')).join(':');};
+        const paint=()=>{const duration=audio.duration||0;position.textContent=clock(audio.currentTime);const played=duration?audio.currentTime/duration*100:0;scrubber.style.setProperty('--played',`${played}%`);if(!scrubbing)scrubber.value=String(Math.round(duration?audio.currentTime/duration*1000:0));};
+        playToggle.addEventListener('click',()=>{if(audio.paused)audio.play();else audio.pause();});
+        audio.addEventListener('play',()=>playToggle.classList.add('playing'));
+        audio.addEventListener('pause',()=>playToggle.classList.remove('playing'));
+        audio.addEventListener('timeupdate',paint);audio.addEventListener('loadedmetadata',paint);
+        scrubber.addEventListener('input',()=>{scrubbing=true;const duration=audio.duration||0;position.textContent=clock(Number(scrubber.value)/1000*duration);scrubber.style.setProperty('--played',`${Number(scrubber.value)/10}%`);});
+        scrubber.addEventListener('change',()=>{const duration=audio.duration||0;audio.currentTime=Number(scrubber.value)/1000*duration;scrubbing=false;});
+        speedToggle.addEventListener('click',()=>{speedIndex=(speedIndex+1)%speeds.length;audio.playbackRate=speeds[speedIndex];speedToggle.textContent=`${speeds[speedIndex]}x`;});
+
+        const list=document.getElementById('segment-list'),segments=list?[...list.querySelectorAll('.segment')]:[];
+        const transcriptPanel=document.getElementById('panel-transcript');
+        segments.forEach(segment=>segment.addEventListener('click',()=>{audio.currentTime=Number(segment.dataset.start)||0;audio.play();}));
+        // Auto-follow must never fight the reader: pause it while the user is
+        // interacting, and only track a segment that is already on screen.
+        let lastUserScroll=0;
+        ['wheel','touchmove','pointerdown'].forEach(name=>transcriptPanel?.addEventListener(name,()=>{lastUserScroll=Date.now();},{passive:true}));
+        audio.addEventListener('timeupdate',()=>{
+          const now=audio.currentTime;let active=null;
+          segments.forEach(segment=>{const on=now>=Number(segment.dataset.start||0)&&now<Number(segment.dataset.end||Infinity);segment.classList.toggle('active',on);if(on)active=segment;});
+          if(!active||audio.paused||!transcriptPanel||Date.now()-lastUserScroll<2500)return;
+          const panelRect=transcriptPanel.getBoundingClientRect(),activeRect=active.getBoundingClientRect();
+          if(activeRect.bottom>panelRect.top&&activeRect.top<panelRect.bottom)active.scrollIntoView({block:'nearest'});
+        });
+        document.addEventListener('keydown',event=>{
+          if(event.code!=='Space'||event.repeat)return;
+          if(event.target.closest('input,textarea,select,[contenteditable]'))return;
+          event.preventDefault();
+          if(audio.paused)audio.play();else audio.pause();
+        });
+      }
+    })();
   </script>
 </body>
 </html>
