@@ -359,6 +359,8 @@ _ZH_HANT_TW = {
     "Name": "名稱",
     "Duration": "長度",
     "Recorded": "錄製時間",
+    "Select visible": "選取本頁",
+    "Sort recordings": "排序錄音",
     "Plaud cloud": "Plaud 雲端",
     "Local import": "本機匯入",
     "Search files…": "搜尋檔案…",

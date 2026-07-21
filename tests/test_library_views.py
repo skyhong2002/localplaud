@@ -370,6 +370,12 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     assert '<td class="num rec-cell">' in r.text
     assert ".rectable tbody td.rec-cell::before { content:'· '; }" in r.text
     assert ".rectable .nm { max-width:none; text-align:left;" in r.text
+    assert '<input id="select-all-mobile" type="checkbox">Select visible' in r.text
+    assert 'id="mobile-sort" aria-label="Sort recordings"' in r.text
+    assert ".rectable thead { display:none; }" in r.text
+    assert "[all, mobileAll].filter(Boolean).forEach(control =>" in r.text
+    assert "mobileSort?.addEventListener('change'" in r.text
+    assert "window.addEventListener('pageshow', syncMobileSortFromLocation" in r.text
     assert 'id="app-view" hx-history-elt' in r.text
     assert 'id="recording-file-list"' not in r.text
     assert 'href="/file/b?return_to=%2F"' in r.text

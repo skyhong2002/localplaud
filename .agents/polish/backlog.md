@@ -1,6 +1,6 @@
 # Polish backlog
 
-Rotation pointer: 1
+Rotation pointer: 2
 
 Journeys:
 1. Library table — filters, folders, tags, sort, bulk select, pagination
@@ -17,6 +17,12 @@ Journeys:
 
 ## Findings
 
+- [ ] (P1) Library table: mobile sort and select-all controls overlap the first card, and tapping the apparent header checkbox selects only the first recording instead of all visible recordings — 2026-07-22 browser audit at 390px; `/tmp/localplaud-polish-20260722/discovery/P1-mobile-select-all-overlaps-first-row-390x844.png`
+- [ ] (P1) Library table: destructive bulk processing deletion is presented in the same menu with the same Apply button as routine folder/tag actions, with no inline warning or visual separation — 2026-07-22 browser audit; `/tmp/localplaud-polish-20260722/discovery/P1-desktop-bulk-delete-option-adjacent-1400x900.png`
+- [ ] (P2) Library table: an empty folder/tag manager is dead-ended because it reports no items but offers no creation action inside the dialog — 2026-07-22 browser audit at desktop and mobile widths
+- [ ] (P2) Library table: active filters are represented only by a count badge, and an empty filtered result offers no visible filter summary or reset action — 2026-07-22 browser audit; `/tmp/localplaud-polish-20260722/discovery/P2-desktop-filter-empty-no-visible-reset-1400x900.png`
+- [ ] (P2) Library table: pagination exposes only previous/next and silently clears page-scoped bulk selection after navigation — 2026-07-22 browser audit across 779 recordings at desktop and mobile widths
+- [ ] (P3) Library table: the mobile drawer uses a nested scroll region whose thin scrollbar is the only cue that more sources and workspace links are available — 2026-07-22 browser audit at 390px
 - [ ] (P3) Share: Plaud's transcript view has a right-edge minimap (small dashes indicating scroll position); localplaud share page has a plain scrollbar — 2026-07-22 parity audit
 - [ ] (P3) Detail: app player (canvas waveform) vs Plaud share player (flat scrubber) diverge; consider one shared player component/style
 - [ ] (taste) Share: summary tab shows every note's own heading (Summary, Outline); Plaud renders one continuous document — propose merging or ordering controls to the user
