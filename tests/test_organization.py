@@ -258,7 +258,8 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert 'id="bulk-delete-confirm" role="alertdialog"' in page.text
     assert 'aria-describedby="bulk-delete-description" hidden' in page.text
     assert "Delete local transcript, corrections, generated notes, mind map, search index, and processing history?" in page.text
-    assert 'class="bulk-danger-preserved"' in page.text
+    assert '<ul class="bulk-danger-preserved" role="list">' in page.text
+    assert page.text.count('<li><i class="nav-icon"') == 5
     for preserved in ("Original audio", "Folders", "Tags", "Ask history", "Editable note"):
         assert preserved in page.text
     assert "deleteConfirm.hidden = false" in page.text
