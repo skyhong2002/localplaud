@@ -241,6 +241,8 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert "String(new FormData(form).get('name') || '').trim()" in page.text
     assert "}, {signal:cleanupController.signal})" in page.text
     assert "if(url.searchParams.get(queryKey)===id)url.searchParams.delete(queryKey)" in page.text
+    assert "location.replace(`${url.pathname}${url.search}${url.hash}`)" in page.text
+    assert "location.assign(`${url.pathname}${url.search}${url.hash}`)" not in page.text
     assert "window.alert(error.message)" not in page.text
 
     from localplaud.i18n import catalog
