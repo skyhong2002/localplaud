@@ -94,6 +94,17 @@
     .outline button:hover{background:#F5F5F6}
     @media (min-width:1220px){.outline.ready{display:block}}
 
+    /* timestamped outline chapters beside the transcript */
+    .chapters{position:fixed;right:40px;top:170px;width:280px;max-height:72vh;overflow-y:auto;display:none;padding-bottom:8px}
+    .chapters-head{display:flex;align-items:center;gap:8px;padding:0 16px 8px;font-size:12px;font-weight:700;color:#000}
+    .chapters button{display:flex;gap:10px;width:100%;padding:6px 16px;text-align:left;font-size:12px;line-height:18px;color:var(--tab-off);border-radius:6px}
+    .chapters button:hover{background:#F5F5F6}
+    .chapters button.on{color:#000;font-weight:600}
+    .chapters .ch-ts{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
+    .chapters button.on .ch-ts{color:#000}
+    .chapters .ch-tx{min-width:0;overflow-wrap:anywhere}
+    @media (min-width:1220px){.chapters.ready{display:block}}
+
     @media (max-width:760px){
       .column{width:calc(100% - 48px)}
       .note-title{font-size:30px;line-height:38px}
@@ -112,6 +123,7 @@
 
   {% set body_notes = notes | rejectattr('template', 'equalto', 'mind_map') | list %}
   {% set mindmaps = notes | selectattr('template', 'equalto', 'mind_map') | list %}
+  {% set outlines = notes | selectattr('template', 'equalto', 'outline') | list %}
   {% set default_tab = 'summary' if (show_notes and notes) or not show_transcript else 'transcript' %}
 
   <div class="column tabs" role="tablist" aria-label="{{ recording.title }}">
@@ -179,11 +191,18 @@
   </div>
 
   <nav class="outline" id="outline" aria-label="{{ t('Summary') }}"></nav>
+  {% if show_transcript and outlines %}
+  <aside class="chapters" id="chapters" aria-label="{{ outlines[0].title or 'Outline' }}">
+    <div class="chapters-head">{{ outlines[0].title or 'Outline' }}{% if outlines[0].imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</div>
+    <div class="chapters-body" id="chapters-body">{% for outline_note in outlines %}<div class="md">{{ outline_note.content_md|markdown }}</div>{% endfor %}</div>
+  </aside>
+  {% endif %}
 
   <script>
     (()=>{
       const tabs=[...document.querySelectorAll('[data-tab]')],panels={transcript:document.getElementById('panel-transcript'),summary:document.getElementById('panel-summary')},outline=document.getElementById('outline');
-      const select=name=>{tabs.forEach(tab=>tab.setAttribute('aria-selected',String(tab.dataset.tab===name)));for(const [key,panel] of Object.entries(panels))if(panel)panel.hidden=key!==name;outline.classList.toggle('ready',name==='summary'&&outline.childElementCount>0);};
+      const chaptersNav=document.getElementById('chapters');let chaptersHasItems=false;
+      const select=name=>{tabs.forEach(tab=>tab.setAttribute('aria-selected',String(tab.dataset.tab===name)));for(const [key,panel] of Object.entries(panels))if(panel)panel.hidden=key!==name;outline.classList.toggle('ready',name==='summary'&&outline.childElementCount>0);chaptersNav?.classList.toggle('ready',name==='transcript'&&chaptersHasItems);};
       tabs.forEach(tab=>tab.addEventListener('click',()=>select(tab.dataset.tab)));
 
       const summaryPanel=panels.summary,headings=[...document.querySelectorAll('#note-doc [data-outline], #note-doc .md h2')];
@@ -205,6 +224,8 @@
         if(!panels.summary.hidden)outline.classList.add('ready');
       }
 
+      const list=document.getElementById('segment-list'),segments=list?[...list.querySelectorAll('.segment')]:[];
+      const transcriptPanel=document.getElementById('transcript-scroll');
       const audio=document.getElementById('shared-audio');
       if(audio){
         const playToggle=document.getElementById('play-toggle');
@@ -220,8 +241,6 @@
         scrubber.addEventListener('change',()=>{const duration=audio.duration||0;audio.currentTime=Number(scrubber.value)/1000*duration;scrubbing=false;});
         speedToggle.addEventListener('click',()=>{speedIndex=(speedIndex+1)%speeds.length;audio.playbackRate=speeds[speedIndex];speedToggle.textContent=`${speeds[speedIndex]}x`;});
 
-        const list=document.getElementById('segment-list'),segments=list?[...list.querySelectorAll('.segment')]:[];
-        const transcriptPanel=document.getElementById('transcript-scroll');
         segments.forEach(segment=>segment.addEventListener('click',()=>{audio.currentTime=Number(segment.dataset.start)||0;audio.play();}));
         // Auto-follow must never fight the reader: pause it while the user is
         // interacting, and only track a segment that is already on screen.
@@ -240,6 +259,42 @@
           event.preventDefault();
           if(audio.paused)audio.play();else audio.pause();
         });
+      }
+
+      // Timestamped outline notes become clickable chapters beside the transcript.
+      if(chaptersNav){
+        const body=document.getElementById('chapters-body'),entries=[];
+        body.querySelectorAll('li').forEach(item=>{
+          const match=item.textContent.trim().match(/^\[?(\d+):(\d{2})(?::(\d{2}))?\]?\s*(.+)$/s);
+          if(!match)return;
+          const seconds=match[3]===undefined?Number(match[1])*60+Number(match[2]):Number(match[1])*3600+Number(match[2])*60+Number(match[3]);
+          const stamp=match[3]===undefined?`${match[1]}:${match[2]}`:`${match[1]}:${match[2]}:${match[3]}`;
+          entries.push({seconds,stamp,label:match[4].trim()});
+        });
+        if(entries.length){
+          chaptersHasItems=true;
+          body.textContent='';
+          const jumpTo=seconds=>{
+            if(audio){audio.currentTime=seconds;audio.play();}
+            const target=segments.find(segment=>seconds<Number(segment.dataset.end||0))||segments[segments.length-1];
+            target?.scrollIntoView({block:'start'});
+          };
+          const buttons=entries.map(entry=>{
+            const item=document.createElement('button');item.type='button';
+            const stamp=document.createElement('span');stamp.className='ch-ts';stamp.textContent=entry.stamp;
+            const label=document.createElement('span');label.className='ch-tx';label.textContent=entry.label;
+            item.append(stamp,label);
+            item.addEventListener('click',()=>jumpTo(entry.seconds));
+            body.appendChild(item);
+            return item;
+          });
+          audio?.addEventListener('timeupdate',()=>{
+            const now=audio.currentTime;let currentIndex=-1;
+            entries.forEach((entry,index)=>{if(now>=entry.seconds)currentIndex=index;});
+            buttons.forEach((item,index)=>item.classList.toggle('on',index===currentIndex));
+          });
+          if(panels.transcript&&!panels.transcript.hidden)chaptersNav.classList.add('ready');
+        }
       }
     })();
   </script>
