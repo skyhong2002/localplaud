@@ -485,10 +485,24 @@ def test_library_paginates_without_truncating_ask_scope(monkeypatch, tmp_path):
     assert ".quickadd { min-width:0;flex-basis:100%;margin-left:0; }" in first.text
     assert ".rectable tbody td.name-cell { padding:0 44px 3px 12px!important; }" in first.text
     assert ".rectable tbody td.select-cell ~ td.name-cell { padding-left:40px!important; }" in first.text
-    assert "Page 1 / 2" in first.text and "Bulk recording 100" in first.text
+    assert 'class="sub pagination-summary">1–100 of 105</span>' in first.text
+    assert 'class="pagination-current" aria-current="page" aria-label="Page 1">1</span>' in first.text
+    assert 'data-page-nav href="http://testserver/?page=2" aria-label="Page 2">2</a>' in first.text
+    assert "Bulk recording 100" in first.text
     assert "Alpha meeting" not in first.text
-    assert "Page 2 / 2" in second.text and "Alpha meeting" in second.text
+    assert 'class="sub pagination-summary">101–105 of 105</span>' in second.text
+    assert 'aria-current="page" aria-label="Page 2">2</span>' in second.text
+    assert "Alpha meeting" in second.text
     assert "Bulk recording 100" in ask.text and "Alpha meeting" in ask.text
+    assert "selected on this page" in first.text
+    assert 'id="page-change-backdrop" hidden' in first.text
+    assert 'role="alertdialog" aria-modal="true"' in first.text
+    assert "Changing pages clears the recordings selected on this page." in first.text
+    assert "pageChangeModal?.open(link, pageChangeCancel)" in first.text
+    assert "if (pendingPageUrl) window.location.href = pendingPageUrl" in first.text
+    assert "event.defaultPrevented || event.button !== 0 || event.metaKey" in first.text
+    assert "event.stopImmediatePropagation()" in first.text
+    assert "{capture:true,signal:cleanupController.signal}" in first.text
 
     detail = c.get("/file/a", params={"return_to": "/?page=1", "tab": "mindmap"})
     assert detail.status_code == 200

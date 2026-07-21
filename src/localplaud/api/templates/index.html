@@ -197,6 +197,21 @@
   .table-wrap .rectable { margin:0; }
   .table-wrap .rectable tbody tr:last-child td { border-bottom:0; }
   .mobile-library-controls { display:none; }
+  .library-pagination { display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:14px; }
+  .pagination-summary { margin-right:auto;font-size:12px;white-space:nowrap; }
+  .pagination-pages { display:flex;align-items:center;gap:4px; }
+  .pagination-link,.pagination-current,.pagination-ellipsis { width:32px;height:32px;display:grid;place-items:center;border-radius:6px;font-size:12px;font-weight:650;font-variant-numeric:tabular-nums; }
+  .pagination-link { border:1px solid var(--border2);background:var(--panel);color:var(--muted); }
+  .pagination-link:hover { border-color:var(--blue-br);color:var(--blue);background:var(--blue-soft); }
+  .pagination-link:focus-visible { outline:2px solid var(--blue);outline-offset:2px; }
+  .pagination-current { border:1px solid var(--blue);background:var(--blue);color:#fff; }
+  .pagination-ellipsis { width:20px;color:var(--faint); }
+  .pagination-edge { width:36px; }
+  .pagination-edge[aria-disabled="true"] { opacity:.4; }
+  .page-change-modal { width:min(420px,100%);min-height:0; }
+  .page-change-body { gap:16px; }
+  .page-change-body p { margin:0;color:var(--muted); }
+  .page-change-actions { display:flex;align-items:center;justify-content:flex-end;gap:8px; }
   .ask-surface { max-width:900px;margin:0 auto;padding:8px 0 60px; }
   .ask-hero { padding:20px 0 18px;border-bottom:1px solid var(--border);margin-bottom:18px; }
   .ask-hero h1 { display:flex;align-items:center;gap:9px;margin:0 0 5px;font-size:22px;letter-spacing:0; }
@@ -256,6 +271,9 @@
     .organization-manager-view { align-items:start; }
     .organization-manager-edit { align-items:stretch;flex-wrap:wrap; }
     .organization-manager-edit input { flex-basis:100%; }
+    .library-pagination { justify-content:center;flex-wrap:wrap;gap:8px; }
+    .pagination-summary { flex-basis:100%;margin:0;text-align:center; }
+    .pagination-pages { flex:1;min-width:0;max-width:100%;overflow-x:auto; }
   }
 </style>
 <div class="library-page"><div class="library-inner">
@@ -413,7 +431,7 @@
     {% else %}
     {% if lib.view != 'trash' %}
     <div class="bulkbar" id="bulkbar">
-      <strong><span id="selected-count">0</span> {{ t('selected') }}</strong>
+      <strong><span id="selected-count">0</span> {{ t('selected on this page') }}</strong>
       <select id="bulk-action" aria-label="Organization action">
         <option value="folder">{{ t('Move to folder') }}</option>
         <option value="add-tag">{{ t('Add tag') }}</option>
@@ -470,10 +488,35 @@
         {% endfor %}
       </tbody>
     </table></div>
-    {% if pagination.pages > 1 %}<nav aria-label="{{ t('Library pages') }}" style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:14px">{% if pagination.page > 1 %}<a class="btn sec" style="padding:7px 11px" href="{{ request.url.include_query_params(page=pagination.page - 1) }}">{{ t('Previous') }}</a>{% else %}<span class="btn sec" aria-disabled="true" style="padding:7px 11px;opacity:.45">{{ t('Previous') }}</span>{% endif %}<span class="sub" style="font-size:12px">{{ t('Page') }} {{ pagination.page }} / {{ pagination.pages }}</span>{% if pagination.page < pagination.pages %}<a class="btn sec" style="padding:7px 11px" href="{{ request.url.include_query_params(page=pagination.page + 1) }}">{{ t('Next') }}</a>{% else %}<span class="btn sec" aria-disabled="true" style="padding:7px 11px;opacity:.45">{{ t('Next') }}</span>{% endif %}</nav>{% endif %}
+    {% if pagination.pages > 1 %}
+    {% set page_start = (pagination.page - 1) * pagination.page_size + 1 %}
+    {% set page_end = [pagination.page * pagination.page_size, pagination.total] | min %}
+    <nav class="library-pagination" aria-label="{{ t('Library pages') }}">
+      <span class="sub pagination-summary">{{ page_start }}–{{ page_end }} {{ t('of') }} {{ pagination.total }}</span>
+      {% if pagination.page > 1 %}<a class="pagination-link pagination-edge" data-page-nav href="{{ request.url.include_query_params(page=pagination.page - 1) }}" aria-label="{{ t('Previous') }}">‹</a>{% else %}<span class="pagination-link pagination-edge" aria-disabled="true" aria-label="{{ t('Previous') }}">‹</span>{% endif %}
+      <span class="pagination-pages">
+        {% for item in range(1, pagination.pages + 1) %}
+          {% if item == pagination.page %}<span class="pagination-current" aria-current="page" aria-label="{{ t('Page') }} {{ item }}">{{ item }}</span>
+          {% else %}<a class="pagination-link" data-page-nav href="{{ request.url.include_query_params(page=item) }}" aria-label="{{ t('Page') }} {{ item }}">{{ item }}</a>{% endif %}
+        {% endfor %}
+      </span>
+      {% if pagination.page < pagination.pages %}<a class="pagination-link pagination-edge" data-page-nav href="{{ request.url.include_query_params(page=pagination.page + 1) }}" aria-label="{{ t('Next') }}">›</a>{% else %}<span class="pagination-link pagination-edge" aria-disabled="true" aria-label="{{ t('Next') }}">›</span>{% endif %}
+    </nav>
+    {% endif %}
     {% endif %}
   {% endif %}
 </div></div>
+{% if files and lib.view != 'trash' and pagination.pages > 1 %}
+<div class="import-backdrop" id="page-change-backdrop" hidden>
+  <section class="import-modal page-change-modal" role="alertdialog" aria-modal="true" aria-labelledby="page-change-title" aria-describedby="page-change-description">
+    <div class="import-head"><span id="page-change-title">{{ t('Change page?') }}</span><button class="import-close" id="page-change-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="import-body page-change-body">
+      <p id="page-change-description">{{ t('Changing pages clears the recordings selected on this page.') }}</p>
+      <div class="page-change-actions"><button class="btn sec" id="page-change-cancel" type="button">{{ t('Stay on this page') }}</button><button class="btn" id="page-change-confirm" type="button">{{ t('Change page') }}</button></div>
+    </div>
+  </section>
+</div>
+{% endif %}
 {% if active != 'ask' %}
 <div class="import-backdrop" id="organization-manager-backdrop" hidden>
   <section class="import-modal organization-manager-modal" role="dialog" aria-modal="true" aria-labelledby="organization-manager-title" aria-describedby="organization-manager-description">
@@ -622,6 +665,12 @@
   const exportDownload = document.getElementById('bulk-export-download');
   const exportTranscript = document.getElementById('bulk-export-transcript');
   const exportNotes = document.getElementById('bulk-export-notes');
+  const pageChangeBackdrop = document.getElementById('page-change-backdrop');
+  const pageChangeClose = document.getElementById('page-change-close');
+  const pageChangeCancel = document.getElementById('page-change-cancel');
+  const pageChangeConfirm = document.getElementById('page-change-confirm');
+  const pageChangeModal = pageChangeBackdrop ? window.localplaudModal({backdrop:pageChangeBackdrop,background:()=>[document.querySelector('.library-page'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')],cleanupSignal:cleanupController.signal}) : null;
+  let pendingPageUrl = null;
   let exportOpener = null;
   let backgroundInert = new Map();
 
@@ -691,6 +740,17 @@
     checks.forEach(c => c.checked = control.checked);
     sync();
   }));
+  document.querySelectorAll('[data-page-nav]').forEach(link => link.addEventListener('click', event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!selected().length) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    pendingPageUrl = link.href;
+    pageChangeModal?.open(link, pageChangeCancel);
+  }, {capture:true,signal:cleanupController.signal}));
+  [pageChangeClose, pageChangeCancel].filter(Boolean).forEach(control => control.addEventListener('click', () => pageChangeModal?.close(), {signal:cleanupController.signal}));
+  pageChangeBackdrop?.addEventListener('localplaud:modal-close', () => { pendingPageUrl = null; }, {signal:cleanupController.signal});
+  pageChangeConfirm?.addEventListener('click', () => { if (pendingPageUrl) window.location.href = pendingPageUrl; }, {signal:cleanupController.signal});
   mobileSort?.addEventListener('change', () => { window.location.href = mobileSort.value; });
   const syncMobileSortFromLocation = () => {
     if (!mobileSort) return;
