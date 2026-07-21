@@ -7,8 +7,9 @@
   <title>{{ recording.title }} · localplaud</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <style>
-    /* Mirrors the Plaud Web public share page: fixed 55px header, promo band,
-       轉錄/摘要 tabs over a 708px column, each tab an internal scroll region. */
+    /* Mirrors the Plaud Web public share page: fixed 55px header, 轉錄/摘要
+       tabs over a 708px column, each tab an internal scroll region, and a
+       play bar pinned above the scrolling transcript. */
     :root{color-scheme:light;--fg:#101828;--body:#3D3D3D;--muted:#A3A3A3;--tab-off:#7A7A7A;--line:#EBEBEB;--track:#D6D6D6}
     *{box-sizing:border-box}
     [hidden]{display:none!important}
@@ -26,21 +27,16 @@
     .head-meta .divider{height:12px}
 
     .column{width:min(708px,100% - 48px);margin:0 auto}
-    .promo{flex:none;margin-top:12px}
-    .promo-inner{height:60px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 14px;border-radius:5px;
-      background:radial-gradient(120% 190% at 88% 10%,#E2FFE3 0%,#DCF8FC 24%,#E6F3FA 46%,#F4F8FF 70%,#F9F9F9 100%)}
-    .promo-brand{min-width:0}
-    .promo-wordmark{font-size:13px;font-weight:760;letter-spacing:.14em;color:#000;text-transform:uppercase}
-    .promo-tagline{margin-top:2px;font-size:12px;line-height:16px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .promo-cta{flex:none;display:inline-block;padding:6px 14px;border-radius:5px;background:#000;color:#fff;font-size:14px;line-height:21px;text-decoration:none}
-
-    .tabs{flex:none;display:flex;gap:24px;align-items:center;height:39px;margin-top:16px}
+    .tabs{flex:none;display:flex;gap:24px;align-items:center;height:39px;margin-top:10px}
     .tabs button{font-size:14px;color:var(--tab-off);font-weight:400}
     .tabs button[aria-selected="true"]{color:#000;font-weight:600}
 
     .panels{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:8px}
     .panel{flex:1;min-height:0;overflow-y:auto}
     .panel[hidden]{display:none}
+    /* The play bar stays pinned above the transcript; only the list scrolls. */
+    #panel-transcript{display:flex;flex-direction:column;overflow:hidden}
+    .transcript-scroll{flex:1;min-height:0;overflow-y:auto}
 
     .import-badge{display:inline-block;padding:2px 9px;border:1px solid var(--line);border-radius:999px;background:#F7F7F8;color:var(--tab-off);font-size:11px;font-weight:600;white-space:nowrap;vertical-align:middle}
     h2 .import-badge,h1 .import-badge{margin-left:10px;vertical-align:4px}
@@ -92,7 +88,7 @@
     .page-foot{padding:30px 0 20px;text-align:center;font-size:13px;line-height:1.5;color:var(--muted)}
 
     /* desktop section outline, fixed at the right like Plaud */
-    .outline{position:fixed;right:40px;top:220px;width:248px;max-height:60vh;overflow-y:auto;display:none}
+    .outline{position:fixed;right:40px;top:170px;width:248px;max-height:60vh;overflow-y:auto;display:none}
     .outline button{display:block;width:100%;min-height:34px;padding:7px 24px 7px 16px;text-align:left;font-size:12px;color:var(--tab-off);border-radius:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .outline button.on{color:#000;font-weight:600}
     .outline button:hover{background:#F5F5F6}
@@ -101,7 +97,6 @@
     @media (max-width:760px){
       .column{width:calc(100% - 48px)}
       .note-title{font-size:30px;line-height:38px}
-      .promo-tagline{display:none}
     }
   </style>
 </head>
@@ -114,11 +109,6 @@
       <div class="head-meta">{% if recording.recorded_at %}<span>{{ recording.recorded_at }}</span><span class="divider"></span>{% endif %}<span>{{ recording.duration_human }}</span></div>
     </div>
   </header>
-
-  <div class="promo"><div class="column promo-inner">
-    <div class="promo-brand"><div class="promo-wordmark">localplaud</div><div class="promo-tagline">{{ t('Self-hosted recording workspace') }}</div></div>
-    <a class="promo-cta" href="/">{{ t('Open workspace') }}</a>
-  </div></div>
 
   {% set body_notes = notes | rejectattr('template', 'equalto', 'mind_map') | list %}
   {% set mindmaps = notes | selectattr('template', 'equalto', 'mind_map') | list %}
@@ -134,7 +124,7 @@
     <section class="panel" id="panel-transcript" role="tabpanel" aria-labelledby="tab-transcript" {% if default_tab != 'transcript' %}hidden{% endif %}>
       <div class="column">
         {% if recording.has_audio %}
-        <div class="player">
+        <div class="player" id="player-bar">
           <div class="player-time"><span id="player-position">00:00:00</span> / {{ recording.duration_clock }}</div>
           <div class="player-controls">
             <button class="play-btn" id="play-toggle" type="button" aria-label="{{ t('Play') }}">
@@ -148,6 +138,9 @@
         </div>
         {% endif %}
         {% if transcript_imported %}<div class="transcript-badge-row"><span class="import-badge">{{ t('Imported from Plaud') }}</span></div>{% endif %}
+      </div>
+      <div class="transcript-scroll" id="transcript-scroll">
+      <div class="column">
         {% if segments %}
         <div class="segments" id="segment-list">
           {% for segment in segments %}{% set start = (segment.get('start') or 0) | int %}
@@ -159,6 +152,7 @@
         </div>
         {% else %}<div class="empty">{{ t('Transcript is not available yet.') }}</div>{% endif %}
         <div class="page-foot">localplaud · {{ t('self-hosted') }}</div>
+      </div>
       </div>
     </section>
     {% endif %}
@@ -227,7 +221,7 @@
         speedToggle.addEventListener('click',()=>{speedIndex=(speedIndex+1)%speeds.length;audio.playbackRate=speeds[speedIndex];speedToggle.textContent=`${speeds[speedIndex]}x`;});
 
         const list=document.getElementById('segment-list'),segments=list?[...list.querySelectorAll('.segment')]:[];
-        const transcriptPanel=document.getElementById('panel-transcript');
+        const transcriptPanel=document.getElementById('transcript-scroll');
         segments.forEach(segment=>segment.addEventListener('click',()=>{audio.currentTime=Number(segment.dataset.start)||0;audio.play();}));
         // Auto-follow must never fight the reader: pause it while the user is
         // interacting, and only track a segment that is already on screen.

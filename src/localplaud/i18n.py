@@ -48,8 +48,6 @@ _ZH_HANT_TW = {
     "Shared content updated": "公開內容已更新",
     "Transcription": "轉錄",
     "Summary": "摘要",
-    "Open workspace": "開啟工作區",
-    "Self-hosted recording workspace": "自架錄音工作區",
     "Notes are not available yet.": "筆記尚未產生。",
     "Seek": "拖曳播放位置",
     "All files": "所有檔案",
