@@ -107,6 +107,8 @@
   .organization-manager-edit input { min-width:0;flex:1; }
   .organization-manager-confirm { display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:9px;border-radius:6px;background:var(--red-soft);font-size:11.5px; }
   .organization-manager-confirm span { min-width:0;flex:1 1 240px;overflow-wrap:anywhere; }
+  /* Cancel/Delete stay one visual group: they wrap as a pair, never apart. */
+  .organization-manager-confirm-actions { display:flex;gap:7px;flex:0 0 auto;margin-left:auto; }
   .organization-manager-status { position:sticky;bottom:0;min-height:18px;padding-top:7px;background:var(--panel);overflow-wrap:anywhere; }
   .quickadd { margin-left:auto; position:relative; }
   .quickadd summary { list-style:none; cursor:pointer; color:var(--blue); font-size:11.5px; font-weight:650; }
@@ -116,7 +118,7 @@
   .quickadd input { min-width:0; flex:1; border:1px solid var(--border2); border-radius:7px; padding:7px 9px;
     background:var(--panel); color:var(--fg); }
   .quickadd button { padding:7px 10px; border:0; border-radius:7px; background:var(--blue); color:white; font-weight:650; cursor:pointer; }
-  .bulkbar { position:sticky; top:-1px; z-index:4; display:none; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0 8px;
+  .bulkbar { position:sticky; top:-1px; z-index:4; display:none; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; margin:12px 0 8px;
     padding:9px 11px; border:1px solid var(--blue-br); border-radius:8px; background:var(--blue-soft); box-shadow:var(--shadow); }
   .bulkbar.on { display:flex; }
   .bulkbar strong { color:var(--blue); margin-right:auto; }
@@ -539,7 +541,7 @@
               <div class="organization-manager-actions"><button class="organization-manager-action" data-organization-rename type="button" aria-label="{{ t('Rename') }} {{ item.name }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></button><button class="organization-manager-action delete" data-organization-delete type="button" aria-label="{{ t('Delete') }} {{ item.name }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/trash-2.svg')"></span></button></div>
             </div>
             <form class="organization-manager-edit" hidden><input class="search-input" name="name" maxlength="80" required aria-label="{{ t('Name') }}"><button class="btn" type="submit">{{ t('Save') }}</button><button class="btn sec" data-organization-cancel type="button">{{ t('Cancel') }}</button></form>
-            <div class="organization-manager-confirm" hidden><span>{{ t('Removing this folder or tag only unassigns it. Recordings and audio stay intact.') }}</span><button class="btn sec" data-organization-delete-cancel type="button">{{ t('Cancel') }}</button><button class="btn" data-organization-delete-confirm type="button" style="background:var(--red)">{{ t('Delete') }}</button></div>
+            <div class="organization-manager-confirm" hidden><span>{{ t('Removing this folder or tag only unassigns it. Recordings and audio stay intact.') }}</span><div class="organization-manager-confirm-actions"><button class="btn sec" data-organization-delete-cancel type="button">{{ t('Cancel') }}</button><button class="btn" data-organization-delete-confirm type="button" style="background:var(--red)">{{ t('Delete') }}</button></div></div>
           </div>
           {% else %}<div class="sub" style="padding:11px 0">{{ t('No folders or tags in this section yet.') }}</div>{% endfor %}
         </div>
