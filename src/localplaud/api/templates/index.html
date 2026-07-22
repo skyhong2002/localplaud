@@ -368,7 +368,7 @@
            href="{{ liburl(lib.sort, lib.dir, lib.state, '', lib.view) }}">{{ t('All') }}</a>
         {% for sc in facets.scenes %}
         <a class="fchip {% if sc.active %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{{ t(sc.label) }} <span class="n">{{ sc.count }}</span></a>
+           href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{% if sc.value == 'unknown' %}{{ t(sc.label) }}{% elif workspace_preferences.locale == 'zh-Hant-TW' %}{{ t('Audio source') }} {{ sc.value }}{% else %}{{ sc.label }}{% endif %} <span class="n">{{ sc.count }}</span></a>
         {% endfor %}
       </div>
       {% endif %}
@@ -413,7 +413,7 @@
         <ul class="active-filter-list" aria-label="{{ t('Active filters') }}">
           {% if q %}<li>{{ t('Search') }}: {{ q }}</li>{% endif %}
           {% if lib.state %}<li>{{ t('State') }}: {{ t(lib.state) }}</li>{% endif %}
-          {% if active_scene %}<li>{{ t('Source') }}: {{ t(active_scene.label) }}</li>{% endif %}
+          {% if active_scene %}<li>{{ t('Source') }}: {% if active_scene.value == 'unknown' %}{{ t(active_scene.label) }}{% elif workspace_preferences.locale == 'zh-Hant-TW' %}{{ t('Audio source') }} {{ active_scene.value }}{% else %}{{ active_scene.label }}{% endif %}</li>{% endif %}
           {% if active_folder %}<li>{{ t('Folder') }}: {{ active_folder.name }}</li>{% endif %}
           {% if active_tag %}<li>{{ t('Tag') }}: {{ active_tag.name }}</li>{% endif %}
           {% if active_origin %}<li>{{ t('Comes from') }}: {{ t(active_origin.label) }}</li>{% endif %}

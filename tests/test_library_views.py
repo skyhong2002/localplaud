@@ -374,8 +374,8 @@ def test_numbered_capture_source_labels_are_localized(monkeypatch, tmp_path):
     page = c.get("/?q=missing&scene=1")
     assert page.status_code == 200
     assert '>來源 1</span>' in page.text
-    assert 'title="錄製來源 1"' in page.text
-    assert "來源: 錄製來源 1" in page.text
+    assert 'title="音訊來源 1"' in page.text
+    assert "來源: 音訊來源 1" in page.text
     assert "Capture source 1" not in page.text
     assert ">Source 1</span>" not in page.text
 
