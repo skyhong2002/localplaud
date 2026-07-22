@@ -376,6 +376,8 @@ _ZH_HANT_TW = {
     "Filtered files": "已篩選檔案",
     "Unknown capture source": "未知錄製來源",
     "Unknown source": "未知來源",
+    "Capture source {value}": "錄製來源 {value}",
+    "Source {value}": "來源 {value}",
     "Selected recording": "目前錄音",
     "Recording list pages": "錄音清單分頁",
     "transcript": "逐字稿",
@@ -1059,6 +1061,16 @@ def translator(locale: str) -> Callable[[str], str]:
     catalog = CATALOGS.get(locale, {})
 
     def translate(message: str) -> str:
-        return catalog.get(message, message)
+        translated = catalog.get(message)
+        if translated is not None:
+            return translated
+        for prefix, template in (
+            ("Capture source ", "Capture source {value}"),
+            ("Source ", "Source {value}"),
+        ):
+            value = message.removeprefix(prefix)
+            if value != message and value.isdigit():
+                return catalog.get(template, template).format(value=value)
+        return message
 
     return translate

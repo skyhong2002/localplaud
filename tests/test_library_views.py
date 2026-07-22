@@ -361,6 +361,25 @@ def test_unknown_source_and_origin_facets_are_localized(monkeypatch, tmp_path):
     assert "Plaud 雲端" in origin_filters
 
 
+def test_numbered_capture_source_labels_are_localized(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+
+    preferences = c.get("/api/preferences/workspace").json()
+    assert c.put(
+        "/api/preferences/workspace",
+        json=preferences | {"locale": "zh-Hant-TW"},
+    ).status_code == 200
+
+    page = c.get("/?q=missing&scene=1")
+    assert page.status_code == 200
+    assert '>來源 1</span>' in page.text
+    assert 'title="錄製來源 1"' in page.text
+    assert "來源: 錄製來源 1" in page.text
+    assert "Capture source 1" not in page.text
+    assert ">Source 1</span>" not in page.text
+
+
 def test_literal_wildcards_do_not_expand_title_search(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, PlaudFile
