@@ -117,6 +117,26 @@ def test_web_login_session_and_logout(monkeypatch, tmp_path):
         assert session.scalar(select(BrowserSession)) is None
 
 
+def test_favicon_is_public_and_served(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("LOCALPLAUD_API__AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("LOCALPLAUD_API__LOGIN_PASSWORD", "web-secret")
+    monkeypatch.setenv("LOCALPLAUD_API__SESSION_SECRET", "a-long-random-session-secret")
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.api.app import app
+    from localplaud.db.session import init_db
+
+    init_db()
+    client = TestClient(app, base_url="https://testserver")
+    # The library is gated, but the icon browsers probe by convention is not,
+    # so the root /favicon.ico request resolves instead of logging a 404.
+    assert client.get("/", headers={"Accept": "text/html"}, follow_redirects=False).status_code == 303
+    icon = client.get("/favicon.ico")
+    assert icon.status_code == 200
+    assert icon.headers["content-type"] == "image/svg+xml"
+
+
 def test_web_login_can_use_tailnet_only_http_cookie(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
 

@@ -201,7 +201,7 @@ async def _auth_gate(request: Request, call_next):
     settings = get_settings().api
     token = settings.auth_token
     login_password = settings.login_password
-    public_paths = {"/healthz", "/login"}
+    public_paths = {"/healthz", "/login", "/favicon.ico"}
     public_share = request.url.path.startswith("/share/")
     if (
         (token or login_password)
@@ -238,6 +238,19 @@ async def _auth_gate(request: Request, call_next):
         response.headers["X-Robots-Tag"] = "noindex"
         response.headers["Cache-Control"] = "private, no-store"
     return response
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    """Serve the app icon for browsers that request /favicon.ico by convention.
+
+    The HTML declares an SVG icon, but browsers still probe the root .ico path;
+    without this they log a 404 and some fall back to a blank tab icon.
+    """
+    icon = _static / "favicon.svg"
+    if icon.exists():
+        return FileResponse(icon, media_type="image/svg+xml")
+    return Response(status_code=404)
 
 
 @app.get("/login", response_class=HTMLResponse)
