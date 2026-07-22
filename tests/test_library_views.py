@@ -380,6 +380,30 @@ def test_numbered_capture_source_labels_are_localized(monkeypatch, tmp_path):
     assert ">Source 1</span>" not in page.text
 
 
+def test_bulk_toolbar_accessible_names_are_localized(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+
+    preferences = c.get("/api/preferences/workspace").json()
+    assert c.put(
+        "/api/preferences/workspace",
+        json=preferences | {"locale": "zh-Hant-TW"},
+    ).status_code == 200
+
+    page = c.get("/")
+    assert page.status_code == 200
+    # Bulk toolbar and row/select controls carry Traditional Chinese accessible names.
+    assert 'aria-label="整理動作"' in page.text  # bulk-action select
+    assert 'aria-label="資料夾或標籤"' in page.text  # bulk-target select
+    assert 'aria-label="選取本頁所有錄音"' in page.text  # header select-all
+    assert 'aria-label="選取錄音 Alpha meeting"' in page.text  # row-select
+    # No English fallbacks leak into the Traditional Chinese shell.
+    assert 'aria-label="Organization action"' not in page.text
+    assert 'aria-label="Folder or tag"' not in page.text
+    assert 'aria-label="Select all visible recordings"' not in page.text
+    assert 'aria-label="Select ' not in page.text
+
+
 def test_literal_wildcards_do_not_expand_title_search(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, PlaudFile

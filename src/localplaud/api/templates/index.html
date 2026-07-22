@@ -432,13 +432,13 @@
     {% if lib.view != 'trash' %}
     <div class="bulkbar" id="bulkbar">
       <strong><span id="selected-count">0</span> {{ t('selected on this page') }}</strong>
-      <select id="bulk-action" aria-label="Organization action">
+      <select id="bulk-action" aria-label="{{ t('Organization action') }}">
         <option value="folder">{{ t('Move to folder') }}</option>
         <option value="add-tag">{{ t('Add tag') }}</option>
         <option value="remove-tag">{{ t('Remove tag') }}</option>
         <option value="resume">{{ t('Resume processing') }}</option>
       </select>
-      <select id="bulk-target" aria-label="Folder or tag"></select>
+      <select id="bulk-target" aria-label="{{ t('Folder or tag') }}"></select>
       <button type="button" id="bulk-apply">{{ t('Apply') }}</button>
       <button type="button" class="bulk-export" id="bulk-export-open"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>{{ t('Export selected') }}</button>
       <span class="bulk-separator" aria-hidden="true"></span>
@@ -466,7 +466,7 @@
     <div class="table-wrap"><table class="rectable">
       <thead>
         <tr>
-          {% if lib.view != 'trash' %}<th class="select-cell"><input id="select-all" type="checkbox" aria-label="Select all visible recordings"></th>{% endif %}
+          {% if lib.view != 'trash' %}<th class="select-cell"><input id="select-all" type="checkbox" aria-label="{{ t('Select all visible recordings') }}"></th>{% endif %}
           <th class="name-cell" aria-sort="{{ 'ascending' if lib.sort=='name' and lib.dir=='asc' else ('descending' if lib.sort=='name' else 'none') }}">{{ sorth('name', t('Name')) }}</th>
           <th class="num" aria-sort="{{ 'ascending' if lib.sort=='duration' and lib.dir=='asc' else ('descending' if lib.sort=='duration' else 'none') }}">{{ sorth('duration', t('Duration')) }}</th>
           <th class="num" aria-sort="{{ 'ascending' if lib.sort=='recorded' and lib.dir=='asc' else ('descending' if lib.sort=='recorded' else 'none') }}">{{ sorth('recorded', t('Recorded')) }}</th>
@@ -476,7 +476,7 @@
       <tbody>
         {% for f in files %}
         <tr class="{% if f.needs_attention %}attn{% endif %}">
-          {% if lib.view != 'trash' %}<td class="select-cell"><input class="row-select" type="checkbox" value="{{ f.id }}" aria-label="Select {{ f.filename }}"></td>{% endif %}
+          {% if lib.view != 'trash' %}<td class="select-cell"><input class="row-select" type="checkbox" value="{{ f.id }}" aria-label="{{ t('Select recording') }} {{ f.filename }}"></td>{% endif %}
           <td class="name-cell">
             <a class="nm" href="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-get="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="Needs attention — {{ f.status }}" aria-label="Needs attention"></span>{% endif %}</a>
             <span class="file-subline"><span>{{ t(f.status) }}</span><span>·</span><span>{{ t('Plaud cloud') if f.origin == 'plaud' else t('Local import') }}</span>{% if f.folder %}<span>·</span><span>{{ f.folder.name }}</span>{% endif %}</span>
