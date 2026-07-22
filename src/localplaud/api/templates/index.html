@@ -324,7 +324,7 @@
   <div class="library-toolbar">
     <details class="filter-menu" {% if lib.invalid_date_range or lib.invalid_duration_range %}open{% endif %}><summary aria-label="{{ t('Filter and organize') }}" title="{{ t('Filter and organize') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg')"></span>{{ t('Filter and organize') }}{% if filter_count %}<span class="filter-count" aria-hidden="true">{{ filter_count }}</span><span class="visually-hidden">{{ filter_count }} {{ t('active filters') }}</span>{% endif %}</summary><div class="filter-popover">
     <div class="filter-head"><strong>{{ t('Filter and organize') }}</strong><button class="filter-close" type="button" aria-label="{{ t('Close filters') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
-    <div class="orgbox" aria-label="Library organization">
+    <div class="orgbox" aria-label="{{ t('Library organization') }}">
       <div class="orgrow">
         <span class="lbl">{{ t('Folders') }}</span>
         <a class="fchip {% if lib.folder is none %}on{% endif %}" href="{{ liburl(view='all', folder='', tag='') }}">{{ t('All') }}</a>

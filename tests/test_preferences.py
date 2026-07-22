@@ -232,6 +232,8 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
             assert text in page.text
 
         settings = client.get("/settings")
+        assert 'aria-label="設定區段"' in settings.text
+        assert 'aria-label="Settings sections"' not in settings.text
         assert 'const tr=window.localplaudT' in settings.text
         assert 'window.localplaudT = message => ({' in settings.text
         assert "建立含資訊清單與 SHA-256 的一致性 SQLite 快照" in settings.text
