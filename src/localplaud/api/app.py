@@ -4265,6 +4265,7 @@ def rename_speaker(
     key: str = Form(...),
     name: str = Form(""),
     return_to: str = Form("/"),
+    t: str = Form(""),
 ):
     """Set (or clear, with an empty name) the display name for one stable
     speaker key. The key itself never changes — it is the diarization label
@@ -4310,7 +4311,9 @@ def rename_speaker(
         expected_speaker_names=expected_names,
     )
     return_to = _validated_library_return_url(return_to)
-    redirect_url = _file_workspace_url(file_id, return_to, tab="transcript")
+    redirect_url = _file_workspace_url(
+        file_id, return_to, tab="transcript", t=_safe_playback_second(t)
+    )
     return RedirectResponse(url=redirect_url, status_code=303)
 
 

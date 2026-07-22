@@ -236,6 +236,24 @@ def test_rename_endpoint_upsert_clear_and_validation(monkeypatch, tmp_path):
     assert r.headers["location"] == "/file/r1?return_to=%2F&tab=transcript"
     assert name_of("SPEAKER_00") == "Alice"
 
+    # Renaming mid-listen carries the playback position through the redirect
+    # so the reloaded workspace seeks back instead of resetting to 0:00.
+    r = c.post(
+        "/file/r1/speakers",
+        data={"key": "SPEAKER_00", "name": "Alice C", "t": "361"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "t=361" in r.headers["location"]
+    # Malformed playback state is discarded, not echoed.
+    r = c.post(
+        "/file/r1/speakers",
+        data={"key": "SPEAKER_00", "name": "Alice", "t": "not-a-number"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "t=" not in r.headers["location"]
+
     # empty/whitespace clears the name back to the stable key
     r = c.post("/file/r1/speakers", data={"key": "SPEAKER_00", "name": "   "},
                follow_redirects=False)

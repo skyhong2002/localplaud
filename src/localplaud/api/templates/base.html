@@ -526,11 +526,11 @@
     .speaker-editor label { display:grid;gap:4px;font-size:10.5px; }
     .legend .spk-name { width:100%;background:var(--panel);border:1px solid var(--border2);color:var(--fg);border-radius:6px;padding:6px 8px;font-size:12px;outline:none; }
     .legend .spk-name:focus { border-color:var(--blue); }
-    .seg .editbtn { opacity:0; background:none; border:0; color:var(--muted); cursor:pointer; font-size:12px; padding:0 4px; }
-    .seg .txt>.editbtn { position:absolute;right:0;top:5px; }
+    .seg .editbtn { opacity:0; background:none; border:0; color:var(--muted); cursor:pointer; font-size:12px; min-width:28px;min-height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px; }
+    .seg .txt>.editbtn { position:absolute;right:-6px;top:-2px; }
     .seg .editbtn .nav-icon { width:13px;height:13px; }
     .seg:hover .editbtn,.seg:focus-within .editbtn,.seg .editbtn:focus-visible { opacity:1; }
-    .seg .editbtn:hover { color:var(--fg); }
+    .seg .editbtn:hover { color:var(--fg);background:var(--panel2); }
     .segedit { margin-top:6px; display:flex; flex-direction:column; gap:6px; cursor:default; }
     .segedit label { display:grid;gap:4px; }
     .segedit select { width:min(320px,100%); }

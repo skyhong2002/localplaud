@@ -854,6 +854,10 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "body.nav-open { overflow:hidden; }" in r.text
     assert ".title-edit { width:36px;height:36px;opacity:1; }" in r.text
     assert ".seg .editbtn { min-width:36px;min-height:36px;opacity:1; }" in r.text
+    # Desktop pencil keeps a 28px hit area; double-clicking segment text opens
+    # the same editor because the hover pencil alone is hard to discover.
+    assert "min-width:28px;min-height:28px" in r.text
+    assert "document.addEventListener('dblclick'" in r.text
     assert "max-height:calc(100dvh - 24px);overflow:hidden" in r.text
     assert ".import-body { min-height:0;" in r.text and "overflow-y:auto" in r.text
     assert ".ask-user-message" in r.text and ".saved-note-actions" in r.text
