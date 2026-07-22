@@ -717,7 +717,7 @@
     const isFolder = action.value === 'folder';
     const items = isFolder ? folders : tags;
     target.innerHTML = '';
-    if (isFolder) target.add(new Option('No folder', ''));
+    if (isFolder) target.add(new Option(window.localplaudT('No folder'), ''));
     for (const item of items) target.add(new Option(item.name, String(item.id)));
     target.disabled = !isFolder && !items.length;
     if (apply) apply.disabled = !isFolder && !items.length;
