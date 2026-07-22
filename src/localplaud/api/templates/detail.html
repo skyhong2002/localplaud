@@ -541,7 +541,7 @@
   document.addEventListener('keydown',event=>{if(!activeDialog)return;if(event.key==='Escape'){event.preventDefault();closeDialog(activeDialog);return;}if(event.key!=='Tab')return;const items=dialogFocusables(activeDialog);if(!items.length){event.preventDefault();return;}const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}},{signal:cleanupController.signal});
   cleanupController.signal.addEventListener('abort',()=>{if(activeDialog)closeDialog(activeDialog,{restoreFocus:false});},{once:true});
   const workspacePopovers=[...document.querySelectorAll('.transcript-tool,.speaker-pill,.note-add-menu')];
-  function closeWorkspacePopover(details,{restoreFocus=true}={}){if(!details?.open)return;details.open=false;if(restoreFocus)details.querySelector(':scope>summary')?.focus();}
+  function closeWorkspacePopover(details,{restoreFocus=true}={}){if(!details?.open)return;details.open=false;details.querySelector('form.speaker-editor')?.reset();if(restoreFocus)details.querySelector(':scope>summary')?.focus();}
   workspacePopovers.forEach(details=>{details.addEventListener('toggle',()=>{if(!details.open)return;workspacePopovers.forEach(other=>{if(other!==details)closeWorkspacePopover(other,{restoreFocus:false});});const panel=details.querySelector('.transcript-popover,.speaker-editor,.note-add-popover');requestAnimationFrame(()=>{(panel?.querySelector('input:not([type="hidden"]),textarea,select,button:not([data-close-popover]),a[href]')||panel?.querySelector('[data-close-popover]'))?.focus();});});details.querySelector('[data-close-popover]')?.addEventListener('click',()=>closeWorkspacePopover(details));});
   document.addEventListener('pointerdown',event=>{workspacePopovers.forEach(details=>{if(details.open&&!details.contains(event.target))closeWorkspacePopover(details,{restoreFocus:false});});},{signal:cleanupController.signal});
   document.addEventListener('keydown',event=>{if(activeDialog||event.key!=='Escape')return;const open=workspacePopovers.find(details=>details.open);if(open){event.preventDefault();closeWorkspacePopover(open);}},{signal:cleanupController.signal});
@@ -855,6 +855,17 @@
     if(t!==null && player){ const s=parseFloat(t); if(Number.isFinite(s)&&s>=0){
       const seek=()=>{ player.currentTime=s; }; if(player.readyState>=1) seek();
       else player.addEventListener('loadedmetadata', seek, {once:true}); player.load(); }}})();
+  // Reloading mid-listen: persist the position per recording in sessionStorage
+  // (a pagehide replaceState is too late for the reload request itself) and
+  // restore it on load when the URL carries no explicit t= deep-link.
+  if(player){ const positionKey='localplaud:playback:{{ f.id }}'; let lastStored=-1;
+    player.addEventListener('timeupdate',()=>{ const second=Math.floor(player.currentTime);
+      if(second===lastStored) return; lastStored=second;
+      try{ if(second>0) sessionStorage.setItem(positionKey,String(second)); else sessionStorage.removeItem(positionKey); }catch(_e){} },{signal:cleanupController.signal});
+    if(new URLSearchParams(location.search).get('t')===null){
+      const stored=parseInt(sessionStorage.getItem(positionKey)||'',10);
+      if(Number.isFinite(stored)&&stored>0){ const seek=()=>{ player.currentTime=stored; };
+        if(player.readyState>=1) seek(); else player.addEventListener('loadedmetadata',seek,{once:true}); } } }
   document.querySelector('[data-segment-edit-error]')?.focus();
   // inline segment editing — never let the edit UI trigger click-to-seek
   document.addEventListener('click',event=>{const button=event.target.closest('.seg .editbtn');if(!button)return;event.stopPropagation();const form=button.parentElement.querySelector('.segedit');form.hidden=!form.hidden;if(!form.hidden)form.querySelector('textarea').focus();},{signal:cleanupController.signal});
