@@ -479,7 +479,7 @@
         <tr class="{% if f.needs_attention %}attn{% endif %}">
           {% if lib.view != 'trash' %}<td class="select-cell"><input class="row-select" type="checkbox" value="{{ f.id }}" aria-label="{{ t('Select recording') }} {{ f.filename }}"></td>{% endif %}
           <td class="name-cell">
-            <a class="nm" href="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-get="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="Needs attention — {{ f.status }}" aria-label="Needs attention"></span>{% endif %}</a>
+            <a class="nm" href="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-get="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="{{ t('Needs attention') }} — {{ t(f.status) }}" aria-label="{{ t('Needs attention') }}"></span>{% endif %}</a>
             <span class="file-subline"><span>{{ t(f.status) }}</span><span>·</span><span>{{ t('Plaud cloud') if f.origin == 'plaud' else t('Local import') }}</span>{% if f.folder %}<span>·</span><span>{{ f.folder.name }}</span>{% endif %}</span>
           </td>
           <td class="num dur-cell">{{ f.duration_ms | dur }}</td>
@@ -906,14 +906,14 @@
     if (action.value === 'add-tag') body.add_tag_ids = [Number(target.value)];
     if (action.value === 'remove-tag') body.remove_tag_ids = [Number(target.value)];
     apply.disabled = true;
-    show('Saving organization…');
+    show(tr('Saving organization…'));
     try {
       const response = await fetch(lifecycle?'/api/files/bulk':'/api/files/organize', {
         method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Could not organize recordings');
-      show(`${data.updated} recording${data.updated === 1 ? '' : 's'} ${action.value === 'resume' ? 'queued' : 'updated'}.`);
+      if (!response.ok) throw new Error(data.detail || tr('Could not organize recordings'));
+      show(`${data.updated} ${action.value === 'resume' ? tr('recordings queued') : tr('recordings updated')}`);
       window.setTimeout(() => window.location.reload(), 350);
     } catch (error) {
       show(error.message, true);

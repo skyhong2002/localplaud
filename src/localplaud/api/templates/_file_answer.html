@@ -2,7 +2,7 @@
   <div class="md" data-answer>{{ res.answer }}</div>
   {% if res.sources %}
   <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px">
-    <div class="sub" style="font-size:12px; font-weight:650; margin-bottom:5px">MOMENTS</div>
+    <div class="sub" style="font-size:12px; font-weight:650; margin-bottom:5px">{{ t('MOMENTS') }}</div>
     {% for s in res.sources[:6] %}
     {% if s.target in ('generated_note', 'saved_note') %}
     <a class="seg" href="{{ s.url }}" style="padding:5px 8px;display:flex;gap:8px">

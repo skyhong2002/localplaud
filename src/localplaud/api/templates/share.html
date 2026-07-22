@@ -210,8 +210,8 @@
 
   <nav class="outline" id="outline" aria-label="{{ t('Summary') }}"></nav>
   {% if show_transcript and outlines %}
-  <aside class="chapters" id="chapters" aria-label="{{ outlines[0].title or 'Outline' }}">
-    <div class="chapters-head">{{ outlines[0].title or 'Outline' }}{% if outlines[0].imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</div>
+  <aside class="chapters" id="chapters" aria-label="{{ outlines[0].title or t('Outline') }}">
+    <div class="chapters-head">{{ outlines[0].title or t('Outline') }}{% if outlines[0].imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</div>
     <div class="chapters-body" id="chapters-body">{% for outline_note in outlines %}<div class="md">{{ outline_note.content_md|markdown }}</div>{% endfor %}</div>
   </aside>
   {% endif %}

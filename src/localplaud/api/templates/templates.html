@@ -29,7 +29,7 @@
       </div>
       <h3 style="margin:14px 0 5px;font-size:17px">{{ template.name }}</h3>
       <p class="sub" style="font-size:13px;line-height:1.5;margin:0">{{ template.description }}</p>
-      <div class="sub" style="font-size:11.5px;margin-top:10px">by {{ template.author }}{% if template.popularity %} · {{ template.popularity }}% popular{% endif %}</div>
+      <div class="sub" style="font-size:11.5px;margin-top:10px">{{ t('by') }} {{ template.author }}{% if template.popularity %} · {{ template.popularity }}% {{ t('popular') }}{% endif %}</div>
       <div style="display:flex;gap:7px;margin-top:auto;padding-top:15px">
         <button class="btn sec template-view" type="button" data-key="{{ template.key }}" style="padding:7px 10px">{{ t('View') }}</button>
         {% if template.is_builtin %}<button class="btn template-copy" type="button" data-key="{{ template.key }}" style="padding:7px 10px">{{ t('Copy to My Space') }}</button>{% else %}<button class="btn template-edit" type="button" data-key="{{ template.key }}" style="padding:7px 10px">New version</button>{% endif %}
@@ -42,14 +42,14 @@
 
 <div class="import-backdrop" id="template-backdrop" hidden>
   <section class="import-modal" style="width:min(720px,100%);min-height:0;max-height:90vh" role="dialog" aria-modal="true">
-    <div class="import-head"><span id="template-modal-title">Template</span><button class="import-close" id="template-close" type="button">×</button></div>
+    <div class="import-head"><span id="template-modal-title">{{ t('Template') }}</span><button class="import-close" id="template-close" type="button">×</button></div>
     <form id="template-form" class="import-body" style="gap:10px;overflow:auto">
-      <label>Key<input class="search-input" name="key" required pattern="[a-z0-9][a-z0-9-]{0,63}" style="width:100%;margin-top:4px"></label>
-      <label>Name<input class="search-input" name="name" required maxlength="80" style="width:100%;margin-top:4px"></label>
-      <label>System prompt<textarea class="search-input" name="system_prompt" required rows="5" style="width:100%;margin-top:4px;resize:vertical"></textarea></label>
-      <label>Note structure / instructions<textarea class="search-input" name="instructions" required rows="10" style="width:100%;margin-top:4px;resize:vertical"></textarea></label>
+      <label>{{ t('Key') }}<input class="search-input" name="key" required pattern="[a-z0-9][a-z0-9-]{0,63}" style="width:100%;margin-top:4px"></label>
+      <label>{{ t('Name') }}<input class="search-input" name="name" required maxlength="80" style="width:100%;margin-top:4px"></label>
+      <label>{{ t('System prompt') }}<textarea class="search-input" name="system_prompt" required rows="5" style="width:100%;margin-top:4px;resize:vertical"></textarea></label>
+      <label>{{ t('Note structure / instructions') }}<textarea class="search-input" name="instructions" required rows="10" style="width:100%;margin-top:4px;resize:vertical"></textarea></label>
       <div id="template-form-status" class="sub" style="font-size:12px"></div>
-      <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn sec" id="template-cancel" type="button">Cancel</button><button class="btn" type="submit">Save template</button></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn sec" id="template-cancel" type="button">{{ t('Cancel') }}</button><button class="btn" type="submit">{{ t('Save template') }}</button></div>
     </form>
   </section>
 </div>

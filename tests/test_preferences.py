@@ -71,7 +71,7 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
         assert 'id="workspace-preferences"' in page.text
         assert 'href="#workspace-preferences"' in page.text
         assert 'value="UTC"' in page.text
-        assert '<option value="12" selected>12-hour</option>' in page.text
+        assert '<option value="12" selected>12 小時制</option>' in page.text
         assert '<option value="zh-Hant-TW" selected>繁體中文（台灣）</option>' in page.text
         assert 'name="auto_process_new_recordings"' in page.text
         assert 'name="auto_process_new_recordings" checked' not in page.text

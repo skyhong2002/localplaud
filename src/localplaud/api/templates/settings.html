@@ -29,7 +29,7 @@
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;margin-top:12px">
       <div class="tile"><div class="k">{{ t('Session') }}</div><div style="margin-top:4px">{{ plaud_auth.detail }}</div></div>
-      <div class="tile"><div class="k">{{ t('Login method') }}</div><div style="margin-top:4px">{{ t('Official Plaud MCP OAuth') if plaud_provider == 'mcp' else 'Native S256 PKCE · no Node.js' }}</div></div>
+      <div class="tile"><div class="k">{{ t('Login method') }}</div><div style="margin-top:4px">{{ t('Official Plaud MCP OAuth') if plaud_provider == 'mcp' else t('Native S256 PKCE · no Node.js') }}</div></div>
       <div class="tile"><div class="k">{{ t('Token storage') }}</div><div style="margin-top:4px;overflow-wrap:anywhere"><code>{{ plaud_auth.tokens_path }}</code></div></div>
     </div>
     {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">{% if plaud_provider == 'mcp' %}{{ t('Run the official Plaud MCP installer on this machine to sign in.') }} <code>npx -y @plaud-ai/mcp@latest install</code>{% else %}{{ t('On the machine running localplaud, run the following command. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.') }} <code>localplaud auth login</code>{% endif %}</div>{% endif %}
@@ -61,7 +61,7 @@
       <datalist id="timezone-suggestions"><option value="Asia/Taipei"><option value="UTC"><option value="Asia/Tokyo"><option value="America/Los_Angeles"><option value="Europe/London"></datalist>
       <input type="hidden" name="theme" value="light">
       <label class="sub">{{ t('Display density') }}<select class="search-input" name="density" style="width:100%;margin-top:4px"><option value="comfortable" {% if workspace_preferences.density=='comfortable' %}selected{% endif %}>{{ t('Comfortable') }}</option><option value="compact" {% if workspace_preferences.density=='compact' %}selected{% endif %}>{{ t('Compact') }}</option></select></label>
-      <label class="sub">{{ t('Clock') }}<select class="search-input" name="hour_cycle" style="width:100%;margin-top:4px"><option value="24" {% if workspace_preferences.hour_cycle=='24' %}selected{% endif %}>24-hour</option><option value="12" {% if workspace_preferences.hour_cycle=='12' %}selected{% endif %}>12-hour</option></select></label>
+      <label class="sub">{{ t('Clock') }}<select class="search-input" name="hour_cycle" style="width:100%;margin-top:4px"><option value="24" {% if workspace_preferences.hour_cycle=='24' %}selected{% endif %}>{{ t('24-hour') }}</option><option value="12" {% if workspace_preferences.hour_cycle=='12' %}selected{% endif %}>{{ t('12-hour') }}</option></select></label>
       <label class="sub" style="display:flex;align-items:center;gap:9px;grid-column:1/-1;border-top:1px solid var(--border);padding-top:10px"><input type="checkbox" name="auto_process_new_recordings" {% if workspace_preferences.auto_process_new_recordings %}checked{% endif %}> <strong>{{ t('Process new recordings automatically') }}</strong></label>
       <div style="display:flex;align-items:end;gap:10px"><button class="btn" type="submit">{{ t('Save preferences') }}</button><span id="workspace-preferences-result" class="sub"></span></div>
     </form>
@@ -94,7 +94,7 @@
       {% set profile_keys = profiles|map(attribute='key')|list %}
       {% for recommendation in hardware_recommendations.recommendations %}
       <div class="tile" style="display:flex;flex-direction:column;gap:7px">
-        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ recommendation.name }}</strong><span class="st {{ 'healthy' if recommendation.ready else 'degraded' }}">{{ 'ready' if recommendation.ready else 'setup needed' }}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ recommendation.name }}</strong><span class="st {{ 'healthy' if recommendation.ready else 'degraded' }}">{{ t('ready') if recommendation.ready else t('setup needed') }}</span></div>
         <div class="sub" style="font-size:11px">{{ recommendation.hardware }}</div>
         <div><code>{{ recommendation.model }}</code></div>
         <div class="sub" style="font-size:11.5px;flex:1">{{ recommendation.reason }}</div>
@@ -115,7 +115,7 @@
       <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 0;border-top:1px solid var(--border)">
         <div>
           <div style="font-weight:650">{{ c.name }} <code>{{ c.key }}</code></div>
-          <div class="sub" style="font-size:12px">{{ c.execution_target }} · {% if c.data_egress %}data egress allowed{% else %}no data egress{% endif %}{% if c.secret_ref %} · secret configured{% endif %}</div>
+          <div class="sub" style="font-size:12px">{{ c.execution_target }} · {% if c.data_egress %}{{ t('data egress allowed') }}{% else %}{{ t('no data egress') }}{% endif %}{% if c.secret_ref %} · {{ t('secret configured') }}{% endif %}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}" title="{{ c.health.detail or '' }}">{{ t(c.health.status or 'unknown') }}</span>
@@ -159,7 +159,7 @@
         <div class="sub" style="font-size:11px;margin-top:3px">{{ m.connection_key }} · <code>{{ m.model_key }}</code></div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">{% for capability in m.capabilities.stages or [] %}<span class="chip">{{ capability.stage }}</span>{% endfor %}</div>
         {% set pricing=(m.capabilities.metadata or {}).pricing or {} %}{% if pricing %}<div class="sub" style="font-size:10.5px;margin-top:6px">{{ t('Pricing') }} · {% if pricing.free %}{{ t('explicitly free') }}{% else %}{{ t('input') }} {{ pricing.input_per_million_tokens_usd or 0 }}/M · {{ t('output') }} {{ pricing.output_per_million_tokens_usd or 0 }}/M · {{ t('audio') }} {{ pricing.audio_per_minute_usd or 0 }}/min{% endif %}</div>{% endif %}
-        <div id="model-health-{{ m.id }}" class="sub" style="font-size:11px;margin-top:7px">{{ (m.capabilities.health or {}).status or 'not tested' }}</div>
+        <div id="model-health-{{ m.id }}" class="sub" style="font-size:11px;margin-top:7px">{{ t((m.capabilities.health or {}).status or 'not tested') }}</div>
       </div>
       {% endfor %}
     </div>

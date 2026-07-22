@@ -1,6 +1,6 @@
 # Polish backlog
 
-Rotation pointer: 2
+Rotation pointer: 3
 
 Journeys:
 1. Library table — filters, folders, tags, sort, bulk select, pagination
@@ -29,6 +29,7 @@ Journeys:
 - [x] (P2) Keyboard & a11y: the Traditional Chinese bulk toolbar retains English accessible names for its action, target, select-all, and row-selection controls — routed all four aria-labels through t() + added catalog entries; verified by new render test `test_bulk_toolbar_accessible_names_are_localized` asserting 整理動作 / 資料夾或標籤 / 選取本頁所有錄音 / 選取錄音 render with no English leak (commit 2f6ede3)
 - [x] (P3) Keyboard & a11y: literal English aria-labels remain in the TC shell outside the bulk toolbar — `notifications.html` Dismiss + read-toggle (Mark read/unread), `settings.html` "Settings sections" nav, and `index.html` orgbox "Library organization" — routed all through t() with catalog entries; verified by render tests on notifications/settings/library in zh-Hant-TW (commit 3bf2254)
 - [x] (P2) Library table: the Library route accepts and summarizes a text query alongside source filters, but its `.library-search` form is hidden at every viewport, so users cannot create that combined filter state through the visible Library UI — surfaced the form as a full-width `role=search` row under the header with filters riding along as hidden fields; verified by new render test `test_library_search_box_is_visible_and_preserves_filters` (commit c5a919b). NOTE: live-browser layout re-check still pending — codex computer-use hung this session; re-verify desktop+mobile visual placement when a browser is available.
+- [ ] (P2) Keyboard & a11y: codex template audit 2026-07-22 found ~30 untranslated user-facing strings across base/detail/settings/home/share/templates/_ask_thread/notifications/index — upload format hint, stage-status chips, cost boundary line, revision labels, settings badges, template editor labels, and 5 inline-JS strings (Play/Pause aria, org bulk status). Fix in batches, verify each against the rendered page
 - [ ] (P3) Library table: at 1400px the bulk toolbar wraps `清除` alone onto a second row despite ample horizontal space — 2026-07-22 browser verification; `/tmp/localplaud-polish-20260722/no-folder-localization/desktop-no-folder-1400x900.png`
 - [ ] (P3) Library table: the mobile drawer uses a nested scroll region whose thin scrollbar is the only cue that more sources and workspace links are available — 2026-07-22 browser audit at 390px
 - [ ] (P3) Mobile: resizing from desktop to 390px with an active bulk selection can briefly leave the desktop sidebar clipped over the library before the responsive layout settles — 2026-07-22 disruptive browser verification; `/tmp/localplaud-polish-20260722/pagination-selection/mobile-01-selection-before-page-change.png`
