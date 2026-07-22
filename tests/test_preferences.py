@@ -289,7 +289,15 @@ def test_dynamic_action_messages_use_translation_helper():
         r"(?:textContent\s*=|alert\(|confirm\(|prompt\()\s*`([^`]*[A-Za-z][^`]*)`",
     )
     violations: list[str] = []
-    technical_fragments = ("${position", "${matches.length}", "${stamp")
+    technical_fragments = (
+        "${position",
+        "${matches.length}",
+        "${stamp",
+        # Playback-speed display (e.g. "1.5x") — a language-neutral multiplier
+        # suffix, not translatable prose. The app's own player uses "1×"/"2×"
+        # unlocalized as well.
+        "${speeds[speedIndex]}",
+    )
     for template in template_dir.glob("*.html"):
         source = template.read_text(encoding="utf-8")
         for pattern in literal_patterns:
