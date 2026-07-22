@@ -627,6 +627,9 @@
       .filelist.has-active { display:none; } .backlink{ display:inline-flex; }
       .stats{ grid-template-columns:repeat(2,1fr); } .pane-inner{ padding:18px 16px 60px; }
       #persistent-player{top:63px!important}
+      /* At mobile widths the body scrolls, not .pane; an overflow-y:auto pane
+         would capture the sticky player and let it scroll away with content. */
+      .pane{ overflow:visible; }
       .tabs{position:static;overflow-x:auto}.recording-header{padding-bottom:10px}
       .transcript-popover { position:fixed;left:12px;right:12px;top:68px;width:auto;max-height:calc(100dvh - 82px);overflow-y:auto; }
       .transcript-popover,.speaker-editor { padding-top:44px; }
