@@ -67,7 +67,12 @@
     /* summary tab */
     .note-title{margin:14px 0 0;padding-bottom:28px;border-bottom:1px solid var(--line);font-size:36px;line-height:44px;font-weight:500;color:var(--fg);overflow-wrap:anywhere}
     .note-doc{padding:6px 0 10px}
-    .note-section-title{margin:32px 0 0;font-size:28px;line-height:32px;font-weight:500;color:#000;overflow-wrap:anywhere}
+    /* One note per page, switched by a pill row — mirrors Plaud's note pager. */
+    .note-tabs{display:flex;gap:8px;margin:18px 0 0;flex-wrap:wrap}
+    .note-tabs button{padding:6px 14px;border:1px solid var(--line);border-radius:999px;font-size:13px;line-height:20px;color:var(--tab-off);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+    .note-tabs button:hover{background:#F5F5F6}
+    .note-tabs button[aria-selected="true"]{color:#000;font-weight:600;background:#F5F5F6;border-color:#F5F5F6}
+    .note-provenance{margin:16px 0 0}
     .md{font-size:16px;line-height:24px;color:var(--body);overflow-wrap:anywhere}
     .md p{margin:14px 0 0}
     .md ul,.md ol{margin:14px 0 0;padding-left:1.6em}
@@ -174,14 +179,27 @@
       <div class="column">
         <h1 class="note-title">{{ recording.title }}</h1>
         {% if body_notes or mindmaps %}
+        {% set note_page_count = (body_notes | length) + (1 if mindmaps else 0) %}
+        {% if note_page_count > 1 %}
+        <div class="note-tabs" role="tablist" aria-label="{{ t('Notes') }}">
+          {% for note in body_notes %}<button id="note-tab-{{ loop.index }}" type="button" role="tab" aria-controls="note-page-{{ loop.index }}" aria-selected="{{ 'true' if loop.first else 'false' }}" data-note-tab="note-page-{{ loop.index }}" title="{{ note.title or note.template|replace('-', ' ')|title }}">{{ note.title or note.template|replace('-', ' ')|title }}</button>{% endfor %}
+          {% if mindmaps %}<button id="note-tab-mindmap" type="button" role="tab" aria-controls="note-page-mindmap" aria-selected="{{ 'false' if body_notes else 'true' }}" data-note-tab="note-page-mindmap">{{ t('Mind map') }}</button>{% endif %}
+        </div>
+        {% endif %}
         <div class="note-doc" id="note-doc">
           {% for note in body_notes %}
-          <h2 class="note-section-title" data-outline>{{ note.title or note.template|replace('-', ' ')|title }}{% if note.imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</h2>
-          <div class="md">{{ note.content_md|markdown }}</div>
+          <div class="note-page" id="note-page-{{ loop.index }}" {% if note_page_count > 1 %}role="tabpanel" aria-labelledby="note-tab-{{ loop.index }}"{% endif %} {% if not loop.first %}hidden{% endif %}>
+            {% if note.imported %}<div class="note-provenance"><span class="import-badge">{{ t('Imported from Plaud') }}</span></div>{% endif %}
+            <div class="md">{{ note.content_md|markdown }}</div>
+          </div>
           {% endfor %}
-          {% for map in mindmaps %}
-          <div class="mindmap-frame"><div class="frame-label">{{ t('Mind map') }}{% if map.imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</div><div class="md">{{ map.content_md|markdown }}</div></div>
-          {% endfor %}
+          {% if mindmaps %}
+          <div class="note-page" id="note-page-mindmap" {% if note_page_count > 1 %}role="tabpanel" aria-labelledby="note-tab-mindmap"{% endif %} {% if body_notes %}hidden{% endif %}>
+            {% for map in mindmaps %}
+            <div class="mindmap-frame"><div class="frame-label">{{ t('Mind map') }}{% if map.imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</div><div class="md">{{ map.content_md|markdown }}</div></div>
+            {% endfor %}
+          </div>
+          {% endif %}
         </div>
         {% else %}<div class="empty">{{ t('Notes are not available yet.') }}</div>{% endif %}
         <div class="page-foot">localplaud · {{ t('self-hosted') }}</div>
@@ -205,23 +223,41 @@
       const select=name=>{tabs.forEach(tab=>tab.setAttribute('aria-selected',String(tab.dataset.tab===name)));for(const [key,panel] of Object.entries(panels))if(panel)panel.hidden=key!==name;outline.classList.toggle('ready',name==='summary'&&outline.childElementCount>0);chaptersNav?.classList.toggle('ready',name==='transcript'&&chaptersHasItems);};
       tabs.forEach(tab=>tab.addEventListener('click',()=>select(tab.dataset.tab)));
 
-      const summaryPanel=panels.summary,headings=[...document.querySelectorAll('#note-doc [data-outline], #note-doc .md h2')];
-      if(summaryPanel&&headings.length){
+      // The outline mirrors the active note page only; switching pages rebuilds it.
+      const summaryPanel=panels.summary;let headings=[],outlineItems=[];
+      const buildOutline=()=>{
+        outline.innerHTML='';
+        const page=document.querySelector('#note-doc .note-page:not([hidden])');
+        headings=page?[...page.querySelectorAll('.md h1, .md h2')]:[];
         headings.forEach((heading,index)=>{
           const item=document.createElement('button');item.type='button';
-          const label=heading.cloneNode(true);label.querySelectorAll('.import-badge').forEach(badge=>badge.remove());
-          item.textContent=label.textContent.trim();
+          item.textContent=heading.textContent.trim();
           item.addEventListener('click',()=>heading.scrollIntoView({block:'start',behavior:'smooth'}));
           if(!index)item.classList.add('on');
           outline.appendChild(item);
         });
-        const items=[...outline.children];
+        outlineItems=[...outline.children];
+        outline.classList.toggle('ready',!!summaryPanel&&!summaryPanel.hidden&&outlineItems.length>0);
+      };
+      if(summaryPanel){
+        buildOutline();
         summaryPanel.addEventListener('scroll',()=>{
+          if(!headings.length)return;
           const top=summaryPanel.getBoundingClientRect().top+10;let current=0;
           headings.forEach((heading,index)=>{if(heading.getBoundingClientRect().top<=top+30)current=index;});
-          items.forEach((item,index)=>item.classList.toggle('on',index===current));
+          outlineItems.forEach((item,index)=>item.classList.toggle('on',index===current));
         },{passive:true});
-        if(!panels.summary.hidden)outline.classList.add('ready');
+      }
+
+      const noteTabs=[...document.querySelectorAll('[data-note-tab]')];
+      if(noteTabs.length){
+        const notePages=[...document.querySelectorAll('#note-doc .note-page')];
+        noteTabs.forEach(tab=>tab.addEventListener('click',()=>{
+          noteTabs.forEach(other=>other.setAttribute('aria-selected',String(other===tab)));
+          notePages.forEach(page=>page.hidden=page.id!==tab.dataset.noteTab);
+          if(summaryPanel)summaryPanel.scrollTop=0;
+          buildOutline();
+        }));
       }
 
       const list=document.getElementById('segment-list'),segments=list?[...list.querySelectorAll('.segment')]:[];

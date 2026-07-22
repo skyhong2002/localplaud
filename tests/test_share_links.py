@@ -291,6 +291,48 @@ def test_cloud_only_transcript_never_appears_on_public_share(clients):
     assert "paid cloud summary must stay private" not in page.text
 
 
+def test_notes_render_as_switchable_pages(clients):
+    """Each note gets its own page with a pill switcher, like Plaud's pager."""
+    authenticated, public, tmp_path = clients
+    _seed_recording(tmp_path)
+    from localplaud.db.models import Summary
+    from localplaud.db.session import session_scope
+
+    path = _share_path(_create_link(authenticated))
+
+    # A single visible note renders without the switcher.
+    single = public.get(path)
+    assert single.status_code == 200
+    assert 'class="note-tabs"' not in single.text
+    assert 'id="note-page-1"' in single.text
+
+    with session_scope() as session:
+        session.add(
+            Summary(
+                file_id="recording",
+                template="action_items",
+                title="Action items",
+                content_md="- follow up with Alice",
+                source="local",
+                input_transcript_source="local",
+            )
+        )
+
+    page = public.get(path)
+    assert page.status_code == 200
+    # Both notes appear as tabs; the first page is visible, the second hidden.
+    tabs = page.text.split('class="note-tabs"', 1)[1].split("</div>", 1)[0]
+    assert ">Action items</button>" in tabs
+    assert ">Meeting notes</button>" in tabs
+    assert 'id="note-page-1" role="tabpanel"' in page.text
+    assert 'id="note-page-2" role="tabpanel" aria-labelledby="note-tab-2" hidden' in page.text
+    # Content still ships for both pages, and the switcher JS is wired.
+    assert "follow up with Alice" in page.text
+    assert "Local generated note" in page.text
+    assert "data-note-tab" in page.text
+    assert "buildOutline" in page.text
+
+
 def test_share_options_control_public_content(clients):
     authenticated, public, tmp_path = clients
     _seed_recording(tmp_path)
