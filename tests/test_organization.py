@@ -259,9 +259,20 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert 'aria-describedby="bulk-delete-description" hidden' in page.text
     assert "Delete local transcript, corrections, generated notes, mind map, search index, and processing history?" in page.text
     assert '<ul class="bulk-danger-preserved" role="list">' in page.text
-    assert page.text.count('<li><i class="nav-icon"') == 5
-    for preserved in ("Original audio", "Folders", "Tags", "Ask history", "Editable note"):
+    assert page.text.count('<li><i class="nav-icon"') == 7
+    for preserved in (
+        "Original audio",
+        "Folders",
+        "Tags",
+        "Ask history",
+        "Saved notes",
+        "Editable note",
+        "Plaud imports",
+    ):
         assert preserved in page.text
+    # The paragraph states only the destructive question; what survives is the
+    # preserved-data list's job, stated once instead of three times.
+    assert "Plaud metadata and imported Plaud transcript/summary are preserved" not in page.text
     assert "deleteConfirm.hidden = false" in page.text
     assert "deleteCancel?.focus()" in page.text
     assert "if (event.key !== 'Escape' || !deleteConfirm || deleteConfirm.hidden) return" in page.text
