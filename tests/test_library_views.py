@@ -380,6 +380,23 @@ def test_numbered_capture_source_labels_are_localized(monkeypatch, tmp_path):
     assert ">Source 1</span>" not in page.text
 
 
+def test_library_search_box_is_visible_and_preserves_filters(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+
+    page = c.get("/?q=Alpha&scene=1")
+    assert page.status_code == 200
+    # The search form is surfaced (no longer force-hidden) and reflects the query.
+    assert ".library-search { display:none; }" not in page.text
+    assert 'class="library-search"' in page.text
+    assert 'name="q"' in page.text
+    assert 'value="Alpha"' in page.text
+    # Active source filter travels with the query as a hidden field so submitting
+    # the box keeps the combined filter state instead of dropping to plain search.
+    search_form = page.text.split('class="library-search"', 1)[1].split("</form>", 1)[0]
+    assert '<input type="hidden" name="scene" value="1">' in search_form
+
+
 def test_bulk_toolbar_accessible_names_are_localized(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()

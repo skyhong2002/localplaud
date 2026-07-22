@@ -160,9 +160,10 @@
   .library-head h1 { margin:0;font-size:22px;letter-spacing:0; }
   .library-actions { display:flex;align-items:center;gap:8px; }
   .library-toolbar { position:absolute;top:30px;right:32px;display:flex;align-items:center;gap:8px; }
-  .library-search { display:none; }
-  .library-search .nav-icon { position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--faint); }
+  .library-search { position:relative;display:flex;align-items:center;margin:0 0 14px; }
+  .library-search .nav-icon { position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--faint);pointer-events:none; }
   .library-search input { width:100%;height:38px;padding:0 12px 0 36px;border:1px solid var(--border2);border-radius:7px;background:var(--panel);font:inherit;outline:none; }
+  .library-search input::-webkit-search-cancel-button { cursor:pointer; }
   .library-search input:focus { border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft); }
   .filter-menu { position:relative; }
   .filter-menu>summary { list-style:none;width:36px;height:36px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--border2);border-radius:6px;background:var(--panel);font-size:0;cursor:pointer; }
@@ -319,8 +320,8 @@
     <div><h1>{% if lib.view == 'trash' %}{{ t('Trash') }}{% elif lib.view == 'uncategorized' %}{{ t('Uncategorized') }}{% elif active_folder %}{{ active_folder.name }}{% elif lib.origin == 'plaud' %}{{ t('Plaud recordings') }}{% elif lib.origin == 'local' %}{{ t('Local uploads') }}{% else %}{{ t('All files') }}{% endif %}</h1></div>
     <div class="library-actions"></div>
   </div>
+  <form class="library-search" method="get" action="/" role="search"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span><input type="search" name="q" value="{{ q }}" placeholder="{{ t('Search files') }}" aria-label="{{ t('Search files') }}"><input type="hidden" name="view" value="{{ lib.view }}">{% for name, value in [('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin), ('state', lib.state), ('scene', lib.scene), ('sort', lib.sort), ('dir', lib.dir), ('date_from', lib.date_from), ('date_to', lib.date_to), ('min_duration_minutes', lib.min_duration_minutes), ('max_duration_minutes', lib.max_duration_minutes)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}</form>
   <div class="library-toolbar">
-    <form class="library-search" method="get" action="/"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span><input name="q" value="{{ q }}" placeholder="{{ t('Search files') }}"><input type="hidden" name="view" value="{{ lib.view }}">{% for name, value in [('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin), ('state', lib.state), ('scene', lib.scene), ('sort', lib.sort), ('dir', lib.dir), ('date_from', lib.date_from), ('date_to', lib.date_to), ('min_duration_minutes', lib.min_duration_minutes), ('max_duration_minutes', lib.max_duration_minutes)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}</form>
     <details class="filter-menu" {% if lib.invalid_date_range or lib.invalid_duration_range %}open{% endif %}><summary aria-label="{{ t('Filter and organize') }}" title="{{ t('Filter and organize') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg')"></span>{{ t('Filter and organize') }}{% if filter_count %}<span class="filter-count" aria-hidden="true">{{ filter_count }}</span><span class="visually-hidden">{{ filter_count }} {{ t('active filters') }}</span>{% endif %}</summary><div class="filter-popover">
     <div class="filter-head"><strong>{{ t('Filter and organize') }}</strong><button class="filter-close" type="button" aria-label="{{ t('Close filters') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
     <div class="orgbox" aria-label="Library organization">
