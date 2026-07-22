@@ -40,4 +40,4 @@ Journeys:
 - [x] (P3) Share: the dynamic-action localization guard misclassifies the technical `${speeds[speedIndex]}x` playback-speed display as untranslated prose, leaving that test red — added it to the guard's `technical_fragments`; full suite (840) now green (commit aa9a98b)
 - [ ] (P3) Share: Plaud's transcript view has a right-edge minimap (small dashes indicating scroll position); localplaud share page has a plain scrollbar — 2026-07-22 parity audit
 - [ ] (P3) Detail: app player (canvas waveform) vs Plaud share player (flat scrubber) diverge; consider one shared player component/style
-- [ ] (taste) Share: summary tab shows every note's own heading (Summary, Outline); Plaud renders one continuous document — propose merging or ordering controls to the user
+- [x] (taste) Share: summary tab shows every note's own heading (Summary, Outline); Plaud renders one continuous document — RESOLVED by user direction 2026-07-22: each note is now its own switchable page with a pill switcher (mind map included), matching Plaud's note pager; verified on the live share page and by `test_notes_render_as_switchable_pages` (commit b9d0dd1)
