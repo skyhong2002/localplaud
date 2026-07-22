@@ -492,6 +492,8 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     assert "mobileSort?.addEventListener('change'" in r.text
     assert "window.addEventListener('pageshow', syncMobileSortFromLocation" in r.text
     assert "new Option(window.localplaudT('No folder'), '')" in r.text
+    # Blank folder/tag creation localizes the native required-field bubble.
+    assert "nameField.setCustomValidity(tr('Enter a name'))" in r.text
     assert 'id="app-view" hx-history-elt' in r.text
     assert 'id="recording-file-list"' not in r.text
     assert 'href="/file/b?return_to=%2F"' in r.text

@@ -922,6 +922,13 @@
   });
 
   document.querySelectorAll('[data-create-kind]').forEach(form => {
+    const nameField = form.elements.name;
+    if(nameField){
+      // Localize the native required-field bubble instead of the browser's
+      // English default, matching the inline empty-name status message.
+      nameField.addEventListener('invalid', () => nameField.setCustomValidity(tr('Enter a name')));
+      nameField.addEventListener('input', () => nameField.setCustomValidity(''));
+    }
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const button = form.querySelector('button');
