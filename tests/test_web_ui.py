@@ -788,6 +788,27 @@ def test_sidebar_ops_card_summarizes_workspace(monkeypatch, tmp_path):
     assert ".ops-stat:focus-visible,.ops-card .ops-sub:focus-visible { outline:2px solid var(--blue)" in r.text
 
 
+def test_sidebar_folder_link_exposes_full_name_via_title(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import Folder, PlaudFile
+    from localplaud.db.session import session_scope
+
+    long_name = "跨部門產品營運與客戶成功長期追蹤資料夾"
+    with session_scope() as s:
+        folder = Folder(name=long_name)
+        s.add(folder)
+        s.flush()
+        s.get(PlaudFile, "r1").folder_id = folder.id
+
+    r = c.get("/")
+    assert r.status_code == 200
+    # The sidebar folder name is ellipsized, so the full name must remain
+    # reachable as a tooltip. The title sits on the folder anchor itself.
+    after_href = r.text.split(f'href="/?folder={folder.id}"', 1)[1]
+    assert after_href.startswith(f' title="{long_name}">')
+
+
 def test_sidebar_ops_card_all_caught_up(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     audio = tmp_path / "audio.mp3"

@@ -709,7 +709,7 @@
       </nav>
       <nav class="nav-section" aria-label="{{ t('Folders') }}">
         <div class="nav-h">{{ t('Folders') }}</div>
-        {% for folder in sidebar.folders %}<a class="navi {% if active=='recordings' and request.query_params.get('folder')==(folder.id|string) %}on{% endif %}" href="/?folder={{ folder.id }}"><span class="nav-color" style="--nav-color:{{ folder.color or '#A1A2A8' }}"></span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ folder.name }}</span><span class="nav-count">{{ folder.count }}</span></a>{% else %}<a class="navi" href="/?view=uncategorized"><span class="nav-icon" style="--nav-icon:url('/static/lucide/folder.svg')"></span><span>{{ t('No folders yet') }}</span></a>{% endfor %}
+        {% for folder in sidebar.folders %}<a class="navi {% if active=='recordings' and request.query_params.get('folder')==(folder.id|string) %}on{% endif %}" href="/?folder={{ folder.id }}" title="{{ folder.name }}"><span class="nav-color" style="--nav-color:{{ folder.color or '#A1A2A8' }}"></span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ folder.name }}</span><span class="nav-count">{{ folder.count }}</span></a>{% else %}<a class="navi" href="/?view=uncategorized"><span class="nav-icon" style="--nav-icon:url('/static/lucide/folder.svg')"></span><span>{{ t('No folders yet') }}</span></a>{% endfor %}
       </nav>
       <nav class="nav-section" aria-label="{{ t('Sources') }}">
         <div class="nav-h">{{ t('Sources') }}</div>
