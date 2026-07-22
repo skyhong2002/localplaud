@@ -193,6 +193,9 @@ def test_public_page_is_local_read_only_and_noindex(clients):
     assert "raw local transcript" not in page.text
     assert "Alice Chen" in page.text
     assert "Local generated note" in page.text
+    # Transcript minimap ships with the transcript view.
+    assert 'id="minimap"' in page.text
+    assert "paint" in page.text and "data-start" in page.text
     assert "paid cloud note must stay private" not in page.text
     assert "cloud-derived local note must stay hidden" not in page.text
     assert "stale map must stay hidden" not in page.text

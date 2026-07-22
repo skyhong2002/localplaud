@@ -110,6 +110,14 @@
     .chapters .ch-tx{min-width:0;overflow-wrap:anywhere}
     @media (min-width:1220px){.chapters.ready{display:block}}
 
+    /* transcript minimap: dash-per-segment scroll position cue at the right
+       edge, like Plaud's — visible only while the transcript tab shows */
+    .minimap{position:fixed;right:10px;top:170px;max-height:64vh;display:none;flex-direction:column;gap:3px;overflow:hidden}
+    .minimap button{display:block;width:14px;height:3px;padding:0;border-radius:2px;background:var(--track);transition:background .12s,width .12s}
+    .minimap button:hover{background:var(--tab-off)}
+    .minimap button.on{width:18px;background:#000}
+    @media (min-width:1220px){.minimap.ready{display:flex}}
+
     @media (max-width:760px){
       .column{width:calc(100% - 48px)}
       .note-title{font-size:30px;line-height:38px}
@@ -209,6 +217,7 @@
   </div>
 
   <nav class="outline" id="outline" aria-label="{{ t('Summary') }}"></nav>
+  {% if show_transcript and segments %}<nav class="minimap" id="minimap" aria-label="{{ t('Transcript position') }}"></nav>{% endif %}
   {% if show_transcript and outlines %}
   <aside class="chapters" id="chapters" aria-label="{{ outlines[0].title or t('Outline') }}">
     <div class="chapters-head">{{ outlines[0].title or t('Outline') }}{% if outlines[0].imported %}<span class="import-badge">{{ t('Imported from Plaud') }}</span>{% endif %}</div>
@@ -220,7 +229,8 @@
     (()=>{
       const tabs=[...document.querySelectorAll('[data-tab]')],panels={transcript:document.getElementById('panel-transcript'),summary:document.getElementById('panel-summary')},outline=document.getElementById('outline');
       const chaptersNav=document.getElementById('chapters');let chaptersHasItems=false;
-      const select=name=>{tabs.forEach(tab=>tab.setAttribute('aria-selected',String(tab.dataset.tab===name)));for(const [key,panel] of Object.entries(panels))if(panel)panel.hidden=key!==name;outline.classList.toggle('ready',name==='summary'&&outline.childElementCount>0);chaptersNav?.classList.toggle('ready',name==='transcript'&&chaptersHasItems);};
+      const minimapNav=document.getElementById('minimap');
+      const select=name=>{tabs.forEach(tab=>tab.setAttribute('aria-selected',String(tab.dataset.tab===name)));for(const [key,panel] of Object.entries(panels))if(panel)panel.hidden=key!==name;outline.classList.toggle('ready',name==='summary'&&outline.childElementCount>0);chaptersNav?.classList.toggle('ready',name==='transcript'&&chaptersHasItems);minimapNav?.classList.toggle('ready',name==='transcript'&&minimapNav.childElementCount>0);};
       tabs.forEach(tab=>tab.addEventListener('click',()=>select(tab.dataset.tab)));
 
       // The outline mirrors the active note page only; switching pages rebuilds it.
@@ -262,6 +272,16 @@
 
       const list=document.getElementById('segment-list'),segments=list?[...list.querySelectorAll('.segment')]:[];
       const transcriptPanel=document.getElementById('transcript-scroll');
+      // Minimap: one dash per (sampled) segment; the dashes inside the viewport
+      // light up, and clicking one scrolls its segment into view.
+      if(minimapNav&&transcriptPanel&&segments.length){
+        const step=Math.max(1,Math.ceil(segments.length/80)),picks=[];
+        for(let i=0;i<segments.length;i+=step){const seg=segments[i],dash=document.createElement('button');dash.type='button';dash.tabIndex=-1;dash.addEventListener('click',()=>seg.scrollIntoView({block:'center',behavior:'smooth'}));minimapNav.appendChild(dash);picks.push(seg);}
+        const dashes=[...minimapNav.children];
+        const paintMinimap=()=>{const rect=transcriptPanel.getBoundingClientRect();picks.forEach((seg,i)=>{const r=seg.getBoundingClientRect();dashes[i].classList.toggle('on',r.bottom>rect.top&&r.top<rect.bottom);});};
+        transcriptPanel.addEventListener('scroll',paintMinimap,{passive:true});paintMinimap();
+        if(panels.transcript&&!panels.transcript.hidden)minimapNav.classList.add('ready');
+      }
       const audio=document.getElementById('shared-audio');
       if(audio){
         const playToggle=document.getElementById('play-toggle');

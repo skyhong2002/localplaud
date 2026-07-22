@@ -1090,6 +1090,7 @@ _ZH_HANT_TW = {
     "Rule": "規則",
     "Delete local transcript, corrections, generated notes, mind map, search index, and processing history?": "要刪除本機逐字稿、修正、生成筆記、心智圖、搜尋索引與處理紀錄嗎？",
     "Plaud imports": "Plaud 匯入內容",
+    "Transcript position": "逐字稿位置",
 }
 
 CATALOGS = {"zh-Hant-TW": _ZH_HANT_TW}
