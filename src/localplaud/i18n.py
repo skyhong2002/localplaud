@@ -1063,6 +1063,7 @@ _ZH_HANT_TW = {
     "legacy / unknown transcript": "舊版／未知逐字稿",
     "Corrected": "已修正",
     "preview": "預覽",
+    "transcript rev": "逐字稿修訂版",
     "MP3, MP4, M4A, WAV, OGG, Opus, WebM, FLAC or AAC · up to 2 GB": "MP3、MP4、M4A、WAV、OGG、Opus、WebM、FLAC 或 AAC · 最大 2 GB",
     "Outline": "大綱",
     "Could not organize recordings": "無法整理錄音",

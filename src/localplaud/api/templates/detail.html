@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ f.filename }} — localplaud{% endblock %}
+{# lineage labels are API data ("raw ASR", "transcript rev N", …); split the
+   dynamic revision number out so the prose part stays translatable. #}
+{% macro lineage(label) %}{% if label and label.startswith('transcript rev ') %}{{ t('transcript rev') }} {{ label[15:] }}{% else %}{{ t(label) }}{% endif %}{% endmacro %}
 {% block body %}
 <div class="shell recording-shell">
   {% set active_id = f.id %}
@@ -252,7 +255,7 @@
     {% for s in notes %}
     <div class="note-panel" data-note-panel="sum-{{ s.id }}" {% if ('sum-' ~ s.id) != active_note_target %}hidden{% endif %}>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0">
-        <div class="sub" style="font-size:11.5px">{% if s.source in ('cloud', 'plaud') %}<span class="chip plaud-note-chip">Plaud</span> · {{ t('Read-only') }}{% else %}{% if s.template_version %}v{{ s.template_version }} · {% endif %}{% if s.created_at %}{{ s.created_at }} · {% endif %}{{ t('Generated from') }} {{ t(s.lineage_label) }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}{% if s.restored_from_revision %} · {{ t('restored from version') }} {{ s.restored_from_revision }}{% endif %}{% endif %}</div>
+        <div class="sub" style="font-size:11.5px">{% if s.source in ('cloud', 'plaud') %}<span class="chip plaud-note-chip">Plaud</span> · {{ t('Read-only') }}{% else %}{% if s.template_version %}v{{ s.template_version }} · {% endif %}{% if s.created_at %}{{ s.created_at }} · {% endif %}{{ t('Generated from') }} {{ lineage(s.lineage_label) }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}{% if s.restored_from_revision %} · {{ t('restored from version') }} {{ s.restored_from_revision }}{% endif %}{% endif %}</div>
         <div style="display:flex;gap:6px;align-items:center;flex:none">
           {% if s.source == 'local' %}
           {% set history_summary = s %}{% set history_tab = 'notes' %}{% include '_note_history.html' %}
@@ -300,7 +303,7 @@
     <div class="tabpanel" id="recording-panel-mindmap" role="tabpanel" aria-labelledby="recording-tab-mindmap" data-panel="mindmap" {% if active_tab != 'mindmap' %}hidden{% endif %}>
       {% if mindmaps %}
       <div class="mindmap-toolbar">
-        <div><strong>{{ t('Mind map') }}</strong><div class="sub" style="font-size:11.5px">{{ t('Generated from') }} {{ t(mindmaps[-1].lineage_label) }}{% if mindmaps[-1].restored_from_revision %} · {{ t('restored from version') }} {{ mindmaps[-1].restored_from_revision }}{% endif %}</div></div>
+        <div><strong>{{ t('Mind map') }}</strong><div class="sub" style="font-size:11.5px">{{ t('Generated from') }} {{ lineage(mindmaps[-1].lineage_label) }}{% if mindmaps[-1].restored_from_revision %} · {{ t('restored from version') }} {{ mindmaps[-1].restored_from_revision }}{% endif %}</div></div>
         <div class="mindmap-zoom">
           <button class="icon-action icon-only" id="mm-zoom-out" type="button" aria-label="{{ t('Zoom out') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/minus.svg')"></span></button>
           <input id="mm-zoom" type="range" min="15" max="140" value="100" aria-label="{{ t('Mind map zoom') }}">
