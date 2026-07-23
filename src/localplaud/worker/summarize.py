@@ -210,11 +210,21 @@ def summarize(
     content = llm.complete(prompt, system=system, temperature=0.2, max_tokens=1500)
     title = _extract_title(content)
     provider, model = _llm_provider_model(settings)
+    # Extract typed tags from the default note on the same host that made the
+    # summary (the WSL worker), so the controller never needs its own LLM call.
+    from .tagging import extract_tags
+
+    tags = (
+        extract_tags(content, settings)
+        if resolved_template.name == settings.pipeline.summary_template
+        else {}
+    )
     return {
         "title": title,
         "content_md": content,
         "provider": provider,
         "model": model,
+        "tags": tags,
         "template": resolved_template.name,
         "template_version": resolved_template.version,
         "template_snapshot": template_snapshot(resolved_template),

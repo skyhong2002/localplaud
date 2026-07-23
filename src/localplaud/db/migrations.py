@@ -1415,6 +1415,40 @@ def migrate_vocabulary_schema(engine: Engine) -> list[str]:
     return ["vocabulary_terms"]
 
 
+def migrate_tag_kind_columns(engine: Engine) -> list[str]:
+    """Add tag categorisation + auto-tag gate columns.
+
+    ``tags.kind`` categorises a tag (topic/person/org/custom); existing tags stay
+    ``custom``. ``plaud_files.auto_tagged_at`` gates one-time auto-tagging so a
+    reprocess never re-adds a tag the user has removed.
+    """
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    migrated: list[str] = []
+    if "tags" in tables:
+        cols = {item["name"] for item in inspector.get_columns("tags")}
+        if "kind" not in cols:
+            rendered = String(16).compile(dialect=engine.dialect)
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE tags ADD COLUMN kind {rendered} "
+                        "NOT NULL DEFAULT 'custom'"
+                    )
+                )
+            migrated.append("tags.kind")
+    if "plaud_files" in tables:
+        cols = {item["name"] for item in inspector.get_columns("plaud_files")}
+        if "auto_tagged_at" not in cols:
+            rendered = DateTime(timezone=True).compile(dialect=engine.dialect)
+            with engine.begin() as connection:
+                connection.execute(
+                    text(f"ALTER TABLE plaud_files ADD COLUMN auto_tagged_at {rendered}")
+                )
+            migrated.append("plaud_files.auto_tagged_at")
+    return migrated
+
+
 def migrate_generated_title_columns(engine: Engine) -> list[str]:
     """Add locally-generated title columns (with provenance) to plaud_files.
 

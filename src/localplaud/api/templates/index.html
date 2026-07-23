@@ -41,6 +41,11 @@
   .fchip.on { color:var(--blue); border-color:var(--blue-br); background:var(--blue-soft); }
   .fchip.trash.on { color:var(--red); border-color:var(--red); background:var(--red-soft); }
   .fchip .n { color:var(--faint); font-weight:600; }
+  /* Typed auto-tags: a small colour dot marks topic/person/org at a glance. */
+  .tag-chip[style*="--tag-color"]::before { content:""; display:inline-block; width:6px; height:6px;
+           border-radius:50%; margin-right:5px; vertical-align:middle; background:var(--tag-color); }
+  .tag-group { align-items:baseline; }
+  .tag-group .lbl.sub { font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--faint); }
 
   .rectable { width:100%; border-collapse:collapse; margin-top:4px; }
   .rectable thead th { text-align:left; padding:6px 10px; border-bottom:1px solid var(--border);
@@ -342,11 +347,22 @@
       <div class="orgrow">
         <span class="lbl">{{ t('Tags') }}</span>
         <a class="fchip {% if lib.tag is none %}on{% endif %}" href="{{ liburl(view='all', folder='', tag='') }}">{{ t('All') }}</a>
-        {% for tag in organization.tags %}
-        <a class="fchip {% if lib.tag == tag.id %}on{% endif %}" href="{{ liburl(view='all', folder='', tag=tag.id) }}" title="{{ tag.name }}">
-          {{ tag.name }} <span class="n">{{ tag.count }}</span>
-        </a>
-        {% endfor %}
+      </div>
+      {% set tag_kinds = [('topic', t('Topics')), ('person', t('People')), ('org', t('Organizations')), ('custom', t('Other'))] %}
+      {% for kind, kind_label in tag_kinds %}
+        {% set kind_tags = organization.tags | selectattr('kind', 'equalto', kind) | list %}
+        {% if kind_tags %}
+        <div class="orgrow tag-group tag-group-{{ kind }}">
+          <span class="lbl sub">{{ kind_label }}</span>
+          {% for tag in kind_tags %}
+          <a class="fchip tag-chip tag-{{ tag.kind }} {% if lib.tag == tag.id %}on{% endif %}" href="{{ liburl(view='all', folder='', tag=tag.id) }}" title="{{ tag.name }}"{% if tag.color %} style="--tag-color:{{ tag.color }}"{% endif %}>
+            {{ tag.name }} <span class="n">{{ tag.count }}</span>
+          </a>
+          {% endfor %}
+        </div>
+        {% endif %}
+      {% endfor %}
+      <div class="orgrow">
         <details class="quickadd"><summary>+ {{ t('Tag') }}</summary>
           <form data-create-kind="tags"><input name="name" maxlength="80" placeholder="{{ t('Tag name') }}" required><button>{{ t('Add') }}</button></form>
         </details>

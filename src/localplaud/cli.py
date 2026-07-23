@@ -554,6 +554,61 @@ def backfill_titles(
     console.print(f"[green]✓[/] {prefix}titles set: {changed}, skipped: {skipped}")
 
 
+@app.command(name="backfill-tags")
+def backfill_tags(
+    force: bool = typer.Option(
+        False, "--force", help="Re-tag even recordings already auto-tagged."
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Cap recordings processed (newest first)."
+    ),
+):
+    """Auto-tag existing recordings from their summaries (topics/people/orgs).
+
+    Uses the Mac's local LLM to read each recording's default-note summary and
+    attach a few typed tags. Only adds tags (never removes), so manual edits are
+    preserved. Recordings already auto-tagged are skipped unless ``--force``.
+    """
+    from sqlalchemy import select
+
+    from .db.models import PlaudFile
+    from .db.models import Summary as SummaryRow
+    from .db.session import session_scope
+    from .worker.tagging import apply_auto_tags
+
+    settings = get_settings()
+    template = settings.pipeline.summary_template
+    processed = tagged = 0
+    with session_scope() as session:
+        rows = session.scalars(
+            select(PlaudFile).order_by(PlaudFile.created_at.desc())
+        ).all()
+        for r in rows:
+            if limit is not None and processed >= limit:
+                break
+            if r.auto_tagged_at is not None and not force:
+                continue
+            summary = session.scalar(
+                select(SummaryRow)
+                .where(
+                    SummaryRow.file_id == r.id,
+                    SummaryRow.template == template,
+                    SummaryRow.source == "local",
+                )
+                .order_by(SummaryRow.id.desc())
+            )
+            if summary is None or not (summary.content_md or "").strip():
+                continue
+            result = apply_auto_tags(
+                session, r.id, summary.content_md, settings, force=force
+            )
+            processed += 1
+            if result.get("applied"):
+                tagged += 1
+                console.print(f"  {r.id[:12]}  +{result['applied']}  {result.get('tags')}")
+    console.print(f"[green]✓[/] processed {processed}, newly tagged {tagged}")
+
+
 @app.command()
 def doctor():
     """Check the environment: ffmpeg, configured providers, and Plaud auth."""

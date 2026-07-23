@@ -2642,6 +2642,15 @@ def _persist_summary(
         session.add(replacement)
         session.flush()
         _apply_generated_title(session, file_id, result, template)
+        if template == get_settings().pipeline.summary_template:
+            try:
+                from .tagging import apply_tags
+
+                # Tags were extracted on the summary's host (the WSL worker) and
+                # ride back in the result; applying them here is DB-only.
+                apply_tags(session, file_id, result.get("tags"))
+            except Exception:  # noqa: BLE001 - tagging must never fail a summary
+                log.exception("auto-tagging failed for %s", file_id)
         from .knowledge_index import sync_summary_document
 
         sync_summary_document(session, replacement, allow_running_stage=True)

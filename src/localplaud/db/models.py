@@ -99,6 +99,9 @@ class Tag(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(80))
     color: Mapped[str | None] = mapped_column(String(64), default=None)
+    # Category of the tag: "topic", "person", "org", or "custom" (user-made).
+    # Auto-tagging fills topic/person/org; manual tags default to custom.
+    kind: Mapped[str] = mapped_column(String(16), default="custom")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
@@ -174,6 +177,11 @@ class PlaudFile(Base):
     generated_title_provider: Mapped[str | None] = mapped_column(String(64), default=None)
     generated_title_model: Mapped[str | None] = mapped_column(String(128), default=None)
     generated_title_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    # When auto-tagging last ran for this recording (gate so it runs once and
+    # never re-adds a tag the user has since removed).
+    auto_tagged_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )
     filesize: Mapped[int | None] = mapped_column(BigInteger, default=None)

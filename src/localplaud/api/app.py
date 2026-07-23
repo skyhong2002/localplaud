@@ -1323,7 +1323,10 @@ def _organization_summary(session) -> dict:
             }
             for row in folders
         ],
-        "tags": [_organization_item(row) | {"count": tag_counts.get(row.id, 0)} for row in tags],
+        "tags": [
+            _organization_item(row) | {"count": tag_counts.get(row.id, 0), "kind": row.kind}
+            for row in tags
+        ],
     }
 
 
