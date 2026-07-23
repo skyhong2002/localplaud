@@ -16,8 +16,9 @@ log = logging.getLogger(__name__)
 # Every system prompt shares the same ground rules Plaud-style notes need:
 # stay faithful to the transcript, answer in its dominant language.
 _GROUND_RULES = (
-    "Never invent facts not present in the transcript. Reply in the "
-    "transcript's dominant language."
+    "Never invent facts not present in the transcript. Write everything — the "
+    "title, headings' content, and body — in the transcript's dominant language; "
+    "for a Mandarin recording the title must be in Chinese, not English."
 )
 
 
@@ -39,7 +40,7 @@ TEMPLATES: dict[str, SummaryTemplate] = {
             f"Produce clear, faithful notes. {_GROUND_RULES}"
         ),
         instructions="""\
-# <a short descriptive title>
+# <a short descriptive title, in the same language as the transcript>
 
 ## Summary
 A concise paragraph capturing what this recording is about.
