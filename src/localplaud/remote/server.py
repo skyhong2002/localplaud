@@ -8,9 +8,15 @@ import hmac
 import json
 import os
 import tempfile
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+
+# This host has a single GPU. Serialize stage execution so concurrent job
+# submissions (e.g. a controller running two recordings in parallel) never run
+# two GPU stages at once — concurrent pyannote/torch calls deadlock on one card.
+_GPU_LOCK = threading.Lock()
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -179,11 +185,14 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
         from ..worker.index import build_chunks, embed_chunks
 
         chunks = build_chunks(transcript)
-        blobs, model, dim = embed_chunks(chunks, settings)
+        blobs, embedder_name, dim = embed_chunks(chunks, settings)
         payload = {
             "chunks": chunks,
             "vectors_base64": [base64.b64encode(blob).decode() for blob in blobs],
-            "model": model,
+            # Attest the model the controller requested (its catalog id), not the
+            # embedder's internal name (e.g. "ollama:bge-m3"), so the controller's
+            # returned-model check accepts the result.
+            "model": request.model or embedder_name,
             "dim": dim,
         }
     else:  # pragma: no cover - enum keeps this unreachable
@@ -205,7 +214,10 @@ def execute_job(job_id: str) -> None:
         row.attempts += 1
         request = JobSubmitRequest.model_validate(row.input_manifest)
     try:
-        artifacts = _execute(request)
+        # One GPU stage at a time on this host (see _GPU_LOCK). A second job
+        # waits here while showing "running"; the controller keeps polling.
+        with _GPU_LOCK:
+            artifacts = _execute(request)
         with session_scope() as session:
             row = session.get(RemoteJob, job_id)
             if row.cancel_requested:
