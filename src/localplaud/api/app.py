@@ -1244,6 +1244,13 @@ class BulkFilesBody(BaseModel):
     action: Literal["resume", "delete_local_processing"]
 
 
+class ReprocessAllBody(BaseModel):
+    mode: Literal["resume", "force", "derived_only"] = "resume"
+    statuses: list[str] | None = None
+    limit: int | None = Field(default=None, ge=1)
+    dry_run: bool = False
+
+
 class BulkExportBody(BaseModel):
     file_ids: list[str] = Field(min_length=1, max_length=200)
     transcript_format: Literal["txt", "srt", "vtt", "docx", "pdf"] | None = None
@@ -1595,6 +1602,23 @@ def bulk_files(body: BulkFilesBody) -> dict:
             row.pipeline_last_failure_at = now
             row.pipeline_next_retry_at = now
     return {"action": body.action, "updated": len(file_ids), "queued": file_ids}
+
+
+@app.post("/api/files/reprocess-all")
+def reprocess_all_files(body: ReprocessAllBody) -> dict:
+    """Queue the whole library for reprocessing; the worker loop drains it.
+
+    ``mode`` selects resume (rerun missing/failed stages), force (recompute every
+    stage), or derived_only (regenerate notes/mind map/index only).
+    """
+    from ..worker.pipeline import queue_library_reprocess
+
+    try:
+        return queue_library_reprocess(
+            mode=body.mode, statuses=body.statuses, limit=body.limit, dry_run=body.dry_run
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/files/export")

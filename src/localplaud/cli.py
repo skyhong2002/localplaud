@@ -451,6 +451,109 @@ def reprocess(
     console.print(f"[green]✓[/] reprocessed {file_id}")
 
 
+@app.command(name="reprocess-all")
+def reprocess_all(
+    mode: str = typer.Option(
+        "resume", "--mode", help="resume | force | derived_only"
+    ),
+    status: list[str] = typer.Option(
+        None, "--status", help="Only recordings in this status (repeatable)."
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Cap how many are queued (newest first)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would be queued; change nothing."
+    ),
+):
+    """Queue the whole library for reprocessing; the worker loop drains it.
+
+    ``--mode resume`` reruns only missing/failed stages, ``force`` recomputes
+    everything (including ASR), and ``derived_only`` regenerates just notes, mind
+    maps, and the index — the cheap way to refresh summaries and titles.
+    """
+    from .worker.pipeline import queue_library_reprocess
+
+    try:
+        result = queue_library_reprocess(
+            mode=mode, statuses=status or None, limit=limit, dry_run=dry_run
+        )
+    except ValueError as exc:
+        console.print(f"[red]✗[/] {exc}")
+        raise typer.Exit(1) from exc
+    prefix = "(dry-run) " if dry_run else ""
+    console.print(
+        f"[green]✓[/] {prefix}mode={result['mode']} queued={result['queued']} "
+        f"skipped={result['skipped']} processing={result['processing']} "
+        f"no_audio={result['no_audio']}"
+    )
+
+
+@app.command(name="backfill-titles")
+def backfill_titles(
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite existing generated titles too."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show what would change; write nothing."
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Cap the number of recordings changed (newest first)."
+    ),
+):
+    """Fill in locally generated titles from existing summaries.
+
+    Only recordings without a manual rename (``local_title`` is unset) are
+    touched, so this never overrides a title you set by hand. Recordings still
+    showing their raw Plaud filename get their default-note summary title.
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from .db.models import PlaudFile
+    from .db.models import Summary as SummaryRow
+    from .db.session import session_scope
+    from .worker.pipeline import _clean_generated_title
+
+    default_template = get_settings().pipeline.summary_template
+    changed = skipped = 0
+    with session_scope() as session:
+        rows = session.scalars(
+            select(PlaudFile)
+            .where(PlaudFile.local_title.is_(None))
+            .order_by(PlaudFile.created_at.desc())
+        ).all()
+        for r in rows:
+            if limit is not None and changed >= limit:
+                break
+            if r.generated_title and not force:
+                skipped += 1
+                continue
+            summary = session.scalar(
+                select(SummaryRow)
+                .where(
+                    SummaryRow.file_id == r.id,
+                    SummaryRow.template == default_template,
+                    SummaryRow.source == "local",
+                )
+                .order_by(SummaryRow.id.desc())
+            )
+            title = _clean_generated_title(summary.title) if summary else None
+            if not title:
+                skipped += 1
+                continue
+            console.print(f"  {r.id[:12]}  {r.display_title!r} → {title!r}")
+            if not dry_run:
+                r.generated_title = title
+                r.generated_title_provider = summary.llm_provider
+                r.generated_title_model = summary.model
+                r.generated_title_at = datetime.now(UTC)
+            changed += 1
+    prefix = "(dry-run) " if dry_run else ""
+    console.print(f"[green]✓[/] {prefix}titles set: {changed}, skipped: {skipped}")
+
+
 @app.command()
 def doctor():
     """Check the environment: ffmpeg, configured providers, and Plaud auth."""

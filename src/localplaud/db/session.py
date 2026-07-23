@@ -102,6 +102,7 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
         migrate_editable_note_provenance_schema,
         migrate_editable_note_revision_schema,
         migrate_editable_note_source_schema,
+        migrate_generated_title_columns,
         migrate_import_schema,
         migrate_incremental_import_schema,
         migrate_knowledge_index_schema,
@@ -131,6 +132,7 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
     migrate_legacy_stage_run_schema(engine)
     migrate_local_transcript_uniqueness(engine)
     migrate_profile_snapshot_columns(engine)
+    migrate_generated_title_columns(engine)
     migrate_automation_ownership_schema(engine)
     migrate_stage_attempt_schema(engine)
     migrate_transcript_revision_provenance(engine)

@@ -792,6 +792,90 @@ def reset_pipeline_retry(row: PlaudFile) -> None:
     row.pipeline_last_failure_at = None
 
 
+def queue_library_reprocess(
+    *,
+    mode: str = "resume",
+    statuses: list[str] | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Queue every eligible recording so the background worker loop drains them.
+
+    Modes:
+      - ``resume``       reuse existing artifacts; rerun only missing/failed stages.
+      - ``force``        recompute every stage from scratch (also reruns ASR).
+      - ``derived_only`` regenerate notes/mind map/index only (keeps ASR/diarize),
+                         the cheap way to refresh summaries and generated titles.
+
+    Recordings without local audio, or currently processing, are skipped. Newest
+    first; ``limit`` caps how many are queued. ``dry_run`` changes nothing.
+    """
+    import secrets
+
+    if mode not in {"resume", "force", "derived_only"}:
+        raise ValueError(f"unknown reprocess mode: {mode}")
+    now = datetime.now(UTC)
+    derived = (StageName.summarize, StageName.mind_map, StageName.index)
+    result = {"mode": mode, "queued": 0, "skipped": 0, "processing": 0, "no_audio": 0}
+    queued_ids: list[str] = []
+    with session_scope() as session:
+        query = select(PlaudFile).order_by(PlaudFile.created_at.desc())
+        if statuses:
+            query = query.where(PlaudFile.status.in_([FileStatus(s) for s in statuses]))
+        for row in session.scalars(query):
+            if limit is not None and result["queued"] >= limit:
+                break
+            if not row.audio_path:
+                result["no_audio"] += 1
+                continue
+            if processing_claim_active(row):
+                result["processing"] += 1
+                continue
+            if mode == "derived_only" and row.local_transcript is None:
+                # Nothing to regenerate from without a transcript.
+                result["skipped"] += 1
+                continue
+            queued_ids.append(row.id)
+            result["queued"] += 1
+            if dry_run:
+                continue
+            reset_pipeline_retry(row)
+            if mode == "force":
+                if StageName.summarize in derived:
+                    from .knowledge_index import invalidate_generated_documents
+
+                    invalidate_generated_documents(session, row.id)
+                for run in row.stage_runs:
+                    run.status = StageStatus.pending
+                    run.error = None
+                    run.completed_at = None
+                row.status = FileStatus.downloaded
+            elif mode == "derived_only":
+                from .knowledge_index import invalidate_generated_documents
+
+                invalidate_generated_documents(session, row.id)
+                stale_generation = secrets.token_hex(16)
+                for run in row.stage_runs:
+                    if run.stage in derived:
+                        run.status = StageStatus.pending
+                        run.error = None
+                        run.completed_at = None
+                        run.detail = dict(run.detail or {}) | {
+                            "stale": True,
+                            "stale_generation": stale_generation,
+                            "derived_only": True,
+                            "reason": "reprocess-all derived_only",
+                        }
+                row.status = FileStatus.partial
+            else:  # resume
+                row.status = FileStatus.partial if row.local_transcript else FileStatus.error
+            row.error = f"Queued by reprocess-all ({mode})."
+            row.pipeline_last_failure_at = now
+            row.pipeline_next_retry_at = now
+    result["queued_ids"] = queued_ids[:50]
+    return result
+
+
 def _schedule_pipeline_retry(row: PlaudFile, settings: Settings) -> None:
     """Persist the next exponential-backoff deadline after a failed cycle."""
     now = datetime.now(UTC)
@@ -2408,6 +2492,40 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
     return next_revision
 
 
+def _clean_generated_title(raw: object) -> str | None:
+    """Normalise an LLM summary title into a recording title: drop markdown
+    heading marks and wrapping quotes/brackets, collapse whitespace, and cap
+    length. Returns None when there is nothing usable."""
+    if not raw or not str(raw).strip():
+        return None
+    text = str(raw).strip().lstrip("#").strip()
+    text = text.strip("\"'“”「」『』").strip()
+    text = " ".join(text.split())
+    return text[:200] or None
+
+
+def _apply_generated_title(session, file_id: str, result: dict, template: str) -> None:
+    """Populate the recording's generated title from its default-note summary.
+
+    Only the default note template sets the recording title, so a secondary
+    note never renames the recording. A manual ``local_title`` is never touched;
+    provenance (provider/model/time) is recorded so the generated title is not
+    mistaken for a user edit.
+    """
+    if template != get_settings().pipeline.summary_template:
+        return
+    title = _clean_generated_title(result.get("title"))
+    if not title:
+        return
+    row = session.get(PlaudFile, file_id)
+    if row is None or row.local_title:
+        return
+    row.generated_title = title
+    row.generated_title_provider = result.get("provider")
+    row.generated_title_model = result.get("model")
+    row.generated_title_at = datetime.now(UTC)
+
+
 def _persist_summary(
     file_id: str,
     result: dict,
@@ -2523,6 +2641,7 @@ def _persist_summary(
         session.flush()
         session.add(replacement)
         session.flush()
+        _apply_generated_title(session, file_id, result, template)
         from .knowledge_index import sync_summary_document
 
         sync_summary_document(session, replacement, allow_running_stage=True)

@@ -166,6 +166,16 @@ class PlaudFile(Base):
     filename: Mapped[str] = mapped_column(String(512), default="")
     local_title: Mapped[str | None] = mapped_column(String(512), default=None)
     fullname: Mapped[str | None] = mapped_column(String(512), default=None)
+
+    # Locally generated title (from the LLM summary), used only when the user
+    # has not set a manual ``local_title``. Provenance is recorded so a generated
+    # title is never mistaken for a user edit or a Plaud-provided name.
+    generated_title: Mapped[str | None] = mapped_column(String(512), default=None)
+    generated_title_provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    generated_title_model: Mapped[str | None] = mapped_column(String(128), default=None)
+    generated_title_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
     filesize: Mapped[int | None] = mapped_column(BigInteger, default=None)
     file_md5: Mapped[str | None] = mapped_column(String(64), default=None)
     duration_ms: Mapped[int | None] = mapped_column(BigInteger, default=None)
@@ -271,7 +281,21 @@ class PlaudFile(Base):
 
     @property
     def display_title(self) -> str:
-        return self.local_title or self.filename or self.id[:12]
+        # Manual rename wins; then the locally generated title; then the
+        # Plaud-provided filename; finally the id prefix as a last resort.
+        return self.local_title or self.generated_title or self.filename or self.id[:12]
+
+    @property
+    def title_source(self) -> str:
+        """Where ``display_title`` currently comes from: manual, generated,
+        plaud, or id. Lets the UI label the title's provenance honestly."""
+        if self.local_title:
+            return "manual"
+        if self.generated_title:
+            return "generated"
+        if self.filename:
+            return "plaud"
+        return "id"
 
     @property
     def local_transcript(self) -> Transcript | None:

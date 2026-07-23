@@ -1415,6 +1415,36 @@ def migrate_vocabulary_schema(engine: Engine) -> list[str]:
     return ["vocabulary_terms"]
 
 
+def migrate_generated_title_columns(engine: Engine) -> list[str]:
+    """Add locally-generated title columns (with provenance) to plaud_files.
+
+    Existing libraries predate the auto-title feature; add the nullable columns
+    so a generated title can be stored alongside — never overwriting — the
+    Plaud ``filename`` and any manual ``local_title``.
+    """
+    inspector = inspect(engine)
+    if "plaud_files" not in set(inspector.get_table_names()):
+        return []
+    columns = {item["name"] for item in inspector.get_columns("plaud_files")}
+    specs: list[tuple[str, TypeEngine]] = [
+        ("generated_title", String(512)),
+        ("generated_title_provider", String(64)),
+        ("generated_title_model", String(128)),
+        ("generated_title_at", DateTime(timezone=True)),
+    ]
+    migrated: list[str] = []
+    for name, coltype in specs:
+        if name in columns:
+            continue
+        rendered = coltype.compile(dialect=engine.dialect)
+        with engine.begin() as connection:
+            connection.execute(
+                text(f"ALTER TABLE plaud_files ADD COLUMN {name} {rendered}")
+            )
+        migrated.append(f"plaud_files.{name}")
+    return migrated
+
+
 def migrate_profile_snapshot_columns(engine: Engine) -> list[str]:
     """Add immutable profile provenance to existing SQLite artifact tables."""
     if engine.dialect.name != "sqlite":
