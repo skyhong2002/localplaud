@@ -1,6 +1,6 @@
 # Polish backlog
 
-Rotation pointer: 3
+Rotation pointer: 4
 
 Journeys:
 1. Library table — filters, folders, tags, sort, bulk select, pagination
