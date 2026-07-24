@@ -465,6 +465,15 @@ def test_local_audio_upload_and_metadata_only_ui(monkeypatch, tmp_path):
     assert client.post(
         "/api/imports/local/audio", files={"file": ("bad.exe", b"x")}
     ).status_code == 415
+    # Feature-phone AMR recordings are accepted (ffmpeg decodes them natively).
+    amr = client.post(
+        "/api/imports/local/audio",
+        files={"file": ("memo.amr", b"#!AMR\n\x00", "audio/amr")},
+    )
+    assert amr.status_code == 201
+    with session_scope() as session:
+        row = session.get(PlaudFile, amr.json()["id"])
+        assert row.audio_path and row.audio_path.endswith("audio.amr")
 
 
 def test_on_demand_plaud_audio_import_uses_its_existing_claim(monkeypatch, tmp_path):

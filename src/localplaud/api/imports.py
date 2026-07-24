@@ -31,6 +31,9 @@ _ALLOWED_EXTENSIONS = {
     "webm",
     "flac",
     "aac",
+    # Feature-phone / voice-memo recordings; ffmpeg decodes AMR-NB and AMR-WB
+    # natively, so the convert stage handles them like any other input.
+    "amr",
 }
 _MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
