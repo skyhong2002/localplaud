@@ -387,7 +387,7 @@
            href="{{ liburl(lib.sort, lib.dir, lib.state, '', lib.view) }}">{{ t('All') }}</a>
         {% for sc in facets.scenes %}
         <a class="fchip {% if sc.active %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{% if sc.value == 'unknown' %}{{ t(sc.label) }}{% elif workspace_preferences.locale == 'zh-Hant-TW' %}{{ t('Audio source') }} {{ sc.value }}{% else %}{{ sc.label }}{% endif %} <span class="n">{{ sc.count }}</span></a>
+           href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{{ t(sc.label) }} <span class="n">{{ sc.count }}</span></a>
         {% endfor %}
       </div>
       {% endif %}
