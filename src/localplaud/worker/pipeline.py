@@ -2494,13 +2494,16 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
 
 def _clean_generated_title(raw: object) -> str | None:
     """Normalise an LLM summary title into a recording title: drop markdown
-    heading marks and wrapping quotes/brackets, collapse whitespace, and cap
-    length. Returns None when there is nothing usable."""
+    heading marks and wrapping quotes/brackets, collapse whitespace, convert
+    to Traditional Chinese, and cap length. Returns None when nothing usable."""
+    from ..zh import to_traditional
+
     if not raw or not str(raw).strip():
         return None
     text = str(raw).strip().lstrip("#").strip()
     text = text.strip("\"'“”「」『』").strip()
     text = " ".join(text.split())
+    text = to_traditional(text) or ""
     return text[:200] or None
 
 

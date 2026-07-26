@@ -1648,6 +1648,7 @@ dependencies = [
     { name = "markdown-it-py" },
     { name = "mdit-py-plugins" },
     { name = "numpy" },
+    { name = "opencc-python-reimplemented" },
     { name = "pillow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -1727,6 +1728,7 @@ requires-dist = [
     { name = "nvidia-cublas-cu12", marker = "extra == 'cuda'" },
     { name = "nvidia-cudnn-cu12", marker = "extra == 'cuda'", specifier = ">=9.0" },
     { name = "openai", marker = "extra == 'cloud'", specifier = ">=1.35" },
+    { name = "opencc-python-reimplemented", specifier = ">=0.1.7" },
     { name = "pillow", specifier = ">=11.0" },
     { name = "pyannote-audio", marker = "extra == 'diarize'", specifier = ">=4.0" },
     { name = "pydantic", specifier = ">=2.7" },
@@ -1880,18 +1882,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mdit-py-plugins"
-version = "0.6.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "markdown-it-py" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/59/fc/f8d0863f8862f25602c0404d75568e89fb6b4109804645e5cdfb1be5cf56/mdit_py_plugins-0.6.1.tar.gz", hash = "sha256:a2bca0f039f39dbd35fb74ae1b5f998608c437463371f0ff7f49a19a17a114d0" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/69/6da5581c6a7fede7dc261bf4e67d6adca4196f176b43288b55b3db395b6e/mdit_py_plugins-0.6.1-py3-none-any.whl", hash = "sha256:214c82fb2ac524472ab6a5bcab1de80f73b50443e187f401bfd77efbc7c6481d" },
-]
-
-[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2027,6 +2017,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0f/c2/f5da6cd37ed6871f5c9b3c0507ddb69f14d6c36fac4541e4e0c60cb8cdfc/matplotlib-3.11.0-pp311-pypy311_pp73-macosx_10_15_x86_64.whl", hash = "sha256:81ae77077a1e16d37a5b61096ccb07c8d90a99b518fa8256b8f21578932f2f62", size = 9434094, upload-time = "2026-06-12T02:29:09.135Z" },
     { url = "https://files.pythonhosted.org/packages/f8/07/56f66906e0f87a0c6d0d0acbd34dbc9432b1931d8f26ef618bd6f92932a9/matplotlib-3.11.0-pp311-pypy311_pp73-macosx_11_0_arm64.whl", hash = "sha256:ddef37840695f5eef65f9f070fe2d2f510f584c2156203f9f622a5b0584efffd", size = 9262183, upload-time = "2026-06-12T02:29:11.283Z" },
     { url = "https://files.pythonhosted.org/packages/0c/d8/c4ecab06b7ea36a570c4f3bd2d48d1799fd5d9174470e45c2194199431e7/matplotlib-3.11.0-pp311-pypy311_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:cf662e5ac5707658cb931e19972c4bd99f7b4f8b7bf79d3c821d239fa6b71e64", size = 10015653, upload-time = "2026-06-12T02:29:13.251Z" },
+]
+
+[[package]]
+name = "mdit-py-plugins"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markdown-it-py" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/59/fc/f8d0863f8862f25602c0404d75568e89fb6b4109804645e5cdfb1be5cf56/mdit_py_plugins-0.6.1.tar.gz", hash = "sha256:a2bca0f039f39dbd35fb74ae1b5f998608c437463371f0ff7f49a19a17a114d0", size = 56114, upload-time = "2026-05-13T09:03:38.91Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a5/69/6da5581c6a7fede7dc261bf4e67d6adca4196f176b43288b55b3db395b6e/mdit_py_plugins-0.6.1-py3-none-any.whl", hash = "sha256:214c82fb2ac524472ab6a5bcab1de80f73b50443e187f401bfd77efbc7c6481d", size = 66663, upload-time = "2026-05-13T09:03:37.76Z" },
 ]
 
 [[package]]
@@ -2704,6 +2706,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/78/60/d4219875289b11d2c2f7da93c36283da224a2e55865ed865ab64e0ce9217/openai-2.45.0.tar.gz", hash = "sha256:10d34ca9c5643bce775852fddbfc172505cb1d4de1ccd101696c3ecff358765d", size = 1109653, upload-time = "2026-07-09T18:02:44.091Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/b0/2291689e3ec4723fbf5bbf3b54afcd7b160f9ddc98ca7aedfd0132af5677/openai-2.45.0-py3-none-any.whl", hash = "sha256:5df105f5f8c9b711fcb9d06d2d3888cebc82506db216484c14a4e53cdf651777", size = 1629470, upload-time = "2026-07-09T18:02:42.21Z" },
+]
+
+[[package]]
+name = "opencc-python-reimplemented"
+version = "0.1.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/6d/c6f37eed651dd6b752e50f80a93396cdaa42a6acc6ce05ad7452303ea511/opencc-python-reimplemented-0.1.7.tar.gz", hash = "sha256:4f777ea3461a25257a7b876112cfa90bb6acabc6dfb843bf4d11266e43579dee", size = 482566, upload-time = "2023-02-11T03:58:42.25Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/6b/055b7806f320cc8f2cdf23c5f70221c0dc1683fca9ffaf76dfc2ad4b91b6/opencc_python_reimplemented-0.1.7-py2.py3-none-any.whl", hash = "sha256:41b3b92943c7bed291f448e9c7fad4b577c8c2eae30fcfe5a74edf8818493aa6", size = 481813, upload-time = "2023-02-11T03:58:39.66Z" },
 ]
 
 [[package]]

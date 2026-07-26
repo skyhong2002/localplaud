@@ -18,7 +18,9 @@ log = logging.getLogger(__name__)
 _GROUND_RULES = (
     "Never invent facts not present in the transcript. Write everything — the "
     "title, headings' content, and body — in the transcript's dominant language; "
-    "for a Mandarin recording the title must be in Chinese, not English."
+    "for a Mandarin recording the title must be in Chinese, not English. For "
+    "Chinese, always write Traditional Chinese with Taiwan wording (臺灣正體), "
+    "even when the transcript text itself is in Simplified script."
 )
 
 

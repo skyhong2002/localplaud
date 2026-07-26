@@ -688,10 +688,23 @@ _STATE_ALIASES = {
 }
 
 
+# Plaud's undocumented capture-scene codes, named from this library's own
+# evidence: scenes 1/7 carry the physical recorder's serial number, 101 rows
+# have app-generated hex ids (and call-recording titles), 102 rows use an
+# upload-timestamp as their serial (imported files). Unknown codes fall back
+# to showing the raw number rather than guessing.
+_SCENE_NAMES = {
+    1: "Plaud recorder",
+    7: "Plaud recorder (other mode)",
+    101: "Phone app recording",
+    102: "Imported audio",
+}
+
+
 def _scene_label(scene: int | None) -> str:
     if scene is None:
         return "Unknown capture source"
-    return f"Capture source {scene}"
+    return _SCENE_NAMES.get(scene, f"Capture source {scene}")
 
 
 def _scene_label_short(scene: int | None) -> str:
@@ -699,7 +712,7 @@ def _scene_label_short(scene: int | None) -> str:
     # ellipsizes into identical, indistinguishable entries at rail width.
     if scene is None:
         return "Unknown source"
-    return f"Source {scene}"
+    return _SCENE_NAMES.get(scene, f"Source {scene}")
 
 
 def _parse_library_params(

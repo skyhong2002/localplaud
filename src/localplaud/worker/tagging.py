@@ -38,7 +38,9 @@ _SCHEMA = {
 
 _SYSTEM = (
     "You label meeting notes for a searchable archive. Reply with ONLY a JSON "
-    "object and no other text. Use the same language as the notes."
+    "object and no other text. Use the same language as the notes; for Chinese, "
+    "always use Traditional Chinese with Taiwan wording (臺灣正體), never "
+    "Simplified."
 )
 
 
@@ -78,6 +80,8 @@ _JUNK_RE = re.compile(r"^(speaker|說話者|語者|發言者)[\s_]*\d+$", re.IGN
 
 
 def _clean(value: object) -> str | None:
+    from ..zh import to_traditional
+
     if not isinstance(value, str):
         return None
     text = " ".join(value.split())  # collapse whitespace first
@@ -85,6 +89,7 @@ def _clean(value: object) -> str | None:
     text = text.strip("\"'“”「」『』·-").strip()  # strip wrapping quotes/brackets
     if not text or _JUNK_RE.match(text):
         return None
+    text = to_traditional(text) or ""
     return text[:_TAG_MAXLEN] or None
 
 
@@ -161,10 +166,15 @@ def apply_tags(
     row.auto_tagged_at = datetime.now(UTC)
     if not tags_by_kind or not any(tags_by_kind.values()):
         return {"applied": 0, "skipped": "no tags"}
+    from ..zh import to_traditional
+
     existing_ids = {t.id for t in row.tags}
     applied = 0
     for kind in ("topic", "person", "org"):
         for name in tags_by_kind.get(kind) or []:
+            # Extraction may run on the worker where OpenCC is absent, so the
+            # authoritative Simplified→Traditional conversion happens here.
+            name = to_traditional(name) or name
             tag = _get_or_create_tag(session, name, kind)
             if tag.id not in existing_ids:
                 row.tags.append(tag)

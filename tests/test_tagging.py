@@ -39,6 +39,12 @@ def test_clean_strips_markup_and_caps():
     assert _clean("Speaker 1") is None
     assert _clean("語者2") is None
     assert _clean("冠子老師") == "冠子老師"
+    # Simplified Chinese converts to Traditional (Taiwan wording)…
+    assert _clean("数据验证") == "資料驗證"
+    assert _clean("会议记录") == "會議記錄"
+    # …but already-Traditional text is untouched (no s2twp phrase damage).
+    assert _clean("編輯權限") == "編輯權限"
+    assert _clean("性格類型") == "性格類型"
 
 
 def test_extract_tags_dedups_caps_and_types(monkeypatch):
