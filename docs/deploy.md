@@ -51,9 +51,17 @@ offline deployments.
 
 ---
 
-## The reference three-machine setup
+## The reference deployment
 
-### 1. Mac mini (Apple Silicon) → `plaud.observe.tw`
+> **Decision (2026-07-31):** multi-host *web* deployments were dropped. There is
+> exactly one production instance — the Mac mini below — plus one private WSL
+> CUDA worker it dispatches GPU stages to (see
+> [remote-worker.md](remote-worker.md)). The former NVIDIA
+> (`nvplaud.observe.tw`) and Oracle (`plaud.skyhong.tw`) standalone instances
+> are retired and their host notes removed; the generic `cpu`/`gpu` profile
+> instructions below remain for anyone deploying localplaud on that hardware.
+
+### 1. Mac mini (Apple Silicon) → `plaud.observe.tw` (production controller)
 
 Docker on macOS **cannot** pass the Metal GPU into a container, so on-device
 Whisper must run on the host. Two options:
@@ -73,7 +81,11 @@ Whisper must run on the host. Two options:
   (Point the Caddyfile's `reverse_proxy` at `host.docker.internal:8080` for
   this variant.)
 
-### 2. NVIDIA Ubuntu → `nvplaud.observe.tw`
+### 2. NVIDIA / CUDA host (generic `gpu` profile)
+
+In the reference deployment this hardware runs only as a **remote worker**
+behind the Mac mini controller, not as its own web instance — but the `gpu`
+profile still brings up a full standalone app if that is what you want:
 
 ```bash
 ./scripts/deploy/bootstrap.sh --gpu
@@ -131,11 +143,10 @@ valid structured output even when thinking is disabled by the client.
 > (`uv sync --extra cuda`), which pulls `nvidia-cublas-cu12` + `nvidia-cudnn-cu12`,
 > and ensure they're on `LD_LIBRARY_PATH`. The Docker image bundles them already.
 
-### 3. Oracle Cloud (aarch64, 2 vCPU) → `plaud.skyhong.tw`
+### 3. CPU-only host (generic `cpu` profile)
 
-The always-on poller/downloader. It is too weak to be the preferred local turbo
-inference worker. For subscription independence, let it ingest/store while a Mac or
-CUDA worker processes the shared queue. A cloud ASR API is an explicit alternative:
+A weak always-on box can still ingest/store with the `cpu` slim image; a cloud
+ASR API is an explicit choice, never an automatic fallback:
 
 ```bash
 ./scripts/deploy/bootstrap.sh

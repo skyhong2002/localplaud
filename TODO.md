@@ -55,13 +55,14 @@ Full pre-audit engineering detail lives in this file's git history.
 - **CUDA ASR still unverified.** The WSL worker serves diarize/notes/embed in
   production, but ASR runs on the Mac; the configured faster-whisper fallback
   is CPU `large-v3` int8, not turbo-on-CUDA. Verify large-v3-turbo through
-  faster-whisper on a CUDA host before claiming the NVIDIA ASR profile.
-- **Rentable GPU host + cross-host artifact contract.** No provider adapter,
-  deploy path, config example, or test exists for a rented GPU host.
-  Per-artifact SHA-256 verification is tested, but nothing compares the same
-  recording's artifacts produced on two different hosts —
+  faster-whisper on the WSL worker host before claiming the NVIDIA ASR
+  profile (the only CUDA host after the single-deployment decision).
+- **Cross-host artifact contract for the live Mac↔WSL pair.** Per-artifact
+  SHA-256 verification is tested, but nothing compares the same recording's
+  artifacts produced on the two production hosts —
   `docs/product-workflow.md` acceptance scenarios 8 and 12 have no executable
-  form.
+  form. (Rentable-GPU host validation was dropped with the 2026-07-31
+  single-deployment decision below.)
 
 ### P0 — operations
 
@@ -102,21 +103,17 @@ Full pre-audit engineering detail lives in this file's git history.
 - Optional: distinct Summary tab (tracked in the polish backlog) and
   community/remote template-catalog ingestion.
 
-### P1 — Multi-host deployment
+### ~~P1 — Multi-host deployment~~ — DROPPED (decision 2026-07-31)
 
-- **Document the real worker topology.** The production NVIDIA worker is a
-  WSL RTX 5060 host reached over Tailscale (`mac-wsl-hybrid` profile), but
-  `docs/remote-worker.md` and `docs/deploy.md` still describe only CCLabPC
-  and predate the WSL deployment entirely. Write down the worker token flow,
-  Tailscale addressing, the process-wide GPU serialization lock, and the
-  remote_jobs cache caveat after code fixes.
-- **CCLabPC** (nvplaud.observe.tw): previously passed CUDA-image handshake
-  acceptance, but the host is currently unreachable (connection failed,
-  2026-07-31). Redeploy, then validate the NVIDIA Local execution profile
-  end-to-end on it.
-- **Oracle** (plaud.skyhong.tw, aarch64 CPU): the vhost resolves but no app
-  is deployed (bare 404 on `/` and `/login`). Deploy the cpu slim image plus
-  a Caddy block (SkyLabMac pattern), with an explicit CPU or cloud profile.
+Multi-host web deployments are no longer a goal: the CCLabPC
+(nvplaud.observe.tw) and Oracle (plaud.skyhong.tw) standalone instances are
+retired, and rentable-GPU validation is out of scope. Production is exactly
+one Mac mini controller plus its private WSL RTX 5060 worker; that topology
+(dispatch stages, GPU serialization lock, code-sync and remote_jobs cache
+caveats) is now documented in `docs/remote-worker.md`, and `docs/deploy.md`
+keeps only generic `cpu`/`gpu` profile instructions for other users.
+Follow-up when convenient: remove the two stale DNS records / Caddy vhosts on
+the retired hosts.
 
 ### P2 — Automation and integrations
 
