@@ -41,9 +41,10 @@
   正式 DB 的核心筆數在 migration 前後完全一致，完整性與外鍵檢查通過。
   LaunchAgent 已恢復，local/public `/healthz` 均回傳 200，worker 也重設停機前的
   1 筆 in-flight lease 並繼續處理。
-- commit 已建立但尚未 push：GitHub CLI 的既有 `skyhong2002` token 已失效，需在
-  重新登入 GitHub 後執行 `git push origin main`。不要把未 push 誤判成未部署；
-  production 直接執行這個已 commit 的本機 worktree。
+- （2026-07-31 更新）GitHub CLI 已重新登入，`git push origin main` 已恢復正常，
+  積壓的 commit 已推上 GitHub。仍要記得：不要把未 push 誤判成未部署；
+  production 直接執行這個已 commit 的本機 worktree。本備忘錄的 migration 任務
+  已全部完成，目前有效的待辦清單以 `TODO.md`（2026-07-31 全面稽核版）為準。
 
 一定要先用 production DB 的副本完整演練 migration、檢查 row count 與 `PRAGMA foreign_key_check`，測試通過後才可遷移正式資料庫。
 

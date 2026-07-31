@@ -3,671 +3,218 @@
 Working notes for continuing development (synced across machines via git).
 No secrets here — those live in `.env` / the Caddyfile, never committed.
 
-## Status snapshot (2026-07-12)
+Audited 2026-07-31 against the running production system, the production
+database, and the codebase: every open item below was re-verified with
+evidence; completed work moved to the compressed archive at the bottom.
+Full pre-audit engineering detail lives in this file's git history.
+
+## Status snapshot (2026-07-31)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (test count is verified per change).
-- **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service
-  `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy
-  at **https://plaud.observe.tw** with localplaud's built-in `/login`. Local ASR =
-  mlx-whisper (Metal); transcript polish = OpenCode Go; embeddings = ollama.
-- **Real account verified**: the official Open API provider is live in production
-  (OAuth auto-refresh verified) and returns the account's **full history (~750
-  recordings)**. Raw audio download works without requesting Plaud AI generation.
-- **Product direction changed**: localplaud must replace the Plaud Intelligence
-  subscription workflow. Plaud is retained only for recorder → App → raw-audio
-  cloud transport. See `AGENTS.md` and `docs/product-workflow.md`.
-- **Independent mode is live in production**: the service was backed up and
-  restarted on the current `main` with `artifact_mode = "independent"` and
-  `prefer_cloud_artifacts = false`; local transcript revisions preserve provenance,
-  mind maps are resumable, and a real failed mind-map stage was retried successfully
-  after fixing thinking-only Ollama completions. Pyannote Community-1, its accepted
-  model terms, and the Hugging Face token are now live: production has completed
-  diarization for real recordings. The contextual AI-polish stage is also live with
-  OpenCode Go `qwen3.7-plus`: a real production recording completed correction,
-  full-coverage notes, mind map, index, and the twelve-part subscription-independence
-  gate using the polished transcript revision. Speaker assignment now closes Whisper/pyannote
-  VAD boundary gaps with the nearest detected turn instead of claiming completion
-  while leaving segments unassigned; backlog reprocessing remains in progress.
-- Dev env on SkyLabMac: `~/Projects/localplaud` (venv, ffmpeg static, config.toml, `.env`). Claude Code CLI installed (`~/.local/bin/claude`).
+  Active development is merged directly to `main` (test count verified per change).
+- **Production is LIVE** on the M4 Mac mini (hostname now `sky-mini`, formerly
+  SkyLabMac/CCLabMacmini): launchd agent `com.localplaud.agent`, reverse-proxied
+  at **https://plaud.observe.tw** (healthz 200 verified 2026-07-31).
+- **Independent mode runs on execution profile `mac-wsl-hybrid` v7** (system
+  default, operator-configured in the DB): Mac MLX Whisper large-v3-turbo ASR
+  with whisper-timestamps word timing; diarize / summarize / mind-map / embed
+  dispatched to the **WSL RTX 5060 remote worker** over Tailscale; transcript
+  polish via OpenCode Go with **codex-local (`gpt-5.6-luna`) as the
+  correct-stage fallback** — 39 completed production attempts prove the
+  codex-local runtime path (68 failed attempts are the fallback trigger noise;
+  watch the rate while the backlog drains).
+- **Backlog** (production DB, 2026-07-31): 175 done · 15 partial ·
+  1 processing · **597 downloaded awaiting processing** · 5 metadata-only.
+  The WSL GPU worker is the throughput bottleneck; `concurrency = 1` on the
+  16 GB Mac is deliberate (2× Whisper pushed it into swap).
+- Legacy DB migration (note_templates / vocabulary_terms / stage_attempts /
+  ask_messages) completed 2026-07-13 with verified row counts and integrity
+  checks; details in `CONTINUATION.md` git history.
 
-## TODO — prioritized
+## Open TODO — prioritized
 
-Priority map:
+### P0 — validation debt (quality gates before changing defaults)
 
-- **P0:** production-safe independent processing; the primary provider/model/profile
-  platform; production speech/diarization; full-coverage notes, mind maps, and Ask.
-- **P1:** expose the P0 capabilities as a complete daily-use Web App, then validate
-  the same product and execution profiles on Apple, NVIDIA, and CPU hosts.
-- **P2:** build AutoFlow and integrations on named P0 profiles and P1 controls; rules
-  orchestrate proven capabilities instead of inventing a second provider system.
+- **Gate/default contradiction — decide and fix.** The twelve-part
+  subscription-independence gate requires `forced_alignment=true`
+  (`src/localplaud/acceptance.py`), but the shipped default profile and live
+  production both align via `whisper-timestamps` (`forced_alignment=false`) —
+  a recording processed on defaults cannot pass the gate. Either validate and
+  select `align:whisperx` in the production profile, or explicitly relax the
+  gate; don't leave them contradicting each other.
+- **WhisperX forced-alignment validation.** `align:whisperx` /
+  `wav2vec2-auto` are selectable but deliberately default-off; all tests are
+  fake-WhisperX. Needs Taiwan Mandarin and Mandarin/English accuracy,
+  timestamp, speed, and memory validation on real recordings before
+  production selection.
+- **VAD validation.** `asr.vad.enabled` remains default-off (implementation
+  is complete for both mlx and faster-whisper paths). Benchmark on real
+  Taiwan Mandarin / code-switch recordings before enabling by default. No
+  benchmark harness exists anywhere in the repo — building one is part of
+  this item (it also unblocks the two items above).
+- **CUDA ASR still unverified.** The WSL worker serves diarize/notes/embed in
+  production, but ASR runs on the Mac; the configured faster-whisper fallback
+  is CPU `large-v3` int8, not turbo-on-CUDA. Verify large-v3-turbo through
+  faster-whisper on a CUDA host before claiming the NVIDIA ASR profile.
+- **Rentable GPU host + cross-host artifact contract.** No provider adapter,
+  deploy path, config example, or test exists for a rented GPU host.
+  Per-artifact SHA-256 verification is tested, but nothing compares the same
+  recording's artifacts produced on two different hosts —
+  `docs/product-workflow.md` acceptance scenarios 8 and 12 have no executable
+  form.
 
-### ✅ DONE (2026-07-10) — Foundation: official Open API and raw audio
-`plaud.provider = "official"` (default): native S256 PKCE OAuth through
-`localplaud auth login`; tokens remain official-CLI-compatible in `~/.plaud/tokens.json`,
-auto-refresh implemented in `plaud/oauth.py`, verified live — both tokens
-rotate, 24h expiry). `/open/third-party/files/{id}` supplies a signed raw-audio
-URL. The client can also import Plaud transcripts/summaries, but that capability is
-now migration/debug-only and cannot be a primary pipeline dependency. The
-reverse-engineered apse1 adapter and browser-session import path have been removed.
-Full API notes: `docs/plaud-api.md`.
+### P0 — operations
 
-The official Plaud MCP is also available as a first-class read-only ingest provider
-(`plaud.provider = "mcp"`) with its own OAuth cache, stdio JSON-RPC timeout, and the
-same signed-audio SSRF/size protections. Its transcript and note tools remain
-migration/debug-only.
+- **Drain the 597-recording backlog.** Reprocessing is in progress and
+  bounded by the WSL GPU; fresh uploads stay ahead of the backlog by design.
 
-### P0 — Make raw-audio processing production-safe
+### P1 — Web App remaining gaps (2026-07-31 audit vs `docs/product-workflow.md`)
 
-- ✅ Added default `pipeline.artifact_mode = "independent"`: only `source=local`
-  transcripts satisfy the pipeline. Explicit `migration` mode retains the old
-  comparison/backfill behavior; automatic cloud import requires both migration mode
-  and `prefer_cloud_artifacts = true`.
-- ✅ Changed transcript storage to preserve multiple provenance rows. The canonical
-  Web/API/CLI/export surface prefers local output while labelling Plaud-only imports;
-  independent export excludes paid Plaud artifacts.
-- ✅ Added an idempotent legacy-data preparation: preserve Plaud transcript/notes,
-  relabel local summaries derived from a cloud-only transcript as `legacy`, clear
-  their non-provenanced chunks, and requeue audio for local ASR. Available explicitly
-  as `localplaud prepare-independent` and run once on independent-mode startup.
-- ✅ Added durable per-recording stage runs with attempt count, status, provider/model,
-  artifact source, timestamps, and errors. ASR is persisted before optional work;
-  diarization, notes, and indexing failures produce an actionable `partial` state
-  without discarding usable artifacts. Web detail/status pages expose diagnostics,
-  and Resume retries only missing/failed work while Rebuild all is explicit.
-- ✅ Fixed Ollama embeddings: model-level health checks now distinguish a healthy
-  daemon from a missing configured model, errors give the exact `ollama pull` action,
-  modern `/api/embed` batches inputs with legacy compatibility, and stored provenance
-  includes the model. Pulled `bge-m3` on SkyLabMac and smoke-tested two 1024-d vectors.
-- ✅ Queue is newest-first, and daemon work is bounded by configurable
-  `pipeline.files_per_cycle` so fresh recordings can enter between backlog batches;
-  `localplaud work --once` remains the explicit full-backlog path. Stage/status
-  counts provide progress. Failed and usable-partial cycles now retry automatically
-  with durable bounded exponential backoff; fresh downloads stay ahead of due
-  retries, exhaustion is visible, and manual Resume immediately resets the budget.
-- ✅ Automatic ingest now distinguishes the initial catalog baseline from genuinely
-  new uploads. A fresh workspace mirrors its existing Plaud history as metadata-only,
-  records that baseline durably, then downloads and processes recordings first seen
-  on later polls by default. This avoids a surprise historical backfill while making
-  the normal recorder → Plaud App → localplaud path hands-off. A durable expiring
-  catalog-sync claim serializes concurrent pollers, and each audio download uses a
-  durable owner token, lease, and private staging path so overlapping CLI/daemon cycles
-  cannot fetch or publish the same file twice after restart recovery.
-  The upgrade baseline neutralizes legacy audio-less queues/errors before automatic
-  download becomes eligible, preventing an accidental historical retry.
-- ✅ Added a read-only `localplaud acceptance-check RECORDING_ID` product gate. It
-  verifies local audio/transcript provenance, timestamped speaker output, local notes
-  and mind map, Ask-ready local chunks, durable profile snapshots, and
-  TXT/SRT/VTT/DOCX/PDF.
-  The network-free acceptance harness starts with raw audio and no Plaud Intelligence
-  artifacts, executes the whole pipeline plus grounded single-file Ask, and verifies
-  a playable source citation. The recording Web workspace now shows the same twelve
-  checks, overall pass/not-ready state, actionable evidence, and versioned JSON API;
-  CLI access is no longer required to inspect readiness. Hardware/model quality
-  validation remains internal engineering work rather than a product feature.
-
-### P0 PRIMARY — Provider, model, and execution profiles
-
-**Outcome:** every derived stage can independently use a local model, a cloud API,
-or a remote worker. localplaud resolves those choices into a reusable execution
-profile, records the resolved snapshot on each run, and never crosses a privacy or
-cost boundary through an implicit fallback.
-
-Backend foundation landed on 2026-07-11, but this is not yet the finished feature:
-
-- ✅ Provider registries/config already exist for ASR, LLMs, and embeddings;
-  OpenAI-compatible `base_url` configuration exists for relevant API paths.
-- ✅ Stage runs and artifacts already retain provider/model provenance, and health
-  checks can distinguish some daemon-level and model-level failures.
-- ✅ Added provider-neutral capability contracts for transcription, alignment,
-  diarization, correction, notes, mind maps, embeddings, and Ask. Durable database
-  records now cover provider connections, model catalog entries, versioned execution
-  profiles, per-stage selections, and per-recording overrides; ordinary rows retain
-  only opaque secret references.
-- ✅ Added deterministic layered resolution (system → folder → durable AutoFlow
-  assignment → active template version → recording profile/patch), versioned
-  structured provenance plus compatible layer strings, capability validation,
-  no-egress enforcement, an idempotent Settings-equivalent bootstrap, legacy SQLite
-  migration, guarded deletion, and headless list/preview/assign/clear APIs. Settings
-  assigns folder/template profiles; recording detail exposes Automatic inheritance
-  and the resolved chain.
-- ✅ Pipeline stages now dispatch through the resolved recording profile without
-  mutating process-wide Settings. The immutable snapshot is persisted on stage runs,
-  transcripts, notes, and embedding chunks; local-only profiles disable legacy cloud
-  fallback. Recordings expose a profile picker for the next Resume/Rebuild. Deployed
-  partial defaults are reconciled through a new immutable version with explicit
-  transcribe, align, diarize, correct, summarize, mind-map, embed, and Ask selections;
-  production is on complete profile version 4 rather than implicit Settings fallback.
-- ✅ Added provider/model/profile CRUD APIs, connection configuration health, and a
-  Settings surface for inspecting connections/profiles, testing health, and creating
-  secret-reference-only connections. Raw credentials are rejected by the API.
-- ✅ Connection and model health actions now execute the real provider/runtime health
-  implementation (including configured model checks) and persist checked status,
-  detail, and timestamp. Secret references resolve only from explicit `env:` names.
-- ✅ Settings can add model capabilities and construct an explicit per-stage profile;
-  the API now provides guarded create/update/delete operations for connections,
-  models, and immutable profile versions.
-- ✅ Existing connections and models can be edited or safely deleted from Settings;
-  immutable profiles expose a guided “New version” flow and guarded deletion for
-  non-default, unused versions.
-- ✅ Added truthful local hardware/runtime detection and ranked Apple Silicon MLX,
-  NVIDIA CUDA faster-whisper, and CPU fallback recommendations. Settings reports
-  architecture, memory, GPU/runtime evidence and missing requirements; only verified
-  ready recommendations can create an idempotent profile. Installation replaces only
-  ASR/alignment while preserving every other stage and privacy/cost/fallback policy.
-- ✅ Added an append-only stage-attempt usage ledger. Every real attempt retains its
-  resolved profile, selected/actual provider and model, status, latency, normalized
-  audio/text/token/request usage, errors, and catalog-priced estimated USD cost.
-  Recording details expose attempt history and totals; Status aggregates execution
-  hours/cost, and model setup accepts explicit token/audio price metadata. Missing
-  rates honestly produce zero rather than invented prices.
-- ✅ Profile cost ceilings now enforce a pre-egress reservation boundary. Cloud and
-  remote stages with a ceiling require explicit catalog pricing or an explicit free
-  declaration; conservative audio/text/output projections are checked against all
-  prior attempt cost before the provider call. Rejections make zero provider calls,
-  remain traceable failures, and can Resume after selecting a new policy/profile.
-- ✅ Added authenticated `localplaud-worker` protocol v1: versioned capability
-  handshake, durable/idempotent jobs, progress, cancellation, structured retryable
-  errors, minimum typed inputs, restart recovery, and SHA-256 artifact verification.
-  Credential-shaped Plaud/provider fields are rejected recursively and bearer tokens
-  remain environment-only. Pipeline dispatch covers transcribe, diarize, notes, mind
-  maps, and embeddings.
-- ✅ CCLabPC NVIDIA acceptance: the CUDA image now pins a compatible PyTorch 2.8 /
-  CUDA 12.8 / TorchCodec 0.7 / pyannote 4 stack. The image imports cleanly, sees the
-  RTX 5060 through NVIDIA Container Toolkit, and completed an authenticated v1
-  capability handshake without interrupting the existing processing container.
-- ✅ Explicit cross-provider fallback is stage-scoped, ordered, capability- and
-  no-egress-validated, restricted to retryable failures, recorded as independent
-  attempts, and visible in recording/usage diagnostics. Remote-worker connections
-  and catalog models now run a real authenticated protocol-v1 handshake for health
-  checks and reject models the worker does not advertise.
-- Remaining: validate one rentable GPU host and the cross-host artifact contract.
-
-Implement this P0 in the following order:
-
-1. **Stage and capability contracts.** Define a common provider interface for ASR,
-   alignment, diarization, transcript correction, notes, mind maps, embeddings, and
-   Ask. Capabilities must declare supported languages, timestamps/word timestamps,
-   speaker output, streaming/batch behavior, prompt limits, input limits, required
-   hardware, data-egress behavior, and health state. Treat OpenAI-compatible text,
-   audio, and embeddings as three separately declared capabilities; supporting one
-   must not imply the other two.
-2. **Durable provider/model/profile schema.** Store provider connections, model
-   catalog entries, secret references, reusable execution profiles, health checks,
-   and versions in the local database. A profile selects a provider/model and
-   stage-specific options for every enabled stage. Never store API keys directly in
-   ordinary profile or artifact rows.
-3. **Deterministic profile resolution.** Resolve in this order: system default →
-   folder/AutoFlow rule → template default → per-recording override. Persist the
-   fully resolved profile snapshot on every `StageRun` and derived artifact so later
-   settings changes do not rewrite history. Reprocessing may explicitly select a
-   newer profile or preserve the previous one.
-4. **Local hardware profiles.** Ship truthful starting profiles for Apple Silicon
-   (MLX Whisper large-v3-turbo), NVIDIA/CUDA (faster-whisper or verified WhisperX
-   integration plus pyannote), and CPU/other GPU (whisper.cpp or faster-whisper where
-   supported). Detect available hardware, memory, runtimes, and installed models,
-   then recommend rather than silently force a profile. Do not claim acceleration
-   on an unverified backend.
-5. **Cloud and compatible API profiles.** Support OpenAI Audio, text/Responses or
-   chat-compatible generation, and embeddings as explicit capabilities; preserve
-   the existing Deepgram and AssemblyAI ASR paths; and support custom
-   OpenAI-compatible base URL, key reference, model name, headers, timeout, and
-   limits per capability. Add an experimental trusted-single-user `codex-local`
-   text provider only through a supported Codex CLI/app-server boundary: never copy
-   or scrape ChatGPT/Codex auth tokens, never present it as a generic
-   OpenAI-compatible endpoint, and never enable it by default on a public or
-   multi-user deployment.
-   The experimental `codex-local` correction adapter and catalog entry are now
-   implemented with a dedicated `CODEX_HOME`, ChatGPT-login health gate, stdin-only
-   payloads, ephemeral read-only execution, and disabled tools. Production profile
-   selection and real subscription-auth runtime proof remain explicit operator work.
-6. **Remote GPU worker.** Define a versioned `localplaud-worker` protocol with
-   capability handshake, authenticated job submission, input transfer or signed
-   fetch, progress, cancellation, retry/idempotency, checksummed artifacts, and
-   structured errors. Workers receive only the minimum audio/job data and never
-   Plaud OAuth credentials. Validate both a self-owned NVIDIA host and one rentable
-   GPU deployment path.
-7. **Policy, fallback, and observability.** Profiles declare local-only/no-egress,
-   allowed providers, retry/timeout policy, fallback order, quality floor, and
-   optional cost ceiling. Never silently fall back from local to external. Show the
-   selected and actual provider/model, degraded capability, queue target, latency,
-   audio seconds/tokens, and estimated/actual cost where providers expose enough
-   data.
-8. **API and acceptance matrix.** Add APIs for connections, models, capabilities,
-   profiles, resolution previews, health tests, and per-recording overrides. Migrate
-   the current config into an equivalent default profile without changing existing
-   behavior. Test clean raw-audio completion on Apple local, NVIDIA local, CPU or
-   other supported fallback, OpenAI cloud, one partial OpenAI-compatible service,
-   and one remote worker. Validate Taiwan Mandarin and Mandarin/English recordings
-   before changing production defaults; do not expose this as a daily-use feature.
-
-The backend contracts, persistence, resolver, policy enforcement, and headless APIs
-are P0. The complete Settings/profile editor and per-recording picker are the P1 Web
-surface for this P0 foundation; AutoFlow consumes named profiles in P2 instead of
-embedding raw provider credentials or model settings in each rule.
-
-### P0 — SOTA speech and speakers
-
-- ✅ Defaulted Apple Silicon to `mlx-community/whisper-large-v3-turbo` and pinned
-  NumPy below 2.5 for mlx-whisper/numba compatibility. SkyLabMac downloaded the
-  1.61 GB model and completed a local Metal smoke test with word timestamps.
-  CUDA/CPU still needs the equivalent turbo deployment verified on its target host.
-- ✅ Updated the diarization integration from legacy pyannote 3.1 to the current
-  open-source `speaker-diarization-community-1` API, including word/segment speaker
-  assignment, model provenance, and actionable health checks. SkyLabMac has the
-  dependency, accepted model terms, Hugging Face credential, and repeated real-audio
-  completion evidence. Local pyannote device selection is explicit and durable:
-  `auto` uses CUDA only when PyTorch reports it available and otherwise uses CPU;
-  an explicitly unavailable CUDA target fails actionably instead of silently falling
-  back. MPS is not claimed. VAD and forced-alignment quality benchmarks remain.
-- ✅ Activated the durable `align` stage between ASR and diarization. It validates
-  finite, ordered word timestamps, records coverage/provider/model/profile evidence,
-  reuses valid results on Resume, and reports a clear degraded state when a provider
-  supplies only segment timing. The strategy is explicitly labelled
-  `provider-word-timestamps` with `forced_alignment=false`; it does not misrepresent
-  Whisper timing as wav2vec2/WhisperX forced alignment.
-- ✅ Added an explicit local `align:whisperx` provider and `wav2vec2-auto` catalog
-  model. A profile can select CUDA or CPU forced alignment independently from ASR;
-  aligned timings update the local transcript in place, preserve transcript/revision
-  identity, retain provider/model/version/coverage provenance, and resume without
-  repeating a completed attempt. The subscription-independence gate now requires
-  `forced_alignment=true` instead of accepting Whisper's native word timing.
-- ✅ Added optional VAD groundwork behind a **default-off** `asr.vad.enabled` flag
-  (`asr/vad.py`): provider-agnostic silero-vad detection + region merge/pad/split
-  planning, ffmpeg region slicing, and honest `health()`. The mlx path transcribes
-  merged speech regions and offsets timestamps back to global time; the
-  faster-whisper path wires its native bundled-silero `vad_filter`. Missing the
-  optional `vad` extra is a *degraded* (not failed) state: ASR logs a warning,
-  falls back to whole-file transcription, and the provider `health()` says so.
-  Remaining: validate VAD on real Taiwan Mandarin / code-switch recordings before
-  enabling it by default. WhisperX forced alignment is selectable but remains
-  default-off until its language-specific models pass explicit Taiwan Mandarin and
-  Mandarin/English accuracy, timestamp, speed, and memory validation.
-- ✅ Persist stable speaker IDs separately from editable display names: `speakers`
-  rows mirror the diarization keys per recording, renames are upserted from the
-  Web detail page (legend inline forms), and flow into transcript view, regenerated
-  notes/indexes, Ask, and Markdown export. A rename invalidates stale derived
-  artifacts and re-indexes without ASR. Diarization reruns now reconcile run-local
-  labels against the previous speech timeline with one-to-one overlap matching;
-  ambiguous/new voices receive a fresh unnamed identity rather than inheriting a
-  user's display name. The mapping is retained in stage-attempt provenance.
-- ✅ Segment-level speaker attribution can be corrected from the canonical transcript
-  editor without changing immutable raw ASR. Speaker-only revisions retain word
-  timings/text/confidence, apply the stable key to nested words, invalidate dependent
-  notes/maps/indexes, and re-index without rerunning ASR or diarization.
-- ✅ Added durable Plaud-style speaker paragraphs after alignment and diarization:
-  losslessly split mixed-speaker word runs, merge consecutive same-speaker speech
-  across short pauses, preserve every word timestamp/confidence, and prevent Ask
-  chunks from crossing speaker boundaries.
-- ✅ Added a durable custom vocabulary/correction layer for names, specialist terms,
-  Taiwan Mandarin, and Mandarin/English code-switching. Rules support language and
-  case scope, longest non-overlapping matching, Settings CRUD, and explicit library
-  application. New local ASR applies rules automatically as an immutable revision;
-  raw provider output stays untouched and dependent artifacts become visibly stale.
-### P0 — Full-transcript notes and usable knowledge
-
-- ✅ Added a Plaud-style contextual transcript polish stage after diarization and
-  before notes/index. The default system profile uses the authenticated OpenCode Go
-  provider (`qwen3.7-plus`) through a dedicated no-tools OpenCode agent. Chunked
-  segment JSON preserves IDs, timestamps, speakers, words, meaning, names, numbers,
-  negation, and raw ASR while correcting recognition errors, stutters, filler, and
-  accidental repetition. The polished output is an immutable canonical revision
-  with provider/model/prompt/profile provenance; Web users can switch back to raw
-  ASR and inspect revision history. User edits always remain authoritative.
-- ✅ Replaced the 24,000-character truncation with bounded hierarchical
-  map/reduce summarization. Every transcript chunk contributes coverage notes before
-  the selected template produces final Markdown; stage provenance records strategy,
-  transcript size, chunks, and map/reduce call counts.
-- ✅ Added a `mind_map` pipeline stage (toggle `pipeline.mind_map`, default on):
-  a full-coverage nested Markdown outline built from the canonical transcript with
-  the same bounded map/reduce chunking (existing local notes are structural context
-  only). Stored as a provenanced `mind_map` note, resumable/degradable like other
-  optional stages, rendered as a collapsible tree tab in the Web detail page, and
-  included in Markdown export and downloadable as a complete, locally rendered PNG tree.
-- ✅ Note templates are editable, versioned database records seeded from the built-in
-  catalog. Settings can create templates or immutable new versions; recordings select
-  a template independently, changes mark notes/maps stale for explicit Resume, remote
-  workers receive the exact prompt snapshot, and generated notes/export retain the
-  template version and full prompt provenance. Multiple template notes remain visible
-  as tabs; local deterministic automatic template selection is also implemented.
-- ✅ Single-file Ask: `/file/{id}/ask` answers grounded only in one recording, with
-  citations rendered as playable timestamp buttons that seek the player; suggested
-  grounded question chips; graceful degrade when unindexed or providers are down.
-- ✅ Whole-library Ask citations now deep-link to `/file/{id}?t={start}` and seek the
-  player on load, so a cited answer opens the recording at the cited moment.
-- ✅ Recording and whole-library Ask now rank current local generated notes and
-  user-owned Manual, Ask-saved, and editable-copy notes alongside corrected
-  transcript chunks. Note evidence has durable artifact/version provenance and opens
-  the exact note instead of fabricating a timestamp. Cloud/Plaud summaries, stale or
-  lineage-mismatched generated notes, ambiguous legacy copies, trash, and filtered
-  library-level notes fail closed; speaker scope remains transcript-only. Note
-  embeddings use an additive durable document queue with independent leases,
-  retries, provider/profile snapshots, cost/fallback enforcement, and remote-worker
-  support. Note edits invalidate only their old chunks, and embedding failure never
-  changes recording stage/file state. Startup only queues metadata; with automatic
-  processing disabled it performs no note embedding work.
-- ✅ Embedding identity is now fail-closed across transcript and note evidence.
-  Ask queries every configured current primary/fallback space so recordings remain
-  searchable while reindex converges; profile, folder, template, provider-model, and AutoFlow
-  changes durably requeue both transcript and note indexes. Transcript-only reindex
-  uses the resolved profile, remote-worker contract, fallback attempts, generation
-  fencing, and the shared provider-cost ceiling without rerunning ASR. Legacy vectors
-  with no provable profile are removed and queued, never compared by dimension alone.
-- ✅ Pipeline attempts, note indexing, and Ask now reserve against one durable
-  recording/library cost ledger. SQLite and PostgreSQL reservations serialize per
-  scope, failed/direct calls remain conservatively accounted, and a persisted Ask
-  message atomically replaces its temporary reservation instead of double-counting.
-- ✅ Ask conversations are durable grounded threads for both one recording and the
-  whole library. Follow-ups retain bounded conversation context while retrieval and
-  citations remain grounded in the current query. Any assistant answer can be saved
-  idempotently as an editable note with source moments; Saved notes has its own page,
-  recording tabs, edit/delete controls, deep links, and Markdown export coverage.
-  Library, recording, quick-action, and follow-up requests share a visible busy/error
-  lifecycle that prevents duplicate submission, preserves the current answer and
-  question on failure, and points users to History before retrying an uncertain call.
-  Existing threads take a cross-process durable request lease before provider egress;
-  daemon-owned leases are owner-fenced and recovered on replacement-daemon startup.
-  Save-to-note also restores its control after network or malformed-response failures.
-- ✅ Library and recording Ask history now has an exact-surface, searchable and
-  paginated drawer with deterministic ordering, metadata, inline rename, and delete.
-  Deletion explicitly detaches and preserves Saved notes even when SQLite foreign-key
-  enforcement is disabled; desktop/mobile focus trapping, Escape, inert background,
-  focus restoration, request cleanup, and long-content bounds are covered.
-- ✅ User-authored Markdown notes can now be created from any non-trash recording or
-  the Saved Notes hub, including metadata-only, unprocessed, failed, and processing
-  recordings. Manual notes have fixed local provenance, enter existing search/export/
-  backup flows, survive local cleanup, and never mutate transcripts, generated notes,
-  Ask, stage state, or processing claims. Recording and hub views expose source-aware
-  copy/edit/export/delete actions plus accessible dirty-form modal lifecycle.
-- ✅ Manual, Ask-saved, and editable generated-copy notes now have immutable
-  title/body version history with optimistic stale-write protection. The recording
-  workspace and Saved Notes hub share a bounded, lazy-loading history drawer;
-  restore creates a new live version while preserving citations and source
-  provenance, and concurrent SQLite writers cannot silently overwrite each other.
-- ✅ Transcript corrections as revisions: inline per-segment editing on the Web
-  detail page creates immutable `transcript_revisions` on top of the untouched raw
-  ASR row; the latest revision is the canonical transcript for summaries, indexing,
-  and export, edits survive re-ASR, and each edit hides/invalidates stale notes and
-  maps while rebuilding the embedding index in the background without rerunning ASR
-  (notes/map regeneration stays explicit through Resume). Provenance prevents edits
-  of Plaud imports from satisfying independent mode. Find/replace, bulk revisions,
-  dependent-artifact lineage, revision history, and non-destructive restore are
-  implemented.
-
-### P1 — Plaud-like Web App workflow
-
-- ✅ Vendored the pinned HTMX 1.9.12 runtime, upstream Zero-Clause BSD license,
-  and SHA-256 manifest. The packaged Web App has no CDN dependency for daily
-  interaction and remains functional on offline/private deployments.
-- ✅ Completed a screenshot-led Plaud Web fidelity pass for the core desktop shell
-  and recording workspace: original localplaud branding now uses the observed
-  compact dark utility rail plus workspace sidebar, the All Files table matches the
-  sparse Name/Duration/Recorded/More hierarchy and row rhythm, and a selected
-  recording preserves the exact library search/filter/sort/page context in its side
-  list. Recording title editing is reading-first, technical retry/provider details
-  are progressive disclosure, Transcript tools are compact, Notes exposes template
-  selection plus derived-only Generate/Regenerate, Share provides an authenticated
-  workspace link/system share sheet, Mind Map is a pannable/zoomable hierarchy, and
-  tab state is deep-linkable. Synthetic-data Chrome checks cover 1405px desktop,
-  1024px compact Mac, and 390px mobile with no horizontal overflow or page errors.
-  Remaining visual acceptance still requires a fresh read-only official Plaud
-  selected-recording/mobile comparison; no proprietary assets or private recording
-  content are stored in the repository.
-- ✅ A second fidelity pass (2026-07-18, from a fresh read-only Plaud Web audit)
-  removed the duplicate dark utility rail — the white workspace sidebar is the only
-  navigation, staying visible from tablet widths up while the mobile drawer is
-  unchanged. The recording workspace now matches Plaud's model: slim breadcrumb top
-  bar (All files › title) with compact Ask/Share/Export/More actions, content tabs
-  above a lighter player (waveform strip, round transport, symmetric ±15 s skips),
-  a polished/raw notice chip instead of a segmented switch, airier transcript
-  paragraphs with neutral speaker names and colored dots, and Ask as a closable
-  360 px right dock on ≥1200 px viewports (the Ask tab remains on narrower screens).
-- ✅ Recordings can be shared externally: each recording can hold one active,
-  revocable public link (`secrets.token_urlsafe(32)`) serving an unauthenticated
-  read-only noindex page with the title, player (Range-capable token-scoped audio),
-  the canonical local transcript with speaker names and click-to-seek, and current
-  local generated notes. Plaud/cloud artifacts and trash are excluded, revocation
-  404s immediately, and the share dialog separates the workspace link from the
-  public link with create/copy/revoke controls.
-- Implement `docs/product-workflow.md`: library filters/folders/tags, responsive
-  split panes, persistent player, waveform/progress, transcript editing, speaker
-  naming, notes, mind map, Ask, processing UI, and actionable recovery.
-- Match the audited daily navigation model: Home/recent files, Search, all files,
-  uncategorized, trash/recovery, folders, capture-source facets, library Ask,
-  Templates, Discover/Automation, and Settings with responsive persistence.
-- ✅ Added a dedicated Home dashboard separate from All files: recent recordings,
-  operational library/audio/processing counts, metadata-only visibility, Plaud mirror
-  progress, AutoFlow activity, attention queue, and direct Add/Import actions.
-- ✅ Added sortable library columns (name, duration, recorded date) with direction
-  indicators, processing-state and capture-source filters, quiet completed rows,
-  error/partial attention indicators, and a read-only trash mirror view with count
-  (localplaud never deletes cloud data). `/` and `/api/files` share
-  the sort/state/scene/view params and fall back safely on bad input.
-- ✅ Library filtering now also supports inclusive recorded-date and duration ranges
-  through one composable URL/API contract. Calendar boundaries follow the durable
-  workspace timezone (including DST), filters survive sorting, pagination, and the
-  recording side list, and invalid ranges fail closed with visible recovery. Unknown
-  capture sources, legacy Plaud-origin rows, uncategorized counts, long filter labels,
-  and visible per-row processing state share the same truthful query surface.
-- ✅ Added local folders and tags with additive legacy-DB migration, guarded CRUD,
-  counts and filters, a true uncategorized view, deterministic metadata in the JSON
-  API, folder/tag pills on library and detail views, and atomic multi-recording bulk
-  move/add/remove controls. The recording workspace now edits or clears folder/tags
-  through the same atomic API. The Library now exposes accessible rename/delete
-  management with inline confirmation and preserves active filters; deletion only
-  unassigns local organization and never removes recordings or audio. Organization
-  never mutates Plaud cloud or trash state.
-- ✅ Library selection also supports bulk Resume and bulk deletion of local
-  processing artifacts. Resume queues every validated recording through the durable
-  worker rather than spawning unbounded threads. Cleanup rejects active claims,
-  commits database deletion atomically, removes stage-attempt history, and preserves
-  original audio, Plaud imports, organization, Ask history, and editable notes.
-- ✅ Added a Plaud-style Add audio surface with local upload and a durable,
-  background Import from Plaud job. It refreshes the full metadata catalog and any
-  paid Plaud transcript/summary, never downloads audio during catalog import, and
-  exposes a per-recording Import audio action for metadata-only rows. Scheduled
-  polling keeps that first-sync baseline metadata-only, then automatically downloads
-  recordings newly uploaded after the baseline. The shared Add audio dialog now has
-  trapped/restored focus, inert background content, Escape dismissal, keyboard source
-  tabs and file selection, cancellable uploads/polling, live progress semantics, and
-  recoverable network/server errors on desktop and mobile.
-- ✅ (partial) Explicit raw-ASR versus corrected-canonical transcript switch with
-  synchronized timestamps/speaker labels is live. Transcript-local search provides
-  next/previous navigation, and case-aware replace-all creates one immutable bulk
-  revision while preserving raw ASR and invalidating only dependent artifacts.
-  Revision history exposes change reason/time, historical preview, current-state
-  marking, and non-destructive restore-as-new-revision with stale-write protection.
-  Summaries, mind maps, embedding chunks, and stage provenance now store and expose
-  the exact raw transcript id/source plus revision they consumed.
-- ✅ Replaced the native audio control with a responsive persistent player: locally
-  generated/cached waveform, click/range seek, play/pause, −10/+30 seconds, playback
-  speed, keyboard controls, deep-link seeking, and active transcript synchronization.
-- ✅ Added explicit local-data lifecycle controls. Plaud-sourced audio/waveform can
-  return to metadata-only for space recovery; local processing can be reset without
-  deleting cloud artifacts, Saved notes, Ask history, organization, or Plaud data.
-- ✅ Added durable local recording-title overrides with inline edit/revert. Plaud
-  keeps its latest cloud title separately; local names survive sync and consistently
-  drive library sort/search, detail, Ask/search citations, automation, CLI, and export.
-- ✅ Search no longer depends on embeddings: local lexical results cover title,
-  provenance-correct canonical transcript, generated notes, and Saved notes, with
-  folder/tag/source/date filters and playable timestamp links. Available semantic
-  hits are merged and deduplicated without weakening those filters.
-- ✅ Search and whole-library Ask now share exact workspace-calendar date semantics.
-  Search resolves the current workspace timezone before lexical and vector ranking;
-  new Ask threads persist a v2 timezone plus UTC-boundary snapshot so later preference
-  changes cannot move the scope. Legacy threads retain their prior UTC meaning, Trash
-  is excluded before ranking, and unsafe dates fail before any provider call.
-- ✅ Search results now navigate to the exact transcript moment, generated note,
-  Saved note, or mind map that matched. Recording note tabs persist in the URL and
-  browser history, while Search and new Ask citations show the recording-local
-  speaker display name without rewriting the stable diarization key. Recording-side
-  searches also retain the active library date and duration ranges.
-- ✅ Added suggested questions and versioned, inspectable local quick actions for
-  action items, task tables, and insights at both recording and whole-library scope.
-  Each scope has an explicit prompt snapshot and uses its matching grounded retrieval,
-  provider profile, citations, durable follow-ups, and save-to-note path; running one
-  is read-only and never silently creates notes, tasks, automation runs, or external
-  work.
-- ✅ Whole-library Ask now has explicit folder, tag, capture-source, user-named
-  speaker, inclusive date, and selected-recording scopes in the Web App. Filtering
-  happens before vector ranking; the normalized scope is durable on the thread,
-  visible with human-readable labels, and immutable across follow-ups. Speaker scope
-  matches editable display names through each recording-local stable key and never
-  conflates anonymous `SPEAKER_00` labels across recordings.
-- ✅ Built dedicated Templates My Space and Explore surfaces with search,
-  categories/scenarios, first-party/personal provenance, authorship, descriptions,
-  popularity signals, prompt preview, immutable new-version editing, and
-  copy-to-workspace behavior. Community/remote catalog ingestion remains optional.
-- ✅ Added local deterministic Auto template selection with title/transcript/duration
-  signals in English and Chinese, an explainable preview, confidence/reasons, and
-  durable stage provenance for the actual selected template and engine version.
-- ✅ Consolidated recording exports in one modal: canonical transcript TXT/SRT/VTT,
-  DOCX, and PDF with timestamp and speaker-label toggles. DOCX uses an explicit
-  compact-reference Word layout; PDF embeds the OFL-licensed Noto Sans TC font for
-  portable Taiwan Mandarin/English output. Generated and Saved notes use the same
-  document pipeline for Markdown/TXT/DOCX/PDF; archive, mind-map image, and
-  original-audio exports remain available alongside the transcript formats.
-- ✅ Completed the daily export workflow with Copy transcript, Copy all current notes,
-  and Library batch ZIP export for up to 50 selected recordings. Batch archives use
-  canonical stale/provenance-aware renderers, collision-resistant paths, bounded
-  spooling/size limits, deterministic output, and a checksummed partial-availability
-  manifest without mutating recordings or processing state.
-- ✅ Generated notes now create one provenance-linked editable copy instead of
-  mutating AI output. The recording workspace opens that user-owned note tab and
-  edits title/Markdown inline; the original generated content, template/model, and
-  transcript lineage remain immutable and independently inspectable.
-- ✅ Note generation now takes an optional one-shot execution-profile choice (an
-  "explicit-generation" resolution layer recorded truthfully in stage provenance,
-  never persisted as an override), the Notes "+" control offers 生成 AI 筆記
-  (template + AI, adds a new output tab) with 空白筆記 secondary, and every note
-  body is editable in place — user-owned notes save through the optimistic-version
-  API while AI notes promote seamlessly to their editable copy on first edit.
-- ✅ AI transcript polish rejects provider output that empties non-empty segments
-  (split-retry then honest stage failure; raw ASR stays canonical), and a
-  maintenance endpoint repairs already-damaged polished revisions by restoring the
-  emptied segments from raw ASR as one immutable revision with normal
-  stale/reindex invalidation.
-- ✅ The migration/debug Plaud import now mirrors every cloud note (not just the
-  auto summary) with cloud provenance, read-only Plaud-chip note tabs, a labelled
-  cloud-transcript view when no local transcript exists, and a per-recording
-  「重新整理 Plaud 雲端資料」 action; cloud artifacts stay excluded from
-  subscription-independence evidence.
-- Treat the Web App as the product, not a status viewer. CLI remains setup/ops tooling.
-- Add provider/model/profile management to Settings: connection setup, capability
-  and model health, recommended local profiles, cost/privacy policy, remote workers,
-  resolution preview, defaults, and a per-recording override/reprocess picker. Keep
-  secrets masked and make the actual selected provider visible during processing.
-- Add original localplaud visual design with Plaud-like interaction density and
-  information architecture; do not copy Plaud assets.
-- Transcript TXT/SRT/VTT/DOCX/PDF is the completed required export scope. Existing
-  notes (MD/TXT/DOCX/PDF), original-audio, archive, and mind-map exports remain
-  complementary formats.
+- **Settings resolution-preview UI.** Headless `POST /api/providers/resolve`
+  exists and the recording detail page shows the resolved layer chain, but
+  Settings itself never calls the preview API.
+- **Cost-ceiling display + version-prefill bug.** `cost_ceiling` is a form
+  input but is never rendered on existing profiles, and the "New version"
+  prefill drops `cost_ceiling` and `is_system_default` — versioning a
+  cost-capped profile silently removes its cap.
+- **Remote-worker management detail.** Settings renders only
+  name/key/protocol/token-env/health. Product spec wants capability,
+  device/memory, queue, last health-check time, and revocation state; the
+  protocol `HandshakeResponse` needs those fields first (today only a
+  free-form metadata dict).
+- **Tags in the persistent sidebar.** Folders and Sources have nav groups;
+  tags are only a filter row on the library page.
+- **Per-file Custom mode.** Per-recording language and speaker-count
+  overrides (today `num_speakers` is global config only; the detail page has
+  no language control).
+- **Cloud/remote starting profiles.** Only the three local hardware
+  recommendations (apple-mlx, nvidia-cuda, cpu) ship; no OpenAI Cloud /
+  OpenAI-compatible / Remote GPU starting profile flow.
+- **Storage use + retention settings.** Backup, auth, and privacy surfaces
+  exist; storage-use display and retention policy do not.
+- **Quality-floor fallback policy.** Capability, no-egress, and cost-ceiling
+  constraints are enforced; the quality floor from the policy spec is
+  unimplemented.
+- **AutoFlow next-run display.** Discover renders run_count/last_run only.
+- **Fresh read-only Plaud Web comparison** for the selected-recording and
+  mobile views (last screenshot-led fidelity pass was 2026-07-18; polish-loop
+  UX iterations continue in `.agents/polish/backlog.md`).
+- Optional: distinct Summary tab (tracked in the polish backlog) and
+  community/remote template-catalog ingestion.
 
 ### P1 — Multi-host deployment
 
-- **CCLabPC** (nvplaud.observe.tw, NVIDIA/CUDA): docker `gpu` profile or native;
-  needs user in `docker` group. DNS already points here. Use this host to validate
-  the NVIDIA Local execution profile and worker capability contract.
-- **Oracle** (plaud.skyhong.tw, aarch64 CPU): `cpu` slim image (already builds/runs
-  there) + Caddy vhost; use an explicit CPU or cloud profile rather than assuming GPU
-  acceleration.
-- Pattern to reuse: append a `<domain> { basic_auth … ; reverse_proxy
-  127.0.0.1:8080 }` block to that host's Caddyfile (SkyLabMac already done this way).
+- **Document the real worker topology.** The production NVIDIA worker is a
+  WSL RTX 5060 host reached over Tailscale (`mac-wsl-hybrid` profile), but
+  `docs/remote-worker.md` and `docs/deploy.md` still describe only CCLabPC
+  and predate the WSL deployment entirely. Write down the worker token flow,
+  Tailscale addressing, the process-wide GPU serialization lock, and the
+  remote_jobs cache caveat after code fixes.
+- **CCLabPC** (nvplaud.observe.tw): previously passed CUDA-image handshake
+  acceptance, but the host is currently unreachable (connection failed,
+  2026-07-31). Redeploy, then validate the NVIDIA Local execution profile
+  end-to-end on it.
+- **Oracle** (plaud.skyhong.tw, aarch64 CPU): the vhost resolves but no app
+  is deployed (bare 404 on `/` and `/login`). Deploy the cpu slim image plus
+  a Caddy block (SkyLabMac pattern), with an explicit CPU or cloud profile.
 
 ### P2 — Automation and integrations
 
-- ✅ Added executable local AutoFlow rules matching source, title keyword, duration,
-  folder, and tag. Rules have priority, enable/disable, readable trigger/action
-  sentences, mutation-free dry-run, versioned idempotency, metadata-sync hooks, and
-  per-recording success/failure history with retry semantics. Early-transcript
-  keyword triggers match the first 4,000 characters of the provenance-correct
-  canonical transcript only: rules stay pending until local transcription exists,
-  are re-evaluated during processing before notes so matched template/profile/
-  organization actions shape the same cycle, and never repeat a completed
-  (rule, version, recording) run.
-- ✅ Rule actions can select a named execution profile and note template or move/add
-  organization metadata; validation prevents dangling references. Profile actions
-  use a durable per-rule assignment below manual recording overrides, capture
-  rule/version/priority/run provenance, preserve the prior choice when a newer run
-  fails, and resolve competing actions deterministically.
-- ✅ Notification-enabled rules now create a durable, deduplicated local inbox item
-  after rule actions commit. Notifications support unread state, mark-all-read,
-  dismissal, preserved rule/recording snapshots, and independent delivery retry;
-  delivery failure never rolls back completed organization or processing actions.
-- ✅ Transcript export actions produce only the required TXT/SRT/VTT formats from
-  the canonical local transcript. Each run/format has a durable deduplicated ledger,
-  checksum, byte count, transcript/revision provenance, safe download, and independent
-  retry; missing transcripts or export failures never roll back completed rule actions.
-- ✅ Authorized webhook integrations expose explicit metadata/transcript/notes scopes,
-  environment-only bearer secret references, HTTPS/private-network policy, health,
-  last use, revocation, immutable run snapshots, bounded responses, idempotency keys,
-  durable delivery status, and independent retry. Non-2xx or missing-secret failures
-  never roll back local rule actions.
-- ✅ Authorized SMTP email integrations support STARTTLS, implicit TLS, and explicitly
-  allowed private/LAN plain SMTP; environment-only password references; validated
-  From/To/subject headers; metadata/transcript/notes scopes; stable Message-ID and
-  delivery idempotency; health, last use, revocation, immutable run snapshots, payload
-  hashes, durable failures, and independent retry. Email failures or later disablement
-  never roll back local rule actions. All planned downstream action types are present.
-- ✅ Added a Discover hub for locally owned/editable AutoFlow rules, create/edit/
-  delete controls, Run now, history, and notification policy, plus a responsive
-  notification inbox with an unread badge. Settings now includes authorized webhook
-  and SMTP email catalogs. Discover now also has an Applications & Integrations
-  catalog and explicit external-rule ownership: owner applications idempotently sync
-  versioned rules, while local edit/toggle/delete APIs reject them and the Web App
-  keeps those rules visibly read-only. AutoFlow editing now uses the shared accessible
-  modal lifecycle with focus trapping, Escape, background inertness, focus restoration,
-  and dirty-form protection. Mobile rule/history layouts stay within 390px, and every
-  mutation or delivery retry checks its response before reload and reports failures in
-  an inline live region. The Discover page now composes AutoFlow rule sentences,
-  integration-card names/details/statuses, and the local owner label through the
-  workspace locale, so zh-Hant-TW shows no catalog-sourced English; the durable rule
-  snapshot and JSON API keep their locale-independent English sentence. Remaining:
-  additional concrete application adapters beyond the generic external-owner contract.
-- ✅ Settings now has a responsive, navigable information architecture for Plaud
-  account state, processing recommendations, vocabulary, templates, provider/model/
-  profile setup, remote workers, authorized webhooks/email, and system health. The
-  desktop section rail remains visible while scrolling and becomes a contained
-  horizontal section list on mobile. Durable workspace preferences now apply the
-  workspace name, comfortable/compact density, IANA timezone, and 12/24-hour
-  clock across browsers; the redesigned shell ships one deliberate light theme,
-  so the stored theme preference is pinned to `light` and no selector is shown. Private workspace backup now uses
-  SQLite's online backup API and produces a manifest plus SHA-256, with an explicit
-  optional media scope; secrets/config/OAuth tokens and media symlinks are excluded,
-  downloads are cataloged, and offline restore is documented. Authorized private
-  cross-host upload now supports HTTPS or explicit LAN destinations, environment-only
-  bearer references, health checks that send no archive data, checksummed PUT,
-  stable delivery IDs, durable retries, idempotent completion, and revocation that
-  preserves non-secret history. Durable interface locale now supports English and
-  Traditional Chinese (Taiwan), sets correct document language/date formatting, and
-  translates the global shell plus Home, Library, Search, Saved notes, Templates,
-  Discover, Notifications, Status, and workspace preference controls through a
-  centralized catalog. Recording Detail now covers playback, transcript search/edit,
-  profiles/templates, local-data controls, Ask, organization, export, and dynamic
-  processing-stage/status/fallback/usage diagnostics. Settings
-  section navigation and primary account, backup, provider/profile, integration, and
-  support controls are translated. Template-owned dynamic helper, health-state,
-  error-fallback, confirmation, and action messages now use the centralized catalog,
-  with a test that rejects direct English literals in JavaScript UI sinks. Arbitrary
-  provider/runtime detail strings remain verbatim for diagnostic accuracy. Access &
-  security now reports the built-in Web login, durable hashed browser sessions,
-  current-session state, immediate revocation, and the separate API-token/reverse-
-  proxy boundary. The pre-authentication `/login` page follows the durable workspace
-  locale and the light visual theme, including localized error states; Support & About shows
-  runtime/build identity and downloads a tested redacted diagnostics bundle with no
-  recording identifiers/content, paths, URLs, errors, environment variables, or
-  credentials.
-- ✅ Added native loopback S256 PKCE inside localplaud. First login no longer needs
-  Node.js or the Plaud CLI; state, two-minute expiry, public-client exchange,
-  atomic `0600` token storage, auto-refresh, CLI-compatible schema, and actionable
-  port/denial/timeout errors are covered. Settings exposes non-secret auth status
-  and the correct local login command without offering a misleading remote callback.
+- Concrete application adapters beyond the generic external-owner rule
+  contract (the Applications & Integrations catalog, external-rule read-only
+  ownership, and every planned downstream action type are done).
 
 ### Housekeeping
-- Optional: root LaunchDaemon so production starts on boot without login (needs sudo).
 
-## Ops quick-reference (SkyLabMac)
+- Optional: root LaunchDaemon so production starts on boot without login
+  (needs sudo; confirmed absent 2026-07-31 — only the per-user LaunchAgent
+  exists).
+
+## ✅ Done — capability archive (compressed 2026-07-31)
+
+Each area below is complete and verified; per-item engineering notes are in
+this file's git history (pre-2026-07-31 versions).
+
+- **Plaud ingest foundation.** Official Open API provider with native S256
+  PKCE OAuth (loopback flow, auto-refresh, CLI-compatible tokens) plus the
+  official Plaud MCP as a second read-only provider (production currently
+  runs `provider = "mcp"`). Signed raw-audio download with SSRF/size
+  protections. Plaud transcripts/summaries are migration/debug-only imports,
+  visibly labelled, never a pipeline dependency.
+- **Production-safe independent processing.** `artifact_mode = "independent"`
+  default; provenance-preserving multi-row transcript storage; durable
+  per-stage runs with attempt counts and actionable partial states; bounded
+  exponential auto-retry; newest-first bounded queue; baseline-aware catalog
+  sync (no surprise historical backfill) with durable download leases; the
+  read-only twelve-part `acceptance-check` gate surfaced in CLI, API, and the
+  recording workspace.
+- **Provider/model/profile platform.** Capability contracts for every stage;
+  durable connections/models/profiles with secret references only; layered
+  deterministic resolution (system → folder → AutoFlow → template →
+  recording) with immutable per-run snapshots; full CRUD + real health
+  checks; truthful hardware detection with one-click local profile install;
+  append-only usage/cost ledger with pre-egress cost-ceiling reservations;
+  authenticated `localplaud-worker` protocol v1 (idempotent jobs, progress,
+  cancellation, SHA-256 artifacts, credential rejection); stage-scoped
+  explicit cross-provider fallback; the experimental codex-local correction
+  adapter — now live in production as the correct-stage fallback on profile
+  `mac-wsl-hybrid` v7 with completed real attempts.
+- **Speech and speakers.** MLX Whisper large-v3-turbo on Apple Silicon;
+  pyannote `speaker-diarization-community-1` with explicit device selection
+  and real production completions; the durable `align` stage (honest
+  `provider-word-timestamps` labelling) plus the selectable `align:whisperx`
+  forced-alignment provider; VAD groundwork behind the default-off flag;
+  stable speaker IDs with renames, one-to-one rerun reconciliation,
+  segment-level attribution correction, and Plaud-style speaker paragraphs;
+  the durable vocabulary/correction layer applied as immutable revisions.
+- **Notes and knowledge.** Contextual transcript polish (OpenCode Go) as an
+  immutable canonical revision with empty-segment rejection and repair;
+  full-coverage map/reduce summaries and mind maps (collapsible tree, PNG
+  export); versioned editable note templates with deterministic Auto
+  selection; single-file and whole-library Ask with playable citations,
+  durable scoped threads, history drawer, quick actions, suggested
+  questions, and save-to-note; fail-closed embedding identity with the
+  durable note-embedding queue; one shared cost ledger across pipeline,
+  indexing, and Ask; transcript corrections as immutable revisions with
+  find/replace, bulk edits, history, and non-destructive restore; manual and
+  editable-copy notes with immutable version history.
+- **Web App.** Two screenshot-led Plaud-fidelity passes (2026-07-18 shell:
+  single white sidebar, breadcrumb workspace, Ask dock); original brand
+  system (`docs/brand.md`, logo/wordmark/favicon, CSS token set, OFL Noto
+  Sans TC, vendored HTMX/Lucide, no CDN); Home dashboard; library sorting,
+  processing/source/date/duration filters, folders/tags with bulk
+  operations, trash mirror, bulk Resume/cleanup; Add audio (upload incl.
+  .amr + durable Plaud import); persistent waveform player with deep-link
+  seek; local-data lifecycle controls; durable local title overrides + LLM
+  title generation; lexical+semantic search landing on the exact moment;
+  scoped whole-library Ask; Templates My Space/Explore; consolidated exports
+  (TXT/SRT/VTT/DOCX/PDF, notes, archive ZIP, mind-map PNG, audio) with
+  copy-to-clipboard; public share links with minimap and note pager;
+  read-only cloud-artifact mirroring with 「重新整理 Plaud 雲端資料」;
+  auto-tagging (typed topic/person/org); zh-Hant-TW locale across shell,
+  surfaces, and dynamic template messages with a literal-English guard test.
+- **Automation and settings.** Executable AutoFlow rules (source/title/
+  duration/folder/tag/early-transcript triggers; profile/template/
+  organization/export/webhook/SMTP actions; durable runs, retries,
+  notifications inbox); Discover hub with external-owner read-only rules;
+  Settings IA covering account/auth sessions, workspace preferences,
+  locale, vocabulary, templates, providers/profiles, remote workers,
+  integrations, private backup (online SQLite backup + cross-host upload),
+  diagnostics bundle, and system health.
+- **Post-2026-07-18 work previously unrecorded here** (from git log): the
+  mac+WSL worker pipeline with GPU-stage serialization and the remote embed
+  model-attest fix; whole-library reprocess-all; LLM title generation;
+  typed auto-tags; .amr upload support; share-page transcript minimap and
+  note pager; named capture sources incl. zh sidebar rendering;
+  Traditional-Chinese output enforcement for generated notes; ~40+
+  polish-loop UX/localization fixes (mobile sticky player, reload-restore,
+  scroll shadows, aria-label localization, favicon, bulk-bar layout, …).
+
+## Ops quick-reference (sky-mini, a.k.a. SkyLabMac)
+
 - Update prod: `git -C ~/Projects/localplaud pull && launchctl kickstart -k gui/$(id -u)/com.localplaud.agent`
+  (production serves directly from this checkout; a commit alone does not
+  restart the service)
 - Logs: `~/Projects/localplaud/data/service.{out,err}.log`
 - Service: `launchctl list | grep localplaud`; plist at `~/Library/LaunchAgents/com.localplaud.agent.plist`
 - Caddy vhost: block for `plaud.observe.tw` in `/usr/local/etc/caddy/Caddyfile`;
