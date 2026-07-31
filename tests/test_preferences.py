@@ -130,7 +130,7 @@ def test_daemon_processing_respects_workspace_preference(monkeypatch, tmp_path):
         )
         assert response.status_code == 200
         assert process_automatic_pending(get_settings()) == 0
-    assert calls == [1]
+    assert calls == [get_settings().pipeline.files_per_cycle]
     assert reindex_calls == [get_settings().pipeline.files_per_cycle]
     assert note_calls == [get_settings().pipeline.files_per_cycle * 4]
 

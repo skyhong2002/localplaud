@@ -263,7 +263,7 @@ def test_empty_filtered_library_summarizes_and_clears_active_filters(monkeypatch
     for label in (
         "Search: missing",
         "State: done",
-        "Source: Capture source 1",
+        "Source: Plaud recorder",
         "Comes from: Plaud cloud",
         "From: 1970-01-01",
         "To: 1970-01-01",
@@ -371,13 +371,17 @@ def test_numbered_capture_source_labels_are_localized(monkeypatch, tmp_path):
         json=preferences | {"locale": "zh-Hant-TW"},
     ).status_code == 200
 
-    page = c.get("/?q=missing&scene=1")
+    # Scene 2 has no curated name, so it exercises the numbered fallback;
+    # scene 1 renders its curated name through the ordinary catalog path.
+    page = c.get("/?q=missing&scene=2")
     assert page.status_code == 200
-    assert '>來源 1</span>' in page.text
-    assert 'title="音訊來源 1"' in page.text
-    assert "來源: 音訊來源 1" in page.text
-    assert "Capture source 1" not in page.text
-    assert ">Source 1</span>" not in page.text
+    assert '>來源 2</span>' in page.text
+    assert 'title="音訊來源 2"' in page.text
+    assert "來源: 音訊來源 2" in page.text
+    assert "Capture source 2" not in page.text
+    assert ">Source 2</span>" not in page.text
+    assert "Plaud 錄音筆" in page.text
+    assert ">Plaud recorder" not in page.text
 
 
 def test_notification_action_labels_are_localized(monkeypatch, tmp_path):
@@ -472,11 +476,13 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     assert ".select-cell input:focus-visible { opacity:1; }" in r.text
     assert "Bravo call" in r.text
     assert "Trash" in r.text  # trash view link
-    assert "Capture source 1" in r.text  # capture-source facet
-    # Sidebar source items stay distinguishable at rail width: short visible
-    # label, full label preserved on the link for hover/assistive context.
-    assert ">Source 1</span>" in r.text
-    assert 'title="Capture source 1"' in r.text
+    assert "Plaud recorder" in r.text  # curated capture-source facet
+    # Unnamed scene codes fall back to numbered labels. Sidebar source items
+    # stay distinguishable at rail width: short visible label, full label
+    # preserved on the link for hover/assistive context.
+    assert "Capture source 2" in r.text
+    assert ">Source 2</span>" in r.text
+    assert 'title="Capture source 2"' in r.text
     # Mobile rows are title-first cards: no repeated per-cell column labels,
     # duration and recorded date collapse into one muted meta line.
     assert "content:attr(data-label)" not in r.text

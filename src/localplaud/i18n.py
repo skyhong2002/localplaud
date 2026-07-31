@@ -385,6 +385,12 @@ _ZH_HANT_TW = {
     "Filtered files": "已篩選檔案",
     "Unknown capture source": "未知錄製來源",
     "Unknown source": "未知來源",
+    "Capture source {value}": "音訊來源 {value}",
+    "Source {value}": "來源 {value}",
+    "Topics": "主題",
+    "People": "人物",
+    "Organizations": "組織",
+    "Other": "其他",
     "Plaud recorder": "Plaud 錄音筆",
     "Plaud recorder (other mode)": "Plaud 錄音筆（其他模式）",
     "Phone app recording": "手機 App 錄音",
@@ -1109,6 +1115,18 @@ def translator(locale: str) -> Callable[[str], str]:
     catalog = CATALOGS.get(locale, {})
 
     def translate(message: str) -> str:
-        return catalog.get(message, message)
+        translated = catalog.get(message)
+        if translated is not None:
+            return translated
+        # Unknown capture-scene codes render as numbered fallbacks built in
+        # Python ("Capture source 3"), which exact-match lookup can't hit.
+        for prefix, template in (
+            ("Capture source ", "Capture source {value}"),
+            ("Source ", "Source {value}"),
+        ):
+            value = message.removeprefix(prefix)
+            if value != message and value.isdigit():
+                return catalog.get(template, template).format(value=value)
+        return message
 
     return translate
