@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from ..asr.base import Segment, Transcript, Word
 from ..config import get_settings
 from ..db.models import RemoteJob
+from ..llm.base import LLMTransientError
 from ..db.session import session_scope
 from ..plaud.common import _assert_safe_fetch_url
 from .protocol import (
@@ -233,7 +234,9 @@ def execute_job(job_id: str) -> None:
             row.error = WorkerError(
                 code="stage_execution_failed",
                 message=str(exc),
-                retryable=isinstance(exc, (httpx.TimeoutException, OSError)),
+                retryable=isinstance(
+                    exc, (httpx.TimeoutException, LLMTransientError, OSError)
+                ),
             ).model_dump(mode="json")
             row.completed_at = datetime.now(UTC)
 
@@ -271,7 +274,21 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
             select(RemoteJob).where(RemoteJob.idempotency_key == request.idempotency_key)
         )
         if existing is not None:
-            return _response(existing)
+            if existing.status != JobStatus.failed:
+                return _response(existing)
+            # A failure is not a durable result. Re-run the job on resubmit so
+            # one transient error (an LLM timeout, an OOM) can't poison the
+            # idempotency cache and fail every controller retry instantly.
+            existing.status, existing.progress = JobStatus.queued, 0.0
+            existing.error = None
+            existing.artifacts = []
+            existing.cancel_requested = False
+            existing.started_at = None
+            existing.completed_at = None
+            response = _response(existing)
+            job_id = existing.id
+            background.add_task(execute_job, job_id)
+            return response
         row = RemoteJob(
             id=uuid.uuid4().hex,
             idempotency_key=request.idempotency_key,

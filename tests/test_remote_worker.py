@@ -115,6 +115,41 @@ def test_worker_cancel_and_structured_retry_error(monkeypatch, tmp_path):
     assert result["error"]["retryable"] is True
 
 
+def test_resubmitting_a_failed_job_reruns_it_instead_of_replaying_the_failure(
+    monkeypatch, tmp_path
+):
+    import localplaud.remote.server as server
+
+    client = _client(monkeypatch, tmp_path)
+    headers = {"authorization": "Bearer worker-secret"}
+
+    monkeypatch.setattr(
+        server, "_execute", lambda request: (_ for _ in ()).throw(OSError("timed out"))
+    )
+    first = client.post("/api/worker/v1/jobs", headers=headers, json=_request("flaky")).json()
+    status = client.get(f"/api/worker/v1/jobs/{first['job_id']}", headers=headers).json()
+    assert status["status"] == "failed"
+
+    monkeypatch.setattr(
+        server,
+        "_execute",
+        lambda request: [server._artifact("result.json", "application/json", b'{"ok":true}')],
+    )
+    second = client.post("/api/worker/v1/jobs", headers=headers, json=_request("flaky")).json()
+    assert second["job_id"] == first["job_id"]
+    result = client.get(f"/api/worker/v1/jobs/{first['job_id']}", headers=headers).json()
+    assert result["status"] == "succeeded"
+    assert result["error"] is None
+    assert result["artifacts"]
+
+    # Succeeded results stay cached: a third submit must not recompute.
+    monkeypatch.setattr(
+        server, "_execute", lambda request: (_ for _ in ()).throw(AssertionError("recomputed"))
+    )
+    third = client.post("/api/worker/v1/jobs", headers=headers, json=_request("flaky")).json()
+    assert third["status"] == "succeeded"
+
+
 def test_restart_recovery_resumes_durable_queued_job(monkeypatch, tmp_path):
     import localplaud.remote.server as server
     from localplaud.db.models import RemoteJob

@@ -235,6 +235,10 @@ class DiarizeConfig(BaseModel):
 class OllamaConfig(BaseModel):
     host: str = "http://localhost:11434"
     model: str = "llama3.1:8b"
+    # Per-request ceiling. Small models on constrained GPUs (the WSL worker's
+    # 8 GB card) can legitimately need far longer than the old hard-coded 600s
+    # for long map-reduce prompts.
+    timeout_seconds: int = 600
 
 
 class OpenAILlmConfig(BaseModel):

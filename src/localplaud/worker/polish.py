@@ -81,6 +81,7 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
     calls = 0
     attempts = 0
     split_retries = 0
+    kept_source = 0
     output_chars = 0
     request_input_chars = 0
     response_output_chars = 0
@@ -146,11 +147,28 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
             expected = set(range(start, end))
             if set(by_id) != expected:
                 raise LLMOutputInvalid("transcript polish changed or omitted segment IDs")
-            if any(
-                str(source[index].get("text") or "").strip() and not by_id[index]
+            emptied = [
+                index
                 for index in range(start, end)
-            ):
-                raise LLMOutputInvalid("transcript polish emptied non-empty segment text")
+                if str(source[index].get("text") or "").strip() and not by_id[index]
+            ]
+            if emptied:
+                filler_like = all(
+                    len(str(source[index].get("text") or "").strip()) <= 4
+                    for index in emptied
+                )
+                if not filler_like and end - start > 1:
+                    raise LLMOutputInvalid(
+                        "transcript polish emptied non-empty segment text"
+                    )
+                # The model legitimately empties filler-only segments ("呃",
+                # "嗯", "!") that the prompt tells it to remove, and can insist
+                # on emptying a lone segment even after splitting. Keep the
+                # source text instead of failing the stage: correction must
+                # never destroy transcript content.
+                for index in emptied:
+                    by_id[index] = str(source[index].get("text") or "").strip()
+                kept_source += len(emptied)
         except LLMOutputInvalid:
             if end - start <= 1:
                 raise
@@ -192,6 +210,7 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
             "chunks": calls,
             "attempts": attempts,
             "split_retries": split_retries,
+            "kept_source_segments": kept_source,
             "segments": len(source),
             "input_chars": len(transcript.text),
             "output_chars": output_chars,

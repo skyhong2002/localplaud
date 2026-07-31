@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from .base import LLMError, LLMUnavailable
+from .base import LLMError, LLMTransientError, LLMUnavailable
 
 if TYPE_CHECKING:
     from ..config import OllamaConfig
@@ -67,11 +67,16 @@ class OllamaProvider:
             resp = httpx.post(
                 f"{self.cfg.host}/api/chat",
                 json=payload,
-                timeout=600,
+                timeout=self.cfg.timeout_seconds,
             )
         except httpx.ConnectError as exc:
             raise LLMUnavailable(
                 f"cannot reach Ollama at {self.cfg.host}: {exc}"
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise LLMTransientError(
+                f"Ollama did not answer within {self.cfg.timeout_seconds}s "
+                f"(model {self.cfg.model!r})"
             ) from exc
         if resp.status_code != 200:
             if resp.status_code == 404:

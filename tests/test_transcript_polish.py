@@ -11,7 +11,6 @@ from localplaud.config import Settings
 from localplaud.llm.base import (
     LLMError,
     LLMInputTooLarge,
-    LLMOutputInvalid,
     LLMTransientError,
 )
 from localplaud.worker.polish import polish_transcript
@@ -118,7 +117,7 @@ def test_polish_splits_structurally_invalid_multi_segment_chunks(monkeypatch):
     assert result["detail"]["response_output_chars"] > result["detail"]["output_chars"]
 
 
-def test_polish_splits_and_rejects_emptied_non_empty_segments(monkeypatch):
+def test_polish_splits_then_keeps_stubbornly_emptied_segments(monkeypatch):
     class EmptyingPolisher(FakePolisher):
         def complete(self, prompt, **kwargs):
             request = json.loads(prompt)
@@ -141,12 +140,56 @@ def test_polish_splits_and_rejects_emptied_non_empty_segments(monkeypatch):
         ]
     )
 
-    with pytest.raises(
-        LLMOutputInvalid, match="transcript polish emptied non-empty segment text"
-    ):
-        polish_transcript(transcript, Settings())
+    result = polish_transcript(transcript, Settings())
 
-    assert [len(request["target_segments"]) for request in provider.requests] == [2, 1]
+    assert [segment.text for segment in result["transcript"].segments] == [
+        "first",
+        "second",
+    ]
+    assert [len(request["target_segments"]) for request in provider.requests] == [2, 1, 1]
+    assert result["detail"]["split_retries"] == 1
+    assert result["detail"]["kept_source_segments"] == 2
+
+
+def test_polish_keeps_filler_segments_the_model_empties_without_splitting(monkeypatch):
+    class FillerDroppingPolisher(FakePolisher):
+        def complete(self, prompt, **kwargs):
+            request = json.loads(prompt)
+            self.requests.append(request)
+            return json.dumps(
+                {
+                    "segments": [
+                        {
+                            "id": item["id"],
+                            "text": "" if len(item["text"]) <= 4 else item["text"],
+                        }
+                        for item in request["target_segments"]
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    provider = FillerDroppingPolisher()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        language="zh",
+        segments=[
+            Segment(text="今天先對一下實驗設計", start=0, end=1, speaker="speaker-a"),
+            Segment(text="呃", start=1, end=2, speaker="speaker-b"),
+            Segment(text="對對對", start=2, end=3, speaker="speaker-a"),
+        ],
+    )
+
+    result = polish_transcript(transcript, Settings())
+
+    assert [segment.text for segment in result["transcript"].segments] == [
+        "今天先對一下實驗設計",
+        "呃",
+        "對對對",
+    ]
+    assert len(provider.requests) == 1
+    assert result["detail"]["split_retries"] == 0
+    assert result["detail"]["kept_source_segments"] == 2
 
 
 def test_polish_allows_shorter_text_and_empty_source_segments(monkeypatch):
