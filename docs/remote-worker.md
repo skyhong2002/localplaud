@@ -87,6 +87,41 @@ Operational caveats learned the hard way:
 - Remote embedding requires the worker to attest the exact embedding model;
   a model mismatch is a hard, non-retryable error rather than silently mixing
   vector spaces.
+- **Ollama can silently fall back to CPU and stay there.** Its scheduler logs a
+  healthy GPU (`library=CUDA`, `model fits`, a plausible VRAM prediction) and
+  only the llama-server child reports the real failure —
+  `ggml_cuda_init: failed to initialize CUDA: CUDA driver version is
+  insufficient for CUDA runtime version`. Inference then runs at CPU speed
+  (~3-5 tok/s instead of ~75) and the only cheap symptom is `ollama ps` showing
+  `100% CPU` and an inflated model SIZE, because a CPU-resident KV cache is
+  counted differently. On 2026-08-01 this made every worker summarize/mind-map
+  run 40-230 minutes and produced a run of "timed out" mind-map failures.
+  Diagnose with `docker exec <ollama> ollama ps` (PROCESSOR column) and
+  `docker exec <ollama> nvidia-smi`; "GPU access blocked by the operating
+  system" from a container whose sibling CUDA container still works means that
+  container's GPU mounts went stale — recreate it with the recipe below (models
+  live in the named volume and survive). Verify the fix by the PROCESSOR column
+  reading `100% GPU`, not by the scheduler log lines.
+
+The worker's Ollama is started outside Compose, so its configuration only
+exists in the running container. The exact recreate is:
+
+```sh
+docker rm -f localplaud-ollama
+docker run -d --name localplaud-ollama \
+  --restart unless-stopped --gpus all \
+  --network localplaud_default \
+  -v localplaud_ollama:/root/.ollama \
+  -e OLLAMA_CONTEXT_LENGTH=8192 -e OLLAMA_KEEP_ALIVE=2m \
+  -e OLLAMA_HOST=0.0.0.0:11434 \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility -e NVIDIA_VISIBLE_DEVICES=all \
+  ollama/ollama:0.31.2
+```
+
+Port 11434 is deliberately unpublished: only sibling containers on
+`localplaud_default` reach it, as `http://localplaud-ollama:11434`. Recreating
+it fails any in-flight remote job with a `500`; those retry on the normal
+stage-retry path.
 
 Multi-host *web* deployments and rentable-GPU validation were explicitly
 dropped on 2026-07-31; this single controller + single worker pair is the

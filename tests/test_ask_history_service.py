@@ -367,17 +367,13 @@ def test_delete_detaches_saved_notes_with_foreign_keys_off_and_changes_no_schema
 
 @pytest.mark.parametrize("journal_mode", ["delete", "wal"])
 def test_delete_serializes_with_concurrent_answer_promotion(
-    ask_db, monkeypatch, journal_mode
+    ask_db, monkeypatch, journal_mode, force_journal_mode
 ):
     import localplaud.ask_threads as service
     from localplaud.db.models import UserNote
     from localplaud.db.session import session_scope
 
-    with ask_db.connect() as connection:
-        selected_mode = connection.exec_driver_sql(
-            f"PRAGMA journal_mode={journal_mode}"
-        ).scalar_one()
-    assert selected_mode.lower() == journal_mode
+    assert force_journal_mode(ask_db, journal_mode) == journal_mode
 
     with session_scope() as session:
         _, messages = _add_thread(

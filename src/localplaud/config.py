@@ -92,6 +92,13 @@ class PollerConfig(BaseModel):
 
 class StoreConfig(BaseModel):
     database_url: str = "sqlite:///./data/localplaud.db"
+    # WAL keeps the Web App readable while the worker writes. Override only for
+    # storage that cannot support it (some network filesystems).
+    sqlite_journal_mode: Literal["wal", "delete"] = "wal"
+    # How long a writer waits for a competing write before failing. Contention
+    # here is normal (API + poller + worker); failing fast turns it into a
+    # failed stage run.
+    sqlite_busy_timeout_ms: int = Field(default=30_000, ge=0, le=600_000)
 
 
 class PipelineConfig(BaseModel):

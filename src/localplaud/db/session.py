@@ -33,6 +33,28 @@ def _sanitize_durable_diagnostics(session: Session, _flush_context, _instances) 
                 setattr(instance, attribute, sanitized)
 
 
+def _configure_sqlite_connection(dbapi_connection, _record) -> None:
+    """Make concurrent access wait instead of failing the caller.
+
+    The API, poller, and worker all write this database from separate threads
+    and processes. Without WAL a reader blocks the writer outright, and with
+    the driver's 5s default a stage that collides with a slow commit dies with
+    ``database is locked`` — which surfaces as a failed stage run rather than a
+    retry. WAL plus a long busy timeout turns that contention into a wait.
+    """
+    store = get_settings().store
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(f"PRAGMA journal_mode={store.sqlite_journal_mode}")
+        cursor.execute(f"PRAGMA busy_timeout={store.sqlite_busy_timeout_ms}")
+        if store.sqlite_journal_mode == "wal":
+            # Safe with WAL: a crash can lose the last commits, never the
+            # database. Under the rollback journal it would not be.
+            cursor.execute("PRAGMA synchronous=NORMAL")
+    finally:
+        cursor.close()
+
+
 def _ensure_sqlite_dir(url: str) -> None:
     prefix = "sqlite:///"
     if url.startswith(prefix):
@@ -45,8 +67,13 @@ def get_engine() -> Engine:
     if _engine is None:
         url = get_settings().store.database_url
         _ensure_sqlite_dir(url)
-        connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+        is_sqlite = url.startswith("sqlite")
+        connect_args = (
+            {"check_same_thread": False, "timeout": 30.0} if is_sqlite else {}
+        )
         _engine = create_engine(url, connect_args=connect_args, future=True)
+        if is_sqlite:
+            event.listen(_engine, "connect", _configure_sqlite_connection)
         _Session = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     return _engine
 

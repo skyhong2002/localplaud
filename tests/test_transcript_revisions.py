@@ -572,7 +572,7 @@ def test_speaker_correction_is_rejected_while_processing_without_mutation(
 
 @pytest.mark.parametrize("journal_mode", ["delete", "wal"])
 def test_concurrent_speaker_corrections_have_one_winner_and_one_conflict(
-    monkeypatch, tmp_path, journal_mode
+    monkeypatch, tmp_path, journal_mode, force_journal_mode
 ):
     c = _client(monkeypatch, tmp_path)
     _seed()
@@ -580,11 +580,8 @@ def test_concurrent_speaker_corrections_have_one_winner_and_one_conflict(
     from localplaud.db.models import TranscriptRevision
     from localplaud.db.session import get_engine, session_scope
 
-    with get_engine().connect() as connection:
-        selected_mode = connection.exec_driver_sql(
-            f"PRAGMA journal_mode={journal_mode}"
-        ).scalar_one()
-    assert selected_mode.lower() == journal_mode
+    selected_mode = force_journal_mode(get_engine(), journal_mode)
+    assert selected_mode == journal_mode
 
     barrier = Barrier(3)
 

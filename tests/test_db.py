@@ -1,5 +1,9 @@
 """DB round-trip against a temporary SQLite file: init, write, read back."""
 
+import sqlite3
+
+from sqlalchemy import text
+
 import localplaud.config as config
 import localplaud.db.session as db_session
 from localplaud.db.models import FileStatus, PlaudFile, Transcript
@@ -60,6 +64,42 @@ def test_init_and_roundtrip_with_relationship(monkeypatch, tmp_path):
         assert got.transcript.provider == "dummy"
         assert got.transcript.segments[0]["text"] == "hello world"
         assert got.transcript.file is got
+
+
+def test_sqlite_connections_use_wal_and_a_long_busy_timeout(monkeypatch, tmp_path):
+    """Concurrent API/poller/worker writes must wait, not fail the stage.
+
+    Without these the driver's 5s default turns ordinary contention into
+    ``database is locked``, which the pipeline records as a failed stage run.
+    """
+    _fresh_db(monkeypatch, tmp_path)
+    init_db()
+
+    with session_scope() as session:
+        assert session.execute(text("PRAGMA journal_mode")).scalar().lower() == "wal"
+        assert session.execute(text("PRAGMA busy_timeout")).scalar() == 30000
+        assert session.execute(text("PRAGMA synchronous")).scalar() == 1  # NORMAL
+
+
+def test_an_open_write_transaction_does_not_block_readers(monkeypatch, tmp_path):
+    """WAL's actual guarantee: the web UI keeps reading while a stage writes."""
+    db_file = _fresh_db(monkeypatch, tmp_path)
+    init_db()
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="already-there", filename="x"))
+
+    writer = sqlite3.connect(db_file, timeout=30)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute("UPDATE plaud_files SET filename='uncommitted' WHERE id='already-there'")
+    try:
+        # Under the default rollback journal this read raises "database is
+        # locked"; under WAL it sees the last committed snapshot.
+        with session_scope() as session:
+            assert session.get(PlaudFile, "already-there").filename == "x"
+    finally:
+        writer.rollback()
+        writer.close()
 
 
 def test_session_scope_rolls_back_on_error(monkeypatch, tmp_path):

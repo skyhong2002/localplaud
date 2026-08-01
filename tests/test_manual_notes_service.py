@@ -298,7 +298,7 @@ def test_legacy_note_update_without_base_version_preserves_history(client):
 
 @pytest.mark.parametrize("journal_mode", ["delete", "wal"])
 def test_manual_note_creation_serializes_with_concurrent_trash_update(
-    client, monkeypatch, journal_mode
+    client, monkeypatch, journal_mode, force_journal_mode
 ):
     from fastapi import HTTPException
 
@@ -307,11 +307,7 @@ def test_manual_note_creation_serializes_with_concurrent_trash_update(
     from localplaud.db.session import get_engine, session_scope
 
     engine = get_engine()
-    with engine.connect() as connection:
-        selected_mode = connection.exec_driver_sql(
-            f"PRAGMA journal_mode={journal_mode}"
-        ).scalar_one()
-    assert selected_mode.lower() == journal_mode
+    assert force_journal_mode(engine, journal_mode) == journal_mode
     _add_recording("trash-race")
 
     trash_has_reservation = Event()

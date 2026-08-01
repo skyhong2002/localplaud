@@ -244,15 +244,13 @@ def test_deleting_note_cascades_history(client):
 
 @pytest.mark.parametrize("journal_mode", ["delete", "wal"])
 def test_concurrent_edits_have_one_winner_and_one_conflict(
-    client, monkeypatch, journal_mode
+    client, monkeypatch, journal_mode, force_journal_mode
 ):
     import localplaud.api.notes as service
     from localplaud.db.session import get_engine
 
     created = _create_note(client)
-    with get_engine().connect() as connection:
-        selected = connection.exec_driver_sql(f"PRAGMA journal_mode={journal_mode}").scalar_one()
-    assert selected.lower() == journal_mode
+    assert force_journal_mode(get_engine(), journal_mode) == journal_mode
 
     first_has_lock = Event()
     release_first = Event()
