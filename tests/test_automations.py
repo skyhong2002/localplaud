@@ -140,6 +140,37 @@ def test_autoflow_membership_actions_take_library_first_fence(monkeypatch, tmp_p
     assert calls == [["match"]]
 
 
+def test_autoflow_defaults_to_smart_template(monkeypatch, tmp_path):
+    client, _folder_id, tag_id = _seed(monkeypatch, tmp_path)
+    response = client.post(
+        "/api/automations/rules",
+        json={
+            "name": "Smart notes",
+            "trigger": {"origin": "plaud"},
+            "actions": {"add_tag_ids": [tag_id]},
+        },
+    )
+    assert response.status_code == 201
+    rule = response.json()
+    assert rule["actions"]["note_template_key"] == "plaud-autopilot"
+    assert "use plaud-autopilot notes" in rule["sentence"]
+
+    assert client.post("/api/automations/run").json()["recordings_changed"] == 1
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        assert session.get(PlaudFile, "match").note_template_key == "plaud-autopilot"
+
+
+def test_discover_form_advertises_smart_template_default(monkeypatch, tmp_path):
+    client, _folder_id, _tag_id = _seed(monkeypatch, tmp_path)
+    page = client.get("/discover")
+    assert page.status_code == 200
+    assert "Use smart template (default)" in page.text
+    assert 'value="plaud-autopilot"' in page.text
+
+
 def test_lower_priority_number_wins_and_toggle_stops_execution(monkeypatch, tmp_path):
     client, _folder_id, _tag_id = _seed(monkeypatch, tmp_path)
     broad = {
@@ -374,7 +405,8 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     # residue is asserted against the visible region rather than the whole page.
     visible = translated.text.split('<main class="main">', 1)[1].split("</main>", 1)[0]
     assert "When a recording arrives" not in visible
-    assert f"當新錄音加入時，移至資料夾 #{folder_id}。" in visible
+    assert "使用 plaud-autopilot 筆記" in visible
+    assert f"移至資料夾 #{folder_id}" in visible
     assert "Local workspace" not in visible
     assert "本機工作區" in visible
     assert "Rules created and fully editable in this Web App." not in visible
@@ -393,10 +425,10 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     api_rules = client.get("/api/automations/rules").json()["rules"]
     by_name = {rule["name"]: rule for rule in api_rules}
     assert by_name[long_name]["sentence"] == (
-        f"When a recording arrives, then move to folder #{folder_id}."
+        f"When a recording arrives, then use plaud-autopilot notes, move to folder #{folder_id}."
     )
     assert by_name["Origin display"]["sentence"] == (
-        f"When source is Local import, then move to folder #{folder_id}."
+        f"When source is Local import, then use plaud-autopilot notes, move to folder #{folder_id}."
     )
 
 

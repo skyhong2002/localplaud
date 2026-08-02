@@ -9,8 +9,12 @@ from localplaud.worker.summary_templates import (
 
 
 def test_registry_templates_are_complete():
-    assert {"default", "meeting", "call", "lecture", "personal"} <= set(TEMPLATES)
-    assert {
+    assert set(TEMPLATES) == {
+        "default",
+        "meeting",
+        "call",
+        "lecture",
+        "personal",
         "plaud-autopilot",
         "plaud-key-metrics",
         "plaud-intent-analysis",
@@ -21,7 +25,7 @@ def test_registry_templates_are_complete():
         "plaud-full-transcript",
         "plaud-meeting-minutes",
         "plaud-meeting-highlights",
-    } <= set(TEMPLATES)
+    }
     for name, template in TEMPLATES.items():
         assert template.name == name
         assert (template.system or "").strip() or template.prompt_mode == "direct"

@@ -94,6 +94,32 @@ def test_builtin_bootstrap_and_versioned_crud(monkeypatch, tmp_path):
     assert client.delete("/api/note-templates/default").status_code == 409
 
 
+def test_bootstrap_archives_removed_builtin_templates(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import NoteTemplate
+    from localplaud.db.session import session_scope
+    from localplaud.worker.summary_templates import bootstrap_note_templates
+
+    with session_scope() as session:
+        session.add(
+            NoteTemplate(
+                key="removed-builtin",
+                version=1,
+                name="Removed builtin",
+                system_prompt="",
+                instructions="# Old",
+                is_builtin=True,
+                is_active=True,
+            )
+        )
+
+    with session_scope() as session:
+        bootstrap_note_templates(session)
+
+    templates = client.get("/api/note-templates").json()["templates"]
+    assert "removed-builtin" not in {row["key"] for row in templates}
+
+
 def test_catalog_metadata_and_copy_to_my_space(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     meeting = next(

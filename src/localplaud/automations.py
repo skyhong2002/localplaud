@@ -33,6 +33,28 @@ from .error_redaction import sanitize_error
 # audited Plaud behavior of matching how a conversation starts rather than
 # scanning entire transcripts.
 EARLY_TRANSCRIPT_WINDOW_CHARS = 4000
+DEFAULT_AUTOMATION_TEMPLATE_KEY = "plaud-autopilot"
+
+
+def effective_note_template_key(actions: dict | None) -> str:
+    """Return the template a scheduled rule will apply when it matches."""
+    key = str((actions or {}).get("note_template_key") or "").strip()
+    return key or DEFAULT_AUTOMATION_TEMPLATE_KEY
+
+
+def ensure_default_note_templates(session) -> int:
+    """Persist the smart template on local rules that predate this default."""
+    changed = 0
+    for rule in session.scalars(select(AutomationRule)):
+        if (rule.owner_type or "local") != "local":
+            continue
+        actions = dict(rule.actions or {})
+        if actions.get("note_template_key"):
+            continue
+        actions["note_template_key"] = DEFAULT_AUTOMATION_TEMPLATE_KEY
+        rule.actions = actions
+        changed += 1
+    return changed
 
 
 def early_transcript_text(recording: PlaudFile) -> str | None:
@@ -108,6 +130,12 @@ def rule_sentence(
     if actions.get("note_template_key"):
         effects.append(
             t("use {value} notes").format(value=actions["note_template_key"])
+        )
+    elif actions:
+        effects.append(
+            t("use {value} notes").format(
+                value=effective_note_template_key(actions)
+            )
         )
     if actions.get("profile_id") is not None:
         effects.append(
@@ -224,8 +252,9 @@ def _apply_actions(
     actions = rule.actions or {}
     applied: dict = {}
     profile_resolution_changed = False
+    template_key = effective_note_template_key(actions)
     if (
-        actions.get("note_template_key")
+        template_key
         or actions.get("profile_id") is not None
         or actions.get("folder_id") is not None
         or actions.get("add_tag_ids")
@@ -238,11 +267,10 @@ def _apply_actions(
             processing_owner_token=processing_owner_token,
         )
         recording = session.get(PlaudFile, recording.id) or recording
-    if key := actions.get("note_template_key"):
-        recording.note_template_key = key
-        _mark_notes_stale(session, recording.id)
-        applied["note_template_key"] = key
-        profile_resolution_changed = True
+    recording.note_template_key = template_key
+    _mark_notes_stale(session, recording.id)
+    applied["note_template_key"] = template_key
+    profile_resolution_changed = True
     if actions.get("profile_id") is not None:
         profile_id = int(actions["profile_id"])
         assignment = session.get(

@@ -36,7 +36,7 @@ from starlette.background import BackgroundTask
 
 from ..ask_skills import get_ask_skill, list_ask_skills
 from ..ask_threads import thread_to_dict
-from ..automations import rule_sentence
+from ..automations import DEFAULT_AUTOMATION_TEMPLATE_KEY, rule_sentence
 from ..config import get_settings
 from ..date_filters import calendar_date_ms, normalize_calendar_date, resolve_date_scope
 from ..db.models import (
@@ -2217,6 +2217,7 @@ def discover_automations(request: Request):
         "organization": organization,
         "profiles": profiles,
         "note_templates": note_templates,
+        "default_automation_template_key": DEFAULT_AUTOMATION_TEMPLATE_KEY,
         "webhook_integrations": webhook_integrations,
         "email_integrations": email_integrations,
         "application_catalog": [

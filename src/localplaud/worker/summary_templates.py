@@ -392,10 +392,19 @@ def get_template(name: str) -> SummaryTemplate:
 
 
 def bootstrap_note_templates(session) -> None:
-    """Seed built-ins once without overwriting later user-created versions."""
+    """Keep the built-in catalog aligned without touching personal templates."""
     from sqlalchemy import select
 
     from ..db.models import NoteTemplate
+
+    for row in session.scalars(
+        select(NoteTemplate).where(
+            NoteTemplate.is_builtin.is_(True),
+            NoteTemplate.is_active.is_(True),
+        )
+    ):
+        if row.key not in TEMPLATES:
+            row.is_active = False
 
     existing = set(session.scalars(select(NoteTemplate.key)).all())
     for key, template in TEMPLATES.items():

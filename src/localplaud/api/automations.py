@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, select, update
 
 from ..automations import (
+    DEFAULT_AUTOMATION_TEMPLATE_KEY,
     deliver_automation_export,
     deliver_local_notification,
     evaluate_library,
@@ -34,6 +35,13 @@ from ..db.models import (
 from ..db.session import session_scope
 
 router = APIRouter(prefix="/api/automations", tags=["automations"])
+
+
+def _normalize_local_actions(actions: dict) -> dict:
+    normalized = dict(actions)
+    if not normalized.get("note_template_key"):
+        normalized["note_template_key"] = DEFAULT_AUTOMATION_TEMPLATE_KEY
+    return normalized
 
 
 class TriggerBody(BaseModel):
@@ -171,7 +179,8 @@ def list_rules() -> dict:
 
 @router.post("/rules", status_code=201)
 def create_rule(body: RuleBody) -> dict:
-    trigger, actions = body.trigger.model_dump(exclude_none=True), body.actions.model_dump(exclude_none=True)
+    trigger = body.trigger.model_dump(exclude_none=True)
+    actions = _normalize_local_actions(body.actions.model_dump(exclude_none=True))
     try:
         validate_rule_references(trigger, actions)
     except ValueError as exc:
@@ -246,7 +255,8 @@ def _require_local_owner(row: AutomationRule) -> None:
 
 @router.put("/rules/{rule_id}")
 def update_rule(rule_id: int, body: RuleBody) -> dict:
-    trigger, actions = body.trigger.model_dump(exclude_none=True), body.actions.model_dump(exclude_none=True)
+    trigger = body.trigger.model_dump(exclude_none=True)
+    actions = _normalize_local_actions(body.actions.model_dump(exclude_none=True))
     try:
         validate_rule_references(trigger, actions)
     except ValueError as exc:

@@ -204,6 +204,7 @@ _ZH_HANT_TW = {
     "Maximum minutes": "最長分鐘數",
     "Has tag": "具有標籤",
     "No change": "不變更",
+    "Use smart template (default)": "使用智慧模板（預設）",
     "Auto": "自動",
     "Send webhook": "傳送 Webhook",
     "No delivery": "不傳送",

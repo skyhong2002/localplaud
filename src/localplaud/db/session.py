@@ -130,7 +130,6 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
         migrate_editable_note_revision_schema,
         migrate_editable_note_source_schema,
         migrate_generated_title_columns,
-        migrate_tag_kind_columns,
         migrate_import_schema,
         migrate_incremental_import_schema,
         migrate_knowledge_index_schema,
@@ -149,6 +148,7 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
         migrate_speaker_timeline_schema,
         migrate_stage_attempt_schema,
         migrate_summary_revision_schema,
+        migrate_tag_kind_columns,
         migrate_transcript_revision_provenance,
         migrate_vocabulary_schema,
         redact_legacy_error_text,
@@ -189,6 +189,9 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
         from ..worker.summary_templates import bootstrap_note_templates
 
         bootstrap_note_templates(session)
+        from ..automations import ensure_default_note_templates
+
+        ensure_default_note_templates(session)
         # Discover current note artifacts without doing any provider work.
         # Embedding remains an explicit mutation/worker action, so a serve-only
         # process or a restart with automatic processing disabled stays idle.
