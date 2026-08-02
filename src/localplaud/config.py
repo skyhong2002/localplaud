@@ -126,9 +126,9 @@ class PipelineConfig(BaseModel):
     # hierarchical map/reduce notes instead of being truncated.
     summary_chunk_chars: int = 6_000
     polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
-    # Which summary template to use (default | meeting | call | lecture |
-    # personal — see worker/summary_templates.py).
-    summary_template: str = "default"
+    # Which summary template to use. The Plaud Web Autopilot snapshot is the
+    # default; ``default`` remains the local structured fallback.
+    summary_template: str = "plaud-autopilot"
     # independent: Plaud supplies metadata + raw audio only; only locally
     # generated transcripts may satisfy the processing pipeline.
     # migration: allow explicitly imported Plaud Intelligence artifacts for
@@ -255,6 +255,11 @@ class OpenAILlmConfig(BaseModel):
     # Leave unset for legacy/OpenAI-compatible endpoints. Reasoning models use
     # max_completion_tokens and do not receive sampling temperature.
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] | None = None
+    # How much transcript one correction request may carry. Relays that front
+    # the API with a proxy (Cloudflare and friends) cut a request that produces
+    # no bytes for too long, and a high reasoning effort spends minutes before
+    # the first token — so the practical ceiling is per-endpoint, not global.
+    polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
 
 
 class AnthropicLlmConfig(BaseModel):

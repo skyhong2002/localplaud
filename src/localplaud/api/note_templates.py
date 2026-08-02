@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import secrets
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -34,14 +35,25 @@ _CATALOG = {
     "call": {"category": "Work", "scenario": "Calls", "description": "Purpose, commitments, sentiment, and follow-ups from a call.", "author": "localplaud", "popularity": 84},
     "lecture": {"category": "Education", "scenario": "Lectures", "description": "Concept-focused study notes with review questions.", "author": "localplaud", "popularity": 91},
     "personal": {"category": "Personal", "scenario": "Voice memos", "description": "A concise TL;DR, highlights, and personal to-dos.", "author": "localplaud", "popularity": 79},
+    "plaud-autopilot": {"category": "General", "scenario": "Multi-scenario", "description": "多場景智能總結，快速抓重點", "author": "Plaud", "popularity": None},
+    "plaud-key-metrics": {"category": "Functional", "scenario": "Data extraction", "description": "從對話萃取數據，快速成表", "author": "Plaud", "popularity": None},
+    "plaud-intent-analysis": {"category": "Functional", "scenario": "Conversation analysis", "description": "解讀對話意圖，給出可行應對", "author": "Plaud", "popularity": None},
+    "plaud-meeting-narrative": {"category": "Work", "scenario": "Meetings", "description": "將逐字稿轉化為會議故事", "author": "Plaud", "popularity": None},
+    "plaud-lecture-deep-dive": {"category": "Education", "scenario": "Lectures", "description": "詳盡的演講總結與引用。", "author": "Plaud", "popularity": None},
+    "plaud-research-interview": {"category": "Research", "scenario": "Interviews", "description": "結構化紀錄研究訪談，快速提煉重點", "author": "Plaud", "popularity": None},
+    "plaud-interview": {"category": "Research", "scenario": "Interviews", "description": "結構化整理採訪稿件並提煉核心觀點與金句", "author": "Plaud", "popularity": None},
+    "plaud-full-transcript": {"category": "Transcription", "scenario": "External use", "description": "忠實且完整的音訊轉錄。", "author": "Plaud", "popularity": None},
+    "plaud-meeting-minutes": {"category": "Work", "scenario": "Meetings", "description": "重構會議為紀要、行動事項與決策", "author": "Plaud", "popularity": None},
+    "plaud-meeting-highlights": {"category": "Work", "scenario": "Meetings", "description": "提煉會議洞見，聚焦長期價值。", "author": "Plaud", "popularity": None},
 }
 
 
 class TemplateBody(BaseModel):
     key: str | None = None
     name: str = Field(min_length=1, max_length=80)
-    system_prompt: str = Field(min_length=1, max_length=20_000)
+    system_prompt: str = Field(min_length=0, max_length=20_000)
     instructions: str = Field(min_length=1, max_length=20_000)
+    prompt_mode: Literal["structured", "direct"] = "structured"
     execution_profile_id: int | None = None
 
     @field_validator("key")
@@ -54,13 +66,18 @@ class TemplateBody(BaseModel):
             raise ValueError("key must contain lowercase letters, numbers, and hyphens")
         return value
 
-    @field_validator("name", "system_prompt", "instructions")
+    @field_validator("name", "instructions")
     @classmethod
     def trim_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
             raise ValueError("value must not be empty")
         return value
+
+    @field_validator("system_prompt")
+    @classmethod
+    def trim_system_prompt(cls, value: str) -> str:
+        return value.strip()
 
 
 class RecordingTemplateBody(BaseModel):
@@ -89,6 +106,7 @@ def _item(row: NoteTemplate) -> dict:
         "name": row.name,
         "system_prompt": row.system_prompt,
         "instructions": row.instructions,
+        "prompt_mode": row.prompt_mode,
         "is_builtin": row.is_builtin,
         "is_active": row.is_active,
         "category": row.category or catalog.get("category", "Custom"),
@@ -136,6 +154,7 @@ def copy_note_template(key: str, body: CopyTemplateBody) -> dict:
             name=body.name or f"{source.name} copy",
             system_prompt=source.system_prompt,
             instructions=source.instructions,
+            prompt_mode=source.prompt_mode,
             category=_item(source)["category"],
             scenario=_item(source)["scenario"],
             description=_item(source)["description"],
@@ -174,6 +193,7 @@ def create_note_template(body: TemplateBody) -> dict:
             name=body.name,
             system_prompt=body.system_prompt,
             instructions=body.instructions,
+            prompt_mode=body.prompt_mode,
             category="Custom",
             scenario="Workspace",
             author="Local workspace",
@@ -207,6 +227,11 @@ def create_note_template_version(key: str, body: TemplateBody) -> dict:
             if "execution_profile_id" in body.model_fields_set
             else current.execution_profile_id
         )
+        prompt_mode = (
+            body.prompt_mode
+            if "prompt_mode" in body.model_fields_set
+            else current.prompt_mode
+        )
         _validate_profile(session, profile_id)
         version = (session.scalar(select(func.max(NoteTemplate.version)).where(NoteTemplate.key == key)) or 0) + 1
         session.execute(
@@ -218,6 +243,7 @@ def create_note_template_version(key: str, body: TemplateBody) -> dict:
             name=body.name,
             system_prompt=body.system_prompt,
             instructions=body.instructions,
+            prompt_mode=prompt_mode,
             category=current.category,
             scenario=current.scenario,
             description=current.description,

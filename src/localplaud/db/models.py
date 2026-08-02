@@ -551,6 +551,8 @@ class NoteTemplate(Base):
     name: Mapped[str] = mapped_column(String(80))
     system_prompt: Mapped[str] = mapped_column(Text)
     instructions: Mapped[str] = mapped_column(Text)
+    # ``direct`` sends the stored prompt without localplaud's markdown wrapper.
+    prompt_mode: Mapped[str] = mapped_column(String(16), default="structured")
     category: Mapped[str | None] = mapped_column(String(80), default=None)
     scenario: Mapped[str | None] = mapped_column(String(80), default=None)
     description: Mapped[str | None] = mapped_column(String(512), default=None)

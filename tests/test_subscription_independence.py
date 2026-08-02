@@ -359,7 +359,10 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
         assert row.status == FileStatus.partial
         assert row.local_transcript is not None
         assert row.corrected_transcript is None
-        assert {summary.template for summary in row.summaries} == {"default", "mind_map"}
+        assert {summary.template for summary in row.summaries} == {
+            "plaud-autopilot",
+            "mind_map",
+        }
         assert row.chunks
         assert all(summary.input_transcript_revision == 0 for summary in row.summaries)
         assert all(summary.input_transcript_source == "local" for summary in row.summaries)

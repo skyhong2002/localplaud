@@ -154,8 +154,10 @@ def summarize(
             name=template_override["key"],
             version=int(template_override["version"]),
             display_name=template_override.get("name"),
-            system=template_override["system_prompt"],
+            system=template_override.get("system_prompt") or None,
             instructions=template_override["instructions"],
+            prompt_mode=template_override.get("prompt_mode", "structured"),
+            provenance=template_override.get("provenance"),
         )
     else:
         resolved_template = get_effective_template(template)

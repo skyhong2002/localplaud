@@ -28,6 +28,14 @@ class OpenAILLM:
     def __init__(self, cfg: OpenAILlmConfig) -> None:
         self.cfg = cfg
 
+    @property
+    def model(self) -> str:
+        return self.cfg.model
+
+    @property
+    def polish_chunk_chars(self) -> int:
+        return self.cfg.polish_chunk_chars
+
     def available(self) -> bool:
         """True if an API key is configured."""
         return bool(self.cfg.api_key)

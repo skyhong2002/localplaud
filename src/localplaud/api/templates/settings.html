@@ -212,7 +212,7 @@
         <input class="search-input" name="name" maxlength="80" placeholder="{{ t('Template name') }}" required>
         <input class="search-input" name="key" maxlength="64" pattern="[a-z0-9][a-z0-9-]*" placeholder="{{ t('Stable key, e.g. research-interview') }}" required>
       </div>
-      <label class="sub">{{ t('System prompt') }}<textarea class="search-input" name="system_prompt" rows="4" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical"></textarea></label>
+      <label class="sub">{{ t('System prompt') }}<textarea class="search-input" name="system_prompt" rows="4" maxlength="20000" style="width:100%;margin-top:3px;resize:vertical"></textarea></label>
       <label class="sub">{{ t('Markdown structure and instructions') }}<textarea class="search-input" name="instructions" rows="9" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></label>
       <label class="sub">{{ t('Execution profile') }}<select class="search-input" name="execution_profile_id" style="width:100%;margin-top:3px"><option value="">{{ t('Inherit from previous layers') }}</option>{% for profile in profiles %}<option value="{{ profile.id }}">{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}</select></label>
       <div style="display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create template') }}</button><button class="btn sec" id="cancel-template-edit" type="button" hidden>{{ t('Cancel edit') }}</button><span id="note-template-result" class="sub"></span></div>

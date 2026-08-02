@@ -211,7 +211,7 @@ def test_derived_artifacts_run_without_audio_and_preserve_upstream_stages(monkey
         assert recording.audio_path is None and recording.wav_path is None
         assert recording.processing_token is None and recording.processing_lease_until is None
         assert {summary.template for summary in recording.summaries} == {
-            "default",
+            "plaud-autopilot",
             "mind_map",
         }
         assert recording.chunks
@@ -460,7 +460,7 @@ def test_index_failure_keeps_transcript_and_summary(monkeypatch, tmp_path):
         f = s.get(PlaudFile, "index-failure")
         assert f.status == FileStatus.partial
         assert f.local_transcript is not None
-        assert {s.template for s in f.summaries} == {"default", "mind_map"}
+        assert {s.template for s in f.summaries} == {"plaud-autopilot", "mind_map"}
         assert len(f.chunks) == 0
         index_run = next(x for x in f.stage_runs if x.stage == StageName.index)
         assert index_run.status == StageStatus.failed

@@ -114,10 +114,45 @@ def test_catalog_metadata_and_copy_to_my_space(monkeypatch, tmp_path):
     assert copied.json()["scenario"] == "Meetings"
     assert copied.json()["description"] == meeting["description"]
     assert copied.json()["system_prompt"] == meeting["system_prompt"]
+    assert copied.json()["prompt_mode"] == meeting["prompt_mode"] == "structured"
     assert client.post(
         "/api/note-templates/meeting/copy",
         json={"key": "my-meeting", "name": "Duplicate"},
     ).status_code == 409
+
+
+def test_plaud_recent_templates_are_bootstrapped_as_direct_snapshots(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    templates = {
+        row["key"]: row for row in client.get("/api/note-templates").json()["templates"]
+    }
+
+    autopilot = templates["plaud-autopilot"]
+    assert autopilot["name"] == "智能總結"
+    assert autopilot["prompt_mode"] == "direct"
+    assert autopilot["provenance"] == "plaud-web-readonly"
+    assert autopilot["instructions"].startswith("Autopilot\n")
+    assert autopilot["system_prompt"] == ""
+
+    copied = client.post(
+        "/api/note-templates/plaud-autopilot/copy",
+        json={"key": "my-autopilot", "name": "我的智能總結"},
+    )
+    assert copied.status_code == 201
+    assert copied.json()["prompt_mode"] == "direct"
+
+    version = client.put(
+        "/api/note-templates/my-autopilot",
+        json={
+            "name": "我的智能總結",
+            "system_prompt": "",
+            "instructions": autopilot["instructions"],
+        },
+    )
+    assert version.status_code == 201
+    assert version.json()["prompt_mode"] == "direct"
 
 
 def test_templates_workspace_search_and_tabs(monkeypatch, tmp_path):
@@ -148,6 +183,7 @@ def test_template_discovery_metadata_migration(monkeypatch, tmp_path):
         "note_templates.author",
         "note_templates.provenance",
         "note_templates.popularity",
+        "note_templates.prompt_mode",
     }
     assert migrate_note_template_schema(engine) == []
 

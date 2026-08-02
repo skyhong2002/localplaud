@@ -46,7 +46,7 @@
     <form id="template-form" class="import-body" style="gap:10px;overflow:auto">
       <label>{{ t('Key') }}<input class="search-input" name="key" required pattern="[a-z0-9][a-z0-9-]{0,63}" style="width:100%;margin-top:4px"></label>
       <label>{{ t('Name') }}<input class="search-input" name="name" required maxlength="80" style="width:100%;margin-top:4px"></label>
-      <label>{{ t('System prompt') }}<textarea class="search-input" name="system_prompt" required rows="5" style="width:100%;margin-top:4px;resize:vertical"></textarea></label>
+      <label>{{ t('System prompt') }}<textarea class="search-input" name="system_prompt" rows="5" style="width:100%;margin-top:4px;resize:vertical"></textarea></label>
       <label>{{ t('Note structure / instructions') }}<textarea class="search-input" name="instructions" required rows="10" style="width:100%;margin-top:4px;resize:vertical"></textarea></label>
       <div id="template-form-status" class="sub" style="font-size:12px"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn sec" id="template-cancel" type="button">{{ t('Cancel') }}</button><button class="btn" type="submit">{{ t('Save template') }}</button></div>

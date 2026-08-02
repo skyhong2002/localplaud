@@ -244,6 +244,7 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
                 name VARCHAR(80) NOT NULL,
                 system_prompt TEXT NOT NULL,
                 instructions TEXT NOT NULL,
+                prompt_mode VARCHAR(16) NOT NULL DEFAULT 'structured',
                 category VARCHAR(80),
                 scenario VARCHAR(80),
                 description VARCHAR(512),
@@ -259,7 +260,7 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
                   ON DELETE SET NULL
             );
             INSERT INTO note_templates_new (
-                id, key, version, name, system_prompt, instructions, category,
+                id, key, version, name, system_prompt, instructions, prompt_mode, category,
                 scenario, description, author, provenance, popularity,
                 execution_profile_id, is_builtin, is_active, created_at
             )
@@ -270,6 +271,7 @@ def migrate_legacy_note_template_schema(engine: Engine) -> list[str]:
                 name,
                 system_prompt,
                 instructions,
+                {legacy('prompt_mode', "'structured'")},
                 {legacy('category')},
                 {legacy('scenario')},
                 {legacy('description')},
@@ -622,6 +624,7 @@ def migrate_note_template_schema(engine: Engine) -> list[str]:
             ("note_templates", "author", "VARCHAR(120)"),
             ("note_templates", "provenance", "VARCHAR(32)"),
             ("note_templates", "popularity", "INTEGER"),
+            ("note_templates", "prompt_mode", "VARCHAR(16) NOT NULL DEFAULT 'structured'"),
         ):
             if table not in tables:
                 continue

@@ -323,7 +323,7 @@ def test_mind_map_failure_leaves_partial_file_with_usable_artifacts(monkeypatch,
         assert "mind_map: LLM unavailable for mind map" in f.error
         # Transcript, notes, and index all survive the mind map failure.
         assert f.local_transcript is not None
-        assert [x.template for x in f.summaries] == ["default"]
+        assert [x.template for x in f.summaries] == ["plaud-autopilot"]
         assert len(f.chunks) == 1
         run = next(x for x in f.stage_runs if x.stage == StageName.mind_map)
         assert run.status == StageStatus.failed

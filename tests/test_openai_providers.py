@@ -72,6 +72,49 @@ def test_openai_compatible_request_preserves_legacy_sampling_parameters(monkeypa
     assert "max_completion_tokens" not in request
 
 
+def test_openai_endpoints_carry_their_own_polish_chunk_budget(monkeypatch):
+    """A relay that cuts long silent requests needs smaller correction chunks
+    than the global default, without shrinking them for every other provider."""
+    from localplaud.asr.base import Segment, Transcript
+    from localplaud.worker.polish import polish_transcript
+
+    provider = OpenAILLM(
+        OpenAILlmConfig(api_key="k", model="gpt-5.6-luna", polish_chunk_chars=3_000)
+    )
+    assert provider.polish_chunk_chars == 3_000
+    assert provider.model == "gpt-5.6-luna"
+
+    seen: list[int] = []
+
+    def fake_complete(prompt, **_kwargs):
+        import json
+
+        request = json.loads(prompt)
+        seen.append(len(request["target_segments"]))
+        return json.dumps(
+            {"segments": [{"id": item["id"], "text": item["text"]}
+                          for item in request["target_segments"]]}
+        )
+
+    monkeypatch.setattr(provider, "complete", fake_complete)
+    monkeypatch.setattr(provider, "available", lambda: True)
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+
+    settings = Settings()
+    settings.pipeline.polish_chunk_chars = 48_000  # deliberately much larger
+    transcript = Transcript(
+        segments=[Segment(text=f"segment {i}", start=i, end=i + 1) for i in range(120)]
+    )
+
+    result = polish_transcript(transcript, settings)
+
+    # The endpoint's own budget wins over the global one, so the transcript is
+    # split into several small requests instead of one oversized request.
+    assert result["detail"]["chunk_chars"] == 3_000
+    assert len(seen) > 1
+    assert max(seen) <= 3_000 // 80 + 1
+
+
 def test_profile_options_project_gpt_5_4_medium_without_mutating_base_settings():
     settings = Settings(llm={"provider": "ollama"})
     snapshot = {

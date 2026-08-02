@@ -1,13 +1,30 @@
 """Summary template registry: lookup, fallback, and prompt rendering."""
 
-from localplaud.worker.summary_templates import TEMPLATES, get_template, render_prompt
+from localplaud.worker.summary_templates import (
+    TEMPLATES,
+    get_template,
+    render_prompt,
+    render_resolved_prompt,
+)
 
 
 def test_registry_templates_are_complete():
     assert {"default", "meeting", "call", "lecture", "personal"} <= set(TEMPLATES)
+    assert {
+        "plaud-autopilot",
+        "plaud-key-metrics",
+        "plaud-intent-analysis",
+        "plaud-meeting-narrative",
+        "plaud-lecture-deep-dive",
+        "plaud-research-interview",
+        "plaud-interview",
+        "plaud-full-transcript",
+        "plaud-meeting-minutes",
+        "plaud-meeting-highlights",
+    } <= set(TEMPLATES)
     for name, template in TEMPLATES.items():
         assert template.name == name
-        assert template.system.strip()
+        assert (template.system or "").strip() or template.prompt_mode == "direct"
         assert template.instructions.strip()
 
 
@@ -33,3 +50,15 @@ def test_render_prompt_unknown_template_uses_default():
     assert system == TEMPLATES["default"].system
     assert TEMPLATES["default"].instructions in prompt
     assert "hello" in prompt
+
+
+def test_plaud_template_uses_the_copied_prompt_without_local_structure():
+    template = TEMPLATES["plaud-autopilot"]
+    system, prompt = render_resolved_prompt(template, "SPEAKER_00: test transcript")
+
+    assert template.prompt_mode == "direct"
+    assert template.provenance == "plaud-web-readonly"
+    assert system is None
+    assert prompt.startswith(template.instructions)
+    assert "SPEAKER_00: test transcript" in prompt
+    assert "Summarize the following transcript as Markdown with exactly these sections" not in prompt
