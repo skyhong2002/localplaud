@@ -168,7 +168,7 @@ def test_whisperx_preserves_empty_zero_duration_placeholders(monkeypatch, tmp_pa
                         "text": "spoken",
                         "start": 1.0,
                         "end": 2.0,
-                        "avg_logprob": 1.0,
+                        "avg_logprob": 0.0,
                         "words": [{"word": "spoken", "start": 1.0, "end": 2.0}],
                     }
                 ]
@@ -183,8 +183,10 @@ def test_whisperx_preserves_empty_zero_duration_placeholders(monkeypatch, tmp_pa
         audio,
         Transcript(
             segments=[
-                Segment(text="", start=0, end=0),
                 Segment(text="spoken", start=1, end=2),
+                # MLX bookkeeping placeholders can be emitted after a speech
+                # segment while retaining an earlier timestamp.
+                Segment(text="", start=0, end=0),
             ],
             language="en",
         ),
@@ -193,8 +195,8 @@ def test_whisperx_preserves_empty_zero_duration_placeholders(monkeypatch, tmp_pa
         options={"device": "cpu", "min_segment_coverage": 1.0},
     )
 
-    assert result.transcript.segments[0].text == ""
-    assert result.transcript.segments[0].words == []
+    assert result.transcript.segments[1].text == ""
+    assert result.transcript.segments[1].words == []
     assert result.detail["skipped_empty_segments"] == 1
     assert result.detail["alignable_segment_count"] == 1
     assert result.detail["segment_coverage"] == 1.0

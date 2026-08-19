@@ -54,9 +54,15 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
             raise AlignmentError(f"segment {segment_index} has a non-finite timestamp")
         if segment.start < 0 or segment.end < segment.start:
             raise AlignmentError(f"segment {segment_index} has an invalid timestamp range")
-        if segment.start < previous_segment_start:
-            raise AlignmentError(f"segment {segment_index} is not chronologically ordered")
-        previous_segment_start = segment.start
+        # Some Whisper providers emit content-free bookkeeping placeholders at
+        # chunk boundaries. Their stale timestamp can fall behind the adjacent
+        # speech segments even though they carry no text or words. Preserve and
+        # validate the placeholder, but do not let it corrupt speech chronology.
+        empty_placeholder = not segment.text.strip() and not segment.words
+        if not empty_placeholder:
+            if segment.start < previous_segment_start:
+                raise AlignmentError(f"segment {segment_index} is not chronologically ordered")
+            previous_segment_start = segment.start
         if segment.words:
             timed_segments += 1
         for word_index, word in enumerate(segment.words):
