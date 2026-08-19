@@ -120,27 +120,56 @@ _SUMMARY_OUTPUT_SCHEMA = {
     "properties": {
         "title": {"type": "string"},
         "content_md": {"type": "string"},
+        "tags": {
+            "type": "object",
+            "additionalProperties": False,
+            "description": "High-signal archive labels grounded only in the transcript.",
+            "properties": {
+                "topics": {
+                    "type": "array",
+                    "description": "Two to five short subject labels.",
+                    "items": {"type": "string"},
+                },
+                "people": {
+                    "type": "array",
+                    "description": "Named people only; never anonymous speaker labels.",
+                    "items": {"type": "string"},
+                },
+                "orgs": {
+                    "type": "array",
+                    "description": "Named organizations, companies, teams, or groups.",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["topics", "people", "orgs"],
+        },
     },
-    "required": ["title", "content_md"],
+    "required": ["title", "content_md", "tags"],
 }
 
 
-def _summary_output(raw: str) -> tuple[str | None, str]:
+def _summary_output(raw: str) -> tuple[str | None, str, dict[str, list[str]] | None]:
     """Accept the typed one-call contract, with Markdown fallback for adapters
     that do not implement structured output."""
     try:
         parsed = json.loads(raw)
     except (TypeError, json.JSONDecodeError):
-        return _extract_title(raw), raw
+        return _extract_title(raw), raw, None
     if not isinstance(parsed, dict):
-        return _extract_title(raw), raw
+        return _extract_title(raw), raw, None
     content = parsed.get("content_md")
     title = parsed.get("title")
     if not isinstance(content, str) or not content.strip():
-        return _extract_title(raw), raw
+        return _extract_title(raw), raw, None
+    from .tagging import normalize_tag_payload
+
+    embedded_tags = (
+        normalize_tag_payload(parsed["tags"]) if isinstance(parsed.get("tags"), dict) else None
+    )
     return (
         title.strip() if isinstance(title, str) and title.strip() else _extract_title(content),
         content.strip(),
+        embedded_tags,
     )
 
 
@@ -225,17 +254,16 @@ def summarize(
         max_tokens=1500,
         json_schema=_SUMMARY_OUTPUT_SCHEMA,
     )
-    title, content = _summary_output(raw_content)
+    title, content, embedded_tags = _summary_output(raw_content)
     provider, model = _llm_provider_model(settings)
     # Extract typed tags from the default note on the same host that made the
     # summary (the WSL worker), so the controller never needs its own LLM call.
     from .tagging import extract_tags
 
-    tags = (
-        extract_tags(content, settings)
-        if resolved_template.name == settings.pipeline.summary_template
-        else {}
-    )
+    if resolved_template.name == settings.pipeline.summary_template:
+        tags = embedded_tags if embedded_tags is not None else extract_tags(content, settings)
+    else:
+        tags = {}
     return {
         "title": title,
         "content_md": content,

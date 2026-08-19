@@ -212,14 +212,46 @@ def test_extract_title_none_when_absent():
 
 
 def test_typed_summary_output_keeps_title_separate_from_exact_template_markdown():
-    title, content = _summary_output(
-        '{"title":"星期五新版上線會議","content_md":"## 會議摘要\\n\\n按計畫部署。"}'
+    title, content, tags = _summary_output(
+        '{"title":"星期五新版上線會議","content_md":"## 會議摘要\\n\\n按計畫部署。",'
+        '"tags":{"topics":["部署"],"people":[],"orgs":["產品團隊"]}}'
     )
     assert title == "星期五新版上線會議"
     assert content == "## 會議摘要\n\n按計畫部署。"
+    assert tags == {"topic": ["部署"], "person": [], "org": ["產品團隊"]}
+
+
+def test_typed_summary_reuses_embedded_tags_without_a_second_llm_turn(monkeypatch):
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import summarize
+
+    class OneTurnLlm:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, prompt, **kwargs):
+            self.calls.append((prompt, kwargs))
+            return (
+                '{"title":"研究會議","content_md":"## 摘要\\n\\n討論研究設計。",'
+                '"tags":{"topics":["研究設計"],"people":[],"orgs":[]}}'
+            )
+
+    llm = OneTurnLlm()
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: llm)
+
+    result = summarize(
+        _transcript(Segment(text="討論研究設計", start=0, end=1)),
+        Settings(),
+    )
+
+    assert len(llm.calls) == 1
+    assert result["title"] == "研究會議"
+    assert result["tags"] == {"topic": ["研究設計"], "person": [], "org": []}
+    assert "tags" in llm.calls[0][1]["json_schema"]["required"]
 
 
 def test_summary_output_falls_back_to_plain_markdown():
-    title, content = _summary_output("# Weekly Sync\n\n- Ship Friday")
+    title, content, tags = _summary_output("# Weekly Sync\n\n- Ship Friday")
     assert title == "Weekly Sync"
     assert content == "# Weekly Sync\n\n- Ship Friday"
+    assert tags is None

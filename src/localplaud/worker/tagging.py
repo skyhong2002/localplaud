@@ -92,6 +92,32 @@ def _clean(value: object) -> str | None:
     return text[:_TAG_MAXLEN] or None
 
 
+def normalize_tag_payload(data: object) -> dict[str, list[str]]:
+    """Validate, clean, deduplicate, and cap a structured tag payload."""
+    if not isinstance(data, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for json_key, kind in (("topics", "topic"), ("people", "person"), ("orgs", "org")):
+        seen: set[str] = set()
+        picked: list[str] = []
+        values = data.get(json_key)
+        if not isinstance(values, list):
+            values = []
+        for item in values:
+            name = _clean(item)
+            if not name:
+                continue
+            low = name.casefold()
+            if low in seen:
+                continue
+            seen.add(low)
+            picked.append(name)
+            if len(picked) >= _LIMITS[kind]:
+                break
+        result[kind] = picked
+    return result
+
+
 def extract_tags(summary: str, settings: Settings) -> dict[str, list[str]]:
     """Return ``{"topic": [...], "person": [...], "org": [...]}``; ``{}`` on any failure."""
     if not summary or not summary.strip():
@@ -108,24 +134,7 @@ def extract_tags(summary: str, settings: Settings) -> dict[str, list[str]]:
     except (LLMError, Exception) as exc:  # noqa: BLE001 - tagging must never break the pipeline
         log.warning("tag extraction failed: %s", exc)
         return {}
-    data = _parse_json(raw)
-    result: dict[str, list[str]] = {}
-    for json_key, kind in (("topics", "topic"), ("people", "person"), ("orgs", "org")):
-        seen: set[str] = set()
-        picked: list[str] = []
-        for item in data.get(json_key) or []:
-            name = _clean(item)
-            if not name:
-                continue
-            low = name.casefold()
-            if low in seen:
-                continue
-            seen.add(low)
-            picked.append(name)
-            if len(picked) >= _LIMITS[kind]:
-                break
-        result[kind] = picked
-    return result
+    return normalize_tag_payload(_parse_json(raw))
 
 
 def _get_or_create_tag(session, name: str, kind: str) -> Tag:
