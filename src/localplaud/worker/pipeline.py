@@ -2509,7 +2509,7 @@ def _persist_aligned_transcript(file_id: str, transcript: Transcript) -> None:
         )
         if row is None:
             raise ValueError("forced alignment requires a persisted local transcript")
-        if transcript.text != row.text:
+        if _immutable_text_key(transcript.text) != _immutable_text_key(row.text):
             raise ValueError("forced alignment cannot replace immutable ASR text")
         segments = [asdict(segment) for segment in transcript.segments]
         row.segments = segments

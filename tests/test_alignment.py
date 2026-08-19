@@ -1018,7 +1018,7 @@ def test_pipeline_dispatches_forced_alignment_and_resumes_without_replacing_edit
         Transcript(
             segments=[
                 Segment(
-                    text="hello world",
+                    text="hello  world",
                     start=0.12,
                     end=0.92,
                     words=[Word(text="hello world", start=0.12, end=0.92)],
@@ -1029,6 +1029,16 @@ def test_pipeline_dispatches_forced_alignment_and_resumes_without_replacing_edit
             model="large-v3-turbo",
         ),
     )
+    with pytest.raises(ValueError, match="immutable ASR text"):
+        _persist_aligned_transcript(
+            "forced",
+            Transcript(
+                segments=[Segment(text="hello there", start=0.12, end=0.92)],
+                language="en",
+                provider="faster-whisper",
+                model="large-v3-turbo",
+            ),
+        )
     with session_scope() as session:
         row = session.get(PlaudFile, "forced")
         assert row.local_transcript.id == transcript_id
