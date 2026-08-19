@@ -20,10 +20,26 @@ Full pre-audit engineering detail lives in this file's git history.
   with WhisperX/wav2vec2 forced alignment; diarize / summarize / mind-map / embed
   dispatched to the **WSL RTX 5060 remote worker** over Tailscale; transcript
   polish and Ask currently use the Mac's local `qwen3.5:9b` through Ollama.
+- **WSL CUDA ASR is verified but intentionally non-default.** A real 43-second
+  recording completed on the RTX 5060 with faster-whisper `large-v3-turbo`
+  (16.063 s, observed 68% GPU / 3.74 GB VRAM) and then passed the complete
+  12-check pipeline. The same short file took 5.559 s on Mac MLX, so the
+  production default remains Mac MLX until a representative long-file benchmark
+  demonstrates a throughput win.
+- **Production authentication is enabled.** Caddy terminates HTTPS and
+  localplaud owns the password/session login; credentials and session secret are
+  stored only in the ignored mode-0600 `.env` and macOS Keychain. Anonymous
+  browser traffic is redirected to `/login`, API-style traffic fails with 401,
+  and `/healthz` remains available to monitoring.
 - **Backlog** (production DB, 2026-08-19, before the repaired queue is resumed):
-  232 done · 42 partial · **565 error** · 5 metadata-only.
+  234 done · 45 partial · **560 error** · 5 metadata-only. All 123 current
+  generated/saved-note knowledge documents are indexed (0 pending/failed).
   The WSL GPU worker is the throughput bottleneck; `concurrency = 1` on the
   16 GB Mac is deliberate (2× Whisper pushed it into swap).
+- **Large-library controls are lazy-loaded.** The homepage no longer renders
+  562 tag buttons and every organization row up front; the real production HTML
+  fell from 1,456,500 to 430,698 bytes while tag filtering and bulk organization
+  remain available on demand.
 - Legacy DB migration (note_templates / vocabulary_terms / stage_attempts /
   ask_messages) completed 2026-07-13 with verified row counts and integrity
   checks; details in `CONTINUATION.md` git history.
@@ -34,21 +50,18 @@ Full pre-audit engineering detail lives in this file's git history.
 
 - **WhisperX forced-alignment validation.** `align:whisperx` /
   `wav2vec2-auto` are now the production default. A real 43-second Mandarin
-  recording passed all 12 independence checks on 2026-08-19, including 93
-  forced-aligned word timestamps and the full Mac-to-WSL pipeline. Broader
-  Taiwan Mandarin and Mandarin/English accuracy, timestamp, speed, and memory
-  benchmarking is still required before considering this quality validation
-  complete.
+  recording passed all 12 independence checks on 2026-08-19. Two previously
+  failing long recordings also completed after empty-placeholder hardening: one
+  aligned 8,879 words at 100% segment coverage and the other aligned 6,771 words
+  across all 169 non-empty segments while preserving one empty bookkeeping
+  placeholder. Broader Taiwan Mandarin and Mandarin/English accuracy, timestamp,
+  speed, and memory benchmarking is still required before considering this
+  quality validation complete.
 - **VAD validation.** `asr.vad.enabled` remains default-off (implementation
   is complete for both mlx and faster-whisper paths). Benchmark on real
   Taiwan Mandarin / code-switch recordings before enabling by default. No
   benchmark harness exists anywhere in the repo — building one is part of
   this item (it also unblocks the two items above).
-- **CUDA ASR still unverified.** The WSL worker serves diarize/notes/embed in
-  production, but ASR runs on the Mac; the configured faster-whisper fallback
-  is CPU `large-v3` int8, not turbo-on-CUDA. Verify large-v3-turbo through
-  faster-whisper on the WSL worker host before claiming the NVIDIA ASR
-  profile (the only CUDA host after the single-deployment decision).
 - **Cross-host artifact contract for the live Mac↔WSL pair.** Per-artifact
   SHA-256 verification is tested, but nothing compares the same recording's
   artifacts produced on the two production hosts —
@@ -59,8 +72,8 @@ Full pre-audit engineering detail lives in this file's git history.
 ### P0 — operations
 
 - **Drain the repaired backlog.** The 2026-08-19 repair restored the missing
-  worker secret, rotated it, synchronized the WSL worker, and proved one real
-  end-to-end recording. Requeue the remaining 565 error and 42 partial rows;
+  worker secret, rotated it, synchronized the WSL worker, and proved short and
+  long real end-to-end recordings. Requeue the remaining 560 error and 45 partial rows;
   processing remains bounded by the WSL GPU and fresh uploads stay ahead of
   historical work by design.
 
