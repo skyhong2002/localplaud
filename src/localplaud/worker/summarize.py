@@ -22,34 +22,6 @@ def _llm_provider_model(settings: Settings) -> tuple[str, str | None]:
     return provider, getattr(config, "model", None)
 
 
-_SYSTEM = (
-    "You are a meticulous meeting-notes assistant. You are given a transcript "
-    "(possibly with speaker labels and multiple languages). Produce clear, "
-    "faithful notes. Never invent facts not present in the transcript. Reply "
-    "in the transcript's dominant language."
-)
-
-_TEMPLATE = """\
-Summarize the following transcript as Markdown with exactly these sections:
-
-# <a short descriptive title>
-
-## Summary
-A concise paragraph capturing what this recording is about.
-
-## Key Points
-- bullet points of the most important information
-
-## Action Items
-- concrete follow-ups, decisions, or TODOs (write "None" if there are none)
-
-Transcript:
----
-{transcript}
----
-"""
-
-
 def _render_transcript(transcript: AsrTranscript, max_chars: int | None = None) -> str:
     lines: list[str] = []
     for seg in transcript.segments:

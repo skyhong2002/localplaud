@@ -282,8 +282,8 @@ def get_template(name: str) -> SummaryTemplate:
 
 
 def bootstrap_note_templates(session) -> None:
-    """Keep the built-in catalog aligned without touching personal templates."""
-    from sqlalchemy import select
+    """Version built-ins to the exact captured catalog without touching personal templates."""
+    from sqlalchemy import func, select
 
     from ..db.models import NoteTemplate
 
@@ -309,19 +309,36 @@ def bootstrap_note_templates(session) -> None:
             .values(note_template_key="plaud-autopilot")
         )
 
-    existing = set(session.scalars(select(NoteTemplate.key)).all())
     for key, template in TEMPLATES.items():
-        if key in existing:
+        current = session.scalar(
+            select(NoteTemplate)
+            .where(NoteTemplate.key == key, NoteTemplate.is_active.is_(True))
+            .order_by(NoteTemplate.version.desc())
+        )
+        expected = {
+            "name": template.display_name or key.replace("-", " ").title(),
+            "system_prompt": template.system or "",
+            "instructions": template.instructions,
+            "prompt_mode": template.prompt_mode,
+            "provenance": template.provenance,
+        }
+        if (
+            current is not None
+            and current.is_builtin
+            and all(getattr(current, field) == value for field, value in expected.items())
+        ):
             continue
+        if current is not None:
+            current.is_active = False
+        version = (
+            session.scalar(select(func.max(NoteTemplate.version)).where(NoteTemplate.key == key))
+            or 0
+        ) + 1
         session.add(
             NoteTemplate(
                 key=key,
-                version=1,
-                name=template.display_name or key.replace("-", " ").title(),
-                system_prompt=template.system or "",
-                instructions=template.instructions,
-                prompt_mode=template.prompt_mode,
-                provenance=template.provenance,
+                version=version,
+                **expected,
                 is_builtin=True,
                 is_active=True,
             )

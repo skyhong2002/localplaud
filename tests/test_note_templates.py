@@ -133,6 +133,35 @@ def test_bootstrap_archives_removed_builtin_templates(monkeypatch, tmp_path):
         assert session.get(PlaudFile, "legacy-template").note_template_key == "plaud-autopilot"
 
 
+def test_bootstrap_versions_stale_builtin_to_exact_plaud_snapshot(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    from sqlalchemy import select
+
+    from localplaud.db.models import NoteTemplate
+    from localplaud.db.session import session_scope
+    from localplaud.worker.summary_templates import TEMPLATES, bootstrap_note_templates
+
+    with session_scope() as session:
+        current = session.scalar(
+            select(NoteTemplate).where(
+                NoteTemplate.key == "plaud-autopilot",
+                NoteTemplate.is_active.is_(True),
+            )
+        )
+        current.instructions = "locally authored stale substitute"
+
+    with session_scope() as session:
+        bootstrap_note_templates(session)
+
+    history = client.get("/api/note-templates?include_history=true").json()["templates"]
+    autopilot = [row for row in history if row["key"] == "plaud-autopilot"]
+    assert [row["version"] for row in autopilot] == [2, 1]
+    assert autopilot[0]["is_active"] is True
+    assert autopilot[0]["instructions"] == TEMPLATES["plaud-autopilot"].instructions
+    assert autopilot[0]["provenance"] == "plaud-web-readonly"
+    assert autopilot[1]["is_active"] is False
+
+
 def test_catalog_metadata_and_copy_to_my_space(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     meeting = next(
