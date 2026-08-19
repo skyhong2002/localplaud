@@ -90,6 +90,52 @@ def test_untimed_asr_evidence_does_not_corrupt_timed_segment_chronology():
     assert detail["segment_coverage"] == pytest.approx(2 / 3)
 
 
+def test_small_cross_segment_start_overlap_is_recorded():
+    transcript = Transcript(
+        segments=[
+            Segment(
+                text="first",
+                start=1.0,
+                end=2.0,
+                words=[Word(text="first", start=1.0, end=2.0)],
+            ),
+            Segment(
+                text="second",
+                start=0.8,
+                end=3.0,
+                words=[Word(text="second", start=0.8, end=3.0)],
+            ),
+        ]
+    )
+
+    detail = inspect_word_alignment(transcript)
+
+    assert detail["cross_segment_start_overlaps"] == 1
+    assert detail["cross_segment_word_overlaps"] == 1
+
+
+def test_materially_reversed_segment_timeline_is_rejected():
+    transcript = Transcript(
+        segments=[
+            Segment(
+                text="first",
+                start=2.0,
+                end=3.0,
+                words=[Word(text="first", start=2.0, end=3.0)],
+            ),
+            Segment(
+                text="second",
+                start=1.0,
+                end=4.0,
+                words=[Word(text="second", start=1.0, end=4.0)],
+            ),
+        ]
+    )
+
+    with pytest.raises(AlignmentError, match="chronologically ordered"):
+        inspect_word_alignment(transcript)
+
+
 def test_standalone_punctuation_is_not_a_speech_chronology_anchor():
     transcript = Transcript(
         segments=[
@@ -689,6 +735,59 @@ def test_whisperx_segment_bounds_expand_to_contain_word_evidence(monkeypatch, tm
     assert result.transcript.segments[0].start == 0.1
     assert result.transcript.segments[0].end == 0.9
     assert result.detail["segment_coverage"] == 1.0
+
+
+def test_whisperx_sorts_words_across_overlapping_sentence_parts(monkeypatch, tmp_path):
+    import localplaud.worker.align as alignment
+
+    class OverlappingPartsWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(*_args, **_kwargs):
+            return {
+                "segments": [
+                    {
+                        "text": "later",
+                        "start": 0.0,
+                        "end": 1.0,
+                        "avg_logprob": 0.0,
+                        "words": [{"word": "later", "start": 0.5, "end": 0.9}],
+                    },
+                    {
+                        "text": "earlier",
+                        "start": 0.0,
+                        "end": 1.0,
+                        "avg_logprob": 0.0,
+                        "words": [{"word": "earlier", "start": 0.1, "end": 0.4}],
+                    },
+                ]
+            }
+
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: OverlappingPartsWhisperX)
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    result = run_alignment(
+        audio,
+        Transcript(segments=[Segment(text="earlier later", start=0, end=1)], language="en"),
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 1.0},
+    )
+
+    assert [word.text for word in result.transcript.segments[0].words] == [
+        "earlier",
+        "later",
+    ]
+    assert result.detail["reordered_word_segments"] == 1
 
 
 def test_whisperx_preserves_text_bearing_zero_duration_placeholder(monkeypatch, tmp_path):

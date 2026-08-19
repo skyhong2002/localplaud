@@ -17,6 +17,7 @@ WHISPERX_AUTO_MODEL = "wav2vec2-auto"
 # one-frame trellis and divides by ``trellis.size(0) - 1``. Keep a small safety
 # margin above the roughly 45 ms required for two frames at 16 kHz.
 _WHISPERX_MIN_SEGMENT_SECONDS = 0.05
+_MAX_CROSS_SEGMENT_START_REGRESSION_SECONDS = 0.5
 _TIMESTAMP_PROVIDERS = {
     PROVIDER_TIMESTAMPS,
     "assemblyai",
@@ -73,6 +74,7 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
     previous_segment_start = -1.0
     previous_global_word_start = -1.0
     cross_segment_word_overlaps = 0
+    cross_segment_start_overlaps = 0
     timed_segments = 0
     untimed_segments = 0
     nonlexical_timed_segments = 0
@@ -95,8 +97,19 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
             nonlexical_timed_segments += 1
         else:
             if segment.start < previous_segment_start:
-                raise AlignmentError(f"segment {segment_index} is not chronologically ordered")
-            previous_segment_start = segment.start
+                regression = previous_segment_start - segment.start
+                # Adjacent ASR chunks can share a small amount of audio. Once
+                # WhisperX expands sentence bounds to include word evidence,
+                # that legitimate overlap can also make the next segment's
+                # start precede the previous start by a fraction of a second.
+                # Preserve the provider evidence, but still reject materially
+                # out-of-order segment timelines.
+                if regression > _MAX_CROSS_SEGMENT_START_REGRESSION_SECONDS:
+                    raise AlignmentError(
+                        f"segment {segment_index} is not chronologically ordered"
+                    )
+                cross_segment_start_overlaps += 1
+            previous_segment_start = max(previous_segment_start, segment.start)
         if segment.words:
             timed_segments += 1
         previous_word_start = -1.0
@@ -133,6 +146,8 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
     }
     if cross_segment_word_overlaps:
         detail["cross_segment_word_overlaps"] = cross_segment_word_overlaps
+    if cross_segment_start_overlaps:
+        detail["cross_segment_start_overlaps"] = cross_segment_start_overlaps
     if untimed_segments:
         detail["untimed_segments"] = untimed_segments
     if nonlexical_timed_segments:
@@ -368,6 +383,7 @@ def _forced_align_whisperx(
     segments: list[Segment] = []
     unaligned_words = 0
     unaligned_segments = 0
+    reordered_word_segments = 0
     omitted_segment_indexes: list[int] = []
     for index, source in enumerate(transcript.segments):
         # WhisperX normally emits sentence parts chronologically, but an
@@ -420,6 +436,14 @@ def _forced_align_whisperx(
                         ),
                     )
                 )
+        ordered_words = sorted(words, key=lambda word: (word.start, word.end))
+        if ordered_words != words:
+            # Sentence parts are sorted above, but overlapping WhisperX parts
+            # can still contribute word lists whose boundary timestamps cross.
+            # Normalize only this forced-alignment reconstruction; generic
+            # provider output remains strictly validated as received.
+            reordered_word_segments += 1
+            words = ordered_words
         if not words:
             unaligned_segments += 1
         starts = [float(part["start"]) for part in parts if part.get("start") is not None]
@@ -480,6 +504,8 @@ def _forced_align_whisperx(
     if omitted_segment_indexes:
         detail["omitted_segments"] = len(omitted_segment_indexes)
         detail["omitted_segment_indexes"] = omitted_segment_indexes
+    if reordered_word_segments:
+        detail["reordered_word_segments"] = reordered_word_segments
     if timestamp_mapped_segments:
         detail["timestamp_mapped_segments"] = timestamp_mapped_segments
     if nearest_mapped_segments:
