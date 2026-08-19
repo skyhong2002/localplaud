@@ -72,6 +72,15 @@ def _complete_document(session, document, text: str, vector=(1.0, 0.0)):
     )
 
 
+def test_note_chunks_canonicalize_slice_boundary_whitespace():
+    from localplaud.worker.knowledge_index import build_note_chunks
+
+    chunks = build_note_chunks("Title", "a" * 699 + " " + "b", target_chars=700)
+
+    assert len(chunks) == 2
+    assert all(chunk == chunk.strip() for chunk in chunks)
+
+
 def test_library_and_file_ask_retrieve_current_generated_and_saved_notes(monkeypatch, tmp_path):
     settings = _database(monkeypatch, tmp_path)
     from localplaud.db.models import Summary, UserNote

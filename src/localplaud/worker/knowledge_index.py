@@ -667,7 +667,12 @@ def build_note_chunks(title: str, content: str, target_chars: int = 700) -> list
         nonlocal current, current_chars
         if current:
             body = "\n\n".join(current)
-            chunks.append(f"{heading}\n\n{body}" if heading else body)
+            # The remote transcript chunker canonicalizes segment boundaries
+            # with ``strip()`` before embedding. Do the same here so a slice
+            # that happens to end on whitespace is not falsely reported as
+            # provider-side text mutation when its vector returns.
+            passage = f"{heading}\n\n{body}" if heading else body
+            chunks.append(passage.strip())
         current, current_chars = [], 0
 
     for paragraph in paragraphs:
