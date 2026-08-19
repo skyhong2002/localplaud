@@ -49,6 +49,26 @@ def _has_lexical_content(value: str) -> bool:
     return any(character.isalnum() for character in value)
 
 
+def _segment_encompassing_own_words(segment: Segment) -> tuple[Segment, bool]:
+    """Preserve an ASR segment while making its coarse bounds contain its words."""
+    if not segment.words:
+        return segment, False
+    start = min(segment.start, *(word.start for word in segment.words))
+    end = max(segment.end, *(word.end for word in segment.words))
+    if start == segment.start and end == segment.end:
+        return segment, False
+    return (
+        Segment(
+            text=segment.text,
+            start=start,
+            end=end,
+            speaker=segment.speaker,
+            words=segment.words,
+        ),
+        True,
+    )
+
+
 class AlignmentError(RuntimeError):
     """Alignment executed but returned invalid or incomplete timing evidence."""
 
@@ -112,9 +132,7 @@ def inspect_word_alignment(
                     regression > _MAX_CROSS_SEGMENT_START_REGRESSION_SECONDS
                     and not allow_overlapping_segment_starts
                 ):
-                    raise AlignmentError(
-                        f"segment {segment_index} is not chronologically ordered"
-                    )
+                    raise AlignmentError(f"segment {segment_index} is not chronologically ordered")
                 cross_segment_start_overlaps += 1
             previous_segment_start = max(previous_segment_start, segment.start)
         if segment.words:
@@ -211,9 +229,7 @@ def health(
 def _language_code(language: str | None) -> str:
     value = (language or "").strip().lower().replace("_", "-")
     if not value or value == "auto":
-        raise AlignmentUnavailable(
-            "WhisperX forced alignment requires the ASR transcript language"
-        )
+        raise AlignmentUnavailable("WhisperX forced alignment requires the ASR transcript language")
     return value.split("-", 1)[0]
 
 
@@ -236,9 +252,7 @@ def _forced_align_whisperx(
     language = _language_code(transcript.language)
     interpolate = str(options.get("interpolate_method", "nearest"))
     if interpolate not in {"nearest", "linear", "ignore"}:
-        raise AlignmentUnavailable(
-            f"unsupported WhisperX interpolate_method: {interpolate}"
-        )
+        raise AlignmentUnavailable(f"unsupported WhisperX interpolate_method: {interpolate}")
     try:
         minimum_coverage = float(options.get("min_segment_coverage", 0.8))
     except (TypeError, ValueError) as exc:
@@ -315,9 +329,7 @@ def _forced_align_whisperx(
     }
     timestamp_mapped_segments = 0
     nearest_mapped_segments = 0
-    alignable_source_indexes = {
-        int(item["avg_logprob"]) for item in source_segments
-    }
+    alignable_source_indexes = {int(item["avg_logprob"]) for item in source_segments}
     for aligned in aligned_segments:
         if not isinstance(aligned, dict):
             raise AlignmentError("WhisperX returned a non-object segment")
@@ -356,9 +368,7 @@ def _forced_align_whisperx(
             source_index, best_overlap = max(
                 positive_overlaps,
                 key=lambda item: (
-                    _alignment_text_rank(
-                        aligned.get("text"), transcript.segments[item[0]].text
-                    ),
+                    _alignment_text_rank(aligned.get("text"), transcript.segments[item[0]].text),
                     item[1],
                 ),
                 default=(-1, 0.0),
@@ -391,6 +401,7 @@ def _forced_align_whisperx(
     unaligned_words = 0
     unaligned_segments = 0
     reordered_word_segments = 0
+    expanded_source_segment_bounds = 0
     omitted_segment_indexes: list[int] = []
     for index, source in enumerate(transcript.segments):
         # WhisperX normally emits sentence parts chronologically, but an
@@ -410,7 +421,9 @@ def _forced_align_whisperx(
                 continue
             if index in skipped_short_segment_indexes:
                 unaligned_segments += 1
-                segments.append(source)
+                preserved, expanded = _segment_encompassing_own_words(source)
+                expanded_source_segment_bounds += int(expanded)
+                segments.append(preserved)
                 continue
             # WhisperX can occasionally omit one sentence-level item while
             # returning valid word timing for the rest of a long recording.
@@ -420,7 +433,9 @@ def _forced_align_whisperx(
             # discard thousands of otherwise valid word timestamps.
             omitted_segment_indexes.append(index)
             unaligned_segments += 1
-            segments.append(source)
+            preserved, expanded = _segment_encompassing_own_words(source)
+            expanded_source_segment_bounds += int(expanded)
+            segments.append(preserved)
             continue
         words: list[Word] = []
         for part in parts:
@@ -519,6 +534,8 @@ def _forced_align_whisperx(
         detail["omitted_segment_indexes"] = omitted_segment_indexes
     if reordered_word_segments:
         detail["reordered_word_segments"] = reordered_word_segments
+    if expanded_source_segment_bounds:
+        detail["expanded_source_segment_bounds"] = expanded_source_segment_bounds
     if timestamp_mapped_segments:
         detail["timestamp_mapped_segments"] = timestamp_mapped_segments
     if nearest_mapped_segments:
@@ -547,7 +564,7 @@ def run_alignment(
 def selection_uses_forced_alignment(selection: dict[str, Any] | None) -> bool:
     if not selection:
         return False
-    provider = selection.get("provider_type") or str(
-        selection.get("connection", "")
-    ).split(":", 1)[-1]
+    provider = (
+        selection.get("provider_type") or str(selection.get("connection", "")).split(":", 1)[-1]
+    )
     return provider == WHISPERX_PROVIDER

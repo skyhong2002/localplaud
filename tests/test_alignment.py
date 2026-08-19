@@ -154,9 +154,7 @@ def test_forced_alignment_can_preserve_material_cross_chunk_segment_overlap():
         ]
     )
 
-    detail = inspect_word_alignment(
-        transcript, allow_overlapping_segment_starts=True
-    )
+    detail = inspect_word_alignment(transcript, allow_overlapping_segment_starts=True)
 
     assert detail["cross_segment_start_overlaps"] == 1
     assert detail["cross_segment_word_overlaps"] == 1
@@ -244,7 +242,7 @@ def test_whisperx_dispatch_forces_alignment_and_preserves_asr_text(monkeypatch, 
                         "words": [
                             {"word": "world", "start": 0.5, "end": 0.95, "score": 0.88},
                         ],
-                    }
+                    },
                 ]
             }
 
@@ -351,9 +349,7 @@ def test_whisperx_preserves_empty_zero_duration_placeholders(monkeypatch, tmp_pa
     assert result.detail["segment_coverage"] == 1.0
 
 
-def test_whisperx_preserves_too_short_segments_without_one_frame_trellis(
-    monkeypatch, tmp_path
-):
+def test_whisperx_preserves_too_short_segments_without_one_frame_trellis(monkeypatch, tmp_path):
     import localplaud.worker.align as alignment
 
     class ShortSegmentAwareWhisperX:
@@ -405,6 +401,65 @@ def test_whisperx_preserves_too_short_segments_without_one_frame_trellis(
     assert result.detail["skipped_short_segments"] == 1
     assert result.detail["unaligned_segments"] == 1
     assert result.detail["segment_coverage"] == 0.5
+
+
+def test_whisperx_expands_skipped_short_segment_to_preserve_its_word_evidence(
+    monkeypatch, tmp_path
+):
+    import localplaud.worker.align as alignment
+
+    class ShortSegmentAwareWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(segments, *_args, **_kwargs):
+            assert len(segments) == 1
+            return {
+                "segments": [
+                    {
+                        "text": "before",
+                        "start": 982.0,
+                        "end": 983.0,
+                        "words": [{"word": "before", "start": 982.0, "end": 983.0}],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: ShortSegmentAwareWhisperX)
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    result = run_alignment(
+        audio,
+        Transcript(
+            segments=[
+                Segment(text="before", start=982.0, end=983.0),
+                Segment(
+                    text="短句",
+                    start=983.34,
+                    end=983.38,
+                    words=[Word(text="短句", start=983.18, end=983.38)],
+                ),
+            ],
+            language="zh",
+        ),
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 0.5},
+    )
+
+    preserved = result.transcript.segments[1]
+    assert preserved.start == 983.18
+    assert preserved.end == 983.38
+    assert preserved.words[0].start == 983.18
+    assert result.detail["expanded_source_segment_bounds"] == 1
 
 
 def test_whisperx_rejects_missing_language_and_incomplete_output(monkeypatch, tmp_path):
@@ -509,9 +564,7 @@ def test_whisperx_preserves_sparse_omissions_subject_to_coverage(monkeypatch, tm
         )
 
 
-def test_whisperx_orders_split_parts_by_timestamp_before_merging_words(
-    monkeypatch, tmp_path
-):
+def test_whisperx_orders_split_parts_by_timestamp_before_merging_words(monkeypatch, tmp_path):
     import localplaud.worker.align as alignment
 
     class OutOfOrderPartsWhisperX:
@@ -544,9 +597,7 @@ def test_whisperx_orders_split_parts_by_timestamp_before_merging_words(
                 ]
             }
 
-    monkeypatch.setattr(
-        alignment, "_import_whisperx", lambda: OutOfOrderPartsWhisperX
-    )
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: OutOfOrderPartsWhisperX)
     monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
     audio = tmp_path / "audio.wav"
     audio.write_bytes(b"RIFF")
@@ -880,8 +931,9 @@ def test_whisperx_catalog_model_uses_alignment_health_probe(monkeypatch, tmp_pat
     monkeypatch.setattr(
         alignment,
         "health",
-        lambda provider, model, options: calls.append((provider, model, options))
-        or (True, "forced align ready"),
+        lambda provider, model, options: (
+            calls.append((provider, model, options)) or (True, "forced align ready")
+        ),
     )
     with Session(engine) as session:
         bootstrap_default_profile(session, Settings())
@@ -902,6 +954,7 @@ def test_whisperx_catalog_model_uses_alignment_health_probe(monkeypatch, tmp_pat
             {"device": "auto", "interpolate_method": "nearest"},
         )
     ]
+
 
 def test_pipeline_dispatches_forced_alignment_and_resumes_without_replacing_edits(
     monkeypatch, tmp_path
@@ -1024,9 +1077,9 @@ def test_pipeline_dispatches_forced_alignment_and_resumes_without_replacing_edit
         assert (run.provider, run.model) == ("whisperx", "wav2vec2-auto")
         assert run.detail["forced_alignment"] is True
         assert run.resolved_profile_snapshot["stages"]["align"]["connection"] == "align:whisperx"
-        attempt = session.query(StageAttempt).filter_by(
-            file_id="forced", stage=StageName.align
-        ).one()
+        attempt = (
+            session.query(StageAttempt).filter_by(file_id="forced", stage=StageName.align).one()
+        )
         assert attempt.status == StageStatus.completed
         session.add(
             TranscriptRevision(
@@ -1077,10 +1130,7 @@ def test_pipeline_dispatches_forced_alignment_and_resumes_without_replacing_edit
     assert calls[0][1]["interpolate_method"] == "nearest"
     with session_scope() as session:
         row = session.get(PlaudFile, "forced")
-        run = next(
-            item for item in row.stage_runs
-            if item.stage == StageName.align
-        )
+        run = next(item for item in row.stage_runs if item.stage == StageName.align)
         assert run.attempts == 1
         assert (run.provider, run.model) == ("whisperx", "wav2vec2-auto")
         assert row.local_transcript.text == "hello world"
