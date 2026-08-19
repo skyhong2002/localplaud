@@ -13,6 +13,10 @@ from ..asr.base import Segment, Transcript, Word
 PROVIDER_TIMESTAMPS = "provider-word-timestamps"
 WHISPERX_PROVIDER = "whisperx"
 WHISPERX_AUTO_MODEL = "wav2vec2-auto"
+# WhisperX pads sub-25 ms input to 400 samples, but wav2vec2 still produces a
+# one-frame trellis and divides by ``trellis.size(0) - 1``. Keep a small safety
+# margin above the roughly 45 ms required for two frames at 16 kHz.
+_WHISPERX_MIN_SEGMENT_SECONDS = 0.05
 _TIMESTAMP_PROVIDERS = {
     PROVIDER_TIMESTAMPS,
     "assemblyai",
@@ -177,6 +181,7 @@ def _forced_align_whisperx(
         raise AlignmentUnavailable("min_segment_coverage must be between 0 and 1")
     source_segments = []
     skipped_empty_segments = 0
+    skipped_short_segment_indexes: set[int] = set()
     for index, segment in enumerate(transcript.segments):
         if not segment.text.strip():
             # MLX Whisper can emit empty, zero-duration placeholders between
@@ -189,6 +194,12 @@ def _forced_align_whisperx(
             raise AlignmentError(
                 f"input segment {index} has text but no positive duration"
             )
+        if segment.end - segment.start < _WHISPERX_MIN_SEGMENT_SECONDS:
+            # Preserve extremely short ASR fragments as unaligned evidence.
+            # Sending them to WhisperX can create a one-frame trellis whose
+            # timestamp conversion divides by zero.
+            skipped_short_segment_indexes.add(index)
+            continue
         source_segments.append(
             {
                 "text": segment.text,
@@ -278,6 +289,10 @@ def _forced_align_whisperx(
             if not source.text.strip():
                 segments.append(source)
                 continue
+            if index in skipped_short_segment_indexes:
+                unaligned_segments += 1
+                segments.append(source)
+                continue
             raise AlignmentError(f"WhisperX omitted input segment {index}")
         words: list[Word] = []
         for part in parts:
@@ -350,6 +365,7 @@ def _forced_align_whisperx(
         "unaligned_words": unaligned_words,
         "unaligned_segments": unaligned_segments,
         "skipped_empty_segments": skipped_empty_segments,
+        "skipped_short_segments": len(skipped_short_segment_indexes),
         "alignable_segment_count": alignable_segment_count,
     }
     if timestamp_mapped_segments:
