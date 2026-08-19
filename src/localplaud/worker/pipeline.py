@@ -1205,12 +1205,18 @@ def _process_file_claimed(
             existing = _load_transcript(file_id, settings) if not force else None
             if existing is not None:
                 transcript, transcript_source = existing
+                # ``transcript`` may be the canonical corrected revision used by
+                # downstream stages.  The transcribe stage, however, describes
+                # the immutable ASR artifact and must never inherit a correction
+                # provider/model (for example Ollama or a user edit).
+                raw_transcript = _load_raw_transcript(file_id, settings)
+                transcribe_provenance = raw_transcript or transcript
                 log.info("Reusing existing transcript for %s", file_id)
                 _finish_stage(
                     file_id,
                     StageName.transcribe,
-                    provider=transcript.provider,
-                    model=transcript.model,
+                    provider=transcribe_provenance.provider,
+                    model=transcribe_provenance.model,
                     artifact_source=transcript_source,
                     detail={"reused": True},
                 )
