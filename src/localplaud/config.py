@@ -250,7 +250,11 @@ class OllamaConfig(BaseModel):
     # transcript is still covered across sequential chunks with neighbour
     # context, while each JSON response remains small enough to finish and
     # validate reliably.
-    polish_chunk_chars: int = Field(default=4_000, ge=1_000, le=60_000)
+    # 2k keeps prompt + same-length structured output inside the common 4k
+    # context used by local 8-9B Ollama models.  Larger chunks repeatedly reach
+    # the context edge, spend minutes generating truncated JSON, then get
+    # bisected by the structural retry path.
+    polish_chunk_chars: int = Field(default=2_000, ge=1_000, le=60_000)
 
 
 class OpenAILlmConfig(BaseModel):

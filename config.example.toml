@@ -151,6 +151,7 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   [llm.ollama]                   # local, no API key
   host = "http://localhost:11434"
   model = "llama3.1:8b"
+  polish_chunk_chars = 2000      # fits prompt + structured output in a 4k context
 
   [llm.openai]
   # api_key via LOCALPLAUD_LLM__OPENAI__API_KEY

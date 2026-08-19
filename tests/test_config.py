@@ -58,7 +58,7 @@ def test_defaults_without_env(monkeypatch, tmp_path):
     assert s.pipeline.artifact_mode == "independent"
     assert s.pipeline.cloud_import_enabled is False
     assert s.pipeline.polish_chunk_chars == 12_000
-    assert s.llm.ollama.polish_chunk_chars == 4_000
+    assert s.llm.ollama.polish_chunk_chars == 2_000
     assert s.llm.codex_local.polish_chunk_chars == 48_000
     assert s.llm.codex_local.summary_chunk_chars == 240_000
     assert s.llm.codex_local.model == "gpt-5.6-sol"
