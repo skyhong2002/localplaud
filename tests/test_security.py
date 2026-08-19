@@ -135,6 +135,16 @@ def test_favicon_is_public_and_served(monkeypatch, tmp_path):
     icon = client.get("/favicon.ico")
     assert icon.status_code == 200
     assert icon.headers["content-type"] == "image/svg+xml"
+    assert icon.headers["x-robots-tag"] == "noindex, nofollow"
+
+    robots = client.get("/robots.txt")
+    assert robots.status_code == 200
+    assert robots.text == "User-agent: *\nDisallow: /\n"
+    assert robots.headers["x-robots-tag"] == "noindex, nofollow"
+
+    login = client.get("/login")
+    assert login.status_code == 200
+    assert login.headers["x-robots-tag"] == "noindex, nofollow"
 
 
 def test_web_login_can_use_tailnet_only_http_cookie(monkeypatch, tmp_path):

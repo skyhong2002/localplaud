@@ -201,7 +201,7 @@ async def _auth_gate(request: Request, call_next):
     settings = get_settings().api
     token = settings.auth_token
     login_password = settings.login_password
-    public_paths = {"/healthz", "/login", "/favicon.ico"}
+    public_paths = {"/healthz", "/login", "/favicon.ico", "/robots.txt"}
     public_share = request.url.path.startswith("/share/")
     if (
         (token or login_password)
@@ -234,10 +234,17 @@ async def _auth_gate(request: Request, call_next):
                     return RedirectResponse(url=login_url, status_code=303)
             return JSONResponse({"error": "unauthorized"}, status_code=401)
     response = await call_next(request)
+    response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
     if public_share:
-        response.headers["X-Robots-Tag"] = "noindex"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
         response.headers["Cache-Control"] = "private, no-store"
     return response
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots() -> Response:
+    """Tell crawlers that this private recording workspace is not indexable."""
+    return Response("User-agent: *\nDisallow: /\n", media_type="text/plain")
 
 
 @app.get("/favicon.ico", include_in_schema=False)
