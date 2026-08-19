@@ -93,7 +93,9 @@ docker compose --profile gpu up -d --build
 ```
 
 Uses `Dockerfile.cuda` (CUDA 12.8 + PyTorch/torchaudio 2.8 + faster-whisper on GPU + pyannote for
-diarization). Verify the GPU is visible: `docker compose exec localplaud-gpu nvidia-smi`.
+diarization). The image keeps the versioned cuDNN 8 runtime required by
+WhisperX-pinned CTranslate2 alongside the base image's cuDNN 9 runtime. Verify
+the GPU is visible: `docker compose exec localplaud-gpu nvidia-smi`.
 Set `[asr] provider = "faster-whisper"`, model `large-v3-turbo`, device `cuda`,
 and keep the diarization profile enabled with `[diarize] device = "cuda"`.
 

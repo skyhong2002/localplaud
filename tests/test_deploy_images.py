@@ -9,6 +9,8 @@ def test_cuda_image_pins_pyannote_compatible_torch_stack():
     assert "torch==2.8.0 torchaudio==2.8.0" in dockerfile
     assert "torchcodec==0.7" in dockerfile
     assert "download.pytorch.org/whl/cu128" in dockerfile
+    assert "libcudnn8=8.9.7.29-1+cuda12.2" in dockerfile
+    assert "cuDNN 8 runtime alongside it for faster-whisper" in dockerfile
     assert "cu124" not in dockerfile
 
 

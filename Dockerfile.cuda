@@ -18,7 +18,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3.12 python3.12-venv python3.12-dev \
         ffmpeg curl git build-essential \
+        libcudnn8=8.9.7.29-1+cuda12.2 \
     && rm -rf /var/lib/apt/lists/*
+
+# WhisperX 3.4 pins CTranslate2 4.4, whose CUDA backend still links against
+# cuDNN 8. The CUDA 12.8 base provides cuDNN 9 for PyTorch/pyannote, so keep
+# the versioned cuDNN 8 runtime alongside it for faster-whisper. The SONAMEs
+# differ and both runtimes are intentionally required by this combined image.
 
 RUN python3.12 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
