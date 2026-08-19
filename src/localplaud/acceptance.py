@@ -63,6 +63,20 @@ def subscription_independence_report(file_id: str) -> dict:
                 "canonical transcript has source=local",
             ),
             _check(
+                "ai_title",
+                transcript is not None
+                and bool((file.generated_title or "").strip())
+                and bool(file.generated_title_provider)
+                and bool(file.generated_title_model)
+                and file.generated_title_at is not None,
+                (
+                    f"AI title via {file.generated_title_provider}:"
+                    f"{file.generated_title_model}"
+                    if file.generated_title
+                    else "no generated AI title for the local transcript"
+                ),
+            ),
+            _check(
                 "transcript_polish",
                 polished is not None
                 and transcript is not None

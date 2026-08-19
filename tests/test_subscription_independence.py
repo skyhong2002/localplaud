@@ -194,6 +194,7 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     assert {item["name"] for item in report["checks"]} == {
         "raw_audio_local",
         "local_transcript",
+        "ai_title",
         "transcript_polish",
         "timestamped_segments",
         "word_alignment",
@@ -206,6 +207,36 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         "required_exports",
     }
     assert all(item["passed"] for item in report["checks"])
+
+    with session_scope() as session:
+        row = session.get(PlaudFile, "clean")
+        generated_title = (
+            row.generated_title,
+            row.generated_title_provider,
+            row.generated_title_model,
+            row.generated_title_at,
+        )
+        row.generated_title = None
+        row.generated_title_provider = None
+        row.generated_title_model = None
+        row.generated_title_at = None
+    missing_title_report = subscription_independence_report("clean")
+    title_check = next(
+        item for item in missing_title_report["checks"] if item["name"] == "ai_title"
+    )
+    assert title_check == {
+        "name": "ai_title",
+        "passed": False,
+        "detail": "no generated AI title for the local transcript",
+    }
+    with session_scope() as session:
+        row = session.get(PlaudFile, "clean")
+        (
+            row.generated_title,
+            row.generated_title_provider,
+            row.generated_title_model,
+            row.generated_title_at,
+        ) = generated_title
 
     # Whisper-native word timestamps are useful evidence, but they are not a
     # substitute for the forced-alignment requirement in the product gate.
