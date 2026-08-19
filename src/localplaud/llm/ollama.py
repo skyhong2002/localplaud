@@ -25,6 +25,10 @@ class OllamaProvider:
     def model(self) -> str:
         return self.cfg.model
 
+    @property
+    def polish_chunk_chars(self) -> int:
+        return self.cfg.polish_chunk_chars
+
     def available(self) -> bool:
         return self.health()[0]
 

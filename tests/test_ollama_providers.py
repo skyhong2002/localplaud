@@ -92,6 +92,7 @@ def test_ollama_llm_disables_thinking_and_honors_visible_token_budget():
     )
     provider = OllamaProvider(OllamaConfig(host=HOST, model="qwen3.5:9b"))
     assert provider.model == "qwen3.5:9b"
+    assert provider.polish_chunk_chars == 4_000
     schema = {"type": "object"}
     assert (
         provider.complete("make an outline", max_tokens=321, json_schema=schema)

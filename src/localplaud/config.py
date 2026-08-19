@@ -246,6 +246,11 @@ class OllamaConfig(BaseModel):
     # 8 GB card) can legitimately need far longer than the old hard-coded 600s
     # for long map-reduce prompts.
     timeout_seconds: int = 600
+    # Keep structured transcript maps bounded on local 8-9B models. The whole
+    # transcript is still covered across sequential chunks with neighbour
+    # context, while each JSON response remains small enough to finish and
+    # validate reliably.
+    polish_chunk_chars: int = Field(default=4_000, ge=1_000, le=60_000)
 
 
 class OpenAILlmConfig(BaseModel):
