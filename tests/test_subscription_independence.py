@@ -92,7 +92,7 @@ def _providers(monkeypatch):
     )
     monkeypatch.setattr(
         "localplaud.worker.pipeline.polish.polish_transcript",
-        lambda transcript, settings: {
+        lambda transcript, settings, progress=None: {
             "transcript": transcript,
             "provider": settings.llm.provider,
             "model": getattr(settings.llm, settings.llm.provider.replace("-", "_")).model,

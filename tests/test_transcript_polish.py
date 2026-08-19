@@ -72,6 +72,36 @@ def test_polish_preserves_ids_timestamps_speakers_and_words(monkeypatch):
     assert result["prompt_version"] == "transcript-polish/v1"
 
 
+def test_polish_reports_chunk_and_segment_progress(monkeypatch):
+    provider = FakePolisher()
+    provider.polish_chunk_chars = 1_000
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        segments=[
+            Segment(text="x" * 600, start=0, end=1),
+            Segment(text="y" * 600, start=1, end=2),
+        ]
+    )
+    updates = []
+
+    polish_transcript(transcript, Settings(), progress=updates.append)
+
+    assert updates[0] == {
+        "strategy": "contextual-segment-map",
+        "segments": 2,
+        "target_segments_total": 2,
+        "target_segments_completed": 0,
+        "chunks_completed": 0,
+        "chunks_total": 2,
+        "attempts": 0,
+        "split_retries": 0,
+    }
+    assert updates[-1]["chunks_completed"] == 2
+    assert updates[-1]["chunks_total"] == 2
+    assert updates[-1]["target_segments_completed"] == 2
+    assert updates[-1]["attempts"] == 2
+
+
 def test_polish_preserves_empty_placeholders_without_sending_them_to_llm(monkeypatch):
     provider = FakePolisher()
     monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)

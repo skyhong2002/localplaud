@@ -1020,6 +1020,39 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     }
 
 
+def test_detail_auto_refreshes_and_shows_live_correction_progress(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from sqlalchemy import select
+
+    from localplaud.db.models import StageName, StageRun, StageStatus
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        run = session.scalar(
+            select(StageRun).where(
+                StageRun.file_id == "r1", StageRun.stage == StageName.correct
+            )
+        )
+        run.status = StageStatus.running
+        run.detail = {
+            "strategy": "contextual-segment-map",
+            "progress": {
+                "chunks_completed": 3,
+                "chunks_total": 8,
+                "target_segments_completed": 42,
+                "target_segments_total": 107,
+            },
+        }
+
+    page = c.get("/file/r1")
+
+    assert 'id="processing-details"' in page.text
+    assert 'hx-trigger="every 5s"' in page.text
+    assert 'hx-select="#processing-details"' in page.text
+    assert 'aria-live="polite">3 / 8 chunks · 42 / 107 segments' in page.text
+
+
 def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     audio = tmp_path / "audio.mp3"

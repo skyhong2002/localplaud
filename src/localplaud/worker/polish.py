@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+from collections.abc import Callable
 from dataclasses import asdict
 
 from ..asr.base import Segment, Transcript, Word
@@ -71,7 +72,12 @@ def _json_completion(value: str) -> dict:
     return result
 
 
-def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
+def polish_transcript(
+    transcript: Transcript,
+    settings: Settings,
+    *,
+    progress: Callable[[dict], None] | None = None,
+) -> dict:
     """Return a corrected copy with identical segment/timestamp/speaker structure."""
     provider = build_llm(settings.llm)
     if not provider.available():
@@ -99,6 +105,28 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
     ):
         raise LLMError("transcript polish chunk budget must be between 1000 and 60000")
     pending = list(_chunks(source, chunk_chars))
+    target_segments_total = sum(
+        bool(str(segment.get("text") or "").strip()) for segment in source
+    )
+    target_segments_completed = 0
+
+    def report_progress() -> None:
+        if progress is None:
+            return
+        progress(
+            {
+                "strategy": "contextual-segment-map",
+                "segments": len(source),
+                "target_segments_total": target_segments_total,
+                "target_segments_completed": target_segments_completed,
+                "chunks_completed": calls,
+                "chunks_total": calls + len(pending),
+                "attempts": attempts,
+                "split_retries": split_retries,
+            }
+        )
+
+    report_progress()
     while pending:
         start, end = pending.pop(0)
         target_indexes = [
@@ -188,11 +216,14 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
             midpoint = start + (end - start) // 2
             pending[0:0] = [(start, midpoint), (midpoint, end)]
             split_retries += 1
+            report_progress()
             continue
         for index in target_indexes:
             polished[index]["text"] = by_id[index]
             output_chars += len(by_id[index])
         calls += 1
+        target_segments_completed += len(target_indexes)
+        report_progress()
 
     result = Transcript(
         segments=[],

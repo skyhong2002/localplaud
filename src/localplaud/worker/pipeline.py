@@ -534,6 +534,33 @@ def _set_stage(
         _set_stage_in_session(session, file_id, stage, status, **metadata)
 
 
+def _update_stage_progress(file_id: str, stage: StageName, progress: dict) -> None:
+    """Persist bounded live progress without completing the active attempt."""
+    with session_scope() as session:
+        _assert_processing_claim_in_session(session, file_id)
+        run = session.scalar(
+            select(StageRun).where(
+                StageRun.file_id == file_id,
+                StageRun.stage == stage,
+                StageRun.status == StageStatus.running,
+            )
+        )
+        if run is None:
+            raise RuntimeError(f"{stage.value} progress has no active stage run")
+        run.detail = dict(run.detail or {}) | {"progress": dict(progress)}
+        attempt = session.scalar(
+            select(StageAttempt)
+            .where(
+                StageAttempt.file_id == file_id,
+                StageAttempt.stage == stage,
+                StageAttempt.status == StageStatus.running,
+            )
+            .order_by(StageAttempt.attempt.desc())
+        )
+        if attempt is not None:
+            attempt.usage = dict(attempt.usage or {}) | {"progress": dict(progress)}
+
+
 def _begin_stage_in_session(session, file_id: str, stage: StageName) -> str | None:
     run = session.scalar(
         select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
@@ -1602,7 +1629,13 @@ def _process_file_claimed(
                         "projection": True,
                     }
                     cost_budget = _cost_guard(file_id, "correct", candidate, projected_usage)
-                    result = polish.polish_transcript(transcript, candidate_settings)
+                    result = polish.polish_transcript(
+                        transcript,
+                        candidate_settings,
+                        progress=lambda value: _update_stage_progress(
+                            file_id, StageName.correct, value
+                        ),
+                    )
                     revision = _persist_polished_revision(file_id, result, settings)
                     detail = dict(result.get("detail") or {}) | {
                         "revision": revision,

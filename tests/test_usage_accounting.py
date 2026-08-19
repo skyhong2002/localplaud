@@ -464,6 +464,35 @@ def test_failed_then_successful_stage_keeps_both_attempts(monkeypatch, tmp_path)
         assert rows[1].usage["audio_seconds"] == 12
 
 
+def test_running_stage_progress_is_durable_on_run_and_attempt(monkeypatch, tmp_path):
+    _reset(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile, StageAttempt, StageName, StageRun
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import _begin_stage, _update_stage_progress
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="progress", filename="Progress"))
+    _begin_stage("progress", StageName.correct)
+    value = {
+        "chunks_completed": 2,
+        "chunks_total": 5,
+        "target_segments_completed": 30,
+        "target_segments_total": 80,
+    }
+
+    _update_stage_progress("progress", StageName.correct, value)
+
+    with session_scope() as session:
+        run = session.scalar(
+            select(StageRun).where(StageRun.file_id == "progress")
+        )
+        attempt = session.scalar(
+            select(StageAttempt).where(StageAttempt.file_id == "progress")
+        )
+        assert run.detail["progress"] == value
+        assert attempt.usage["progress"] == value
+
+
 def test_stage_attempt_migration_is_idempotent(tmp_path):
     from localplaud.db.migrations import migrate_stage_attempt_schema
 
