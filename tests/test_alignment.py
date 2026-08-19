@@ -139,9 +139,65 @@ def test_whisperx_dispatch_forces_alignment_and_preserves_asr_text(monkeypatch, 
         "minimum_segment_coverage": 1.0,
         "unaligned_words": 0,
         "unaligned_segments": 0,
+        "skipped_empty_segments": 0,
+        "alignable_segment_count": 1,
     }
     assert calls["load"] == {"language_code": "zh", "device": "cuda"}
     assert calls["align"]["return_char_alignments"] is False
+
+
+def test_whisperx_preserves_empty_zero_duration_placeholders(monkeypatch, tmp_path):
+    import localplaud.worker.align as alignment
+
+    class PlaceholderAwareWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(segments, *_args, **_kwargs):
+            assert len(segments) == 1
+            assert segments[0]["text"] == "spoken"
+            return {
+                "segments": [
+                    {
+                        "text": "spoken",
+                        "start": 1.0,
+                        "end": 2.0,
+                        "avg_logprob": 1.0,
+                        "words": [{"word": "spoken", "start": 1.0, "end": 2.0}],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: PlaceholderAwareWhisperX)
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    result = run_alignment(
+        audio,
+        Transcript(
+            segments=[
+                Segment(text="", start=0, end=0),
+                Segment(text="spoken", start=1, end=2),
+            ],
+            language="en",
+        ),
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 1.0},
+    )
+
+    assert result.transcript.segments[0].text == ""
+    assert result.transcript.segments[0].words == []
+    assert result.detail["skipped_empty_segments"] == 1
+    assert result.detail["alignable_segment_count"] == 1
+    assert result.detail["segment_coverage"] == 1.0
 
 
 def test_whisperx_rejects_missing_language_and_incomplete_output(monkeypatch, tmp_path):

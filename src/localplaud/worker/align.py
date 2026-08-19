@@ -169,18 +169,30 @@ def _forced_align_whisperx(
         raise AlignmentUnavailable("min_segment_coverage must be a number") from exc
     if not 0 <= minimum_coverage <= 1:
         raise AlignmentUnavailable("min_segment_coverage must be between 0 and 1")
-    source_segments = [
-        {
-            "text": segment.text,
-            "start": segment.start,
-            "end": segment.end,
-            # WhisperX preserves avg_logprob while splitting one input segment
-            # into sentence-level output segments. Use it only as a round-trip
-            # marker so those subsegments can be safely regrouped.
-            "avg_logprob": float(index),
-        }
-        for index, segment in enumerate(transcript.segments)
-    ]
+    source_segments = []
+    skipped_empty_segments = 0
+    for index, segment in enumerate(transcript.segments):
+        if not segment.text.strip():
+            # MLX Whisper can emit empty, zero-duration placeholders between
+            # speech chunks. WhisperX divides by segment duration internally,
+            # so preserve these in the transcript but never send them to the
+            # aligner.
+            skipped_empty_segments += 1
+            continue
+        if segment.end <= segment.start:
+            raise AlignmentError(
+                f"input segment {index} has text but no positive duration"
+            )
+        source_segments.append(
+            {
+                "text": segment.text,
+                "start": segment.start,
+                "end": segment.end,
+                # Older WhisperX versions preserve avg_logprob while splitting
+                # an input segment. Newer releases are mapped by timestamps.
+                "avg_logprob": float(index),
+            }
+        )
     if not source_segments or not any(item["text"].strip() for item in source_segments):
         raise AlignmentUnavailable("WhisperX forced alignment requires transcript segments")
 
@@ -257,6 +269,9 @@ def _forced_align_whisperx(
     for index, source in enumerate(transcript.segments):
         parts = grouped[index]
         if not parts:
+            if not source.text.strip():
+                segments.append(source)
+                continue
             raise AlignmentError(f"WhisperX omitted input segment {index}")
         words: list[Word] = []
         for part in parts:
@@ -304,6 +319,13 @@ def _forced_align_whisperx(
         has_speakers=transcript.has_speakers,
     )
     detail = inspect_word_alignment(result)
+    alignable_segment_count = len(transcript.segments) - skipped_empty_segments
+    aligned_segment_count = sum(
+        bool(segment.words) and bool(segment.text.strip()) for segment in result.segments
+    )
+    detail["segment_coverage"] = (
+        aligned_segment_count / alignable_segment_count if alignable_segment_count else 0.0
+    )
     if detail["segment_coverage"] < minimum_coverage:
         raise AlignmentError(
             "WhisperX aligned segment coverage "
@@ -321,6 +343,8 @@ def _forced_align_whisperx(
         "minimum_segment_coverage": minimum_coverage,
         "unaligned_words": unaligned_words,
         "unaligned_segments": unaligned_segments,
+        "skipped_empty_segments": skipped_empty_segments,
+        "alignable_segment_count": alignable_segment_count,
     }
     if timestamp_mapped_segments:
         detail["timestamp_mapped_segments"] = timestamp_mapped_segments
