@@ -432,7 +432,7 @@ def test_pipeline_persists_priced_attempt_and_usage_api(monkeypatch, tmp_path):
 
 def test_failed_then_successful_stage_keeps_both_attempts(monkeypatch, tmp_path):
     _reset(monkeypatch, tmp_path)
-    from localplaud.db.models import PlaudFile, StageAttempt, StageName
+    from localplaud.db.models import PlaudFile, StageAttempt, StageName, StageRun
     from localplaud.db.session import session_scope
     from localplaud.worker.pipeline import _begin_stage, _fail_stage, _finish_stage
 
@@ -441,6 +441,12 @@ def test_failed_then_successful_stage_keeps_both_attempts(monkeypatch, tmp_path)
     _begin_stage("history", StageName.transcribe)
     _fail_stage("history", StageName.transcribe, RuntimeError("temporary"))
     _begin_stage("history", StageName.transcribe)
+    with session_scope() as session:
+        running = session.scalar(
+            select(StageRun).where(StageRun.file_id == "history")
+        )
+        assert running.detail == {}
+        assert running.error is None
     _finish_stage(
         "history",
         StageName.transcribe,

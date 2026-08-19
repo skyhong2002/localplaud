@@ -60,20 +60,22 @@ The protocol and same-process integration are covered by automated tests.
 
 ## The production topology (mac-wsl-hybrid)
 
-Since 2026-07 the production deployment is one controller plus one worker:
+The production deployment is one controller plus one worker. Since 2026-08-19,
+the system default sends ASR to the WSL CUDA worker after a clean
+`large-v3-turbo` validation run:
 
-- **Controller**: the M4 Mac mini running the full app. ASR stays on the Mac
-  (MLX Whisper large-v3-turbo on Metal) because Docker on macOS cannot pass the
-  GPU through, and the recordings never need to leave the box for transcription.
+- **Controller**: the M4 Mac mini runs the Web App, polling, durable scheduler,
+  WhisperX word alignment, transcript correction, and library Ask. Mac MLX ASR
+  remains an explicit alternate profile, not the production default.
 - **Worker**: a WSL2 host with an RTX 5060, running the pinned CUDA image
   (PyTorch 2.8 / CUDA 12.8 / TorchCodec 0.7 / pyannote 4), reached over
   Tailscale at its tailnet address on port 8081. The execution profile
-  (`mac-wsl-hybrid`, the system default) dispatches **diarize, summarize,
-  mind-map, and embed** to it.
+  (`mac-wsl-hybrid`, the system default) dispatches **transcribe, diarize,
+  summarize, mind-map, and embed** to it. Transcription uses faster-whisper
+  `large-v3-turbo` with `device=cuda`.
 - **GPU serialization**: the controller holds a process-wide GPU lock so only
   one GPU-bound remote stage runs at a time — concurrent pyannote jobs
-  deadlocked the single card. The Mac keeps pipelining CPU/Metal work while a
-  GPU stage is in flight; the worker is the throughput bottleneck by design.
+  deadlocked the single card. The worker is the throughput bottleneck by design.
 
 The worker container must run `localplaud serve`, not `localplaud run`. The
 controller owns Plaud polling and backlog scheduling; `serve` exposes the

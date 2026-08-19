@@ -565,13 +565,24 @@ def _begin_stage_in_session(session, file_id: str, stage: StageName) -> str | No
     run = session.scalar(
         select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
     )
-    stale_generation = (run.detail or {}).get("stale_generation") if run else None
+    previous_detail = dict(run.detail or {}) if run else {}
+    stale_generation = previous_detail.get("stale_generation")
+    running_detail = (
+        previous_detail
+        if previous_detail.get("stale")
+        else (
+            {"stale_generation": stale_generation}
+            if stale_generation is not None
+            else {}
+        )
+    )
     _set_stage_in_session(
         session,
         file_id,
         stage,
         StageStatus.running,
         begin_attempt=True,
+        detail=running_detail,
     )
     return stale_generation
 
