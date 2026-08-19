@@ -1,8 +1,8 @@
-"""Locally generated recording titles: precedence, provenance, and backfill.
+"""Locally generated recording titles: invariant, precedence, and backfill.
 
-A generated title fills in only where the user has not renamed the recording,
-never overrides a manual ``local_title``, and carries provider/model provenance
-so it is not mistaken for a user edit or a Plaud-provided name.
+Every local transcript gets a generated-title artifact. It never overrides the
+display precedence of a manual ``local_title`` and carries provider/model
+provenance so it is not mistaken for a user edit or a Plaud-provided name.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ def _init_db(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'titles.db'}")
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'titles.db'}")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
@@ -23,13 +23,17 @@ def _init_db(monkeypatch, tmp_path):
 
 
 def test_clean_generated_title_strips_markup_and_caps():
-    from localplaud.worker.pipeline import _clean_generated_title
+    from localplaud.worker.pipeline import _clean_generated_title, _generated_title_candidate
 
     assert _clean_generated_title("# 「會議：口琴社」  ") == "會議：口琴社"
     assert _clean_generated_title('  "A Quoted Title"\n') == "A Quoted Title"
     assert _clean_generated_title("   ") is None
     assert _clean_generated_title(None) is None
     assert len(_clean_generated_title("x" * 500)) == 200
+    assert _generated_title_candidate(None, "\n# AI heading\nbody") == "AI heading"
+    assert _generated_title_candidate(None, "**Generated first line**\nbody") == (
+        "Generated first line"
+    )
 
 
 def test_display_title_precedence_and_source():
@@ -78,7 +82,7 @@ def test_apply_generated_title_sets_provenance_when_unnamed(monkeypatch, tmp_pat
         assert row.display_title == "Weekly Sync"
 
 
-def test_apply_generated_title_preserves_manual_and_ignores_secondary_template(
+def test_apply_generated_title_preserves_manual_display_and_ignores_secondary_template(
     monkeypatch, tmp_path
 ):
     _init_db(monkeypatch, tmp_path)
@@ -91,25 +95,43 @@ def test_apply_generated_title_preserves_manual_and_ignores_secondary_template(
     with session_scope() as session:
         session.add(PlaudFile(id="manual", filename="raw", local_title="My hand title"))
         session.add(PlaudFile(id="rec2", filename="raw2"))
+        session.add(PlaudFile(id="auto", filename="raw3"))
 
     with session_scope() as session:
-        # Manual rename must never be overwritten.
+        # Manual display rename stays preferred, but the AI artifact is stored.
         _apply_generated_title(
-            session, "manual", {"title": "Auto title", "provider": "p", "model": "m"},
+            session,
+            "manual",
+            {"title": "Auto title", "provider": "p", "model": "m"},
             default_template,
         )
         # A non-default note template must not rename the recording.
         _apply_generated_title(
-            session, "rec2", {"title": "Auto title", "provider": "p", "model": "m"},
+            session,
+            "rec2",
+            {"title": "Auto title", "provider": "p", "model": "m"},
             default_template + "-other",
         )
+        _apply_generated_title(
+            session,
+            "auto",
+            {
+                "title": None,
+                "content_md": "# Auto-selected heading\nbody",
+                "provider": "p",
+                "model": "m",
+            },
+            default_template + "-auto",
+            primary_summary=True,
+        )
     with session_scope() as session:
-        assert session.get(PlaudFile, "manual").generated_title is None
+        assert session.get(PlaudFile, "manual").generated_title == "Auto title"
         assert session.get(PlaudFile, "manual").display_title == "My hand title"
         assert session.get(PlaudFile, "rec2").generated_title is None
+        assert session.get(PlaudFile, "auto").generated_title == "Auto-selected heading"
 
 
-def test_backfill_titles_cli_fills_unnamed_only(monkeypatch, tmp_path):
+def test_backfill_titles_cli_fills_every_local_transcript(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
     from typer.testing import CliRunner
 
@@ -121,28 +143,64 @@ def test_backfill_titles_cli_fills_unnamed_only(monkeypatch, tmp_path):
 
     template = get_settings().pipeline.summary_template
     with session_scope() as session:
+        from localplaud.db.models import Transcript
+
         session.add(PlaudFile(id="unnamed", filename="raw-1"))
         session.add(PlaudFile(id="named", filename="raw-2", local_title="Kept"))
-        for fid in ("unnamed", "named"):
+        session.add(PlaudFile(id="heading", filename="raw-3"))
+        for fid in ("unnamed", "named", "heading"):
             session.add(
-                SummaryRow(
+                Transcript(
                     file_id=fid,
-                    template=template,
+                    provider="asr",
                     source="local",
-                    title="# Summary Heading",
-                    content_md="body",
-                    llm_provider="remote-worker",
-                    model="qwen3:8b",
+                    text="hello",
+                    segments=[{"text": "hello", "start": 0, "end": 1}],
                 )
             )
+            if fid != "heading":
+                session.add(
+                    SummaryRow(
+                        file_id=fid,
+                        template=template,
+                        source="local",
+                        title="# Summary Heading",
+                        content_md="body",
+                        llm_provider="remote-worker",
+                        model="qwen3:8b",
+                    )
+                )
+        session.add(
+            SummaryRow(
+                file_id="heading",
+                template=template,
+                source="local",
+                title=None,
+                content_md="Generated prose without a Markdown heading.",
+                llm_provider="ollama",
+                model="qwen3:8b",
+            )
+        )
+        session.add(
+            SummaryRow(
+                file_id="heading",
+                template="mind_map",
+                source="local",
+                title=None,
+                content_md="# AI mind-map heading\n- body",
+                llm_provider="ollama",
+                model="qwen3:8b",
+            )
+        )
 
     result = CliRunner().invoke(app, ["backfill-titles"])
     assert result.exit_code == 0, result.output
     with session_scope() as session:
         assert session.get(PlaudFile, "unnamed").generated_title == "Summary Heading"
-        # Manual rename untouched, and no generated title written over it.
-        assert session.get(PlaudFile, "named").generated_title is None
+        # Manual rename remains visible while the generated artifact also exists.
+        assert session.get(PlaudFile, "named").generated_title == "Summary Heading"
         assert session.get(PlaudFile, "named").display_title == "Kept"
+        assert session.get(PlaudFile, "heading").generated_title == "AI mind-map heading"
 
 
 def test_backfill_titles_dry_run_writes_nothing(monkeypatch, tmp_path):
@@ -157,11 +215,27 @@ def test_backfill_titles_dry_run_writes_nothing(monkeypatch, tmp_path):
 
     template = get_settings().pipeline.summary_template
     with session_scope() as session:
+        from localplaud.db.models import Transcript
+
         session.add(PlaudFile(id="rec", filename="raw"))
         session.add(
+            Transcript(
+                file_id="rec",
+                provider="asr",
+                source="local",
+                text="hello",
+                segments=[{"text": "hello", "start": 0, "end": 1}],
+            )
+        )
+        session.add(
             SummaryRow(
-                file_id="rec", template=template, source="local",
-                title="Heading", content_md="b", llm_provider="p", model="m",
+                file_id="rec",
+                template=template,
+                source="local",
+                title="Heading",
+                content_md="b",
+                llm_provider="p",
+                model="m",
             )
         )
     result = CliRunner().invoke(app, ["backfill-titles", "--dry-run"])

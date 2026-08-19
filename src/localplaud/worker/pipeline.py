@@ -2053,7 +2053,11 @@ def _run_derived_stages(
             derived_profile_token = _PROFILE_SNAPSHOT.set(derived_snapshot)
 
         if pcfg.summarize and transcript is not None:
-            if force or not _has_summary(file_id, template_key, derived_snapshot, "summarize"):
+            if (
+                force
+                or not _has_summary(file_id, template_key, derived_snapshot, "summarize")
+                or not _has_generated_title(file_id)
+            ):
                 try:
 
                     def run_summary(candidate):
@@ -2076,7 +2080,14 @@ def _run_derived_stages(
                             result.setdefault("provider", "remote-worker")
                         else:
                             result = summarize.summarize(transcript, candidate_settings)
-                        _persist_summary(file_id, result, transcript_lineage)
+                        _persist_summary(
+                            file_id,
+                            result,
+                            transcript_lineage,
+                            sets_recording_title=True,
+                        )
+                        if not _has_generated_title(file_id):
+                            raise RuntimeError("AI summary returned no usable recording title")
                         return {
                             "value": result,
                             "provider": result.get("provider"),
@@ -2654,21 +2665,57 @@ def _clean_generated_title(raw: object) -> str | None:
     return text[:200] or None
 
 
-def _apply_generated_title(session, file_id: str, result: dict, template: str) -> None:
-    """Populate the recording's generated title from its default-note summary.
+def _generated_title_candidate(title: object, content_md: object = None) -> str | None:
+    """Extract a title from an AI artifact, even when it omitted ``title``.
 
-    Only the default note template sets the recording title, so a secondary
-    note never renames the recording. A manual ``local_title`` is never touched;
-    provenance (provider/model/time) is recorded so the generated title is not
-    mistaken for a user edit.
+    Providers occasionally return useful Markdown but forget the separate title
+    field. Prefer an explicit title, then a level-one heading, and finally the
+    first meaningful generated line so a usable transcript never remains stuck
+    behind a formatting mistake in otherwise successful AI output.
     """
-    if template != get_settings().pipeline.summary_template:
+    explicit = _clean_generated_title(title)
+    if explicit:
+        return explicit
+    lines = [line.strip() for line in str(content_md or "").splitlines() if line.strip()]
+    for line in lines:
+        if line.startswith("# "):
+            return _clean_generated_title(line)
+    for line in lines:
+        candidate = line.lstrip("-*#> ").strip().strip("*_")
+        if candidate:
+            return _clean_generated_title(candidate)
+    return None
+
+
+def _has_generated_title(file_id: str) -> bool:
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        return bool(row and (row.generated_title or "").strip())
+
+
+def _apply_generated_title(
+    session,
+    file_id: str,
+    result: dict,
+    template: str,
+    *,
+    primary_summary: bool = False,
+) -> None:
+    """Populate the recording's generated title from a primary AI note.
+
+    The pipeline's Auto-selected primary template is allowed to set the title,
+    as is the configured default template for compatibility. Secondary notes do
+    not rename a recording. A manual ``local_title`` remains display-preferred,
+    but every transcript still gets a separate generated-title artifact with
+    provider/model provenance.
+    """
+    if not primary_summary and template != get_settings().pipeline.summary_template:
         return
-    title = _clean_generated_title(result.get("title"))
+    title = _generated_title_candidate(result.get("title"), result.get("content_md"))
     if not title:
         return
     row = session.get(PlaudFile, file_id)
-    if row is None or row.local_title:
+    if row is None:
         return
     row.generated_title = title
     row.generated_title_provider = result.get("provider")
@@ -2682,6 +2729,7 @@ def _persist_summary(
     lineage: dict | None = None,
     *,
     expected_mind_map_inputs: dict | None = None,
+    sets_recording_title: bool = False,
 ) -> None:
     from ..note_history import (
         archive_summary,
@@ -2791,7 +2839,13 @@ def _persist_summary(
         session.flush()
         session.add(replacement)
         session.flush()
-        _apply_generated_title(session, file_id, result, template)
+        _apply_generated_title(
+            session,
+            file_id,
+            result,
+            template,
+            primary_summary=sets_recording_title,
+        )
         if template == get_settings().pipeline.summary_template:
             try:
                 from .tagging import apply_tags

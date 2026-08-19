@@ -501,11 +501,10 @@ def backfill_titles(
         None, "--limit", help="Cap the number of recordings changed (newest first)."
     ),
 ):
-    """Fill in locally generated titles from existing summaries.
+    """Fill in locally generated titles from existing AI artifacts.
 
-    Only recordings without a manual rename (``local_title`` is unset) are
-    touched, so this never overrides a title you set by hand. Recordings still
-    showing their raw Plaud filename get their default-note summary title.
+    Every recording with a local transcript gets a distinct generated-title
+    artifact. A manual rename remains display-preferred and is never changed.
     """
     from datetime import UTC, datetime
 
@@ -514,14 +513,14 @@ def backfill_titles(
     from .db.models import PlaudFile
     from .db.models import Summary as SummaryRow
     from .db.session import session_scope
-    from .worker.pipeline import _clean_generated_title
+    from .worker.pipeline import _clean_generated_title, _generated_title_candidate
 
     default_template = get_settings().pipeline.summary_template
     changed = skipped = 0
     with session_scope() as session:
         rows = session.scalars(
             select(PlaudFile)
-            .where(PlaudFile.local_title.is_(None))
+            .where(PlaudFile.transcripts.any(source="local"))
             .order_by(PlaudFile.created_at.desc())
         ).all()
         for r in rows:
@@ -530,16 +529,42 @@ def backfill_titles(
             if r.generated_title and not force:
                 skipped += 1
                 continue
-            summary = session.scalar(
-                select(SummaryRow)
-                .where(
-                    SummaryRow.file_id == r.id,
-                    SummaryRow.template == default_template,
-                    SummaryRow.source == "local",
+            summaries = list(
+                session.scalars(
+                    select(SummaryRow)
+                    .where(SummaryRow.file_id == r.id, SummaryRow.source == "local")
+                    .order_by(SummaryRow.id.desc())
                 )
-                .order_by(SummaryRow.id.desc())
             )
-            title = _clean_generated_title(summary.title) if summary else None
+
+            # Prefer the primary note's explicit title, then any explicit title
+            # or H1 (including a mind-map heading), before a prose fallback.
+            def title_quality(item) -> int:
+                if _clean_generated_title(item.title):
+                    return 0
+                if any(
+                    line.strip().startswith("# ") for line in (item.content_md or "").splitlines()
+                ):
+                    return 1
+                return 2
+
+            ranked = sorted(
+                summaries,
+                key=lambda item: (
+                    title_quality(item),
+                    item.template != default_template,
+                    item.template == "mind_map",
+                ),
+            )
+            selected = next(
+                (
+                    (summary, _generated_title_candidate(summary.title, summary.content_md))
+                    for summary in ranked
+                    if _generated_title_candidate(summary.title, summary.content_md)
+                ),
+                None,
+            )
+            summary, title = selected if selected is not None else (None, None)
             if not title:
                 skipped += 1
                 continue

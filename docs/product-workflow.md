@@ -344,7 +344,11 @@ public link's create/copy/revoke controls.
 Recording titles have a separate local override: editing never mutates Plaud and is
 not overwritten by later metadata sync. The latest cloud title remains visible and
 can be restored with one action; every local user-facing/search/export surface uses
-the override consistently.
+the override consistently. Every recording with a canonical local transcript also
+has a locally generated AI title with provider, model, and creation-time provenance.
+The pipeline's primary note supplies it (including Auto-selected templates), and a
+provider formatting omission falls back to that AI artifact's H1 or first meaningful
+line. A manual override remains display-preferred without deleting the AI title.
 
 Folder and tag metadata is editable directly from the recording header through the
 same atomic organization contract used by Library bulk actions. Counts and filters
