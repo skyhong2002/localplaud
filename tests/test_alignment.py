@@ -40,6 +40,30 @@ def test_provider_word_timestamps_are_validated_without_claiming_forced_alignmen
     }
 
 
+def test_word_timestamps_may_overlap_across_ordered_segments():
+    transcript = Transcript(
+        segments=[
+            Segment(
+                text="first",
+                start=0,
+                end=1.2,
+                words=[Word(text="first", start=1.1, end=1.2)],
+            ),
+            Segment(
+                text="second",
+                start=1.0,
+                end=2.0,
+                words=[Word(text="second", start=1.0, end=1.4)],
+            ),
+        ]
+    )
+
+    detail = inspect_word_alignment(transcript)
+
+    assert detail["cross_segment_word_overlaps"] == 1
+    assert detail["segment_coverage"] == 1.0
+
+
 @pytest.mark.parametrize(
     "words,error,match",
     [

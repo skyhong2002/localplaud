@@ -51,7 +51,8 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
             "ASR provider returned segment timestamps but no word timestamps"
         )
     previous_segment_start = -1.0
-    previous_word_start = -1.0
+    previous_global_word_start = -1.0
+    cross_segment_word_overlaps = 0
     timed_segments = 0
     for segment_index, segment in enumerate(transcript.segments):
         if not math.isfinite(segment.start) or not math.isfinite(segment.end):
@@ -69,6 +70,7 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
             previous_segment_start = segment.start
         if segment.words:
             timed_segments += 1
+        previous_word_start = -1.0
         for word_index, word in enumerate(segment.words):
             label = f"word {word_index} in segment {segment_index}"
             if not math.isfinite(word.start) or not math.isfinite(word.end):
@@ -77,6 +79,11 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
                 raise AlignmentError(f"{label} has an invalid timestamp range")
             if word.start < previous_word_start:
                 raise AlignmentError(f"{label} is not chronologically ordered")
+            if word.start < previous_global_word_start:
+                # Adjacent ASR chunks can legitimately overlap in time. Keep
+                # strict ordering inside each segment, while recording rather
+                # than rejecting cross-segment overlap.
+                cross_segment_word_overlaps += 1
             if word.start < segment.start - 0.05 or word.end > segment.end + 0.05:
                 raise AlignmentError(f"{label} falls outside its segment")
             if word.confidence is not None and (
@@ -84,7 +91,8 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
             ):
                 raise AlignmentError(f"{label} has an invalid confidence")
             previous_word_start = word.start
-    return {
+            previous_global_word_start = max(previous_global_word_start, word.start)
+    detail = {
         "strategy": PROVIDER_TIMESTAMPS,
         "forced_alignment": False,
         "word_count": len(words),
@@ -94,6 +102,9 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
             timed_segments / len(transcript.segments) if transcript.segments else 0.0
         ),
     }
+    if cross_segment_word_overlaps:
+        detail["cross_segment_word_overlaps"] = cross_segment_word_overlaps
+    return detail
 
 
 def _import_whisperx():
