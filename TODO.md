@@ -87,10 +87,6 @@ Full pre-audit engineering detail lives in this file's git history.
 - **Settings resolution-preview UI.** Headless `POST /api/providers/resolve`
   exists and the recording detail page shows the resolved layer chain, but
   Settings itself never calls the preview API.
-- **Cost-ceiling display + version-prefill bug.** `cost_ceiling` is a form
-  input but is never rendered on existing profiles, and the "New version"
-  prefill drops `cost_ceiling` and `is_system_default` — versioning a
-  cost-capped profile silently removes its cap.
 - **Remote-worker management detail.** Settings renders only
   name/key/protocol/token-env/health. Product spec wants capability,
   device/memory, queue, last health-check time, and revocation state; the

@@ -172,7 +172,7 @@
       <details {% if p.is_system_default %}open{% endif %} style="border-top:1px solid var(--border);padding-top:11px">
         <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:12px;list-style:none">
           <span><strong>{{ p.name }}</strong> <code>{{ p.key }}@{{ p.version }}</code></span>
-          <span>{% if p.is_system_default %}<span class="chip on">{{ t('Default') }}</span>{% endif %} <span class="chip">{{ t('Local only') if p.policy.no_egress else t('Egress allowed') }}</span> <button class="btn sec" style="padding:5px 8px" onclick="event.preventDefault();newProfileVersion({{ p.id }})">{{ t('New version') }}</button>{% if not p.is_system_default %} <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="event.preventDefault();removeItem('profiles',{{ p.id }})">{{ t('Delete') }}</button>{% endif %}</span>
+          <span>{% if p.is_system_default %}<span class="chip on">{{ t('Default') }}</span>{% endif %} <span class="chip">{{ t('Local only') if p.policy.no_egress else t('Egress allowed') }}</span>{% if p.policy.cost_ceiling is not none %} <span class="chip">{{ t('Cost ceiling') }} · US${{ '%.2f'|format(p.policy.cost_ceiling) }}</span>{% endif %} <button class="btn sec" style="padding:5px 8px" onclick="event.preventDefault();newProfileVersion({{ p.id }})">{{ t('New version') }}</button>{% if not p.is_system_default %} <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="event.preventDefault();removeItem('profiles',{{ p.id }})">{{ t('Delete') }}</button>{% endif %}</span>
         </summary>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px">
           {% for stage, selection in p.stages.items() %}
@@ -429,7 +429,7 @@ async function editModel(id){
   const r=await fetch(`/api/providers/models/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});if(r.ok)location.reload();else{const d=await r.json();alert(tr(d.detail||'Update failed'));}
 }
 function newProfileVersion(id){
-  const p=PROFILES.find(x=>x.id===id),form=document.getElementById('profile-form');form.elements.name.value=p.name;form.elements.key.value=p.key;form.elements.no_egress.checked=p.policy.no_egress;
+  const p=PROFILES.find(x=>x.id===id),form=document.getElementById('profile-form');form.reset();form.elements.name.value=p.name;form.elements.key.value=p.key;form.elements.no_egress.checked=p.policy.no_egress;form.elements.is_system_default.checked=p.is_system_default;form.elements.cost_ceiling.value=p.policy.cost_ceiling??'';
   for(const [stage,s] of Object.entries(p.stages)){const el=form.elements[`stage-${stage}`];if(el)el.value=`${s.connection}|||${s.model}`;}for(const [stage,candidates] of Object.entries(p.policy.fallback_policy?.stages||{})){const el=form.elements[`fallback-${stage}`],candidate=candidates[0];if(el&&candidate)el.value=`${candidate.connection}|||${candidate.model}`;}
   form.scrollIntoView({behavior:'smooth'});document.getElementById('profile-result').textContent=`${tr('Creating the next version of')} ${p.key}`;
 }

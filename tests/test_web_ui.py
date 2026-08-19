@@ -1310,6 +1310,12 @@ def test_status_page_renders(monkeypatch, tmp_path):
 
 def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import ExecutionProfile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        profile = session.query(ExecutionProfile).filter_by(is_system_default=True).one()
+        profile.cost_ceiling = 12.34
     r = c.get("/settings")
     assert r.status_code == 200
     assert "Model catalog" in r.text
@@ -1317,6 +1323,7 @@ def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_pat
     assert "Create execution profile" in r.text
     assert "Local only / no egress" in r.text
     assert "New version" in r.text and "Edit" in r.text and "Delete" in r.text
+    assert "Cost ceiling · US$12.34" in r.text
     assert "Remote workers" in r.text and "Register worker" in r.text
     assert 'href="/templates"' in r.text
     assert "Plaud account" in r.text
@@ -1339,6 +1346,9 @@ def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_pat
     assert "grid-template-columns:180px minmax(0,1fr)" in r.text
     assert "@media(max-width:820px)" in r.text
     assert "<script>\n(()=>{\nconst CONNECTIONS=" in r.text
+    assert "form.reset();form.elements.name.value=p.name" in r.text
+    assert "form.elements.is_system_default.checked=p.is_system_default" in r.text
+    assert "form.elements.cost_ceiling.value=p.policy.cost_ceiling??''" in r.text
     assert "Object.assign(window,{editVocabulary" in r.text
     templates = c.get("/templates")
     assert templates.status_code == 200
