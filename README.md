@@ -211,9 +211,11 @@ privacy boundary, and secret reference are persisted before dispatch; unavailabl
 providers fail visibly unless the profile declares an allowed fallback. For OpenCode
 Go, the tracked `transcript-polish` agent denies every tool and OpenCode continues to
 own its credential. Correction batching is provider-aware: conservative runtimes use
-bounded requests, while large-context Codex starts with a larger batch and bisects only
-when the returned segment structure is incomplete. Transport and quota failures are
-never converted into additional split calls.
+bounded requests, while large-context providers start with a larger batch. A valid
+partial response keeps its usable corrections and preserves the immutable source for
+omitted or emptied segments; only malformed JSON, duplicate/unknown IDs, or an
+explicit context limit can bisect a batch. Transport and quota failures are never
+converted into additional split calls.
 
 The `codex-local` adapter is an explicit trusted-single-user option for transcript
 correction, generated notes, and mind maps. It invokes `codex exec` through stdin in an ephemeral, read-only,

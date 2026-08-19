@@ -91,6 +91,9 @@ def polish_transcript(
     attempts = 0
     split_retries = 0
     kept_source = 0
+    kept_missing = 0
+    kept_emptied = 0
+    last_split_reason: str | None = None
     output_chars = 0
     request_input_chars = 0
     response_output_chars = 0
@@ -123,6 +126,8 @@ def polish_transcript(
                 "chunks_total": calls + len(pending),
                 "attempts": attempts,
                 "split_retries": split_retries,
+                "kept_source_segments": kept_source,
+                "last_split_reason": last_split_reason,
             }
         )
 
@@ -184,38 +189,44 @@ def polish_transcript(
                     raise LLMOutputInvalid("transcript polish returned an invalid segment entry")
                 if not isinstance(item.get("text"), str):
                     raise LLMOutputInvalid("transcript polish segment text must be a string")
-                by_id[item["id"]] = item["text"].strip()
+                item_id = item["id"]
+                if item_id in by_id:
+                    raise LLMOutputInvalid("transcript polish returned duplicate segment IDs")
+                by_id[item_id] = item["text"].strip()
             expected = set(target_indexes)
-            if set(by_id) != expected:
-                raise LLMOutputInvalid("transcript polish changed or omitted segment IDs")
+            unexpected = set(by_id) - expected
+            if unexpected:
+                raise LLMOutputInvalid("transcript polish returned unexpected segment IDs")
+            # A local model can omit a segment while otherwise returning valid
+            # corrections. Preserve those source segments instead of recursively
+            # rerunning the whole chunk: omission must never lose transcript text,
+            # and the successful corrections remain useful downstream.
+            missing = expected - set(by_id)
+            for index in missing:
+                by_id[index] = str(source[index].get("text") or "").strip()
+            kept_source += len(missing)
+            kept_missing += len(missing)
             emptied = [
                 index
                 for index in target_indexes
                 if str(source[index].get("text") or "").strip() and not by_id[index]
             ]
             if emptied:
-                filler_like = all(
-                    len(str(source[index].get("text") or "").strip()) <= 4
-                    for index in emptied
-                )
-                if not filler_like and end - start > 1:
-                    raise LLMOutputInvalid(
-                        "transcript polish emptied non-empty segment text"
-                    )
-                # The model legitimately empties filler-only segments ("呃",
-                # "嗯", "!") that the prompt tells it to remove, and can insist
-                # on emptying a lone segment even after splitting. Keep the
-                # source text instead of failing the stage: correction must
-                # never destroy transcript content.
+                # The model can legitimately empty filler-only segments, but it
+                # can also empty substantive text. In both cases the safest
+                # degradation is the original timed segment, not an expensive
+                # recursive retry that may repeat the same omission.
                 for index in emptied:
                     by_id[index] = str(source[index].get("text") or "").strip()
                 kept_source += len(emptied)
-        except LLMOutputInvalid:
+                kept_emptied += len(emptied)
+        except LLMOutputInvalid as exc:
             if end - start <= 1:
                 raise
             midpoint = start + (end - start) // 2
             pending[0:0] = [(start, midpoint), (midpoint, end)]
             split_retries += 1
+            last_split_reason = str(exc)
             report_progress()
             continue
         for index in target_indexes:
@@ -255,6 +266,9 @@ def polish_transcript(
             "attempts": attempts,
             "split_retries": split_retries,
             "kept_source_segments": kept_source,
+            "kept_missing_segments": kept_missing,
+            "kept_emptied_segments": kept_emptied,
+            "last_split_reason": last_split_reason,
             "skipped_empty_segments": skipped_empty_segments,
             "segments": len(source),
             "input_chars": len(transcript.text),

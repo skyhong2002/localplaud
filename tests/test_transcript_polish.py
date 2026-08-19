@@ -9,7 +9,6 @@ import pytest
 from localplaud.asr.base import Segment, Transcript, Word
 from localplaud.config import Settings
 from localplaud.llm.base import (
-    LLMError,
     LLMInputTooLarge,
     LLMTransientError,
 )
@@ -95,6 +94,8 @@ def test_polish_reports_chunk_and_segment_progress(monkeypatch):
         "chunks_total": 2,
         "attempts": 0,
         "split_retries": 0,
+        "kept_source_segments": 0,
+        "last_split_reason": None,
     }
     assert updates[-1]["chunks_completed"] == 2
     assert updates[-1]["chunks_total"] == 2
@@ -125,7 +126,7 @@ def test_polish_preserves_empty_placeholders_without_sending_them_to_llm(monkeyp
     assert result["detail"]["skipped_empty_segments"] == 1
 
 
-def test_polish_rejects_missing_segment_ids(monkeypatch):
+def test_polish_preserves_source_for_missing_segment_ids(monkeypatch):
     class BrokenPolisher(FakePolisher):
         def complete(self, prompt, **_kwargs):
             return '{"segments":[]}'
@@ -134,18 +135,49 @@ def test_polish_rejects_missing_segment_ids(monkeypatch):
         "localplaud.worker.polish.build_llm", lambda _cfg: BrokenPolisher()
     )
     transcript = Transcript(segments=[Segment(text="hello", start=0, end=1)])
-    with pytest.raises(LLMError, match="changed or omitted segment IDs"):
-        polish_transcript(transcript, Settings())
+    result = polish_transcript(transcript, Settings())
+
+    assert result["transcript"].segments[0].text == "hello"
+    assert result["detail"]["kept_source_segments"] == 1
+    assert result["detail"]["kept_missing_segments"] == 1
+    assert result["detail"]["split_retries"] == 0
 
 
-def test_polish_splits_structurally_invalid_multi_segment_chunks(monkeypatch):
+def test_polish_applies_valid_subset_and_preserves_only_omitted_segments(monkeypatch):
+    class PartialPolisher(FakePolisher):
+        def complete(self, prompt, **_kwargs):
+            request = json.loads(prompt)
+            first = request["target_segments"][0]
+            return json.dumps(
+                {"segments": [{"id": first["id"], "text": "corrected first"}]}
+            )
+
+    monkeypatch.setattr(
+        "localplaud.worker.polish.build_llm", lambda _cfg: PartialPolisher()
+    )
+    transcript = Transcript(
+        segments=[
+            Segment(text="raw first", start=0, end=1),
+            Segment(text="raw second", start=1, end=2),
+        ]
+    )
+
+    result = polish_transcript(transcript, Settings())
+
+    assert [segment.text for segment in result["transcript"].segments] == [
+        "corrected first",
+        "raw second",
+    ]
+    assert result["detail"]["kept_missing_segments"] == 1
+    assert result["detail"]["split_retries"] == 0
+
+
+def test_polish_preserves_structurally_missing_multi_segment_chunks(monkeypatch):
     class SplittingPolisher(FakePolisher):
         def complete(self, prompt, **kwargs):
             request = json.loads(prompt)
             self.requests.append(request)
-            if len(request["target_segments"]) > 1:
-                return '{"segments":[]}'
-            return json.dumps({"segments": request["target_segments"]})
+            return '{"segments":[]}'
 
     provider = SplittingPolisher()
     monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
@@ -162,15 +194,46 @@ def test_polish_splits_structurally_invalid_multi_segment_chunks(monkeypatch):
         "first",
         "second",
     ]
-    assert [len(request["target_segments"]) for request in provider.requests] == [2, 1, 1]
-    assert result["detail"]["chunks"] == 2
-    assert result["detail"]["attempts"] == 3
-    assert result["detail"]["split_retries"] == 1
+    assert [len(request["target_segments"]) for request in provider.requests] == [2]
+    assert result["detail"]["chunks"] == 1
+    assert result["detail"]["attempts"] == 1
+    assert result["detail"]["split_retries"] == 0
+    assert result["detail"]["kept_missing_segments"] == 2
     assert result["detail"]["request_input_chars"] > len(transcript.text)
     assert result["detail"]["response_output_chars"] > result["detail"]["output_chars"]
 
 
-def test_polish_splits_then_keeps_stubbornly_emptied_segments(monkeypatch):
+def test_polish_still_splits_unexpected_segment_ids(monkeypatch):
+    class UnexpectedIdPolisher(FakePolisher):
+        def complete(self, prompt, **kwargs):
+            request = json.loads(prompt)
+            self.requests.append(request)
+            if len(request["target_segments"]) > 1:
+                return '{"segments":[{"id":999,"text":"wrong"}]}'
+            return json.dumps({"segments": request["target_segments"]})
+
+    provider = UnexpectedIdPolisher()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        segments=[
+            Segment(text="first", start=0, end=1),
+            Segment(text="second", start=1, end=2),
+        ]
+    )
+
+    result = polish_transcript(transcript, Settings())
+
+    assert [segment.text for segment in result["transcript"].segments] == [
+        "first",
+        "second",
+    ]
+    assert result["detail"]["split_retries"] == 1
+    assert result["detail"]["last_split_reason"] == (
+        "transcript polish returned unexpected segment IDs"
+    )
+
+
+def test_polish_keeps_stubbornly_emptied_segments_without_splitting(monkeypatch):
     class EmptyingPolisher(FakePolisher):
         def complete(self, prompt, **kwargs):
             request = json.loads(prompt)
@@ -199,9 +262,10 @@ def test_polish_splits_then_keeps_stubbornly_emptied_segments(monkeypatch):
         "first",
         "second",
     ]
-    assert [len(request["target_segments"]) for request in provider.requests] == [2, 1, 1]
-    assert result["detail"]["split_retries"] == 1
+    assert [len(request["target_segments"]) for request in provider.requests] == [2]
+    assert result["detail"]["split_retries"] == 0
     assert result["detail"]["kept_source_segments"] == 2
+    assert result["detail"]["kept_emptied_segments"] == 2
 
 
 def test_polish_keeps_filler_segments_the_model_empties_without_splitting(monkeypatch):

@@ -585,7 +585,11 @@ provider/model/configuration provenance and no-egress policy are resolved before
 execution, and unavailable providers never trigger an implicit fallback. A production
 recording has completed the OpenCode Go path end to end: the immutable `ai_polish`
 revision became the canonical input for notes, mind map, and embedding chunks while
-raw ASR remained directly inspectable.
+raw ASR remained directly inspectable. Correction is best-effort without being
+destructive: valid returned segments are applied, omitted or emptied segments retain
+their source text, and recursive splitting is reserved for malformed JSON,
+duplicate/unknown IDs, or explicit provider context limits. Durable stage details
+report every preserved source segment and the last structural split reason.
 The trusted-single-user Codex CLI boundary now also advertises generated-note and
 mind-map capabilities, uses GPT-5.6-sol at high reasoning effort when explicitly
 selected, and reads the ChatGPT subscription window before every model turn. A 5%
