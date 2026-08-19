@@ -15,27 +15,30 @@ Full pre-audit engineering detail lives in this file's git history.
 - **Production is LIVE** on the M4 Mac mini (hostname now `sky-mini`, formerly
   SkyLabMac/CCLabMacmini): launchd agent `com.localplaud.agent`, reverse-proxied
   at **https://plaud.observe.tw** (healthz 200 verified 2026-08-19).
-- **Independent mode runs on execution profile `mac-wsl-hybrid` v11** (system
-  default, operator-configured in the DB): Mac MLX Whisper large-v3-turbo ASR
-  with WhisperX/wav2vec2 forced alignment; diarize / summarize / mind-map / embed
+- **Independent mode runs on execution profile `mac-wsl-hybrid` v12** (system
+  default, operator-configured in the DB): WSL RTX 5060 faster-whisper
+  large-v3-turbo ASR with Mac WhisperX/wav2vec2 forced alignment; diarize /
+  summarize / mind-map / embed
   dispatched to the **WSL RTX 5060 remote worker** over Tailscale; transcript
   polish and Ask currently use the Mac's local `qwen3.5:9b` through Ollama.
-- **WSL CUDA ASR is verified but intentionally non-default.** A real 43-second
-  recording completed on the RTX 5060 with faster-whisper `large-v3-turbo`
-  (16.063 s, observed 68% GPU / 3.74 GB VRAM) and then passed the complete
-  12-check pipeline. The same short file took 5.559 s on Mac MLX, so the
-  production default remains Mac MLX until a representative long-file benchmark
-  demonstrates a throughput win.
+- **WSL CUDA ASR is verified and is the production default.** The CUDA 12.8
+  image carries cuDNN 9 for torch/pyannote and the side-by-side cuDNN 8 runtime
+  required by the pinned CTranslate2 4.4 ASR stack. A fresh real 43-second
+  recording completed with faster-whisper `large-v3-turbo` on CUDA, followed by
+  Mac WhisperX and WSL pyannote, and passed the complete 12-check independent
+  pipeline. The worker remained healthy with zero restarts and no OOM.
 - **Production authentication is enabled.** Caddy terminates HTTPS and
   localplaud owns the password/session login; credentials and session secret are
   stored only in the ignored mode-0600 `.env` and macOS Keychain. Anonymous
   browser traffic is redirected to `/login`, API-style traffic fails with 401,
   and `/healthz` remains available to monitoring.
-- **Backlog** (production DB, 2026-08-19, before the repaired queue is resumed):
-  234 done · 45 partial · **560 error** · 5 metadata-only. All 123 current
+- **Backlog** (production DB, 2026-08-19, while the repaired queue is draining):
+  241 done · 45 partial · **552 queued/error** · 5 metadata-only · 2 processing.
+  Counts are intentionally transient; the live processing/status surfaces are
+  authoritative. All 123 current
   generated/saved-note knowledge documents are indexed (0 pending/failed).
-  The WSL GPU worker is the throughput bottleneck; `concurrency = 1` on the
-  16 GB Mac is deliberate (2× Whisper pushed it into swap).
+  End-to-end pipeline concurrency remains 1 on the 16 GB Mac; both remote GPU
+  stages and long local Ollama transcript-polish stages can bound throughput.
 - **Large-library controls are lazy-loaded.** The homepage no longer renders
   562 tag buttons and every organization row up front; the real production HTML
   fell from 1,456,500 to 430,698 bytes while tag filtering and bulk organization
@@ -54,9 +57,11 @@ Full pre-audit engineering detail lives in this file's git history.
   failing long recordings also completed after empty-placeholder hardening: one
   aligned 8,879 words at 100% segment coverage and the other aligned 6,771 words
   across all 169 non-empty segments while preserving one empty bookkeeping
-  placeholder. Broader Taiwan Mandarin and Mandarin/English accuracy, timestamp,
-  speed, and memory benchmarking is still required before considering this
-  quality validation complete.
+  placeholder. A further two-hour Mandarin meeting aligned 19,703 words across
+  all 574 non-empty segments at 100% coverage after preserving a legitimate
+  cross-chunk start overlap. Broader Taiwan Mandarin and Mandarin/English
+  accuracy, timestamp, speed, and memory benchmarking is still required before
+  considering this quality validation complete.
 - **VAD validation.** `asr.vad.enabled` remains default-off (implementation
   is complete for both mlx and faster-whisper paths). Benchmark on real
   Taiwan Mandarin / code-switch recordings before enabling by default. No
@@ -73,9 +78,9 @@ Full pre-audit engineering detail lives in this file's git history.
 
 - **Drain the repaired backlog.** The 2026-08-19 repair restored the missing
   worker secret, rotated it, synchronized the WSL worker, and proved short and
-  long real end-to-end recordings. Requeue the remaining 560 error and 45 partial rows;
-  processing remains bounded by the WSL GPU and fresh uploads stay ahead of
-  historical work by design.
+  long real end-to-end recordings. The remaining historical error/partial rows
+  are now requeued and draining; keep monitoring stage-level progress and retain
+  fresh-upload priority over historical work.
 
 ### P1 — Web App remaining gaps (2026-07-31 audit vs `docs/product-workflow.md`)
 
