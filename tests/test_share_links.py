@@ -186,7 +186,7 @@ def test_public_page_is_local_read_only_and_noindex(clients):
 
     page = public.get(path)
     assert page.status_code == 200
-    assert page.headers["X-Robots-Tag"] == "noindex"
+    assert page.headers["X-Robots-Tag"] == "noindex, nofollow"
     assert '<meta name="robots" content="noindex">' in page.text
     assert "Local weekly sync" in page.text
     assert "corrected canonical line" in page.text
@@ -211,7 +211,7 @@ def test_public_audio_supports_ranges_and_dies_on_revoke(clients):
     assert ranged.status_code == 206
     assert ranged.content == audio[10:20]
     assert ranged.headers["Content-Range"] == "bytes 10-19/100"
-    assert ranged.headers["X-Robots-Tag"] == "noindex"
+    assert ranged.headers["X-Robots-Tag"] == "noindex, nofollow"
 
     assert authenticated.delete("/api/files/recording/share-link").status_code == 200
     assert authenticated.delete("/api/files/recording/share-link").status_code == 200
@@ -241,7 +241,7 @@ def test_unknown_and_trash_recordings_are_not_shareable(clients):
 
     unknown = public.get("/share/not-a-real-token")
     assert unknown.status_code == 404
-    assert unknown.headers["X-Robots-Tag"] == "noindex"
+    assert unknown.headers["X-Robots-Tag"] == "noindex, nofollow"
     assert public.get("/share/not-a-real-token/audio").status_code == 404
     assert authenticated.post("/api/files/missing/share-link").status_code == 404
     assert authenticated.post("/api/files/trashed/share-link").status_code == 404
