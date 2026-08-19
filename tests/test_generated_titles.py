@@ -29,11 +29,12 @@ def test_clean_generated_title_strips_markup_and_caps():
     assert _clean_generated_title('  "A Quoted Title"\n') == "A Quoted Title"
     assert _clean_generated_title("   ") is None
     assert _clean_generated_title(None) is None
-    assert len(_clean_generated_title("x" * 500)) == 200
+    assert _clean_generated_title("x" * 500) is None
+    assert _clean_generated_title("以下是根據您提供的內容整理出的摘要") is None
+    assert _clean_generated_title("**清楚的會議標題**") == "清楚的會議標題"
     assert _generated_title_candidate(None, "\n# AI heading\nbody") == "AI heading"
-    assert _generated_title_candidate(None, "**Generated first line**\nbody") == (
-        "Generated first line"
-    )
+    assert _generated_title_candidate(None, "## Generated heading\nbody") == "Generated heading"
+    assert _generated_title_candidate(None, "Generated first line\nbody") is None
 
 
 def test_display_title_precedence_and_source():

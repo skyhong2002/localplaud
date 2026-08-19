@@ -2646,37 +2646,47 @@ def _clean_generated_title(raw: object) -> str | None:
         return None
     text = str(raw).strip().lstrip("#").strip()
     text = text.strip("\"'“”「」『』").strip()
+    text = text.replace("**", "").replace("__", "").replace("`", "")
     text = " ".join(text.split())
     text = to_traditional(text) or ""
-    return text[:200] or None
+    boilerplate = (
+        "以下是",
+        "以下為",
+        "根據您提供",
+        "根據你提供",
+        "這段對話",
+        "這段文字",
+        "這是一段",
+    )
+    if len(text) > 80 or text.startswith(boilerplate):
+        return None
+    return text or None
 
 
 def _generated_title_candidate(title: object, content_md: object = None) -> str | None:
     """Extract a title from an AI artifact, even when it omitted ``title``.
 
     Providers occasionally return useful Markdown but forget the separate title
-    field. Prefer an explicit title, then a level-one heading, and finally the
-    first meaningful generated line so a usable transcript never remains stuck
-    behind a formatting mistake in otherwise successful AI output.
+    field. Prefer an explicit title, then a Markdown heading. Arbitrary prose is
+    deliberately not promoted: older small-model summaries often began with
+    "以下是根據…" and that boilerplate became an unusable 100-character title.
     """
     explicit = _clean_generated_title(title)
     if explicit:
         return explicit
     lines = [line.strip() for line in str(content_md or "").splitlines() if line.strip()]
     for line in lines:
-        if line.startswith("# "):
-            return _clean_generated_title(line)
-    for line in lines:
-        candidate = line.lstrip("-*#> ").strip().strip("*_")
-        if candidate:
-            return _clean_generated_title(candidate)
+        if line.startswith("#") and line.lstrip("#").startswith(" "):
+            candidate = _clean_generated_title(line)
+            if candidate:
+                return candidate
     return None
 
 
 def _has_generated_title(file_id: str) -> bool:
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
-        return bool(row and (row.generated_title or "").strip())
+        return bool(row and _clean_generated_title(row.generated_title))
 
 
 def _apply_generated_title(

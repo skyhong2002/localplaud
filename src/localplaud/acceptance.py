@@ -16,6 +16,8 @@ def _check(name: str, passed: bool, detail: str) -> dict:
 
 def subscription_independence_report(file_id: str) -> dict:
     """Return concrete evidence that one recording is usable without Plaud AI."""
+    from .worker.pipeline import _clean_generated_title
+
     with session_scope() as session:
         file = session.get(PlaudFile, file_id)
         if file is None:
@@ -65,7 +67,7 @@ def subscription_independence_report(file_id: str) -> dict:
             _check(
                 "ai_title",
                 transcript is not None
-                and bool((file.generated_title or "").strip())
+                and bool(_clean_generated_title(file.generated_title))
                 and bool(file.generated_title_provider)
                 and bool(file.generated_title_model)
                 and file.generated_title_at is not None,

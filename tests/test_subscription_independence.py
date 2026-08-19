@@ -238,6 +238,16 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
             row.generated_title_at,
         ) = generated_title
 
+    with session_scope() as session:
+        row = session.get(PlaudFile, "clean")
+        row.generated_title = "以下是根據您提供的內容整理出的智能總結"
+    boilerplate_title_report = subscription_independence_report("clean")
+    assert next(
+        item for item in boilerplate_title_report["checks"] if item["name"] == "ai_title"
+    )["passed"] is False
+    with session_scope() as session:
+        session.get(PlaudFile, "clean").generated_title = generated_title[0]
+
     # Whisper-native word timestamps are useful evidence, but they are not a
     # substitute for the forced-alignment requirement in the product gate.
     with session_scope() as session:
