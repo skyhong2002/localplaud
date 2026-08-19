@@ -389,8 +389,11 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
             provider="fake-asr",
             model="raw-asr-model",
             source="local",
-            text="raw words",
-            segments=[{"text": "raw words", "start": 0.0, "end": 1.0, "speaker": None}],
+            text="raw\nwords",
+            segments=[
+                {"text": "raw", "start": 0.0, "end": 0.5, "speaker": None},
+                {"text": "words", "start": 0.5, "end": 1.0, "speaker": None},
+            ],
             has_speakers=False,
         )
         session.add(raw)
@@ -431,7 +434,7 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
 
     process_file("raw-lane")
 
-    assert seen == ["raw words"]
+    assert seen == ["raw\nwords"]
     with session_scope() as session:
         stages = {run.stage.value: run for run in session.get(PlaudFile, "raw-lane").stage_runs}
         assert stages["transcribe"].provider == "fake-asr"
@@ -440,7 +443,9 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
         row = session.get(PlaudFile, "raw-lane")
         assert row.local_transcript.id == raw_id
         assert row.transcript_revisions[0].base_transcript_id == raw_id
-        assert row.local_transcript.text == "raw words"
+        assert row.local_transcript.text == "raw\nwords"
+        assert len(row.local_transcript.segments) == 1
+        assert row.local_transcript.segments[0]["text"] == "raw words"
         assert row.corrected_transcript.text == "corrected words"
 
 

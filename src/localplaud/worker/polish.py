@@ -78,6 +78,9 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
         raise LLMError(f"transcript polish provider unavailable: {provider.name}")
     source = [asdict(segment) for segment in transcript.segments]
     polished = copy.deepcopy(source)
+    for item in polished:
+        if not str(item.get("text") or "").strip():
+            item["text"] = ""
     calls = 0
     attempts = 0
     split_retries = 0
@@ -85,6 +88,9 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
     output_chars = 0
     request_input_chars = 0
     response_output_chars = 0
+    skipped_empty_segments = sum(
+        not str(segment.get("text") or "").strip() for segment in source
+    )
     chunk_chars = getattr(provider, "polish_chunk_chars", settings.pipeline.polish_chunk_chars)
     if (
         isinstance(chunk_chars, bool)
@@ -95,13 +101,20 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
     pending = list(_chunks(source, chunk_chars))
     while pending:
         start, end = pending.pop(0)
+        target_indexes = [
+            index
+            for index in range(start, end)
+            if str(source[index].get("text") or "").strip()
+        ]
+        if not target_indexes:
+            continue
         targets = [
             {
                 "id": index,
                 "speaker": source[index].get("speaker"),
                 "text": source[index].get("text", ""),
             }
-            for index in range(start, end)
+            for index in target_indexes
         ]
         request = {
             "language": transcript.language,
@@ -144,12 +157,12 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
                 if not isinstance(item.get("text"), str):
                     raise LLMOutputInvalid("transcript polish segment text must be a string")
                 by_id[item["id"]] = item["text"].strip()
-            expected = set(range(start, end))
+            expected = set(target_indexes)
             if set(by_id) != expected:
                 raise LLMOutputInvalid("transcript polish changed or omitted segment IDs")
             emptied = [
                 index
-                for index in range(start, end)
+                for index in target_indexes
                 if str(source[index].get("text") or "").strip() and not by_id[index]
             ]
             if emptied:
@@ -176,7 +189,7 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
             pending[0:0] = [(start, midpoint), (midpoint, end)]
             split_retries += 1
             continue
-        for index in range(start, end):
+        for index in target_indexes:
             polished[index]["text"] = by_id[index]
             output_chars += len(by_id[index])
         calls += 1
@@ -211,6 +224,7 @@ def polish_transcript(transcript: Transcript, settings: Settings) -> dict:
             "attempts": attempts,
             "split_retries": split_retries,
             "kept_source_segments": kept_source,
+            "skipped_empty_segments": skipped_empty_segments,
             "segments": len(source),
             "input_chars": len(transcript.text),
             "output_chars": output_chars,

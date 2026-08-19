@@ -72,6 +72,29 @@ def test_polish_preserves_ids_timestamps_speakers_and_words(monkeypatch):
     assert result["prompt_version"] == "transcript-polish/v1"
 
 
+def test_polish_preserves_empty_placeholders_without_sending_them_to_llm(monkeypatch):
+    provider = FakePolisher()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        language="zh",
+        segments=[
+            Segment(text="第一段", start=0, end=1),
+            Segment(text="", start=1, end=1),
+            Segment(text="第二段", start=1, end=2),
+        ],
+    )
+
+    result = polish_transcript(transcript, Settings())
+
+    assert [item["id"] for item in provider.requests[0]["target_segments"]] == [0, 2]
+    assert [segment.text for segment in result["transcript"].segments] == [
+        "第一段",
+        "",
+        "第二段",
+    ]
+    assert result["detail"]["skipped_empty_segments"] == 1
+
+
 def test_polish_rejects_missing_segment_ids(monkeypatch):
     class BrokenPolisher(FakePolisher):
         def complete(self, prompt, **_kwargs):

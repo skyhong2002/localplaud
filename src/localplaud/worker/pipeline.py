@@ -2492,6 +2492,11 @@ def _persist_aligned_transcript(file_id: str, transcript: Transcript) -> None:
         sync_speakers(session, file_id, speaker_keys_from_segments(segments))
 
 
+def _immutable_text_key(value: str) -> str:
+    """Compare ASR content across segment regrouping without losing characters."""
+    return "".join(value.split())
+
+
 def _persist_diarized_transcript(
     file_id: str, transcript: Transcript
 ) -> dict[str, str]:
@@ -2508,7 +2513,7 @@ def _persist_diarized_transcript(
         )
         if row is None:
             raise ValueError("diarization requires a persisted local transcript")
-        if transcript.text != row.text:
+        if _immutable_text_key(transcript.text) != _immutable_text_key(row.text):
             raise ValueError("diarization cannot replace immutable ASR text")
 
         previous_segments = list(row.segments or [])
