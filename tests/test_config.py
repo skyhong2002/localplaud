@@ -64,6 +64,7 @@ def test_defaults_without_env(monkeypatch, tmp_path):
     assert s.llm.codex_local.model == "gpt-5.6-sol"
     assert s.llm.codex_local.reasoning_effort == "high"
     assert s.llm.codex_local.quota_reserve_percent == 5
+    assert s.llm.codex_local.quota_check_timeout_seconds == 20
     assert s.diarize.provider == "pyannote"
     assert s.diarize.model == "pyannote/speaker-diarization-community-1"
 

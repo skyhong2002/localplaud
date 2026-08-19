@@ -171,14 +171,17 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   timeout_seconds = 900
   polish_chunk_chars = 12000      # conservative CLI batch; structural failures split further
 
-  [llm.codex_local]              # correction-only; select through an execution profile
+  [llm.codex_local]              # trusted local ChatGPT subscription adapter
   executable = "codex"
-  model = "gpt-5.6-luna"         # clear, repeatable transcript transformations
+  model = "gpt-5.6-sol"
   codex_home = "~/.localplaud/codex" # dedicated login; localplaud never reads its tokens
-  reasoning_effort = "low"
+  reasoning_effort = "high"
   timeout_seconds = 900
   polish_chunk_chars = 48000      # large-context first; invalid structured output is bisected
   require_chatgpt_login = true   # reject API-key auth when subscription usage is intended
+  quota_reserve_percent = 5      # hard floor above the requested 3% remaining usage
+  quota_call_headroom_percent = 2 # do not start a turn too close to that floor
+  quota_check_timeout_seconds = 20 # tolerate a busy app-server between consecutive stages
 
 # --------------------------------------------------------------------------- #
 # Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.

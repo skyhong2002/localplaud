@@ -317,7 +317,10 @@ class CodexLocalLlmConfig(BaseModel):
     # is about to start, so a large response cannot consume the protected floor.
     quota_reserve_percent: int = Field(default=5, ge=3, le=50)
     quota_call_headroom_percent: int = Field(default=2, ge=0, le=20)
-    quota_check_timeout_seconds: int = Field(default=10, ge=2, le=30)
+    # The desktop app-server can still be draining the previous GPT response
+    # when a mind-map call follows a summary immediately. Give the local quota
+    # RPC enough time to answer instead of needlessly falling back to Ollama.
+    quota_check_timeout_seconds: int = Field(default=20, ge=2, le=30)
 
 
 class LlmConfig(BaseModel):
