@@ -456,7 +456,7 @@ def reprocess_all(
     mode: str = typer.Option(
         "resume", "--mode", help="resume | force | derived_only"
     ),
-    status: list[str] = typer.Option(
+    status: list[str] = typer.Option(  # noqa: B008
         None, "--status", help="Only recordings in this status (repeatable)."
     ),
     limit: int | None = typer.Option(

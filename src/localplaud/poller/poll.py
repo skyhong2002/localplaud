@@ -426,6 +426,27 @@ def reset_inflight(*, force: bool = False, previous_owner: str | None = None) ->
                 completed_at=now,
             )
         )
+        # Older deployments could close the roll-up StageRun while leaving its
+        # append-only attempt marked running. Recover those ledger orphans even
+        # when the recording itself no longer carries a processing token. A
+        # genuinely live CLI/daemon claim remains untouched.
+        active_claim_ids = select(PlaudFile.id).where(
+            PlaudFile.processing_token.is_not(None),
+            PlaudFile.processing_lease_until.is_not(None),
+            PlaudFile.processing_lease_until > now,
+        )
+        session.execute(
+            update(StageAttempt)
+            .where(
+                StageAttempt.status == StageStatus.running,
+                StageAttempt.file_id.not_in(active_claim_ids),
+            )
+            .values(
+                status=StageStatus.failed,
+                error="Orphaned stage attempt recovered; no active processing claim.",
+                completed_at=now,
+            )
+        )
     if reset:
         log.info("Reset %d in-flight file(s) after restart", reset)
     return reset

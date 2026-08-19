@@ -255,6 +255,12 @@ class OpenAILlmConfig(BaseModel):
     # Leave unset for legacy/OpenAI-compatible endpoints. Reasoning models use
     # max_completion_tokens and do not receive sampling temperature.
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] | None = None
+    # "responses" streams typed events — including reasoning progress — so a
+    # long high-effort request keeps bytes flowing. Chat Completions stays
+    # silent until the first output token, which reverse proxies in front of
+    # hosted relays terminate (Cloudflare 524). Prefer "responses" for
+    # reasoning models behind a relay; "chat" remains the compatible default.
+    api_mode: Literal["chat", "responses"] = "chat"
     # How much transcript one correction request may carry. Relays that front
     # the API with a proxy (Cloudflare and friends) cut a request that produces
     # no bytes for too long, and a high reasoning effort spends minutes before

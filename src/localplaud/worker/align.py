@@ -213,15 +213,42 @@ def _forced_align_whisperx(
     grouped: dict[int, list[dict[str, Any]]] = {
         index: [] for index in range(len(transcript.segments))
     }
+    timestamp_mapped_segments = 0
     for aligned in aligned_segments:
         if not isinstance(aligned, dict):
             raise AlignmentError("WhisperX returned a non-object segment")
         marker = aligned.get("avg_logprob")
-        if not isinstance(marker, int | float) or not float(marker).is_integer():
-            raise AlignmentError("WhisperX did not preserve the input segment marker")
-        source_index = int(marker)
-        if source_index not in grouped:
-            raise AlignmentError("WhisperX returned an unknown input segment marker")
+        if (
+            isinstance(marker, int | float)
+            and float(marker).is_integer()
+            and int(marker) in grouped
+        ):
+            source_index = int(marker)
+        else:
+            # WhisperX 3.7+ no longer preserves arbitrary input keys such as
+            # avg_logprob. Map its sentence-level output back to the immutable
+            # ASR segment by timestamp overlap; the source text itself is never
+            # replaced by WhisperX output.
+            try:
+                aligned_start = float(aligned["start"])
+                aligned_end = float(aligned["end"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise AlignmentError(
+                    "WhisperX returned a segment without a usable source marker or timestamps"
+                ) from exc
+            if not math.isfinite(aligned_start) or not math.isfinite(aligned_end):
+                raise AlignmentError("WhisperX returned non-finite segment timestamps")
+            overlaps = [
+                max(0.0, min(aligned_end, source.end) - max(aligned_start, source.start))
+                for source in transcript.segments
+            ]
+            best_overlap = max(overlaps, default=0.0)
+            if best_overlap <= 0:
+                raise AlignmentError(
+                    "WhisperX output could not be mapped to an input segment by timestamp"
+                )
+            source_index = overlaps.index(best_overlap)
+            timestamp_mapped_segments += 1
         grouped[source_index].append(aligned)
 
     segments: list[Segment] = []
@@ -295,6 +322,8 @@ def _forced_align_whisperx(
         "unaligned_words": unaligned_words,
         "unaligned_segments": unaligned_segments,
     }
+    if timestamp_mapped_segments:
+        detail["timestamp_mapped_segments"] = timestamp_mapped_segments
     return AlignmentResult(result, WHISPERX_PROVIDER, model or WHISPERX_AUTO_MODEL, detail)
 
 

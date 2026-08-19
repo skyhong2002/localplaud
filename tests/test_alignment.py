@@ -172,7 +172,6 @@ def test_whisperx_rejects_missing_language_and_incomplete_output(monkeypatch, tm
             provider="whisperx",
             model="wav2vec2-auto",
         )
-
     with pytest.raises(AlignmentError, match="omitted input segment"):
         run_alignment(
             audio,
@@ -184,6 +183,60 @@ def test_whisperx_rejects_missing_language_and_incomplete_output(monkeypatch, tm
             model="wav2vec2-auto",
         )
 
+
+def test_whisperx_maps_newer_output_without_custom_marker_by_timestamp(monkeypatch, tmp_path):
+    import localplaud.worker.align as alignment
+
+    class MarkerDroppingWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(*_args, **_kwargs):
+            return {
+                "segments": [
+                    {
+                        "text": "first",
+                        "start": 0.1,
+                        "end": 0.8,
+                        "words": [{"word": "first", "start": 0.1, "end": 0.8}],
+                    },
+                    {
+                        "text": "second",
+                        "start": 1.2,
+                        "end": 1.9,
+                        "words": [{"word": "second", "start": 1.2, "end": 1.9}],
+                    },
+                ]
+            }
+
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: MarkerDroppingWhisperX)
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    result = run_alignment(
+        audio,
+        Transcript(
+            segments=[
+                Segment(text="first", start=0, end=1),
+                Segment(text="second", start=1, end=2),
+            ],
+            language="en",
+        ),
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 1.0},
+    )
+
+    assert [segment.text for segment in result.transcript.segments] == ["first", "second"]
+    assert result.detail["forced_alignment"] is True
+    assert result.detail["timestamp_mapped_segments"] == 2
 
 def test_whisperx_catalog_model_uses_alignment_health_probe(monkeypatch, tmp_path):
     import localplaud.worker.align as alignment

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..asr.base import Segment, Transcript, Word
 from ..config import DiarizeConfig
@@ -235,6 +236,38 @@ class DiarizationUnavailable(DiarizationError):
     pass
 
 
+def _cached_pipeline_config(model: str) -> Path | None:
+    """Return a complete cached pipeline config without requiring live HF auth.
+
+    Community-1 vendors its segmentation, embedding, and PLDA artifacts beneath
+    the same snapshot. Once the gated model has been accepted and downloaded,
+    production should remain usable offline instead of requiring the original
+    Hugging Face token on every daemon restart.
+    """
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except Exception:  # noqa: BLE001 - optional dependency/version mismatch
+        return None
+    try:
+        cached = try_to_load_from_cache(model, "config.yaml")
+    except Exception:  # noqa: BLE001 - a corrupt cache must degrade cleanly
+        return None
+    if isinstance(cached, str):
+        path = Path(cached)
+        # community-1 is a self-contained bundle. Merely finding config.yaml is
+        # not sufficient: an interrupted gated download can leave that file
+        # while one of the weights or PLDA artifacts is absent.
+        required = (
+            "segmentation/pytorch_model.bin",
+            "embedding/pytorch_model.bin",
+            "plda/xvec_transform.npz",
+            "plda/plda.npz",
+        )
+        if path.is_file() and all((path.parent / item).is_file() for item in required):
+            return path
+    return None
+
+
 def _resolve_device(cfg: DiarizeConfig) -> tuple[object, str]:
     try:
         import torch
@@ -261,14 +294,16 @@ def health(cfg: DiarizeConfig) -> tuple[bool, str]:
         import pyannote.audio  # noqa: F401
     except Exception as exc:  # noqa: BLE001 - binary dependency imports can fail broadly
         return False, f"pyannote.audio unavailable: {exc}"
-    if not cfg.hf_token:
+    cached = _cached_pipeline_config(cfg.model)
+    if not cfg.hf_token and cached is None:
         return False, "Hugging Face token missing; accept the model terms and set hf_token"
     try:
         _torch, device = _resolve_device(cfg)
     except DiarizationUnavailable as exc:
         return False, str(exc)
     selection = "auto-selected" if cfg.device == "auto" else "configured"
-    return True, f"model {cfg.model} configured on {device} ({selection})"
+    source = "cached offline" if not cfg.hf_token else "authenticated"
+    return True, f"model {cfg.model} configured on {device} ({selection}); {source}"
 
 
 def _load_pipeline(cfg: DiarizeConfig):
@@ -276,14 +311,15 @@ def _load_pipeline(cfg: DiarizeConfig):
         from pyannote.audio import Pipeline
     except Exception as exc:  # noqa: BLE001
         raise DiarizationUnavailable(f"pyannote.audio not installed: {exc}") from exc
-    if not cfg.hf_token:
+    cached = _cached_pipeline_config(cfg.model)
+    if not cfg.hf_token and cached is None:
         raise DiarizationUnavailable(
-            "diarize.hf_token not set (needed to download the pyannote pipeline)"
+            "diarize.hf_token not set and the pyannote pipeline is not cached locally"
         )
     torch, device = _resolve_device(cfg)
     try:
         pipeline = Pipeline.from_pretrained(
-            cfg.model,
+            cached if cached is not None and not cfg.hf_token else cfg.model,
             token=cfg.hf_token,
         )
     except Exception as exc:  # noqa: BLE001

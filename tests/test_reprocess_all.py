@@ -18,8 +18,14 @@ def _init_db(monkeypatch, tmp_path):
 
 
 def _seed(session):
-    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageRun, StageStatus
-    from localplaud.db.models import Transcript
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        StageName,
+        StageRun,
+        StageStatus,
+        Transcript,
+    )
 
     # done, with a transcript + a completed summarize stage
     done = PlaudFile(id="done1", filename="a", status=FileStatus.done, audio_path="/x/a.opus")
@@ -55,8 +61,9 @@ def test_resume_queues_eligible_and_skips_no_audio(monkeypatch, tmp_path):
 
 def test_derived_only_targets_transcribed_and_marks_stale(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
-    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageRun
     from sqlalchemy import select
+
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageRun
     from localplaud.db.session import session_scope
     from localplaud.worker.pipeline import queue_library_reprocess
 
@@ -79,8 +86,9 @@ def test_derived_only_targets_transcribed_and_marks_stale(monkeypatch, tmp_path)
 
 def test_force_resets_all_stages_to_pending(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
-    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageRun, StageStatus
     from sqlalchemy import select
+
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageRun, StageStatus
     from localplaud.db.session import session_scope
     from localplaud.worker.pipeline import queue_library_reprocess
 

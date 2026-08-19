@@ -48,8 +48,8 @@ def test_clean_strips_markup_and_caps():
 
 
 def test_extract_tags_dedups_caps_and_types(monkeypatch):
-    from localplaud.worker import tagging
     from localplaud.config import get_settings
+    from localplaud.worker import tagging
 
     class _FakeLLM:
         def complete(self, *a, **k):
@@ -68,8 +68,8 @@ def test_extract_tags_dedups_caps_and_types(monkeypatch):
 
 
 def test_extract_tags_survives_llm_failure(monkeypatch):
-    from localplaud.worker import tagging
     from localplaud.config import get_settings
+    from localplaud.worker import tagging
 
     class _Boom:
         def complete(self, *a, **k):
@@ -81,7 +81,7 @@ def test_extract_tags_survives_llm_failure(monkeypatch):
 
 def test_apply_tags_creates_typed_tags_and_gates(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
-    from localplaud.db.models import PlaudFile, Tag
+    from localplaud.db.models import PlaudFile
     from localplaud.db.session import session_scope
     from localplaud.worker.tagging import apply_tags
 

@@ -5,7 +5,10 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from localplaud.config import OpenAILlmConfig, Settings
+from localplaud.llm.base import LLMError
 from localplaud.llm.openai_llm import OpenAILLM
 from localplaud.worker.pipeline import _settings_for_stage
 
@@ -31,6 +34,7 @@ def test_openai_reasoning_request_uses_completion_budget_without_temperature(mon
     provider = OpenAILLM(
         OpenAILlmConfig(
             api_key="test-key",
+            base_url="https://relay.example.test/v1",
             model="gpt-5.4",
             reasoning_effort="medium",
         )
@@ -70,6 +74,129 @@ def test_openai_compatible_request_preserves_legacy_sampling_parameters(monkeypa
     assert request["max_tokens"] == 123
     assert "reasoning_effort" not in request
     assert "max_completion_tokens" not in request
+
+
+def _fake_responses(monkeypatch, events):
+    calls: list[dict] = []
+
+    class Responses:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return iter(events)
+
+    client = SimpleNamespace(responses=Responses())
+    module = SimpleNamespace(OpenAI=lambda **_kwargs: client)
+    monkeypatch.setitem(sys.modules, "openai", module)
+    return calls
+
+
+def _delta(text):
+    return SimpleNamespace(type="response.output_text.delta", delta=text)
+
+
+def test_responses_mode_streams_reasoning_models_with_structured_output(monkeypatch):
+    """Relays terminate a request that stays silent while the model reasons,
+    so a reasoning endpoint must stream the typed event feed."""
+    calls = _fake_responses(
+        monkeypatch,
+        [
+            SimpleNamespace(type="response.created"),
+            SimpleNamespace(type="response.reasoning_summary_text.delta", delta="thinking"),
+            _delta('{"ok"'),
+            _delta(":true}"),
+            SimpleNamespace(type="response.completed"),
+        ],
+    )
+    schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+    provider = OpenAILLM(
+        OpenAILlmConfig(
+            api_key="k",
+            base_url="http://127.0.0.1:8317/v1",
+            model="gpt-5.6-luna",
+            reasoning_effort="xhigh",
+            api_mode="responses",
+        )
+    )
+
+    assert provider.complete("polish", system="sys", max_tokens=999, json_schema=schema) == (
+        '{"ok":true}'
+    )
+
+    request = calls[0]
+    assert request["stream"] is True
+    assert request["reasoning"] == {"effort": "xhigh"}
+    assert request["max_output_tokens"] == 999
+    assert request["input"][0] == {"role": "system", "content": "sys"}
+    assert request["text"]["format"]["schema"] == schema
+    assert request["text"]["format"]["strict"] is True
+    # Reasoning models must not receive sampling temperature.
+    assert "temperature" not in request
+    assert "messages" not in request
+
+
+def test_responses_mode_rejects_a_truncated_response(monkeypatch):
+    """A truncated correction silently drops transcript; it is not a result."""
+    _fake_responses(
+        monkeypatch,
+        [
+            _delta('{"segments":['),
+            SimpleNamespace(
+                type="response.incomplete",
+                response=SimpleNamespace(
+                    incomplete_details=SimpleNamespace(reason="max_output_tokens")
+                ),
+            ),
+        ],
+    )
+    provider = OpenAILLM(
+        OpenAILlmConfig(
+            api_key="k",
+            base_url="https://relay.example.test/v1",
+            model="gpt-5.6-luna",
+            api_mode="responses",
+        )
+    )
+
+    with pytest.raises(LLMError, match="incomplete \\(max_output_tokens\\)"):
+        provider.complete("polish")
+
+
+def test_responses_mode_rejects_a_stream_without_terminal_completion(monkeypatch):
+    _fake_responses(monkeypatch, [_delta("partial output")])
+    provider = OpenAILLM(
+        OpenAILlmConfig(api_key="k", model="gpt-5.6-luna", api_mode="responses")
+    )
+
+    with pytest.raises(LLMError, match="ended before completion"):
+        provider.complete("polish")
+
+
+def test_responses_mode_surfaces_stream_errors(monkeypatch):
+    _fake_responses(
+        monkeypatch,
+        [SimpleNamespace(type="error", error=SimpleNamespace(message="relay disconnected"))],
+    )
+    provider = OpenAILLM(
+        OpenAILlmConfig(api_key="k", model="gpt-5.6-luna", api_mode="responses")
+    )
+
+    with pytest.raises(LLMError, match="relay disconnected"):
+        provider.complete("polish")
+
+
+def test_chat_mode_remains_the_default_and_untouched(monkeypatch):
+    calls = _fake_openai(monkeypatch)
+    provider = OpenAILLM(
+        OpenAILlmConfig(
+            api_key="k", base_url="https://relay.example.test/v1", model="gpt-4o-mini"
+        )
+    )
+
+    assert provider.cfg.api_mode == "chat"
+    provider.complete("hi", max_tokens=50)
+
+    assert "messages" in calls[0]
+    assert "input" not in calls[0]
 
 
 def test_openai_endpoints_carry_their_own_polish_chunk_budget(monkeypatch):

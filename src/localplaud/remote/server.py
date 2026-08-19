@@ -13,11 +13,6 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-# This host has a single GPU. Serialize stage execution so concurrent job
-# submissions (e.g. a controller running two recordings in parallel) never run
-# two GPU stages at once — concurrent pyannote/torch calls deadlock on one card.
-_GPU_LOCK = threading.Lock()
-
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import Response
@@ -28,8 +23,8 @@ from sqlalchemy.exc import IntegrityError
 from ..asr.base import Segment, Transcript, Word
 from ..config import get_settings
 from ..db.models import RemoteJob
-from ..llm.base import LLMTransientError
 from ..db.session import session_scope
+from ..llm.base import LLMTransientError
 from ..plaud.common import _assert_safe_fetch_url
 from .protocol import (
     ArtifactDescriptor,
@@ -43,6 +38,11 @@ from .protocol import (
     StageCapability,
     WorkerError,
 )
+
+# This host has a single GPU. Serialize stage execution so concurrent job
+# submissions (e.g. a controller running two recordings in parallel) never run
+# two GPU stages at once — concurrent pyannote/torch calls deadlock on one card.
+_GPU_LOCK = threading.Lock()
 
 router = APIRouter(prefix="/api/worker/v1", tags=["remote-worker"])
 _bearer = HTTPBearer(auto_error=False)

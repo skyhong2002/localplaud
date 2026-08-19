@@ -811,7 +811,14 @@ def test_resolved_correct_snapshot_preserves_connection_dispatch_data(tmp_path):
             "model": "gpt-correction",
             "options": {},
             "provider_type": "openai",
-            "configuration": {"base_url": "https://llm.example.test/v1"},
+            # api_mode and polish_chunk_chars are dispatch data too: which API
+            # surface the endpoint is driven through, and how much transcript
+            # one correction request may carry.
+            "configuration": {
+                "base_url": "https://llm.example.test/v1",
+                "api_mode": "chat",
+                "polish_chunk_chars": 12000,
+            },
             "secret_ref": None,
             "execution_target": "cloud",
             "data_egress": True,

@@ -73,6 +73,11 @@ class OpenAILLM:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
+        if self.cfg.api_mode == "responses":
+            return self._complete_via_responses(
+                client, messages, temperature, max_tokens, json_schema
+            )
+
         request: dict[str, object] = {
             "model": self.cfg.model,
             "messages": messages,
@@ -97,5 +102,72 @@ class OpenAILLM:
         )
         content = resp.choices[0].message.content
         if content is None:
+            raise LLMError("OpenAI LLM: empty completion")
+        return content
+
+    def _complete_via_responses(
+        self,
+        client,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        json_schema: dict | None,
+    ) -> str:
+        """Stream the Responses API and return the assembled output text.
+
+        Streaming is not an optimization here: a high reasoning effort spends
+        minutes before the first output token, and a reverse proxy in front of
+        a hosted relay terminates a request that produces no bytes for that
+        long. The typed event stream carries reasoning progress throughout, so
+        the connection never goes silent.
+        """
+        request: dict[str, object] = {
+            "model": self.cfg.model,
+            "input": messages,
+            "max_output_tokens": max_tokens,
+            "stream": True,
+        }
+        if self.cfg.reasoning_effort is not None:
+            request["reasoning"] = {"effort": self.cfg.reasoning_effort}
+        else:
+            request["temperature"] = temperature
+        if json_schema is not None:
+            request["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "localplaud_response",
+                    "strict": True,
+                    "schema": json_schema,
+                }
+            }
+        parts: list[str] = []
+        incomplete: str | None = None
+        completed = False
+        for event in client.responses.create(**request):
+            kind = getattr(event, "type", "")
+            if kind == "response.output_text.delta":
+                parts.append(event.delta)
+            elif kind == "response.completed":
+                completed = True
+            elif kind == "response.failed":
+                detail = getattr(getattr(event.response, "error", None), "message", None)
+                raise LLMError(f"OpenAI LLM: response failed: {detail or 'unknown error'}")
+            elif kind in {"error", "response.error"}:
+                detail = getattr(getattr(event, "error", None), "message", None)
+                detail = detail or getattr(event, "message", None)
+                raise LLMError(f"OpenAI LLM: stream error: {detail or 'unknown error'}")
+            elif kind == "response.incomplete":
+                reason = getattr(
+                    getattr(event.response, "incomplete_details", None), "reason", None
+                )
+                incomplete = reason or "unknown reason"
+        if incomplete is not None:
+            # Truncation here silently drops transcript, so it must not pass as
+            # a usable completion.
+            raise LLMError(f"OpenAI LLM: response incomplete ({incomplete})")
+        if not completed:
+            raise LLMError("OpenAI LLM: response stream ended before completion")
+        content = "".join(parts)
+        if not content.strip():
             raise LLMError("OpenAI LLM: empty completion")
         return content

@@ -185,6 +185,38 @@ def test_periodic_recovery_preserves_live_processing_lease(monkeypatch, tmp_path
         assert session.query(StageAttempt).one().status == StageStatus.running
 
 
+def test_recovery_closes_orphan_attempt_without_file_claim(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        StageAttempt,
+        StageName,
+        StageStatus,
+    )
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import reset_inflight
+
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="orphan", status=FileStatus.error, audio_path="/x"))
+        session.add(
+            StageAttempt(
+                file_id="orphan",
+                stage=StageName.correct,
+                attempt=2,
+                status=StageStatus.running,
+            )
+        )
+
+    assert reset_inflight() == 0
+    with session_scope() as session:
+        attempt = session.query(StageAttempt).one()
+        assert attempt.status == StageStatus.failed
+        assert attempt.completed_at is not None
+        assert "no active processing claim" in attempt.error
+
+
 def test_startup_recovers_only_previous_daemon_and_expired_claims(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import (

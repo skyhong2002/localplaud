@@ -7,8 +7,6 @@ so it is not mistaken for a user edit or a Plaud-provided name.
 
 from __future__ import annotations
 
-import pytest
-
 
 def _init_db(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
