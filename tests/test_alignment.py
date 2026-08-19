@@ -353,6 +353,48 @@ def test_whisperx_maps_newer_output_without_custom_marker_by_timestamp(monkeypat
     assert result.detail["forced_alignment"] is True
     assert result.detail["timestamp_mapped_segments"] == 2
 
+
+def test_whisperx_maps_zero_duration_output_to_containing_source(monkeypatch, tmp_path):
+    import localplaud.worker.align as alignment
+
+    class PointTimestampWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(*_args, **_kwargs):
+            return {
+                "segments": [
+                    {
+                        "text": "point",
+                        "start": 0.5,
+                        "end": 0.5,
+                        "words": [{"word": "point", "start": 0.5, "end": 0.5}],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: PointTimestampWhisperX)
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    result = run_alignment(
+        audio,
+        Transcript(segments=[Segment(text="point", start=0, end=1)], language="en"),
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 1.0},
+    )
+
+    assert result.detail["nearest_mapped_segments"] == 1
+    assert result.detail["segment_coverage"] == 1.0
+
 def test_whisperx_catalog_model_uses_alignment_health_probe(monkeypatch, tmp_path):
     import localplaud.worker.align as alignment
     from localplaud.providers.service import bootstrap_default_profile, check_model_health
