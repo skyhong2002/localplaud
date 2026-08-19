@@ -65,7 +65,11 @@ class AlignmentResult:
     detail: dict[str, Any]
 
 
-def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
+def inspect_word_alignment(
+    transcript: Transcript,
+    *,
+    allow_overlapping_segment_starts: bool = False,
+) -> dict[str, Any]:
     words = [word for segment in transcript.segments for word in segment.words]
     if not words:
         raise AlignmentUnavailable(
@@ -104,7 +108,10 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
                 # start precede the previous start by a fraction of a second.
                 # Preserve the provider evidence, but still reject materially
                 # out-of-order segment timelines.
-                if regression > _MAX_CROSS_SEGMENT_START_REGRESSION_SECONDS:
+                if (
+                    regression > _MAX_CROSS_SEGMENT_START_REGRESSION_SECONDS
+                    and not allow_overlapping_segment_starts
+                ):
                     raise AlignmentError(
                         f"segment {segment_index} is not chronologically ordered"
                     )
@@ -472,7 +479,13 @@ def _forced_align_whisperx(
         model=transcript.model,
         has_speakers=transcript.has_speakers,
     )
-    detail = inspect_word_alignment(result)
+    # Long-form Whisper input is chunked with overlap. A later ASR segment can
+    # therefore begin several seconds before a short segment emitted at the
+    # edge of the preceding chunk, even though WhisperX's word evidence is
+    # usable. Forced alignment already preserves source ordering and validates
+    # word order inside every segment, so retain and report these cross-chunk
+    # overlaps instead of discarding the complete alignment artifact.
+    detail = inspect_word_alignment(result, allow_overlapping_segment_starts=True)
     alignable_segment_count = len(transcript.segments) - skipped_empty_segments
     aligned_segment_count = sum(
         bool(segment.words) and bool(segment.text.strip()) for segment in result.segments

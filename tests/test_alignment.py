@@ -136,6 +136,32 @@ def test_materially_reversed_segment_timeline_is_rejected():
         inspect_word_alignment(transcript)
 
 
+def test_forced_alignment_can_preserve_material_cross_chunk_segment_overlap():
+    transcript = Transcript(
+        segments=[
+            Segment(
+                text="chunk edge",
+                start=4829.37,
+                end=4830.37,
+                words=[Word(text="edge", start=4829.5, end=4830.0)],
+            ),
+            Segment(
+                text="overlapping next chunk",
+                start=4825.43,
+                end=4836.05,
+                words=[Word(text="next", start=4826.0, end=4827.0)],
+            ),
+        ]
+    )
+
+    detail = inspect_word_alignment(
+        transcript, allow_overlapping_segment_starts=True
+    )
+
+    assert detail["cross_segment_start_overlaps"] == 1
+    assert detail["cross_segment_word_overlaps"] == 1
+
+
 def test_standalone_punctuation_is_not_a_speech_chronology_anchor():
     transcript = Transcript(
         segments=[
