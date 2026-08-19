@@ -10,12 +10,23 @@ through unchanged rather than failing the pipeline.
 from __future__ import annotations
 
 import logging
+import re
 
 log = logging.getLogger(__name__)
 
 _detect = None
 _convert = None
 _unavailable = False
+
+# OpenCC's s2twp phrase dictionary correctly renders an online "community" as
+# 「社群」, but applies the same rewrite to residential compounds such as
+# 「社區管委會」.  Protect only the neighbourhood-specific prefix while the
+# remainder of the sentence is converted; broad replacement of 「社区」 would
+# damage legitimate phrases such as 「線上社群」.
+_NEIGHBOURHOOD_PREFIX = re.compile(
+    r"社[区區](?=(?:管委[会會]|規約|规约|住戶|住户|住民|大樓|大楼|物業|物业|治理|管理|事務|事务))"
+)
+_NEIGHBOURHOOD_TOKEN = "__LOCALPLAUD_NEIGHBOURHOOD__"
 
 
 def to_traditional(text: str | None) -> str | None:
@@ -43,6 +54,7 @@ def to_traditional(text: str | None) -> str | None:
     try:
         if _detect.convert(text) == text:
             return text  # already Traditional (or non-Chinese)
-        return _convert.convert(text)
+        protected = _NEIGHBOURHOOD_PREFIX.sub(_NEIGHBOURHOOD_TOKEN, text)
+        return _convert.convert(protected).replace(_NEIGHBOURHOOD_TOKEN, "社區")
     except Exception:  # noqa: BLE001
         return text
