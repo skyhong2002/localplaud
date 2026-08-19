@@ -64,6 +64,58 @@ def test_word_timestamps_may_overlap_across_ordered_segments():
     assert detail["segment_coverage"] == 1.0
 
 
+def test_untimed_asr_evidence_does_not_corrupt_timed_segment_chronology():
+    transcript = Transcript(
+        segments=[
+            Segment(
+                text="before",
+                start=10,
+                end=11,
+                words=[Word(text="before", start=10, end=11)],
+            ),
+            Segment(text="!", start=15, end=16),
+            Segment(
+                text="after",
+                start=12,
+                end=13,
+                words=[Word(text="after", start=12, end=13)],
+            ),
+        ]
+    )
+
+    detail = inspect_word_alignment(transcript)
+
+    assert detail["timed_segments"] == 2
+    assert detail["untimed_segments"] == 1
+    assert detail["segment_coverage"] == pytest.approx(2 / 3)
+
+
+def test_standalone_punctuation_is_not_a_speech_chronology_anchor():
+    transcript = Transcript(
+        segments=[
+            Segment(
+                text="before",
+                start=10,
+                end=11,
+                words=[Word(text="before", start=10, end=11)],
+            ),
+            Segment(text="!", start=15, end=16, words=[Word(text="!", start=15, end=16)]),
+            Segment(
+                text="after",
+                start=12,
+                end=13,
+                words=[Word(text="after", start=12, end=13)],
+            ),
+        ]
+    )
+
+    detail = inspect_word_alignment(transcript)
+
+    assert detail["timed_segments"] == 3
+    assert detail["nonlexical_timed_segments"] == 1
+    assert detail["segment_coverage"] == 1.0
+
+
 @pytest.mark.parametrize(
     "words,error,match",
     [
@@ -323,6 +375,127 @@ def test_whisperx_rejects_missing_language_and_incomplete_output(monkeypatch, tm
         )
 
 
+def test_whisperx_preserves_sparse_omissions_subject_to_coverage(monkeypatch, tmp_path):
+    import localplaud.worker.align as alignment
+
+    class SparseWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(*_args, **_kwargs):
+            return {
+                "segments": [
+                    {
+                        "text": "first",
+                        "start": 0.1,
+                        "end": 0.8,
+                        "avg_logprob": 0.0,
+                        "words": [{"word": "first", "start": 0.1, "end": 0.8}],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: SparseWhisperX)
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+    transcript = Transcript(
+        segments=[
+            Segment(text="first", start=0, end=1),
+            Segment(text="second", start=1, end=2),
+        ],
+        language="en",
+    )
+
+    result = run_alignment(
+        audio,
+        transcript,
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 0.5},
+    )
+
+    assert result.transcript.segments[1] == transcript.segments[1]
+    assert result.detail["segment_coverage"] == 0.5
+    assert result.detail["unaligned_segments"] == 1
+    assert result.detail["omitted_segments"] == 1
+    assert result.detail["omitted_segment_indexes"] == [1]
+
+    with pytest.raises(AlignmentError, match="coverage 50.0%"):
+        run_alignment(
+            audio,
+            transcript,
+            provider="whisperx",
+            model="wav2vec2-auto",
+            options={"device": "cpu", "min_segment_coverage": 1.0},
+        )
+
+
+def test_whisperx_orders_split_parts_by_timestamp_before_merging_words(
+    monkeypatch, tmp_path
+):
+    import localplaud.worker.align as alignment
+
+    class OutOfOrderPartsWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(*_args, **_kwargs):
+            return {
+                "segments": [
+                    {
+                        "text": "later",
+                        "start": 0.6,
+                        "end": 0.9,
+                        "avg_logprob": 0.0,
+                        "words": [{"word": "later", "start": 0.6, "end": 0.9}],
+                    },
+                    {
+                        "text": "earlier",
+                        "start": 0.1,
+                        "end": 0.4,
+                        "avg_logprob": 0.0,
+                        "words": [{"word": "earlier", "start": 0.1, "end": 0.4}],
+                    },
+                ]
+            }
+
+    monkeypatch.setattr(
+        alignment, "_import_whisperx", lambda: OutOfOrderPartsWhisperX
+    )
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    result = run_alignment(
+        audio,
+        Transcript(
+            segments=[Segment(text="earlier later", start=0, end=1)],
+            language="en",
+        ),
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 1.0},
+    )
+
+    assert [word.text for word in result.transcript.segments[0].words] == [
+        "earlier",
+        "later",
+    ]
+
+
 def test_whisperx_maps_newer_output_without_custom_marker_by_timestamp(monkeypatch, tmp_path):
     import localplaud.worker.align as alignment
 
@@ -376,6 +549,60 @@ def test_whisperx_maps_newer_output_without_custom_marker_by_timestamp(monkeypat
     assert [segment.text for segment in result.transcript.segments] == ["first", "second"]
     assert result.detail["forced_alignment"] is True
     assert result.detail["timestamp_mapped_segments"] == 2
+
+
+def test_whisperx_prefers_text_match_between_overlapping_sources(monkeypatch, tmp_path):
+    import localplaud.worker.align as alignment
+
+    class TextMatchingWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(*_args, **_kwargs):
+            return {
+                "segments": [
+                    {
+                        "text": "speech",
+                        "start": 0.9,
+                        "end": 1.6,
+                        "words": [{"word": "speech", "start": 0.9, "end": 1.6}],
+                    },
+                    {
+                        "text": "!",
+                        "start": 1.0,
+                        "end": 1.5,
+                        "words": [{"word": "!", "start": 1.0, "end": 1.5}],
+                    },
+                ]
+            }
+
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: TextMatchingWhisperX)
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    result = run_alignment(
+        audio,
+        Transcript(
+            segments=[
+                Segment(text="speech", start=0.8, end=1.7),
+                Segment(text="!", start=1.0, end=1.5),
+            ],
+            language="en",
+        ),
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 1.0},
+    )
+
+    assert [word.text for word in result.transcript.segments[0].words] == ["speech"]
+    assert [word.text for word in result.transcript.segments[1].words] == ["!"]
 
 
 def test_whisperx_maps_zero_duration_output_to_containing_source(monkeypatch, tmp_path):

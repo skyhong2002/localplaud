@@ -28,6 +28,26 @@ _TIMESTAMP_PROVIDERS = {
 }
 
 
+def _alignment_text_key(value: object) -> str:
+    return "".join(str(value or "").split()).casefold()
+
+
+def _alignment_text_rank(aligned: object, source: object) -> int:
+    aligned_key = _alignment_text_key(aligned)
+    source_key = _alignment_text_key(source)
+    if not aligned_key or not source_key:
+        return 0
+    if aligned_key == source_key:
+        return 2
+    if aligned_key in source_key or source_key in aligned_key:
+        return 1
+    return 0
+
+
+def _has_lexical_content(value: str) -> bool:
+    return any(character.isalnum() for character in value)
+
+
 class AlignmentError(RuntimeError):
     """Alignment executed but returned invalid or incomplete timing evidence."""
 
@@ -54,17 +74,26 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
     previous_global_word_start = -1.0
     cross_segment_word_overlaps = 0
     timed_segments = 0
+    untimed_segments = 0
+    nonlexical_timed_segments = 0
     for segment_index, segment in enumerate(transcript.segments):
         if not math.isfinite(segment.start) or not math.isfinite(segment.end):
             raise AlignmentError(f"segment {segment_index} has a non-finite timestamp")
         if segment.start < 0 or segment.end < segment.start:
             raise AlignmentError(f"segment {segment_index} has an invalid timestamp range")
-        # Some Whisper providers emit content-free bookkeeping placeholders at
-        # chunk boundaries. Their stale timestamp can fall behind the adjacent
-        # speech segments even though they carry no text or words. Preserve and
-        # validate the placeholder, but do not let it corrupt speech chronology.
-        empty_placeholder = not segment.text.strip() and not segment.words
-        if not empty_placeholder:
+        # Some Whisper providers emit bookkeeping placeholders or standalone
+        # punctuation that forced alignment cannot time. Their coarse ASR
+        # timestamp can fall outside adjacent speech even though no word-level
+        # evidence supports it. Preserve and validate the unaligned segment,
+        # but enforce chronology only across segments that actually have timed
+        # words. The forced-alignment coverage gate accounts for the omission.
+        if not segment.words:
+            untimed_segments += 1
+        elif not _has_lexical_content(segment.text):
+            # A standalone punctuation token can carry an alignment timestamp,
+            # but it is not a reliable speech-order anchor between ASR chunks.
+            nonlexical_timed_segments += 1
+        else:
             if segment.start < previous_segment_start:
                 raise AlignmentError(f"segment {segment_index} is not chronologically ordered")
             previous_segment_start = segment.start
@@ -104,6 +133,10 @@ def inspect_word_alignment(transcript: Transcript) -> dict[str, Any]:
     }
     if cross_segment_word_overlaps:
         detail["cross_segment_word_overlaps"] = cross_segment_word_overlaps
+    if untimed_segments:
+        detail["untimed_segments"] = untimed_segments
+    if nonlexical_timed_segments:
+        detail["nonlexical_timed_segments"] = nonlexical_timed_segments
     return detail
 
 
@@ -250,6 +283,8 @@ def _forced_align_whisperx(
     aligned_segments = payload.get("segments") if isinstance(payload, dict) else None
     if not isinstance(aligned_segments, list):
         raise AlignmentError("WhisperX returned no aligned segments")
+    if not aligned_segments:
+        raise AlignmentError("WhisperX omitted input segments: all")
     grouped: dict[int, list[dict[str, Any]]] = {
         index: [] for index in range(len(transcript.segments))
     }
@@ -292,8 +327,16 @@ def _forced_align_whisperx(
                 )
                 for index in alignable_source_indexes
             }
+            positive_overlaps = [item for item in overlaps.items() if item[1] > 0]
             source_index, best_overlap = max(
-                overlaps.items(), key=lambda item: item[1], default=(-1, 0.0)
+                positive_overlaps,
+                key=lambda item: (
+                    _alignment_text_rank(
+                        aligned.get("text"), transcript.segments[item[0]].text
+                    ),
+                    item[1],
+                ),
+                default=(-1, 0.0),
             )
             if best_overlap <= 0:
                 # Sentence tokenization can yield a point timestamp, and CTC
@@ -322,8 +365,19 @@ def _forced_align_whisperx(
     segments: list[Segment] = []
     unaligned_words = 0
     unaligned_segments = 0
+    omitted_segment_indexes: list[int] = []
     for index, source in enumerate(transcript.segments):
-        parts = grouped[index]
+        # WhisperX normally emits sentence parts chronologically, but an
+        # out-of-order ASR placeholder can make split parts arrive in input
+        # order instead. Stabilize only the part boundary here; word order
+        # inside each part remains provider evidence and is still validated.
+        parts = sorted(
+            grouped[index],
+            key=lambda part: (
+                float(part["start"]) if part.get("start") is not None else math.inf,
+                float(part["end"]) if part.get("end") is not None else math.inf,
+            ),
+        )
         if not parts:
             if not source.text.strip():
                 segments.append(source)
@@ -332,7 +386,16 @@ def _forced_align_whisperx(
                 unaligned_segments += 1
                 segments.append(source)
                 continue
-            raise AlignmentError(f"WhisperX omitted input segment {index}")
+            # WhisperX can occasionally omit one sentence-level item while
+            # returning valid word timing for the rest of a long recording.
+            # Preserve that immutable ASR segment as explicitly unaligned and
+            # let the configured whole-transcript coverage floor decide
+            # whether the result is usable. A sparse omission should not
+            # discard thousands of otherwise valid word timestamps.
+            omitted_segment_indexes.append(index)
+            unaligned_segments += 1
+            segments.append(source)
+            continue
         words: list[Word] = []
         for part in parts:
             for item in part.get("words") or []:
@@ -407,6 +470,9 @@ def _forced_align_whisperx(
         "skipped_short_segments": len(skipped_short_segment_indexes),
         "alignable_segment_count": alignable_segment_count,
     }
+    if omitted_segment_indexes:
+        detail["omitted_segments"] = len(omitted_segment_indexes)
+        detail["omitted_segment_indexes"] = omitted_segment_indexes
     if timestamp_mapped_segments:
         detail["timestamp_mapped_segments"] = timestamp_mapped_segments
     if nearest_mapped_segments:
