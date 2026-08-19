@@ -75,6 +75,12 @@ Since 2026-07 the production deployment is one controller plus one worker:
   deadlocked the single card. The Mac keeps pipelining CPU/Metal work while a
   GPU stage is in flight; the worker is the throughput bottleneck by design.
 
+The worker container must run `localplaud serve`, not `localplaud run`. The
+controller owns Plaud polling and backlog scheduling; `serve` exposes the
+authenticated worker API without starting a second autonomous poller on WSL.
+The production-only Compose override pins that command and is intentionally
+kept beside the worker's local secrets rather than committed.
+
 Operational caveats learned the hard way:
 
 - Keep controller and worker on the **same code/protocol revision**. The worker

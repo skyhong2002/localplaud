@@ -3,28 +3,25 @@
 Working notes for continuing development (synced across machines via git).
 No secrets here — those live in `.env` / the Caddyfile, never committed.
 
-Audited 2026-07-31 against the running production system, the production
+Audited 2026-08-19 against the running production system, the production
 database, and the codebase: every open item below was re-verified with
 evidence; completed work moved to the compressed archive at the bottom.
 Full pre-audit engineering detail lives in this file's git history.
 
-## Status snapshot (2026-07-31)
+## Status snapshot (2026-08-19)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
   Active development is merged directly to `main` (test count verified per change).
 - **Production is LIVE** on the M4 Mac mini (hostname now `sky-mini`, formerly
   SkyLabMac/CCLabMacmini): launchd agent `com.localplaud.agent`, reverse-proxied
-  at **https://plaud.observe.tw** (healthz 200 verified 2026-07-31).
-- **Independent mode runs on execution profile `mac-wsl-hybrid` v7** (system
+  at **https://plaud.observe.tw** (healthz 200 verified 2026-08-19).
+- **Independent mode runs on execution profile `mac-wsl-hybrid` v11** (system
   default, operator-configured in the DB): Mac MLX Whisper large-v3-turbo ASR
-  with whisper-timestamps word timing; diarize / summarize / mind-map / embed
+  with WhisperX/wav2vec2 forced alignment; diarize / summarize / mind-map / embed
   dispatched to the **WSL RTX 5060 remote worker** over Tailscale; transcript
-  polish via OpenCode Go with **codex-local (`gpt-5.6-luna`) as the
-  correct-stage fallback** — 39 completed production attempts prove the
-  codex-local runtime path (68 failed attempts are the fallback trigger noise;
-  watch the rate while the backlog drains).
-- **Backlog** (production DB, 2026-07-31): 175 done · 15 partial ·
-  1 processing · **597 downloaded awaiting processing** · 5 metadata-only.
+  polish and Ask currently use the Mac's local `qwen3.5:9b` through Ollama.
+- **Backlog** (production DB, 2026-08-19, before the repaired queue is resumed):
+  232 done · 42 partial · **565 error** · 5 metadata-only.
   The WSL GPU worker is the throughput bottleneck; `concurrency = 1` on the
   16 GB Mac is deliberate (2× Whisper pushed it into swap).
 - Legacy DB migration (note_templates / vocabulary_terms / stage_attempts /
@@ -35,18 +32,13 @@ Full pre-audit engineering detail lives in this file's git history.
 
 ### P0 — validation debt (quality gates before changing defaults)
 
-- **Gate/default contradiction — decide and fix.** The twelve-part
-  subscription-independence gate requires `forced_alignment=true`
-  (`src/localplaud/acceptance.py`), but the shipped default profile and live
-  production both align via `whisper-timestamps` (`forced_alignment=false`) —
-  a recording processed on defaults cannot pass the gate. Either validate and
-  select `align:whisperx` in the production profile, or explicitly relax the
-  gate; don't leave them contradicting each other.
 - **WhisperX forced-alignment validation.** `align:whisperx` /
-  `wav2vec2-auto` are selectable but deliberately default-off; all tests are
-  fake-WhisperX. Needs Taiwan Mandarin and Mandarin/English accuracy,
-  timestamp, speed, and memory validation on real recordings before
-  production selection.
+  `wav2vec2-auto` are now the production default. A real 43-second Mandarin
+  recording passed all 12 independence checks on 2026-08-19, including 93
+  forced-aligned word timestamps and the full Mac-to-WSL pipeline. Broader
+  Taiwan Mandarin and Mandarin/English accuracy, timestamp, speed, and memory
+  benchmarking is still required before considering this quality validation
+  complete.
 - **VAD validation.** `asr.vad.enabled` remains default-off (implementation
   is complete for both mlx and faster-whisper paths). Benchmark on real
   Taiwan Mandarin / code-switch recordings before enabling by default. No
@@ -66,8 +58,11 @@ Full pre-audit engineering detail lives in this file's git history.
 
 ### P0 — operations
 
-- **Drain the 597-recording backlog.** Reprocessing is in progress and
-  bounded by the WSL GPU; fresh uploads stay ahead of the backlog by design.
+- **Drain the repaired backlog.** The 2026-08-19 repair restored the missing
+  worker secret, rotated it, synchronized the WSL worker, and proved one real
+  end-to-end recording. Requeue the remaining 565 error and 42 partial rows;
+  processing remains bounded by the WSL GPU and fresh uploads stay ahead of
+  historical work by design.
 
 ### P1 — Web App remaining gaps (2026-07-31 audit vs `docs/product-workflow.md`)
 
