@@ -2727,6 +2727,64 @@ def _persist_remote_chunks(file_id: str, payload: dict, lineage: dict | None = N
     return model_name
 
 
+def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | None:
+    """Return the currently eligible processing scope for a queued recording.
+
+    The daemon builds a bounded batch before it starts expensive work.  A retry
+    can be deferred or claimed while an earlier item in that batch is running,
+    so every item must pass this same eligibility check again immediately before
+    execution.
+    """
+    if processing_claim_active(row, now=now):
+        return None
+    if row.status not in (FileStatus.downloaded, FileStatus.error, FileStatus.partial):
+        return None
+
+    derived_stages = {StageName.summarize, StageName.mind_map, StageName.index}
+    derived_only = any(
+        run.stage in derived_stages
+        and bool((run.detail or {}).get("derived_only"))
+        and run.status != StageStatus.completed
+        for run in row.stage_runs
+    )
+    # A pending mind-map-only rebuild retries at that same narrow scope — unless
+    # a broader derived regeneration is also pending, which supersedes it.
+    mind_map_only = not derived_only and any(
+        run.stage == StageName.mind_map
+        and bool((run.detail or {}).get("mind_map_only"))
+        and run.status != StageStatus.completed
+        for run in row.stage_runs
+    )
+    if row.status != FileStatus.downloaded:
+        if mind_map_only:
+            map_run = next(
+                run
+                for run in row.stage_runs
+                if run.stage == StageName.mind_map
+                and bool((run.detail or {}).get("mind_map_only"))
+            )
+            detail = map_run.detail or {}
+            scoped_count = int(detail.get("mind_map_retry_count") or 0)
+            scoped_due = _retry_snapshot_datetime(detail.get("mind_map_next_retry_at"))
+            if scoped_count >= settings.pipeline.retry_max_attempts or (
+                scoped_due is not None and scoped_due > now
+            ):
+                return None
+        elif row.pipeline_retry_count >= settings.pipeline.retry_max_attempts or (
+            row.pipeline_next_retry_at is not None
+            and (
+                row.pipeline_next_retry_at.replace(tzinfo=UTC)
+                if row.pipeline_next_retry_at.tzinfo is None
+                else row.pipeline_next_retry_at
+            )
+            > now
+        ):
+            return None
+    if row.audio_path is None and not (derived_only or mind_map_only):
+        return None
+    return "derived" if derived_only else ("mind_map" if mind_map_only else "full")
+
+
 def process_pending(
     settings: Settings | None = None, limit: int | None = None, force: bool = False
 ) -> int:
@@ -2749,51 +2807,10 @@ def process_pending(
             )
         )
         rows = []
-        derived_stages = {StageName.summarize, StageName.mind_map, StageName.index}
         for row in candidate_rows:
-            derived_only = any(
-                run.stage in derived_stages
-                and bool((run.detail or {}).get("derived_only"))
-                and run.status != StageStatus.completed
-                for run in row.stage_runs
-            )
-            # A pending mind-map-only rebuild retries at that same narrow
-            # scope — unless a broader derived regeneration is also pending,
-            # which supersedes it (and covers the mind map anyway).
-            mind_map_only = not derived_only and any(
-                run.stage == StageName.mind_map
-                and bool((run.detail or {}).get("mind_map_only"))
-                and run.status != StageStatus.completed
-                for run in row.stage_runs
-            )
-            if row.status != FileStatus.downloaded:
-                if mind_map_only:
-                    map_run = next(
-                        run
-                        for run in row.stage_runs
-                        if run.stage == StageName.mind_map
-                        and bool((run.detail or {}).get("mind_map_only"))
-                    )
-                    detail = map_run.detail or {}
-                    scoped_count = int(detail.get("mind_map_retry_count") or 0)
-                    scoped_due = _retry_snapshot_datetime(detail.get("mind_map_next_retry_at"))
-                    if scoped_count >= settings.pipeline.retry_max_attempts or (
-                        scoped_due is not None and scoped_due > now
-                    ):
-                        continue
-                elif row.pipeline_retry_count >= settings.pipeline.retry_max_attempts or (
-                    row.pipeline_next_retry_at is not None
-                    and (
-                        row.pipeline_next_retry_at.replace(tzinfo=UTC)
-                        if row.pipeline_next_retry_at.tzinfo is None
-                        else row.pipeline_next_retry_at
-                    )
-                    > now
-                ):
-                    continue
-            if row.audio_path is None and not (derived_only or mind_map_only):
+            scope = _pending_scope(row, settings, now)
+            if scope is None:
                 continue
-            scope = "derived" if derived_only else ("mind_map" if mind_map_only else "full")
             rows.append((row, scope))
 
         def timestamp(value: datetime | None) -> float:
@@ -2841,6 +2858,13 @@ def process_pending(
         with processing_owner(claim_owner):
             fid, scope = job
             try:
+                # The batch may have waited behind minutes of ASR/LLM work.
+                # Re-read durable state so a newly deferred or claimed item is
+                # not executed from a stale in-memory queue snapshot.
+                with session_scope() as session:
+                    row = session.get(PlaudFile, fid)
+                    if row is None or _pending_scope(row, settings, datetime.now(UTC)) != scope:
+                        return False
                 if scope == "derived":
                     process_derived_artifacts(fid, settings)
                 elif scope == "mind_map":

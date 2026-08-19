@@ -154,6 +154,50 @@ def test_due_retry_is_not_starved_by_older_download_backlog(monkeypatch, tmp_pat
     assert seen == ["due-retry"]
 
 
+def test_pending_batch_revalidates_retry_deadline_before_each_job(monkeypatch, tmp_path):
+    settings = _reset(monkeypatch, tmp_path)
+    import localplaud.worker.pipeline as pipeline
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    audio = tmp_path / "deferred.wav"
+    audio.write_bytes(b"RIFF")
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        session.add_all(
+            [
+                PlaudFile(
+                    id="first",
+                    status=FileStatus.error,
+                    audio_path=str(audio),
+                    pipeline_retry_count=1,
+                    pipeline_next_retry_at=now - timedelta(seconds=1),
+                ),
+                PlaudFile(
+                    id="deferred",
+                    status=FileStatus.error,
+                    audio_path=str(audio),
+                    pipeline_retry_count=1,
+                    pipeline_next_retry_at=now - timedelta(seconds=2),
+                ),
+            ]
+        )
+
+    seen: list[str] = []
+
+    def process(file_id, *_args, **_kwargs):
+        seen.append(file_id)
+        if file_id == "first":
+            with session_scope() as session:
+                session.get(PlaudFile, "deferred").pipeline_next_retry_at = datetime.now(
+                    UTC
+                ) + timedelta(hours=1)
+
+    monkeypatch.setattr(pipeline, "process_file", process)
+    assert pipeline.process_pending(settings, limit=2) == 1
+    assert seen == ["first"]
+
+
 def test_pipeline_failure_is_retried_then_success_clears_state(monkeypatch, tmp_path):
     settings = _reset(monkeypatch, tmp_path)
     import localplaud.worker.pipeline as pipeline
