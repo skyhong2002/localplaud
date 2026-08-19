@@ -583,6 +583,20 @@ def _fail_stage(file_id: str, stage: StageName, exc: Exception, *, degraded=Fals
     )
 
 
+def _latest_completed_attempt(file_id: str, stage: StageName) -> StageAttempt | None:
+    """Return durable execution provenance for a reused stage artifact."""
+    with session_scope() as session:
+        return session.scalar(
+            select(StageAttempt)
+            .where(
+                StageAttempt.file_id == file_id,
+                StageAttempt.stage == stage,
+                StageAttempt.status == StageStatus.completed,
+            )
+            .order_by(StageAttempt.id.desc())
+        )
+
+
 def _rehydrate_segments(segments: list[dict] | None) -> list[Segment]:
     segs = []
     for s in segments or []:
@@ -1419,13 +1433,26 @@ def _process_file_claimed(
         elif transcript_source != "local":
             _skip_stage(file_id, StageName.diarize, "imported migration artifact")
         elif diarization_input.has_speakers:
+            prior_diarization = _latest_completed_attempt(file_id, StageName.diarize)
+            provided_by_asr = prior_diarization is None
+            detail = {"reused": True, "provided_by_asr": provided_by_asr}
+            if prior_diarization is not None:
+                detail["reused_attempt"] = prior_diarization.attempt
             _finish_stage(
                 file_id,
                 StageName.diarize,
-                provider=diarization_input.provider,
-                model=diarization_input.model,
+                provider=(
+                    prior_diarization.provider
+                    if prior_diarization is not None
+                    else diarization_input.provider
+                ),
+                model=(
+                    prior_diarization.model
+                    if prior_diarization is not None
+                    else diarization_input.model
+                ),
                 artifact_source=transcript_source,
-                detail={"reused": True, "provided_by_asr": True},
+                detail=detail,
             )
         elif (
             diarize_settings.diarize.provider == "none"

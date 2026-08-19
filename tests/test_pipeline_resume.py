@@ -364,8 +364,17 @@ def test_derived_artifacts_require_canonical_local_transcript(monkeypatch, tmp_p
 
 def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
+    from sqlalchemy import select
+
     from localplaud.config import get_settings
-    from localplaud.db.models import FileStatus, PlaudFile, TranscriptRevision
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        StageAttempt,
+        StageName,
+        StageStatus,
+        TranscriptRevision,
+    )
     from localplaud.db.models import Transcript as TranscriptRow
     from localplaud.db.session import init_db, session_scope
     from localplaud.worker.pipeline import process_file
@@ -447,6 +456,26 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
         assert len(row.local_transcript.segments) == 1
         assert row.local_transcript.segments[0]["text"] == "raw words"
         assert row.corrected_transcript.text == "corrected words"
+        first_diarization = session.scalar(
+            select(StageAttempt).where(
+                StageAttempt.file_id == row.id,
+                StageAttempt.stage == StageName.diarize,
+                StageAttempt.status == StageStatus.completed,
+            )
+        )
+        assert first_diarization is not None
+        expected_provider = first_diarization.provider
+        expected_model = first_diarization.model
+
+    process_file("raw-lane")
+
+    with session_scope() as session:
+        row = session.get(PlaudFile, "raw-lane")
+        diarization = next(run for run in row.stage_runs if run.stage.value == "diarize")
+        assert diarization.provider == expected_provider
+        assert diarization.model == expected_model
+        assert diarization.detail["provided_by_asr"] is False
+        assert diarization.detail["reused_attempt"] == 1
 
 
 def test_ai_revision_reuse_requires_current_raw_structure():
