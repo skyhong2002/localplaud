@@ -621,6 +621,32 @@ def _rehydrate_revision(rev: TranscriptRevision, base: TranscriptRow | None) -> 
     )
 
 
+def _revision_matches_raw_structure(
+    revision: TranscriptRevision, raw: TranscriptRow
+) -> bool:
+    """Return whether a text-only revision still overlays the current raw lane."""
+    if revision.base_transcript_id != raw.id or revision.source != raw.source:
+        return False
+
+    def signature(segment: dict) -> tuple:
+        return (
+            segment.get("start"),
+            segment.get("end"),
+            segment.get("speaker"),
+            tuple(
+                (word.get("start"), word.get("end"), word.get("speaker"))
+                for word in segment.get("words") or []
+            ),
+        )
+
+    revision_segments = revision.segments or []
+    raw_segments = raw.segments or []
+    return len(revision_segments) == len(raw_segments) and all(
+        signature(edited) == signature(source)
+        for edited, source in zip(revision_segments, raw_segments, strict=True)
+    )
+
+
 def _select_raw_transcript(row: PlaudFile, settings: Settings) -> TranscriptRow | None:
     """Select the raw transcript allowed by the configured artifact mode."""
     local = [item for item in row.transcripts if item.source == "local"]
@@ -1440,7 +1466,7 @@ def _process_file_claimed(
                     # explicit stage map.  ``candidate_settings`` already
                     # resolves that case against durable settings.
                     model = candidate_settings.diarize.model
-                    speaker_mapping = _persist_transcript(file_id, source)
+                    speaker_mapping = _persist_diarized_transcript(file_id, source)
                     return {
                         "value": source,
                         "provider": provider,
@@ -1515,6 +1541,8 @@ def _process_file_claimed(
                     and current.provider
                     and current.model
                     and current.prompt_version
+                    and raw is not None
+                    and _revision_matches_raw_structure(current, raw)
                 )
                 if current_kind == "ai_polish" and not current_provenance_complete and raw:
                     transcript = _rehydrate_transcript(raw)
@@ -2462,6 +2490,43 @@ def _persist_aligned_transcript(file_id: str, transcript: Transcript) -> None:
         if (snapshot := _PROFILE_SNAPSHOT.get()) is not None:
             row.resolved_profile_snapshot = snapshot
         sync_speakers(session, file_id, speaker_keys_from_segments(segments))
+
+
+def _persist_diarized_transcript(
+    file_id: str, transcript: Transcript
+) -> dict[str, str]:
+    """Update speaker evidence in place and invalidate speaker-derived artifacts."""
+    with session_scope() as session:
+        _assert_processing_claim_in_session(session, file_id)
+        from .knowledge_index import reject_active_ask_evidence_mutation
+
+        reject_active_ask_evidence_mutation(session, file_id)
+        row = session.scalar(
+            select(TranscriptRow)
+            .where(TranscriptRow.file_id == file_id, TranscriptRow.source == "local")
+            .order_by(TranscriptRow.id.desc())
+        )
+        if row is None:
+            raise ValueError("diarization requires a persisted local transcript")
+        if transcript.text != row.text:
+            raise ValueError("diarization cannot replace immutable ASR text")
+
+        previous_segments = list(row.segments or [])
+        if speaker_keys_from_segments(previous_segments):
+            capture_speaker_evidence(session, file_id, previous_segments)
+        segments = [asdict(segment) for segment in transcript.segments]
+        speaker_mapping = reconcile_speaker_labels(session, file_id, segments)
+        changed = segments != previous_segments or row.has_speakers != transcript.has_speakers
+        row.segments = segments
+        row.has_speakers = transcript.has_speakers
+        if (snapshot := _PROFILE_SNAPSHOT.get()) is not None:
+            row.resolved_profile_snapshot = snapshot
+        sync_speakers(session, file_id, speaker_keys_from_segments(segments))
+        if changed:
+            from ..vocabulary import _mark_derived_stale
+
+            _mark_derived_stale(session, file_id, reason="diarization")
+        return speaker_mapping
 
 
 def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -> int:

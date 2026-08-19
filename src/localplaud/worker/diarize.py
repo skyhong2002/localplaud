@@ -57,6 +57,16 @@ def _words_text(words: list[Word]) -> str:
     return text.strip()
 
 
+def _dominant_speaker(segment: Segment) -> str | None:
+    """Choose a deterministic display speaker without changing word ownership."""
+    weights: dict[str, float] = {}
+    for word in segment.words:
+        speaker = word.speaker or segment.speaker
+        if speaker:
+            weights[speaker] = weights.get(speaker, 0.0) + max(0.0, word.end - word.start)
+    return max(weights, key=weights.get) if weights else segment.speaker
+
+
 @dataclass
 class _SpeakerRun:
     segment: Segment
@@ -95,7 +105,7 @@ def _speaker_runs(segment: Segment) -> tuple[list[_SpeakerRun], bool]:
                         text=segment.text,
                         start=segment.start,
                         end=segment.end,
-                        speaker=None,
+                        speaker=_dominant_speaker(segment),
                         words=list(segment.words),
                     ),
                     mergeable=False,

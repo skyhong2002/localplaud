@@ -269,8 +269,8 @@ def test_group_speaker_segments_preserves_unsafe_mixed_text_as_a_barrier():
         "punctuation must remain!",
         "next",
     ]
-    assert grouped.segments[0].speaker is None
-    assert grouped.has_speakers is False
+    assert grouped.segments[0].speaker == "SPEAKER_01"
+    assert grouped.has_speakers is True
     assert detail["unsafe_mixed_segments"] == 1
     assert detail["merged_boundaries"] == 0
 
@@ -310,7 +310,7 @@ def test_group_speaker_segments_requires_exact_whitespace_reconstruction():
     grouped, detail = diarize_module.group_speaker_segments(transcript)
 
     assert grouped.segments[0].text == "NewYork"
-    assert grouped.segments[0].speaker is None
+    assert grouped.segments[0].speaker == "SPEAKER_01"
     assert detail["unsafe_mixed_segments"] == 1
 
 

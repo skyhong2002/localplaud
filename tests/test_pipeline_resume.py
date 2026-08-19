@@ -395,6 +395,7 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
         )
         session.add(raw)
         session.flush()
+        raw_id = raw.id
         session.add(
             TranscriptRevision(
                 file_id=row.id,
@@ -437,8 +438,47 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
         assert stages["transcribe"].model == "raw-asr-model"
     with session_scope() as session:
         row = session.get(PlaudFile, "raw-lane")
+        assert row.local_transcript.id == raw_id
+        assert row.transcript_revisions[0].base_transcript_id == raw_id
         assert row.local_transcript.text == "raw words"
         assert row.corrected_transcript.text == "corrected words"
+
+
+def test_ai_revision_reuse_requires_current_raw_structure():
+    from localplaud.db.models import Transcript as TranscriptRow
+    from localplaud.db.models import TranscriptRevision
+    from localplaud.worker.pipeline import _revision_matches_raw_structure
+
+    segments = [
+        {
+            "text": "raw",
+            "start": 0.0,
+            "end": 1.0,
+            "speaker": "SPEAKER_00",
+            "words": [
+                {
+                    "text": "raw",
+                    "start": 0.0,
+                    "end": 1.0,
+                    "speaker": "SPEAKER_00",
+                }
+            ],
+        }
+    ]
+    raw = TranscriptRow(id=7, file_id="lineage", provider="asr", source="local", segments=segments)
+    revision = TranscriptRevision(
+        file_id="lineage",
+        base_transcript_id=7,
+        revision=1,
+        source="local",
+        segments=[dict(segments[0]) | {"text": "polished"}],
+    )
+
+    assert _revision_matches_raw_structure(revision, raw) is True
+    revision.segments[0]["speaker"] = "SPEAKER_01"
+    assert _revision_matches_raw_structure(revision, raw) is False
+    revision.base_transcript_id = None
+    assert _revision_matches_raw_structure(revision, raw) is False
 
 
 def test_index_failure_keeps_transcript_and_summary(monkeypatch, tmp_path):
