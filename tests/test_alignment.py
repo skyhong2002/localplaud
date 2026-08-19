@@ -646,6 +646,105 @@ def test_whisperx_maps_zero_duration_output_to_containing_source(monkeypatch, tm
     assert result.detail["nearest_mapped_segments"] == 1
     assert result.detail["segment_coverage"] == 1.0
 
+
+def test_whisperx_segment_bounds_expand_to_contain_word_evidence(monkeypatch, tmp_path):
+    import localplaud.worker.align as alignment
+
+    class NarrowSentenceWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(*_args, **_kwargs):
+            return {
+                "segments": [
+                    {
+                        "text": "speech",
+                        "start": 0.2,
+                        "end": 0.8,
+                        "avg_logprob": 0.0,
+                        "words": [{"word": "speech", "start": 0.1, "end": 0.9}],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: NarrowSentenceWhisperX)
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    result = run_alignment(
+        audio,
+        Transcript(segments=[Segment(text="speech", start=0, end=1)], language="en"),
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 1.0},
+    )
+
+    assert result.transcript.segments[0].start == 0.1
+    assert result.transcript.segments[0].end == 0.9
+    assert result.detail["segment_coverage"] == 1.0
+
+
+def test_whisperx_preserves_text_bearing_zero_duration_placeholder(monkeypatch, tmp_path):
+    import localplaud.worker.align as alignment
+
+    class PlaceholderWhisperX:
+        @staticmethod
+        def load_align_model(**_kwargs):
+            return object(), {}
+
+        @staticmethod
+        def load_audio(_path):
+            return []
+
+        @staticmethod
+        def align(*_args, **_kwargs):
+            return {
+                "segments": [
+                    {
+                        "text": "speech",
+                        "start": 0.0,
+                        "end": 1.0,
+                        "avg_logprob": 1.0,
+                        "words": [{"word": "speech", "start": 0.0, "end": 1.0}],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(alignment, "_import_whisperx", lambda: PlaceholderWhisperX)
+    monkeypatch.setattr(alignment, "_resolve_device", lambda _requested: "cpu")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
+
+    result = run_alignment(
+        audio,
+        Transcript(
+            segments=[
+                Segment(text="placeholder", start=0.0, end=0.0),
+                Segment(text="speech", start=0.0, end=1.0),
+            ],
+            language="en",
+        ),
+        provider="whisperx",
+        model="wav2vec2-auto",
+        options={"device": "cpu", "min_segment_coverage": 0.5},
+    )
+
+    assert [segment.text for segment in result.transcript.segments] == [
+        "placeholder",
+        "speech",
+    ]
+    assert result.transcript.segments[0].start == 0.0
+    assert result.transcript.segments[0].end == 0.0
+    assert result.detail["skipped_short_segments"] == 1
+
+
 def test_whisperx_catalog_model_uses_alignment_health_probe(monkeypatch, tmp_path):
     import localplaud.worker.align as alignment
     from localplaud.providers.service import bootstrap_default_profile, check_model_health

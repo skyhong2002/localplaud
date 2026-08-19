@@ -235,9 +235,12 @@ def _forced_align_whisperx(
             skipped_empty_segments += 1
             continue
         if segment.end <= segment.start:
-            raise AlignmentError(
-                f"input segment {index} has text but no positive duration"
-            )
+            # Historical ASR output can contain text-bearing placeholders at
+            # a chunk boundary with identical start/end timestamps. Keep the
+            # evidence in the result, but do not send an impossible interval
+            # to WhisperX.
+            skipped_short_segment_indexes.add(index)
+            continue
         if segment.end - segment.start < _WHISPERX_MIN_SEGMENT_SECONDS:
             # Preserve extremely short ASR fragments as unaligned evidence.
             # Sending them to WhisperX can create a one-frame trellis whose
@@ -421,8 +424,12 @@ def _forced_align_whisperx(
             unaligned_segments += 1
         starts = [float(part["start"]) for part in parts if part.get("start") is not None]
         ends = [float(part["end"]) for part in parts if part.get("end") is not None]
-        segment_start = min(starts, default=source.start)
-        segment_end = max(ends, default=source.end)
+        # WhisperX sentence bounds can be slightly narrower than its own word
+        # timestamps. The word evidence is the finer-grained artifact, so make
+        # the derived segment encompass it instead of rejecting otherwise valid
+        # alignment. Generic provider timestamps remain strictly validated.
+        segment_start = min(starts + [word.start for word in words], default=source.start)
+        segment_end = max(ends + [word.end for word in words], default=source.end)
         segments.append(
             Segment(
                 text=source.text,
