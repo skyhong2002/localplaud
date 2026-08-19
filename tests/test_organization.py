@@ -220,15 +220,21 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert 'id="organization-manager-open"' in page.text
     assert 'id="organization-manager-backdrop" hidden' in page.text
     assert 'aria-labelledby="organization-manager-title"' in page.text
-    assert 'data-organization-kind="folders"' in page.text
-    assert 'data-organization-kind="tags"' in page.text
+    assert 'data-organization-list="folders"' in page.text
+    assert 'data-organization-list="tags"' in page.text
+    assert 'id="organization-manager-row-template"' in page.text
     assert 'class="organization-manager-create" data-create-kind="folders"' in page.text
     assert 'class="organization-manager-create" data-create-kind="tags"' in page.text
     assert page.text.count('class="organization-manager-create"') == 2
     assert "form.closest('#organization-manager-backdrop') ? organizationStatus : createStatus" in page.text
     assert "status.textContent=tr('Created. Reloading…')" in page.text
-    assert 'aria-label="Rename Research"' in page.text
-    assert 'aria-label="Delete Interview"' in page.text
+    # Hundreds of organization rows are fetched only when the manager opens;
+    # they are not duplicated into the initial library response.
+    assert 'aria-label="Rename Research"' not in page.text
+    assert 'aria-label="Delete Interview"' not in page.text
+    assert "fetch('/api/organization'" in page.text
+    assert "renderOrganization(await getOrganization())" in page.text
+    assert "requestVersion!==targetRequestVersion||action.value!==selectedAction" in page.text
     assert "const organizationModal = organizationBackdrop ? window.localplaudModal" in page.text
     assert "event.stopImmediatePropagation();organizationModal?.close()" in page.text
     assert "{capture:true,signal:cleanupController.signal}" in page.text

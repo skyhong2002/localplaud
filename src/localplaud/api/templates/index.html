@@ -86,6 +86,9 @@
   .orgrow { display:flex; min-width:0;gap:7px; align-items:center; flex-wrap:wrap; margin-top:8px; }
   .orgrow:first-child { margin-top:0; }
   .orgrow .lbl { width:52px; flex:none; }
+  .tag-filter-select { display:flex;align-items:center;gap:7px;margin-top:8px; }
+  .tag-filter-select .lbl { width:52px;flex:none; }
+  .tag-filter-select select { width:min(340px,calc(100% - 59px)); }
   .org-manage { display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:6px 8px;border:0;border-radius:5px;background:transparent;color:var(--blue);font-size:11.5px;font-weight:650;cursor:pointer; }
   .org-manage:hover { background:var(--panel); }
   .org-manage .nav-icon { width:14px;height:14px; }
@@ -344,24 +347,11 @@
           <form data-create-kind="folders"><input name="name" maxlength="80" placeholder="{{ t('Folder name') }}" required><button>{{ t('Add') }}</button></form>
         </details>
       </div>
-      <div class="orgrow">
-        <span class="lbl">{{ t('Tags') }}</span>
-        <a class="fchip {% if lib.tag is none %}on{% endif %}" href="{{ liburl(view='all', folder='', tag='') }}">{{ t('All') }}</a>
-      </div>
       {% set tag_kinds = [('topic', t('Topics')), ('person', t('People')), ('org', t('Organizations')), ('custom', t('Other'))] %}
-      {% for kind, kind_label in tag_kinds %}
-        {% set kind_tags = organization.tags | selectattr('kind', 'equalto', kind) | list %}
-        {% if kind_tags %}
-        <div class="orgrow tag-group tag-group-{{ kind }}">
-          <span class="lbl sub">{{ kind_label }}</span>
-          {% for tag in kind_tags %}
-          <a class="fchip tag-chip tag-{{ tag.kind }} {% if lib.tag == tag.id %}on{% endif %}" href="{{ liburl(view='all', folder='', tag=tag.id) }}" title="{{ tag.name }}"{% if tag.color %} style="--tag-color:{{ tag.color }}"{% endif %}>
-            {{ tag.name }} <span class="n">{{ tag.count }}</span>
-          </a>
-          {% endfor %}
-        </div>
-        {% endif %}
-      {% endfor %}
+      <label class="tag-filter-select"><span class="lbl">{{ t('Tags') }}</span><select class="search-input" id="library-tag-filter" aria-label="{{ t('Tags') }}" onchange="window.location.href=this.value">
+        <option value="{{ liburl(view='all', folder='', tag='') }}"{% if lib.tag is none %} selected{% endif %}>{{ t('All') }}</option>
+        {% for kind, kind_label in tag_kinds %}{% set kind_tags = organization.tags | selectattr('kind', 'equalto', kind) | list %}{% if kind_tags %}<optgroup label="{{ kind_label }}">{% for tag in kind_tags %}<option value="{{ liburl(view='all', folder='', tag=tag.id) }}"{% if lib.tag == tag.id %} selected{% endif %}>{{ tag.name }} · {{ tag.count }}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}
+      </select></label>
       <div class="orgrow">
         <details class="quickadd"><summary>+ {{ t('Tag') }}</summary>
           <form data-create-kind="tags"><input name="name" maxlength="80" placeholder="{{ t('Tag name') }}" required><button>{{ t('Add') }}</button></form>
@@ -542,30 +532,29 @@
     <div class="import-head"><span id="organization-manager-title">{{ t('Manage folders and tags') }}</span><button class="import-close" id="organization-manager-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
     <div class="import-body organization-manager-body">
       <p class="sub" id="organization-manager-description" style="margin:0;font-size:12px">{{ t('Rename or remove local organization without deleting recordings or audio.') }}</p>
-      {% for kind, heading, items in [('folders', t('Folders'), organization.folders), ('tags', t('Tags'), organization.tags)] %}
+      {% for kind, heading in [('folders', t('Folders')), ('tags', t('Tags'))] %}
       <section class="organization-manager-section" data-organization-section="{{ kind }}">
         <h3>{{ heading }}</h3>
         <form class="organization-manager-create" data-create-kind="{{ kind }}">
           <label><span class="visually-hidden">{{ t('Folder name') if kind == 'folders' else t('Tag name') }}</span><input class="search-input" name="name" maxlength="80" placeholder="{{ t('Folder name') if kind == 'folders' else t('Tag name') }}" required></label>
           <button class="btn" type="submit"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span>{{ t('Add') }}</button>
         </form>
-        <div class="organization-manager-list">
-          {% for item in items %}
-          <div class="organization-manager-row" data-organization-kind="{{ kind }}" data-organization-id="{{ item.id }}" data-organization-color="{{ item.color or '' }}">
-            <div class="organization-manager-view">
-              <div class="organization-manager-name"><span data-organization-name>{{ item.name }}</span><span class="organization-manager-count">{{ item.count }} {{ t('recordings') }}</span></div>
-              <div class="organization-manager-actions"><button class="organization-manager-action" data-organization-rename type="button" aria-label="{{ t('Rename') }} {{ item.name }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></button><button class="organization-manager-action delete" data-organization-delete type="button" aria-label="{{ t('Delete') }} {{ item.name }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/trash-2.svg')"></span></button></div>
-            </div>
-            <form class="organization-manager-edit" hidden><input class="search-input" name="name" maxlength="80" required aria-label="{{ t('Name') }}"><button class="btn" type="submit">{{ t('Save') }}</button><button class="btn sec" data-organization-cancel type="button">{{ t('Cancel') }}</button></form>
-            <div class="organization-manager-confirm" hidden><span>{{ t('Removing this folder or tag only unassigns it. Recordings and audio stay intact.') }}</span><div class="organization-manager-confirm-actions"><button class="btn sec" data-organization-delete-cancel type="button">{{ t('Cancel') }}</button><button class="btn" data-organization-delete-confirm type="button" style="background:var(--red)">{{ t('Delete') }}</button></div></div>
-          </div>
-          {% else %}<div class="sub" style="padding:11px 0">{{ t('No folders or tags in this section yet.') }}</div>{% endfor %}
-        </div>
+        <div class="organization-manager-list" data-organization-list="{{ kind }}"><div class="sub" style="padding:11px 0">{{ t('Loading…') }}</div></div>
       </section>
       {% endfor %}
       <div class="sub organization-manager-status" id="organization-manager-status" role="status" aria-live="polite"></div>
     </div>
   </section>
+  <template id="organization-manager-row-template">
+    <div class="organization-manager-row">
+      <div class="organization-manager-view">
+        <div class="organization-manager-name"><span data-organization-name></span><span class="organization-manager-count"></span></div>
+        <div class="organization-manager-actions"><button class="organization-manager-action" data-organization-rename type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></button><button class="organization-manager-action delete" data-organization-delete type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/trash-2.svg')"></span></button></div>
+      </div>
+      <form class="organization-manager-edit" hidden><input class="search-input" name="name" maxlength="80" required aria-label="{{ t('Name') }}"><button class="btn" type="submit">{{ t('Save') }}</button><button class="btn sec" data-organization-cancel type="button">{{ t('Cancel') }}</button></form>
+      <div class="organization-manager-confirm" hidden><span>{{ t('Removing this folder or tag only unassigns it. Recordings and audio stay intact.') }}</span><div class="organization-manager-confirm-actions"><button class="btn sec" data-organization-delete-cancel type="button">{{ t('Cancel') }}</button><button class="btn" data-organization-delete-confirm type="button" style="background:var(--red)">{{ t('Delete') }}</button></div></div>
+    </div>
+  </template>
 </div>
 {% endif %}
 {% if files and lib.view != 'trash' %}
@@ -635,24 +624,27 @@
     }
   }, {signal: cleanupController.signal});
   const tr = window.localplaudT;
-  const folders = {{ organization.folders | tojson }};
-  const tags = {{ organization.tags | tojson }};
   const organizationOpen = document.getElementById('organization-manager-open');
   const organizationBackdrop = document.getElementById('organization-manager-backdrop');
   const organizationClose = document.getElementById('organization-manager-close');
   const organizationStatus = document.getElementById('organization-manager-status');
   const createStatus = document.getElementById('organization-create-status');
+  const organizationRowTemplate = document.getElementById('organization-manager-row-template');
+  let organizationData = null;
+  let organizationRequest = null;
   const organizationModal = organizationBackdrop ? window.localplaudModal({backdrop:organizationBackdrop,background:()=>[document.querySelector('.library-page'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')],cleanupSignal:cleanupController.signal}) : null;
   document.addEventListener('keydown',event=>{if(event.key!=='Escape'||organizationBackdrop?.hidden)return;event.preventDefault();event.stopImmediatePropagation();organizationModal?.close();},{capture:true,signal:cleanupController.signal});
   const organizationDetail = (data, fallback) => { const detail=data?.detail,item=Array.isArray(detail)?detail[0]?.msg:detail;return tr(typeof item==='string'?item:fallback); };
+  const getOrganization = async () => {
+    if (organizationData) return organizationData;
+    if (!organizationRequest) organizationRequest = fetch('/api/organization',{signal:cleanupController.signal}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(organizationDetail(data,'Could not load organization'));organizationData=data;return data;}).finally(()=>{organizationRequest=null;});
+    return organizationRequest;
+  };
   const setOrganizationBusy = value => { organizationModal?.setBusy(value);if(organizationClose)organizationClose.disabled=value;organizationBackdrop?.querySelectorAll('button,input').forEach(control=>{control.disabled=value;}); };
   const resetOrganizationRow = row => { row.querySelector('.organization-manager-view').hidden=false;row.querySelector('.organization-manager-edit').hidden=true;row.querySelector('.organization-manager-confirm').hidden=true; };
   const resetOrganizationManager = () => { organizationBackdrop?.querySelectorAll('.organization-manager-row').forEach(resetOrganizationRow);if(organizationStatus)organizationStatus.textContent='';setOrganizationBusy(false); };
   async function mutateOrganization(url, options, fallback) { let response;try{response=await fetch(url,{...options,signal:cleanupController.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr(fallback));}let data={};try{data=await response.json();}catch(_error){}if(!response.ok)throw new Error(organizationDetail(data,fallback));return data; }
-  organizationOpen?.addEventListener('click',event=>{resetOrganizationManager();organizationModal.open(event.currentTarget,organizationClose);},{signal:cleanupController.signal});
-  organizationClose?.addEventListener('click',()=>organizationModal.close(),{signal:cleanupController.signal});
-  organizationBackdrop?.addEventListener('localplaud:modal-close',resetOrganizationManager,{signal:cleanupController.signal});
-  organizationBackdrop?.querySelectorAll('.organization-manager-row').forEach(row=>{
+  const bindOrganizationRow = row => {
     const view=row.querySelector('.organization-manager-view'),edit=row.querySelector('.organization-manager-edit'),confirmDelete=row.querySelector('.organization-manager-confirm'),input=edit.elements.name,name=row.querySelector('[data-organization-name]'),kind=row.dataset.organizationKind,id=row.dataset.organizationId,color=row.dataset.organizationColor||null;
     row.querySelector('[data-organization-rename]').addEventListener('click',()=>{confirmDelete.hidden=true;view.hidden=true;edit.hidden=false;input.value=name.textContent.trim();input.focus();},{signal:cleanupController.signal});
     row.querySelector('[data-organization-cancel]').addEventListener('click',()=>{resetOrganizationRow(row);row.querySelector('[data-organization-rename]').focus();},{signal:cleanupController.signal});
@@ -660,7 +652,17 @@
     row.querySelector('[data-organization-delete-cancel]').addEventListener('click',()=>{resetOrganizationRow(row);row.querySelector('[data-organization-delete]').focus();},{signal:cleanupController.signal});
     edit.addEventListener('submit',async event=>{event.preventDefault();const nextName=input.value.trim();if(!nextName){organizationStatus.textContent=tr('Enter a name');input.focus();return;}setOrganizationBusy(true);organizationStatus.textContent=tr('Updating…');try{await mutateOrganization(`/api/${kind}/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nextName,color})},'Could not rename item');location.reload();}catch(error){organizationStatus.textContent=error.name==='AbortError'?'':error.message;setOrganizationBusy(false);input.focus();}},{signal:cleanupController.signal});
     row.querySelector('[data-organization-delete-confirm]').addEventListener('click',async()=>{setOrganizationBusy(true);organizationStatus.textContent=tr('Deleting…');try{await mutateOrganization(`/api/${kind}/${id}`,{method:'DELETE'},'Could not delete item');const url=new URL(location.href),queryKey=kind==='folders'?'folder':'tag';if(url.searchParams.get(queryKey)===id)url.searchParams.delete(queryKey);location.replace(`${url.pathname}${url.search}${url.hash}`);}catch(error){organizationStatus.textContent=error.name==='AbortError'?'':error.message;setOrganizationBusy(false);confirmDelete.querySelector('[data-organization-delete-confirm]').focus();}},{signal:cleanupController.signal});
-  });
+  };
+  const renderOrganization = data => {
+    for (const kind of ['folders','tags']) {
+      const list=organizationBackdrop?.querySelector(`[data-organization-list="${kind}"]`);if(!list)continue;list.replaceChildren();
+      for (const item of data[kind]||[]) {const row=organizationRowTemplate.content.firstElementChild.cloneNode(true);row.dataset.organizationKind=kind;row.dataset.organizationId=String(item.id);row.dataset.organizationColor=item.color||'';row.querySelector('[data-organization-name]').textContent=item.name;row.querySelector('.organization-manager-count').textContent=`${item.count} ${tr('recordings')}`;row.querySelector('[data-organization-rename]').ariaLabel=`${tr('Rename')} ${item.name}`;row.querySelector('[data-organization-delete]').ariaLabel=`${tr('Delete')} ${item.name}`;bindOrganizationRow(row);list.append(row);}
+      if(!list.children.length){const empty=document.createElement('div');empty.className='sub';empty.style.padding='11px 0';empty.textContent=tr('No folders or tags in this section yet.');list.append(empty);}
+    }
+  };
+  organizationOpen?.addEventListener('click',async event=>{resetOrganizationManager();organizationModal.open(event.currentTarget,organizationClose);organizationStatus.textContent=tr('Loading…');try{renderOrganization(await getOrganization());organizationStatus.textContent='';}catch(error){organizationStatus.textContent=error.name==='AbortError'?'':error.message;}},{signal:cleanupController.signal});
+  organizationClose?.addEventListener('click',()=>organizationModal.close(),{signal:cleanupController.signal});
+  organizationBackdrop?.addEventListener('localplaud:modal-close',resetOrganizationManager,{signal:cleanupController.signal});
   const checks = [...document.querySelectorAll('.row-select')];
   const all = document.getElementById('select-all');
   const mobileAll = document.getElementById('select-all-mobile');
@@ -688,6 +690,7 @@
   const pageChangeClose = document.getElementById('page-change-close');
   const pageChangeCancel = document.getElementById('page-change-cancel');
   const pageChangeConfirm = document.getElementById('page-change-confirm');
+  let targetRequestVersion = 0;
   const pageChangeModal = pageChangeBackdrop ? window.localplaudModal({backdrop:pageChangeBackdrop,background:()=>[document.querySelector('.library-page'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')],cleanupSignal:cleanupController.signal}) : null;
   let pendingPageUrl = null;
   let exportOpener = null;
@@ -728,13 +731,18 @@
     });
     if (!n) closeDeleteConfirm({restoreFocus:false});
   }
-  function targets() {
+  async function targets() {
     if (!target || !action) return;
-    const lifecycle = action.value === 'resume';
+    const requestVersion = ++targetRequestVersion;
+    const selectedAction = action.value;
+    const lifecycle = selectedAction === 'resume';
     target.hidden = lifecycle;
     if (lifecycle) { target.disabled = true; if (apply) apply.disabled = false; return; }
     const isFolder = action.value === 'folder';
-    const items = isFolder ? folders : tags;
+    target.disabled = true;if(apply)apply.disabled = true;
+    let data;try{data=await getOrganization();}catch(error){show(error.name==='AbortError'?'':error.message,true);return;}
+    if(requestVersion!==targetRequestVersion||action.value!==selectedAction)return;
+    const items = isFolder ? data.folders : data.tags;
     target.innerHTML = '';
     if (isFolder) target.add(new Option(window.localplaudT('No folder'), ''));
     for (const item of items) target.add(new Option(item.name, String(item.id)));

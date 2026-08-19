@@ -405,6 +405,7 @@ _ZH_HANT_TW = {
     "metadata only": "僅中繼資料",
     "No recordings yet.": "目前沒有錄音。",
     "Loading library…": "正在載入錄音庫…",
+    "Loading…": "正在載入…",
     "Loading recording…": "正在載入錄音…",
     "Loading transcript…": "正在載入逐字稿…",
     "Transcript is not available yet.": "逐字稿尚未完成。",
