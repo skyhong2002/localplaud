@@ -9,13 +9,22 @@ from subprocess import CompletedProcess, TimeoutExpired
 import pytest
 
 from localplaud.config import CodexLocalLlmConfig
-from localplaud.llm.base import LLMInputTooLarge, LLMQuotaExhausted, LLMTransientError
+from localplaud.llm.base import (
+    LLMInputTooLarge,
+    LLMQuotaExhausted,
+    LLMTransientError,
+    LLMUnavailable,
+)
 from localplaud.llm.codex_local import CodexLocalLLM
 
 
 def _provider(monkeypatch, tmp_path, **updates):
     monkeypatch.setattr("localplaud.llm.codex_local.shutil.which", lambda _name: "/bin/codex")
-    return CodexLocalLLM(CodexLocalLlmConfig(codex_home=str(tmp_path / "codex-home"), **updates))
+    provider = CodexLocalLLM(
+        CodexLocalLlmConfig(codex_home=str(tmp_path / "codex-home"), **updates)
+    )
+    monkeypatch.setattr(provider, "_remaining_quota_percent", lambda: 100)
+    return provider
 
 
 @pytest.mark.parametrize(
@@ -161,3 +170,51 @@ def test_codex_classifies_context_limit_for_adaptive_split(monkeypatch, tmp_path
     )
     with pytest.raises(LLMInputTooLarge, match="exceeded the model context"):
         _provider(monkeypatch, tmp_path).complete("text")
+
+
+def test_codex_quota_reserve_stops_before_protected_floor(monkeypatch, tmp_path):
+    provider = _provider(monkeypatch, tmp_path)
+    monkeypatch.setattr(provider, "_remaining_quota_percent", lambda: 7)
+    monkeypatch.setattr(
+        "localplaud.llm.codex_local.subprocess.run",
+        lambda command, **_kwargs: CompletedProcess(
+            command, 0, stdout="Logged in using ChatGPT", stderr=""
+        ),
+    )
+    with pytest.raises(LLMQuotaExhausted, match="reserve protected.*7%"):
+        provider.complete("text")
+
+
+def test_codex_quota_reserve_allows_safe_headroom(monkeypatch, tmp_path):
+    provider = _provider(monkeypatch, tmp_path)
+    monkeypatch.setattr(provider, "_remaining_quota_percent", lambda: 8)
+    responses = iter(
+        [
+            CompletedProcess([], 0, stdout="Logged in using ChatGPT", stderr=""),
+            CompletedProcess([], 1, stdout="", stderr="usage limit exhausted"),
+        ]
+    )
+    monkeypatch.setattr(
+        "localplaud.llm.codex_local.subprocess.run", lambda *_args, **_kwargs: next(responses)
+    )
+    with pytest.raises(LLMQuotaExhausted, match="usage is exhausted"):
+        provider.complete("text")
+
+
+def test_codex_quota_snapshot_prefers_main_codex_bucket():
+    assert (
+        CodexLocalLLM._remaining_from_rate_limit_result(
+            {
+                "rateLimits": {"primary": {"usedPercent": 99}},
+                "rateLimitsByLimitId": {
+                    "codex": {"primary": {"usedPercent": 41}},
+                    "codex_bengalfox": {"primary": {"usedPercent": 0}},
+                },
+            }
+        )
+        == 59
+    )
+    with pytest.raises(LLMUnavailable, match="incomplete"):
+        CodexLocalLLM._remaining_from_rate_limit_result(
+            {"rateLimits": {"primary": {"usedPercent": True}}}
+        )

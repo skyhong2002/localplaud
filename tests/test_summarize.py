@@ -8,6 +8,7 @@ from localplaud.worker.summarize import (
     _extract_title,
     _reduction_max_tokens,
     _render_transcript,
+    _summary_output,
 )
 
 
@@ -92,10 +93,12 @@ def test_long_transcript_uses_every_chunk_before_final_summary(monkeypatch):
             return "# Complete note\n\n## Summary\nAll parts covered."
 
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda cfg: FakeLlm())
-    transcript = _transcript(*(
-        Segment(text=f"segment-{idx}-" + chr(65 + idx) * 35, start=idx, end=idx + 1)
-        for idx in range(4)
-    ))
+    transcript = _transcript(
+        *(
+            Segment(text=f"segment-{idx}-" + chr(65 + idx) * 35, start=idx, end=idx + 1)
+            for idx in range(4)
+        )
+    )
     settings = Settings(pipeline={"summary_chunk_chars": 50})
     result = summarize(transcript, settings)
 
@@ -113,6 +116,38 @@ def test_long_transcript_uses_every_chunk_before_final_summary(monkeypatch):
     assert result["title"] == "Complete note"
 
 
+def test_large_context_provider_reduces_map_calls_without_dropping_text(monkeypatch):
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import summarize
+
+    class LargeContextLlm:
+        summary_chunk_chars = 60_000
+
+        def __init__(self):
+            self.prompts = []
+
+        def complete(self, prompt, **_kwargs):
+            self.prompts.append(prompt)
+            if prompt.startswith("Extract faithful coverage notes"):
+                return "coverage"
+            return "# Complete note\n\nFull coverage."
+
+    llm = LargeContextLlm()
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: llm)
+    transcript = _transcript(
+        Segment(text="A" * 59_000, start=0, end=1),
+        Segment(text="B" * 59_000, start=1, end=2),
+    )
+
+    result = summarize(transcript, Settings(pipeline={"summary_chunk_chars": 6_000}))
+
+    assert result["coverage"]["chunks"] == 2
+    map_prompts = [p for p in llm.prompts if p.startswith("Extract faithful coverage notes")]
+    assert len(map_prompts) == 2
+    assert "A" * 1_000 in map_prompts[0]
+    assert "B" * 1_000 in map_prompts[1]
+
+
 def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
     from localplaud.config import Settings
     from localplaud.worker.summarize import summarize
@@ -122,9 +157,7 @@ def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
             return "# Result\n\n## Summary\nGrounded."
 
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: FakeLlm())
-    settings = Settings(
-        llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-tested"}}
-    )
+    settings = Settings(llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-tested"}})
 
     result = summarize(_transcript(Segment(text="evidence", start=0, end=1)), settings)
 
@@ -142,9 +175,7 @@ def test_reducer_converges_when_model_fills_each_token_budget(monkeypatch):
                 return "x" * (kwargs["max_tokens"] * 4)
             return "# Complete note\n\n## Summary\nAll parts covered."
 
-    monkeypatch.setattr(
-        "localplaud.worker.summarize.build_llm", lambda cfg: BudgetFillingLlm()
-    )
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda cfg: BudgetFillingLlm())
     transcript = _transcript(
         *(Segment(text="x" * 5_990, start=idx, end=idx + 1) for idx in range(12))
     )
@@ -178,3 +209,17 @@ def test_extract_title_ignores_deeper_headings():
 def test_extract_title_none_when_absent():
     assert _extract_title("plain text without headings") is None
     assert _extract_title("") is None
+
+
+def test_typed_summary_output_keeps_title_separate_from_exact_template_markdown():
+    title, content = _summary_output(
+        '{"title":"星期五新版上線會議","content_md":"## 會議摘要\\n\\n按計畫部署。"}'
+    )
+    assert title == "星期五新版上線會議"
+    assert content == "## 會議摘要\n\n按計畫部署。"
+
+
+def test_summary_output_falls_back_to_plain_markdown():
+    title, content = _summary_output("# Weekly Sync\n\n- Ship Friday")
+    assert title == "Weekly Sync"
+    assert content == "# Weekly Sync\n\n- Ship Friday"

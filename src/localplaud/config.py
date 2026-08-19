@@ -127,7 +127,7 @@ class PipelineConfig(BaseModel):
     summary_chunk_chars: int = 6_000
     polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
     # Which summary template to use. The Plaud Web Autopilot snapshot is the
-    # default; ``default`` remains the local structured fallback.
+    # default; legacy or unknown keys fall back to this captured Plaud prompt.
     summary_template: str = "plaud-autopilot"
     # independent: Plaud supplies metadata + raw audio only; only locally
     # generated transcripts may satisfy the processing pipeline.
@@ -294,15 +294,26 @@ class CodexLocalLlmConfig(BaseModel):
     """Trusted single-user Codex CLI boundary; Codex owns its credentials."""
 
     executable: str = "codex"
-    model: str = "gpt-5.6-luna"
+    model: str = "gpt-5.6-sol"
     codex_home: str = "~/.localplaud/codex"
-    reasoning_effort: Literal["low", "medium"] = "low"
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] = "high"
     timeout_seconds: int = Field(default=900, ge=30, le=1800)
     # Codex has enough context for large transcript maps. Structural output
     # failures are bisected by the correction stage, while transport failures
     # fail immediately instead of multiplying calls.
     polish_chunk_chars: int = Field(default=48_000, ge=1_000, le=60_000)
+    # GPT-5.6-sol has a large context window. Larger full-coverage map chunks
+    # preserve more discourse structure while spending far fewer subscription
+    # turns than the 6k local-model default.
+    summary_chunk_chars: int = Field(default=240_000, ge=6_000, le=240_000)
     require_chatgpt_login: bool = True
+    # Codex exposes the current subscription window through its local app-server.
+    # Fail closed before every inference call when the remaining allowance is too
+    # close to the user's reserve.  The extra headroom accounts for the call that
+    # is about to start, so a large response cannot consume the protected floor.
+    quota_reserve_percent: int = Field(default=5, ge=3, le=50)
+    quota_call_headroom_percent: int = Field(default=2, ge=0, le=20)
+    quota_check_timeout_seconds: int = Field(default=10, ge=2, le=30)
 
 
 class LlmConfig(BaseModel):
@@ -317,8 +328,9 @@ class LlmConfig(BaseModel):
     def codex_is_profile_scoped(self) -> LlmConfig:
         if self.provider == "codex-local":
             raise ValueError(
-                "codex-local is correction-only; select correct:codex-local in an "
-                "execution profile instead of using it as the global LLM provider"
+                "codex-local is profile-scoped; select it only for supported text "
+                "stages in an execution profile instead of using it as the global "
+                "LLM provider"
             )
         return self
 

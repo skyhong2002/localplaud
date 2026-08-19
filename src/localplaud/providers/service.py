@@ -129,7 +129,7 @@ def _capability(stages: list[ProviderStage], *, cloud: bool) -> dict:
 def _settings_specs(settings: Settings):
     if settings.llm.provider == "codex-local":
         raise ValueError(
-            "codex-local is correction-only and cannot bootstrap a general LLM connection"
+            "codex-local is profile-scoped and cannot bootstrap a general LLM connection"
         )
     return [
         (
@@ -302,7 +302,7 @@ def _ensure_forced_alignment_entry(
 def _ensure_codex_entry(
     session: Session, settings: Settings
 ) -> tuple[ProviderConnection, ModelCatalogEntry]:
-    """Catalog the opt-in Codex CLI correction path without selecting it."""
+    """Catalog the opt-in Codex CLI text stages without selecting them."""
     config = settings.llm.codex_local
     connection = session.scalar(
         select(ProviderConnection).where(ProviderConnection.key == "correct:codex-local")
@@ -324,6 +324,11 @@ def _ensure_codex_entry(
         )
         session.add(connection)
         session.flush()
+    else:
+        connection.name = "Codex CLI (experimental)"
+        connection.execution_target = "cloud"
+        connection.data_egress = True
+        connection.config = snapshot
     model = session.scalar(
         select(ModelCatalogEntry).where(
             ModelCatalogEntry.connection_id == connection.id,
@@ -347,17 +352,31 @@ def _ensure_codex_entry(
                         stage=ProviderStage.correct,
                         hardware_requirement="local Codex CLI; cloud inference",
                     ),
+                    StageCapabilities(
+                        stage=ProviderStage.summarize,
+                        hardware_requirement="local Codex CLI; cloud inference",
+                    ),
+                    StageCapabilities(
+                        stage=ProviderStage.mind_map,
+                        hardware_requirement="local Codex CLI; cloud inference",
+                    ),
                 ),
                 metadata={
                     "experimental": True,
                     "trusted_single_user_only": True,
                     "auth_owner": "codex-cli",
-                    "billing": "Codex entitlement or configured Codex authentication",
+                    "billing": "ChatGPT Codex entitlement owned by the Codex CLI login",
                 },
             ).model_dump(mode="json"),
         )
         session.add(model)
         session.flush()
+    else:
+        model.capabilities = _with_required_capabilities(
+            model.capabilities,
+            [ProviderStage.correct, ProviderStage.summarize, ProviderStage.mind_map],
+            cloud=True,
+        )
     return connection, model
 
 
@@ -542,11 +561,7 @@ def _capability_catalog(session: Session) -> dict[tuple[str, str], dict]:
     }
     for model in session.scalars(select(ModelCatalogEntry)):
         connection = session.get(ProviderConnection, model.connection_id)
-        if (
-            connection is not None
-            and connection.key not in disabled_workers
-            and model.enabled
-        ):
+        if connection is not None and connection.key not in disabled_workers and model.enabled:
             catalog[(connection.key, model.model_key)] = model.capabilities
     return catalog
 
@@ -765,12 +780,9 @@ def lock_recording_profile_change(
         return None
     session.refresh(recording)
     if processing_claim_active(recording) and not (
-        processing_owner_token is not None
-        and recording.processing_token == processing_owner_token
+        processing_owner_token is not None and recording.processing_token == processing_owner_token
     ):
-        raise ProfileMutationBusyError(
-            "recording is processing; change profile when it finishes"
-        )
+        raise ProfileMutationBusyError("recording is processing; change profile when it finishes")
     _reject_active_provider_operations(session, file_id=file_id)
     return recording
 
@@ -817,15 +829,18 @@ def _reject_active_provider_operations(
         if file_id is not None
         else AskThread.file_id.is_(None)
     )
-    if session.scalar(
-        select(AskThread.id)
-        .where(
-            ask_filter,
-            AskThread.request_token.is_not(None),
-            AskThread.request_lease_until > now,
+    if (
+        session.scalar(
+            select(AskThread.id)
+            .where(
+                ask_filter,
+                AskThread.request_token.is_not(None),
+                AskThread.request_lease_until > now,
+            )
+            .limit(1)
         )
-        .limit(1)
-    ) is not None:
+        is not None
+    ):
         raise ProfileMutationBusyError(
             "Ask is using this provider scope; change the profile when it finishes"
         )
@@ -834,29 +849,35 @@ def _reject_active_provider_operations(
         if file_id is not None
         else KnowledgeDocument.file_id.is_(None)
     )
-    if session.scalar(
-        select(KnowledgeDocument.id)
-        .where(
-            document_filter,
-            KnowledgeDocument.status == "running",
-            KnowledgeDocument.lease_token.is_not(None),
-            KnowledgeDocument.lease_until > now,
+    if (
+        session.scalar(
+            select(KnowledgeDocument.id)
+            .where(
+                document_filter,
+                KnowledgeDocument.status == "running",
+                KnowledgeDocument.lease_token.is_not(None),
+                KnowledgeDocument.lease_until > now,
+            )
+            .limit(1)
         )
-        .limit(1)
-    ) is not None:
+        is not None
+    ):
         raise ProfileMutationBusyError(
             "note indexing is using this provider scope; change the profile when it finishes"
         )
     scope_key = f"file:{file_id}" if file_id is not None else "library"
-    if session.scalar(
-        select(ProviderCostReservation.id)
-        .where(
-            ProviderCostReservation.scope_key == scope_key,
-            ProviderCostReservation.status == "active",
-            ProviderCostReservation.lease_until > now,
+    if (
+        session.scalar(
+            select(ProviderCostReservation.id)
+            .where(
+                ProviderCostReservation.scope_key == scope_key,
+                ProviderCostReservation.status == "active",
+                ProviderCostReservation.lease_until > now,
+            )
+            .limit(1)
         )
-        .limit(1)
-    ) is not None:
+        is not None
+    ):
         raise ProfileMutationBusyError(
             "a provider request is active; change the profile when it finishes"
         )
@@ -942,9 +963,7 @@ def select_folder_profile(session: Session, folder_id: int, profile_id: int | No
     lock_library_profile_membership_change(session)
     file_ids = list(
         session.scalars(
-            select(PlaudFile.id)
-            .where(PlaudFile.folder_id == folder_id)
-            .order_by(PlaudFile.id)
+            select(PlaudFile.id).where(PlaudFile.folder_id == folder_id).order_by(PlaudFile.id)
         )
     )
     lock_recording_profile_changes(session, file_ids)
@@ -977,9 +996,7 @@ def save_connection(session: Session, data: dict, connection_id: int | None = No
         config = data.get("config", getattr(row, "config", {})) or {}
         validate_provider_timeout(config.get("timeout", 120), field="timeout")
         validate_provider_timeout(config.get("job_timeout", 3600), field="job_timeout")
-    if provider_type == "codex-local" and (
-        execution_target != "cloud" or data_egress is not True
-    ):
+    if provider_type == "codex-local" and (execution_target != "cloud" or data_egress is not True):
         raise ValueError("codex-local requires cloud execution with data egress")
     if row is None:
         row = ProviderConnection(
@@ -1193,20 +1210,20 @@ def save_model(session: Session, data: dict, model_id: int | None = None) -> dic
     capabilities = data.get("capabilities", getattr(row, "capabilities", {}))
     if connection.provider_type == "codex-local":
         codex_capability = Capability.model_validate(capabilities)
-        if (
-            codex_capability.execution_target != "cloud"
-            or not codex_capability.data_egress
-        ):
+        if codex_capability.execution_target != "cloud" or not codex_capability.data_egress:
             raise ValueError("codex-local requires cloud execution with data egress")
+        supported = {
+            ProviderStage.correct,
+            ProviderStage.summarize,
+            ProviderStage.mind_map,
+        }
         invalid_stages = [
-            item.stage.value
-            for item in codex_capability.stages
-            if item.stage != ProviderStage.correct
+            item.stage.value for item in codex_capability.stages if item.stage not in supported
         ]
         if invalid_stages:
             raise ValueError(
-                "codex-local is correction-only; unsupported stages: "
-                + ", ".join(invalid_stages)
+                "codex-local supports only correction, summaries, and mind maps; "
+                "unsupported stages: " + ", ".join(invalid_stages)
             )
     if row is None:
         row = ModelCatalogEntry(

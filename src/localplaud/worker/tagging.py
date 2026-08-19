@@ -28,6 +28,7 @@ _TAG_MAXLEN = 80
 
 _SCHEMA = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "topics": {"type": "array", "items": {"type": "string"}},
         "people": {"type": "array", "items": {"type": "string"}},
@@ -53,9 +54,7 @@ def _prompt(summary: str) -> str:
         "diarization labels like SPEAKER_00 / Speaker 1)\n"
         "- orgs: named organizations, companies, teams, or groups\n"
         "Omit anything not clearly present; prefer fewer, high-signal labels. "
-        'Output JSON {"topics":[],"people":[],"orgs":[]}.\n\nNotes:\n---\n'
-        + summary
-        + "\n---"
+        'Output JSON {"topics":[],"people":[],"orgs":[]}.\n\nNotes:\n---\n' + summary + "\n---"
     )
 
 
@@ -132,9 +131,7 @@ def extract_tags(summary: str, settings: Settings) -> dict[str, list[str]]:
 def _get_or_create_tag(session, name: str, kind: str) -> Tag:
     """Reuse an existing tag with the same name (case-insensitive), so the same
     topic/person consolidates across the library; otherwise create it."""
-    rows = session.scalars(
-        select(Tag).where(func.lower(Tag.name) == name.casefold())
-    ).all()
+    rows = session.scalars(select(Tag).where(func.lower(Tag.name) == name.casefold())).all()
     if rows:
         same_kind = [t for t in rows if t.kind == kind]
         return (same_kind or rows)[0]

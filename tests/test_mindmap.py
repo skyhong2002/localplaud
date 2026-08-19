@@ -129,13 +129,9 @@ def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
 
     llm = _FakeLlm()
     monkeypatch.setattr("localplaud.worker.mindmap.build_llm", lambda _cfg: llm)
-    settings = Settings(
-        llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-map"}}
-    )
+    settings = Settings(llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-map"}})
 
-    result = generate_mind_map(
-        _transcript(Segment(text="grounded", start=0.0, end=1.0)), settings
-    )
+    result = generate_mind_map(_transcript(Segment(text="grounded", start=0.0, end=1.0)), settings)
 
     assert result["provider"] == "opencode-go"
     assert result["model"] == "qwen-map"
@@ -262,28 +258,28 @@ def test_pipeline_persists_mind_map_and_resumes(monkeypatch, tmp_path):
     # A different notes template changes the mind-map input even when the
     # mind-map provider selection itself is unchanged.
     with session_scope() as s:
-        s.get(PlaudFile, "mm1").note_template_key = "meeting"
+        s.get(PlaudFile, "mm1").note_template_key = "plaud-meeting-minutes"
     process_file("mm1")
     assert counters["mm"] == 2
     with session_scope() as s:
         mind_map = next(
-            item for item in s.get(PlaudFile, "mm1").summaries
-            if item.template == "mind_map"
+            item for item in s.get(PlaudFile, "mm1").summaries if item.template == "mind_map"
         )
-        assert mind_map.template_snapshot["source_template_key"] == "meeting"
+        assert mind_map.template_snapshot["source_template_key"] == "plaud-meeting-minutes"
 
     from localplaud.db.models import NoteTemplate
 
     with session_scope() as s:
-        meeting = s.query(NoteTemplate).filter_by(key="meeting", is_active=True).one()
+        meeting = s.query(NoteTemplate).filter_by(key="plaud-meeting-minutes", is_active=True).one()
         meeting.is_active = False
         s.add(
             NoteTemplate(
-                key="meeting",
+                key="plaud-meeting-minutes",
                 version=meeting.version + 1,
                 name=meeting.name,
                 system_prompt=meeting.system_prompt,
                 instructions=meeting.instructions + "\n\n## New section",
+                prompt_mode=meeting.prompt_mode,
                 is_active=True,
             )
         )
@@ -291,8 +287,7 @@ def test_pipeline_persists_mind_map_and_resumes(monkeypatch, tmp_path):
     assert counters["mm"] == 3
     with session_scope() as s:
         mind_map = next(
-            item for item in s.get(PlaudFile, "mm1").summaries
-            if item.template == "mind_map"
+            item for item in s.get(PlaudFile, "mm1").summaries if item.template == "mind_map"
         )
         assert mind_map.template_snapshot["source_template_version"] == 2
 

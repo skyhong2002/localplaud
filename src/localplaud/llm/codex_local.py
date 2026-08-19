@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from ..config import CodexLocalLlmConfig
@@ -68,6 +70,10 @@ class CodexLocalLLM:
     def polish_chunk_chars(self) -> int:
         return self.cfg.polish_chunk_chars
 
+    @property
+    def summary_chunk_chars(self) -> int:
+        return self.cfg.summary_chunk_chars
+
     def _executable(self) -> str | None:
         return shutil.which(self.cfg.executable)
 
@@ -86,6 +92,95 @@ class CodexLocalLLM:
 
     def available(self) -> bool:
         return self._executable() is not None
+
+    @staticmethod
+    def _remaining_from_rate_limit_result(result: dict) -> int:
+        buckets = result.get("rateLimitsByLimitId") or {}
+        snapshot = buckets.get("codex") or result.get("rateLimits") or {}
+        primary = snapshot.get("primary") or {}
+        used = primary.get("usedPercent")
+        if not isinstance(used, int) or isinstance(used, bool) or not 0 <= used <= 100:
+            raise LLMUnavailable("Codex subscription quota response was incomplete")
+        return 100 - used
+
+    def _remaining_quota_percent(self) -> int:
+        """Read the Codex subscription window without spending a model turn."""
+        executable = self._executable()
+        if executable is None:
+            raise LLMUnavailable(f"{self.cfg.executable} is not on PATH")
+        process: subprocess.Popen[str] | None = None
+        try:
+            process = subprocess.Popen(
+                [executable, "app-server", "--stdio"],
+                text=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=1,
+                env=self._environment(),
+            )
+            if process.stdin is None or process.stdout is None:
+                raise LLMUnavailable("Codex quota check could not open app-server pipes")
+            messages = (
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "clientInfo": {"name": "localplaud", "version": "1"},
+                        "capabilities": {"experimentalApi": True},
+                    },
+                },
+                {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "account/rateLimits/read",
+                    "params": {},
+                },
+            )
+            for message in messages:
+                process.stdin.write(json.dumps(message) + "\n")
+            process.stdin.flush()
+            deadline = time.monotonic() + self.cfg.quota_check_timeout_seconds
+            while time.monotonic() < deadline:
+                readable, _, _ = select.select(
+                    [process.stdout], [], [], min(0.5, max(0.0, deadline - time.monotonic()))
+                )
+                if not readable:
+                    if process.poll() is not None:
+                        break
+                    continue
+                line = process.stdout.readline()
+                if not line:
+                    break
+                response = json.loads(line)
+                if response.get("id") != 2:
+                    continue
+                if response.get("error"):
+                    raise LLMUnavailable("Codex subscription quota could not be read")
+                result = response.get("result") or {}
+                return self._remaining_from_rate_limit_result(result)
+            raise LLMUnavailable("Codex subscription quota check timed out")
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise LLMUnavailable("Codex subscription quota check failed") from exc
+        finally:
+            if process is not None and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
+    def _ensure_quota_reserve(self) -> int:
+        remaining = self._remaining_quota_percent()
+        minimum = self.cfg.quota_reserve_percent + self.cfg.quota_call_headroom_percent
+        if remaining <= minimum:
+            raise LLMQuotaExhausted(
+                "Codex subscription reserve protected: "
+                f"{remaining}% remains; a new call requires more than {minimum}%"
+            )
+        return remaining
 
     def health(self) -> tuple[bool, str]:
         executable = self._executable()
@@ -113,9 +208,14 @@ class CodexLocalLLM:
                 )
             return True, f"Codex API-key access verified for {self.cfg.model}"
         if "chatgpt" in status or "access token" in status:
+            try:
+                remaining = self._ensure_quota_reserve()
+            except (LLMUnavailable, LLMQuotaExhausted) as exc:
+                return False, str(exc)
             return True, (
-                f"Codex ChatGPT login detected for {self.cfg.model}; model access and "
-                "remaining usage are not tested by this check"
+                f"Codex ChatGPT login detected for {self.cfg.model}; {remaining}% of "
+                f"the subscription window remains; {self.cfg.quota_reserve_percent}% "
+                "is protected"
             )
         return False, "Codex login method could not be verified"
 
@@ -133,6 +233,8 @@ class CodexLocalLLM:
             raise LLMUnavailable(f"{self.cfg.executable} is not on PATH")
         healthy, detail = self.health()
         if not healthy:
+            if detail.startswith("Codex subscription reserve protected:"):
+                raise LLMQuotaExhausted(detail)
             raise LLMUnavailable(detail)
 
         payload = (

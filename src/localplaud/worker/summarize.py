@@ -1,12 +1,12 @@
-"""Summarization stage — turn a transcript into structured notes via an LLM.
+"""Turn a complete transcript into titled notes using an exact stored template.
 
-Mirrors Plaud's "template note" idea: a titled markdown summary with key
-points and action items. The template is a simple prompt; more templates can
-be added later (meeting / call / lecture / ...).
+The built-in prompt catalog is captured from the user's Plaud Recent surface;
+localplaud supplies only the durable full-coverage and typed-output contracts.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 
 from ..asr.base import Transcript as AsrTranscript
@@ -111,6 +111,14 @@ def _reduction_max_tokens(chunk_chars: int) -> int:
     return max(32, min(600, chunk_chars // 12))
 
 
+def _summary_chunk_chars(settings: Settings, llm) -> int:
+    """Use a provider's safe large-context budget when it advertises one."""
+    provider_budget = getattr(llm, "summary_chunk_chars", None)
+    if isinstance(provider_budget, int) and provider_budget > 0:
+        return max(settings.pipeline.summary_chunk_chars, provider_budget)
+    return settings.pipeline.summary_chunk_chars
+
+
 _COVERAGE_PROMPT = """\
 Extract faithful coverage notes from transcript part {part} of {total}.
 Preserve decisions, facts, names, numbers, questions, and action items. Keep the
@@ -133,6 +141,35 @@ Coverage notes:
 {text}
 ---
 """
+
+_SUMMARY_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "title": {"type": "string"},
+        "content_md": {"type": "string"},
+    },
+    "required": ["title", "content_md"],
+}
+
+
+def _summary_output(raw: str) -> tuple[str | None, str]:
+    """Accept the typed one-call contract, with Markdown fallback for adapters
+    that do not implement structured output."""
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return _extract_title(raw), raw
+    if not isinstance(parsed, dict):
+        return _extract_title(raw), raw
+    content = parsed.get("content_md")
+    title = parsed.get("title")
+    if not isinstance(content, str) or not content.strip():
+        return _extract_title(raw), raw
+    return (
+        title.strip() if isinstance(title, str) and title.strip() else _extract_title(content),
+        content.strip(),
+    )
 
 
 def summarize(
@@ -162,7 +199,7 @@ def summarize(
     else:
         resolved_template = get_effective_template(template)
     transcript_text = _render_transcript(transcript)
-    chunk_chars = settings.pipeline.summary_chunk_chars
+    chunk_chars = _summary_chunk_chars(settings, llm)
     chunks = _chunk_text(transcript_text, chunk_chars)
     map_calls = 0
     reduce_calls = 0
@@ -209,8 +246,14 @@ def summarize(
             "complete transcript:\n\n" + "\n\n".join(notes)
         )
     system, prompt = render_resolved_prompt(resolved_template, source_text)
-    content = llm.complete(prompt, system=system, temperature=0.2, max_tokens=1500)
-    title = _extract_title(content)
+    raw_content = llm.complete(
+        prompt,
+        system=system,
+        temperature=0.2,
+        max_tokens=1500,
+        json_schema=_SUMMARY_OUTPUT_SCHEMA,
+    )
+    title, content = _summary_output(raw_content)
     provider, model = _llm_provider_model(settings)
     # Extract typed tags from the default note on the same host that made the
     # summary (the WSL worker), so the controller never needs its own LLM call.

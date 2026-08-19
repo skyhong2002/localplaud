@@ -30,21 +30,76 @@ from ..providers.service import (
 router = APIRouter(prefix="/api", tags=["note-templates"])
 _KEY = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _CATALOG = {
-    "default": {"category": "General", "scenario": "Any recording", "description": "Balanced summary, key points, and action items.", "author": "localplaud", "popularity": 100},
-    "meeting": {"category": "Work", "scenario": "Meetings", "description": "Decisions, owners, action items, and unresolved questions.", "author": "localplaud", "popularity": 96},
-    "call": {"category": "Work", "scenario": "Calls", "description": "Purpose, commitments, sentiment, and follow-ups from a call.", "author": "localplaud", "popularity": 84},
-    "lecture": {"category": "Education", "scenario": "Lectures", "description": "Concept-focused study notes with review questions.", "author": "localplaud", "popularity": 91},
-    "personal": {"category": "Personal", "scenario": "Voice memos", "description": "A concise TL;DR, highlights, and personal to-dos.", "author": "localplaud", "popularity": 79},
-    "plaud-autopilot": {"category": "General", "scenario": "Multi-scenario", "description": "多場景智能總結，快速抓重點", "author": "Plaud", "popularity": None},
-    "plaud-key-metrics": {"category": "Functional", "scenario": "Data extraction", "description": "從對話萃取數據，快速成表", "author": "Plaud", "popularity": None},
-    "plaud-intent-analysis": {"category": "Functional", "scenario": "Conversation analysis", "description": "解讀對話意圖，給出可行應對", "author": "Plaud", "popularity": None},
-    "plaud-meeting-narrative": {"category": "Work", "scenario": "Meetings", "description": "將逐字稿轉化為會議故事", "author": "Plaud", "popularity": None},
-    "plaud-lecture-deep-dive": {"category": "Education", "scenario": "Lectures", "description": "詳盡的演講總結與引用。", "author": "Plaud", "popularity": None},
-    "plaud-research-interview": {"category": "Research", "scenario": "Interviews", "description": "結構化紀錄研究訪談，快速提煉重點", "author": "Plaud", "popularity": None},
-    "plaud-interview": {"category": "Research", "scenario": "Interviews", "description": "結構化整理採訪稿件並提煉核心觀點與金句", "author": "Plaud", "popularity": None},
-    "plaud-full-transcript": {"category": "Transcription", "scenario": "External use", "description": "忠實且完整的音訊轉錄。", "author": "Plaud", "popularity": None},
-    "plaud-meeting-minutes": {"category": "Work", "scenario": "Meetings", "description": "重構會議為紀要、行動事項與決策", "author": "Plaud", "popularity": None},
-    "plaud-meeting-highlights": {"category": "Work", "scenario": "Meetings", "description": "提煉會議洞見，聚焦長期價值。", "author": "Plaud", "popularity": None},
+    "plaud-autopilot": {
+        "category": "General",
+        "scenario": "Multi-scenario",
+        "description": "多場景智能總結，快速抓重點",
+        "author": "Plaud",
+        "popularity": None,
+    },
+    "plaud-key-metrics": {
+        "category": "Functional",
+        "scenario": "Data extraction",
+        "description": "從對話萃取數據，快速成表",
+        "author": "Plaud",
+        "popularity": None,
+    },
+    "plaud-intent-analysis": {
+        "category": "Functional",
+        "scenario": "Conversation analysis",
+        "description": "解讀對話意圖，給出可行應對",
+        "author": "Plaud",
+        "popularity": None,
+    },
+    "plaud-meeting-narrative": {
+        "category": "Work",
+        "scenario": "Meetings",
+        "description": "將逐字稿轉化為會議故事",
+        "author": "Plaud",
+        "popularity": None,
+    },
+    "plaud-lecture-deep-dive": {
+        "category": "Education",
+        "scenario": "Lectures",
+        "description": "詳盡的演講總結與引用。",
+        "author": "Plaud",
+        "popularity": None,
+    },
+    "plaud-research-interview": {
+        "category": "Research",
+        "scenario": "Interviews",
+        "description": "結構化紀錄研究訪談，快速提煉重點",
+        "author": "Plaud",
+        "popularity": None,
+    },
+    "plaud-interview": {
+        "category": "Research",
+        "scenario": "Interviews",
+        "description": "結構化整理採訪稿件並提煉核心觀點與金句",
+        "author": "Plaud",
+        "popularity": None,
+    },
+    "plaud-full-transcript": {
+        "category": "Transcription",
+        "scenario": "External use",
+        "description": "忠實且完整的音訊轉錄。",
+        "author": "Plaud",
+        "popularity": None,
+    },
+    "plaud-meeting-minutes": {
+        "category": "Work",
+        "scenario": "Meetings",
+        "description": "重構會議為紀要、行動事項與決策",
+        "author": "Plaud",
+        "popularity": None,
+    },
+    "plaud-meeting-highlights": {
+        "category": "Work",
+        "scenario": "Meetings",
+        "description": "提煉會議洞見，聚焦長期價值。",
+        "author": "Plaud",
+        "popularity": None,
+    },
 }
 
 
@@ -111,8 +166,13 @@ def _item(row: NoteTemplate) -> dict:
         "is_active": row.is_active,
         "category": row.category or catalog.get("category", "Custom"),
         "scenario": row.scenario or catalog.get("scenario", "Workspace"),
-        "description": row.description or catalog.get(
-            "description", next((line.strip("# ") for line in row.instructions.splitlines() if line.strip()), "Custom structured notes")
+        "description": row.description
+        or catalog.get(
+            "description",
+            next(
+                (line.strip("# ") for line in row.instructions.splitlines() if line.strip()),
+                "Custom structured notes",
+            ),
         ),
         "author": row.author or catalog.get("author", "Local workspace"),
         "popularity": row.popularity if row.popularity is not None else catalog.get("popularity"),
@@ -140,9 +200,7 @@ def copy_note_template(key: str, body: CopyTemplateBody) -> dict:
     """Copy an active template into an independently versioned personal template."""
     with session_scope() as session:
         source = session.scalar(
-            select(NoteTemplate).where(
-                NoteTemplate.key == key, NoteTemplate.is_active.is_(True)
-            )
+            select(NoteTemplate).where(NoteTemplate.key == key, NoteTemplate.is_active.is_(True))
         )
         if source is None:
             raise HTTPException(status_code=404, detail="template not found")
@@ -170,9 +228,7 @@ def copy_note_template(key: str, body: CopyTemplateBody) -> dict:
         from ..worker.knowledge_index import sync_file_knowledge_documents
 
         for file_id in session.scalars(
-            select(PlaudFile.id)
-            .where(PlaudFile.note_template_key == key)
-            .order_by(PlaudFile.id)
+            select(PlaudFile.id).where(PlaudFile.note_template_key == key).order_by(PlaudFile.id)
         ):
             sync_file_knowledge_documents(session, file_id)
         return _item(row)
@@ -228,15 +284,14 @@ def create_note_template_version(key: str, body: TemplateBody) -> dict:
             else current.execution_profile_id
         )
         prompt_mode = (
-            body.prompt_mode
-            if "prompt_mode" in body.model_fields_set
-            else current.prompt_mode
+            body.prompt_mode if "prompt_mode" in body.model_fields_set else current.prompt_mode
         )
         _validate_profile(session, profile_id)
-        version = (session.scalar(select(func.max(NoteTemplate.version)).where(NoteTemplate.key == key)) or 0) + 1
-        session.execute(
-            update(NoteTemplate).where(NoteTemplate.key == key).values(is_active=False)
-        )
+        version = (
+            session.scalar(select(func.max(NoteTemplate.version)).where(NoteTemplate.key == key))
+            or 0
+        ) + 1
+        session.execute(update(NoteTemplate).where(NoteTemplate.key == key).values(is_active=False))
         row = NoteTemplate(
             key=key,
             version=version,
@@ -264,23 +319,21 @@ def create_note_template_version(key: str, body: TemplateBody) -> dict:
 
 @router.delete("/note-templates/{key}")
 def archive_note_template(key: str) -> dict:
-    if key == "default":
-        raise HTTPException(status_code=409, detail="the default template cannot be archived")
+    if key == "plaud-autopilot":
+        raise HTTPException(status_code=409, detail="the automatic template cannot be archived")
     with session_scope() as session:
         # The selected recordings are a dynamic set. Fence concurrent version
         # creation/archive before reading which version is currently active.
         lock_library_profile_membership_change(session)
         current = session.scalar(
-            select(NoteTemplate).where(
-                NoteTemplate.key == key, NoteTemplate.is_active.is_(True)
-            ).with_for_update()
+            select(NoteTemplate)
+            .where(NoteTemplate.key == key, NoteTemplate.is_active.is_(True))
+            .with_for_update()
         )
         if current is None:
             raise HTTPException(status_code=404, detail="template not found")
         file_ids = sorted(
-            session.scalars(
-                select(PlaudFile.id).where(PlaudFile.note_template_key == key)
-            )
+            session.scalars(select(PlaudFile.id).where(PlaudFile.note_template_key == key))
         )
         try:
             lock_recording_profile_changes(session, file_ids)

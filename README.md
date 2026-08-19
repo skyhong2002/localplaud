@@ -216,16 +216,19 @@ when the returned segment structure is incomplete. Transport and quota failures 
 never converted into additional split calls.
 
 The `codex-local` adapter is an explicit trusted-single-user option for transcript
-correction. It invokes `codex exec` through stdin in an ephemeral, read-only,
+correction, generated notes, and mind maps. It invokes `codex exec` through stdin in an ephemeral, read-only,
 temporary workspace with strict, fail-closed flags that disable the supported shell,
 browser, computer-use, app, plugin, multi-agent, and workspace tools. localplaud never
 reads or copies Codex credentials. Its
-dedicated `CODEX_HOME` must be signed in normally with ChatGPT before the provider is
+configured `CODEX_HOME` must be signed in normally with ChatGPT before the provider is
 healthy; API-key login is rejected by default so the UI cannot misrepresent API
-billing as included Codex subscription usage. It is cloud inference and must not be
-used as an unattended public or multi-user default.
+billing as included Codex subscription usage. Before every model turn, the adapter
+reads Codex's local subscription-window snapshot without inference and fails closed
+unless the configured reserve plus call headroom remains. It is cloud inference and
+must not be used as an unattended public or multi-user default.
 
-Set up that isolated login interactively on the trusted local host:
+Either use the already active user-owned Codex login (`codex_home = "~/.codex"`) or
+set up an isolated login interactively on the trusted local host:
 
 ```bash
 mkdir -p ~/.localplaud/codex
@@ -234,13 +237,19 @@ CODEX_HOME=~/.localplaud/codex codex login status
 .venv/bin/localplaud doctor
 ```
 
-The health check confirms that the dedicated home uses ChatGPT or an approved access
-token; it does not spend usage to probe the model and therefore does not claim that
-the selected model or remaining allowance is currently available. Create a new
-immutable execution-profile version and select `correct:codex-local` only for the
-`correct` stage. `codex-local` is intentionally rejected as the global `[llm]`
-provider, so summaries, mind maps, and Ask cannot be moved across this experimental
-boundary accidentally.
+The health check confirms ChatGPT authentication and reports the current remaining
+Codex window without spending a model turn. Create a new immutable execution-profile
+version and select `correct:codex-local` only for the explicitly approved `correct`,
+`summarize`, and/or `mind_map` stages. `codex-local` remains rejected as the global
+`[llm]` provider and for Ask, so unrelated text workloads cannot cross this
+experimental boundary accidentally. The shipped local profile protects 5% and
+requires another 2% of pre-call headroom, keeping the user's requested 3% floor
+outside the callable range.
+
+For GPT-5.6-sol, summary and mind-map calls use up to 240,000 transcript characters
+per request. This keeps ordinary long recordings in one full-transcript turn instead
+of spending many quota-consuming lossy map calls; recordings beyond that bound still
+use the durable full-coverage hierarchy.
 
 ## ASR providers
 

@@ -227,9 +227,7 @@ def _snapshot_state(session):
         (t.id, t.source, t.text)
         for t in session.scalars(select(Transcript).where(Transcript.file_id == "r1"))
     ]
-    chunks = [
-        (c.id, c.text) for c in session.scalars(select(Chunk).where(Chunk.file_id == "r1"))
-    ]
+    chunks = [(c.id, c.text) for c in session.scalars(select(Chunk).where(Chunk.file_id == "r1"))]
     other_runs = [
         (run.stage.value, run.status.value, run.attempts, run.detail, run.error)
         for run in session.scalars(select(StageRun).where(StageRun.file_id == "r1"))
@@ -279,9 +277,7 @@ def test_remote_mind_map_idempotency_includes_effective_note_options(monkeypatch
         def close(self):
             pass
 
-    monkeypatch.setattr(
-        pipeline.RemoteWorkerClient, "from_config", lambda _config: FakeClient()
-    )
+    monkeypatch.setattr(pipeline.RemoteWorkerClient, "from_config", lambda _config: FakeClient())
     snapshot = {
         "stages": {
             "mind_map": {
@@ -295,9 +291,7 @@ def test_remote_mind_map_idempotency_includes_effective_note_options(monkeypatch
     }
     inputs = [pipeline._remote_json_input("transcript", {"segments": []})]
     for note in ("# Note A", "# Note B", "# Note A"):
-        pipeline._run_remote_stage(
-            "r1", snapshot, "mind_map", inputs, options={"summary_md": note}
-        )
+        pipeline._run_remote_stage("r1", snapshot, "mind_map", inputs, options={"summary_md": note})
 
     keys = [request.idempotency_key for request in requests]
     assert keys[0] != keys[1]
@@ -331,9 +325,13 @@ def test_rebuild_success_replaces_only_the_map_with_provenance(monkeypatch, tmp_
             select(Summary).where(Summary.file_id == "r1", Summary.template == "default")
         ).one()
         note_fingerprint = fingerprint_digest(note)
-        old_map_content = s.scalars(
-            select(Summary).where(Summary.file_id == "r1", Summary.template == "mind_map")
-        ).one().content_md
+        old_map_content = (
+            s.scalars(
+                select(Summary).where(Summary.file_id == "r1", Summary.template == "mind_map")
+            )
+            .one()
+            .content_md
+        )
 
     process_mind_map_only("r1")
 
@@ -382,9 +380,7 @@ def test_rebuild_success_replaces_only_the_map_with_provenance(monkeypatch, tmp_
         assert run.error is None
         assert not (run.detail or {}).get("stale")
         assert "mind_map_only" not in (run.detail or {})
-        attempts = list(
-            s.scalars(select(StageAttempt).where(StageAttempt.file_id == "r1"))
-        )
+        attempts = list(s.scalars(select(StageAttempt).where(StageAttempt.file_id == "r1")))
         assert [a.stage for a in attempts] == [StageName.mind_map]
 
 
@@ -413,9 +409,7 @@ def test_rebuild_records_restored_revision_in_provenance(monkeypatch, tmp_path):
         assert live_map.template_snapshot["source_note"]["restored_from_revision"] == 3
 
 
-def test_rebuild_compare_and_set_rejects_inputs_changed_during_provider_call(
-    monkeypatch, tmp_path
-):
+def test_rebuild_compare_and_set_rejects_inputs_changed_during_provider_call(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import PlaudFile, StageName, StageStatus, Summary
     from localplaud.db.session import init_db, session_scope
@@ -429,9 +423,7 @@ def test_rebuild_compare_and_set_rejects_inputs_changed_during_provider_call(
         assert summary_md == "# Sync notes\n\n- agenda\n- decisions"
         with session_scope() as s:
             note = s.scalars(
-                select(Summary).where(
-                    Summary.file_id == "r1", Summary.template == "default"
-                )
+                select(Summary).where(Summary.file_id == "r1", Summary.template == "default")
             ).one()
             note.content_md = "# Changed while provider was running"
         return {
@@ -484,9 +476,7 @@ def test_rebuild_compare_and_set_rejects_source_stage_made_stale(monkeypatch, tm
             "model": "m",
         }
 
-    monkeypatch.setattr(
-        "localplaud.worker.pipeline.mindmap.generate_mind_map", make_notes_stale
-    )
+    monkeypatch.setattr("localplaud.worker.pipeline.mindmap.generate_mind_map", make_notes_stale)
     process_mind_map_only("r1")
 
     with session_scope() as s:
@@ -494,18 +484,14 @@ def test_rebuild_compare_and_set_rejects_source_stage_made_stale(monkeypatch, tm
         live_map = s.scalars(
             select(Summary).where(Summary.file_id == "r1", Summary.template == "mind_map")
         ).one()
-        map_run = next(
-            item for item in recording.stage_runs if item.stage == StageName.mind_map
-        )
+        map_run = next(item for item in recording.stage_runs if item.stage == StageName.mind_map)
         assert live_map.content_md == "# Sync topics\n- agenda\n  - budget"
         assert recording.status.value == "partial"
         assert map_run.status == StageStatus.failed
         assert (map_run.detail or {}).get("stale") is True
 
 
-def test_rebuild_completion_cannot_overwrite_a_post_persist_stale_write(
-    monkeypatch, tmp_path
-):
+def test_rebuild_completion_cannot_overwrite_a_post_persist_stale_write(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import PlaudFile, StageName, StageStatus, Summary
     from localplaud.db.session import init_db, session_scope
@@ -523,15 +509,11 @@ def test_rebuild_completion_cannot_overwrite_a_post_persist_stale_write(
             return
         with session_scope() as s:
             note = s.scalars(
-                select(Summary).where(
-                    Summary.file_id == "r1", Summary.template == "default"
-                )
+                select(Summary).where(Summary.file_id == "r1", Summary.template == "default")
             ).one()
             note.content_md = "# Restored after map persistence"
             recording = s.get(PlaudFile, "r1")
-            run = next(
-                item for item in recording.stage_runs if item.stage == StageName.mind_map
-            )
+            run = next(item for item in recording.stage_runs if item.stage == StageName.mind_map)
             run.status = StageStatus.pending
             run.detail = dict(run.detail or {}) | {
                 "stale": True,
@@ -586,9 +568,7 @@ def test_rebuild_failure_keeps_stale_state_and_schedules_scoped_retry(monkeypatc
     def broken_mindmap(transcript, settings, summary_md=None):
         raise RuntimeError("boom from provider")
 
-    monkeypatch.setattr(
-        "localplaud.worker.pipeline.mindmap.generate_mind_map", broken_mindmap
-    )
+    monkeypatch.setattr("localplaud.worker.pipeline.mindmap.generate_mind_map", broken_mindmap)
     unrelated_due = datetime.now(UTC) + timedelta(hours=4)
     with session_scope() as s:
         recording = s.get(PlaudFile, "r1")
@@ -632,9 +612,7 @@ def test_rebuild_failure_keeps_stale_state_and_schedules_scoped_retry(monkeypatc
         recording = s.get(PlaudFile, "r1")
         run = next(r for r in recording.stage_runs if r.stage == StageName.mind_map)
         detail = dict(run.detail)
-        detail["mind_map_next_retry_at"] = (
-            datetime.now(UTC) - timedelta(seconds=1)
-        ).isoformat()
+        detail["mind_map_next_retry_at"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
         run.detail = detail
     assert process_pending() == 1
     assert counters["sum"] == 0 and counters["emb"] == 0 and counters["mm"] == 1
@@ -672,9 +650,7 @@ def test_rebuild_setup_guards(monkeypatch, tmp_path):
 
     with session_scope() as s:
         summarize = s.scalars(
-            select(StageRun).where(
-                StageRun.file_id == "r1", StageRun.stage == StageName.summarize
-            )
+            select(StageRun).where(StageRun.file_id == "r1", StageRun.stage == StageName.summarize)
         ).one()
         summarize.detail = {"sentinel": "summarize", "stale": True}
         summarize.status = StageStatus.pending
@@ -688,9 +664,7 @@ def test_rebuild_setup_guards(monkeypatch, tmp_path):
 
     with session_scope() as s:
         summarize = s.scalars(
-            select(StageRun).where(
-                StageRun.file_id == "r1", StageRun.stage == StageName.summarize
-            )
+            select(StageRun).where(StageRun.file_id == "r1", StageRun.stage == StageName.summarize)
         ).one()
         summarize.detail = {"sentinel": "summarize"}
         summarize.status = StageStatus.completed
@@ -699,9 +673,7 @@ def test_rebuild_setup_guards(monkeypatch, tmp_path):
         recording.error = None
         for note in list(
             s.scalars(
-                select(Summary).where(
-                    Summary.file_id == "r1", Summary.template != "mind_map"
-                )
+                select(Summary).where(Summary.file_id == "r1", Summary.template != "mind_map")
             )
         ):
             s.delete(note)
@@ -745,9 +717,10 @@ def test_rebuild_source_selection(monkeypatch, tmp_path):
         row.note_template_key = "meeting"
         assert mind_map_rebuild_source(s, row, settings).template == "meeting"
 
-        # ``auto`` falls through to the workspace default template.
+        # ``auto`` cannot select a legacy output when the current Plaud
+        # Autopilot default has no live note among several candidates.
         row.note_template_key = "auto"
-        assert mind_map_rebuild_source(s, row, settings).template == "default"
+        assert mind_map_rebuild_source(s, row, settings) is None
 
         # Ambiguous: several live outputs and nothing names one of them.
         for note in row.summaries:
@@ -868,9 +841,7 @@ def test_rebuild_route_validations(monkeypatch, tmp_path):
         row.processing_token = None
         row.processing_lease_until = None
         summarize = s.scalars(
-            select(StageRun).where(
-                StageRun.file_id == "r1", StageRun.stage == StageName.summarize
-            )
+            select(StageRun).where(StageRun.file_id == "r1", StageRun.stage == StageName.summarize)
         ).one()
         summarize.detail = {"stale": True}
         summarize.status = StageStatus.pending
@@ -880,16 +851,16 @@ def test_rebuild_route_validations(monkeypatch, tmp_path):
 
     with session_scope() as s:
         summarize = s.scalars(
-            select(StageRun).where(
-                StageRun.file_id == "r1", StageRun.stage == StageName.summarize
-            )
+            select(StageRun).where(StageRun.file_id == "r1", StageRun.stage == StageName.summarize)
         ).one()
         summarize.detail = {}
         summarize.status = StageStatus.completed
         from localplaud.db.models import Summary
 
         for note in list(
-            s.scalars(select(Summary).where(Summary.file_id == "r1", Summary.template != "mind_map"))
+            s.scalars(
+                select(Summary).where(Summary.file_id == "r1", Summary.template != "mind_map")
+            )
         ):
             s.delete(note)
     no_notes = c.post("/file/r1/rebuild-mind-map")
@@ -909,9 +880,11 @@ def test_active_rebuild_claim_blocks_every_web_input_mutation(monkeypatch, tmp_p
         row = s.get(PlaudFile, "r1")
         row.processing_token = "mind-map-claim"
         row.processing_lease_until = datetime.now(UTC) + timedelta(minutes=5)
-        note_id = s.scalars(
-            select(Summary).where(Summary.file_id == "r1", Summary.template == "default")
-        ).one().id
+        note_id = (
+            s.scalars(select(Summary).where(Summary.file_id == "r1", Summary.template == "default"))
+            .one()
+            .id
+        )
 
     responses = [
         c.post(
@@ -946,9 +919,7 @@ def test_rebuild_route_queues_only_the_mind_map_stage(monkeypatch, tmp_path):
         recording.pipeline_retry_count = 2
         recording.pipeline_next_retry_at = unrelated_due
     started = _deferred_threads(monkeypatch)
-    monkeypatch.setattr(
-        "localplaud.poller.poll.current_daemon_owner", lambda: "web-daemon-owner"
-    )
+    monkeypatch.setattr("localplaud.poller.poll.current_daemon_owner", lambda: "web-daemon-owner")
 
     queued = c.post("/file/r1/rebuild-mind-map")
     assert queued.status_code == 200
@@ -1062,9 +1033,7 @@ def test_rebuild_route_revalidates_current_state_after_claim(monkeypatch, tmp_pa
             assert s.get(PlaudFile, file_id).processing_token == token
         return token
 
-    monkeypatch.setattr(
-        pipeline, "claim_mind_map_rebuild", finish_first_request_then_claim
-    )
+    monkeypatch.setattr(pipeline, "claim_mind_map_rebuild", finish_first_request_then_claim)
     started = _deferred_threads(monkeypatch)
     response = c.post("/file/r1/rebuild-mind-map")
     assert response.status_code == 409
@@ -1122,11 +1091,15 @@ def test_scope_markers_supersede_each_other(monkeypatch, tmp_path):
 
     assert c.post("/file/r1/rebuild-mind-map").status_code == 200
     with session_scope() as s:
-        detail = s.scalars(
-            select(StageRun).where(
-                StageRun.file_id == "r1", StageRun.stage == StageName.mind_map
+        detail = (
+            s.scalars(
+                select(StageRun).where(
+                    StageRun.file_id == "r1", StageRun.stage == StageName.mind_map
+                )
             )
-        ).one().detail
+            .one()
+            .detail
+        )
         assert detail.get("mind_map_only") is True and "derived_only" not in detail
 
     # The synchronous lease makes a broader request conflict while this
@@ -1141,11 +1114,15 @@ def test_scope_markers_supersede_each_other(monkeypatch, tmp_path):
 
     assert c.post("/file/r1/generate-notes").status_code == 200
     with session_scope() as s:
-        detail = s.scalars(
-            select(StageRun).where(
-                StageRun.file_id == "r1", StageRun.stage == StageName.mind_map
+        detail = (
+            s.scalars(
+                select(StageRun).where(
+                    StageRun.file_id == "r1", StageRun.stage == StageName.mind_map
+                )
             )
-        ).one().detail
+            .one()
+            .detail
+        )
         assert detail.get("derived_only") is True and "mind_map_only" not in detail
 
     assert c.post("/file/r1/rebuild-mind-map").status_code == 409  # notes now stale
@@ -1177,9 +1154,7 @@ def test_mindmap_tab_falls_back_to_regenerate_when_notes_stale(monkeypatch, tmp_
     _seed(audio_path=None)
     with session_scope() as s:
         summarize = s.scalars(
-            select(StageRun).where(
-                StageRun.file_id == "r1", StageRun.stage == StageName.summarize
-            )
+            select(StageRun).where(StageRun.file_id == "r1", StageRun.stage == StageName.summarize)
         ).one()
         summarize.detail = {"stale": True}
         summarize.status = StageStatus.pending
@@ -1197,9 +1172,7 @@ def test_mindmap_tab_shows_actionable_failure_and_retry(monkeypatch, tmp_path):
     _seed(audio_path=None)
     with session_scope() as s:
         run = s.scalars(
-            select(StageRun).where(
-                StageRun.file_id == "r1", StageRun.stage == StageName.mind_map
-            )
+            select(StageRun).where(StageRun.file_id == "r1", StageRun.stage == StageName.mind_map)
         ).one()
         from localplaud.db.models import StageStatus
 
@@ -1304,9 +1277,11 @@ def test_restoring_the_maps_recorded_source_content_keeps_it_current(monkeypatch
     # Rebuild records the fingerprint of the live v2 content.
     process_mind_map_only("r1")
     with session_scope() as s:
-        note_id = s.scalars(
-            select(Summary).where(Summary.file_id == "r1", Summary.template == "default")
-        ).one().id
+        note_id = (
+            s.scalars(select(Summary).where(Summary.file_id == "r1", Summary.template == "default"))
+            .one()
+            .id
+        )
 
     def map_run_state():
         with session_scope() as s:
@@ -1340,9 +1315,11 @@ def test_restoring_the_maps_recorded_source_content_keeps_it_current(monkeypatch
     with session_scope() as s:
         from localplaud.db.models import SummaryRevision
 
-        live_content = s.scalars(
-            select(Summary).where(Summary.file_id == "r1", Summary.template == "default")
-        ).one().content_md
+        live_content = (
+            s.scalars(select(Summary).where(Summary.file_id == "r1", Summary.template == "default"))
+            .one()
+            .content_md
+        )
         twin_revision = next(
             r.revision
             for r in s.scalars(

@@ -13,16 +13,6 @@ from textwrap import dedent
 
 log = logging.getLogger(__name__)
 
-# Every system prompt shares the same ground rules Plaud-style notes need:
-# stay faithful to the transcript, answer in its dominant language.
-_GROUND_RULES = (
-    "Never invent facts not present in the transcript. Write everything — the "
-    "title, headings' content, and body — in the transcript's dominant language; "
-    "for a Mandarin recording the title must be in Chinese, not English. For "
-    "Chinese, always write Traditional Chinese with Taiwan wording (臺灣正體), "
-    "even when the transcript text itself is in Simplified script."
-)
-
 
 @dataclass
 class SummaryTemplate:
@@ -35,109 +25,9 @@ class SummaryTemplate:
     provenance: str | None = None
 
 
-TEMPLATES: dict[str, SummaryTemplate] = {
-    "default": SummaryTemplate(
-        name="default",
-        system=(
-            "You are a meticulous meeting-notes assistant. You are given a "
-            "transcript (possibly with speaker labels and multiple languages). "
-            f"Produce clear, faithful notes. {_GROUND_RULES}"
-        ),
-        instructions="""\
-# <a short descriptive title, in the same language as the transcript>
-
-## Summary
-A concise paragraph capturing what this recording is about.
-
-## Key Points
-- bullet points of the most important information
-
-## Action Items
-- concrete follow-ups, decisions, or TODOs (write "None" if there are none)""",
-    ),
-    "meeting": SummaryTemplate(
-        name="meeting",
-        system=(
-            "You are a precise minute-taker for business meetings. You are "
-            "given a transcript, possibly with speaker labels. "
-            f"{_GROUND_RULES}"
-        ),
-        instructions="""\
-# <a short descriptive meeting title>
-
-## Attendees / Speakers
-- speakers present (use names if stated, otherwise the speaker labels)
-
-## Decisions
-- decisions that were made (write "None" if there are none)
-
-## Action Items
-- concrete follow-ups, with an owner in parentheses when it can be inferred
-
-## Open Questions
-- unresolved questions or topics deferred to later (write "None" if there are none)""",
-    ),
-    "call": SummaryTemplate(
-        name="call",
-        system=(
-            "You are an assistant summarizing a phone or video call from its "
-            f"transcript. {_GROUND_RULES}"
-        ),
-        instructions="""\
-# <a short descriptive call title>
-
-## Purpose
-One or two sentences on why this call happened.
-
-## Key Points
-- the most important information exchanged
-
-## Commitments / Follow-ups
-- who agreed to do what (write "None" if there are none)
-
-## Sentiment
-One sentence on the overall tone of the call, grounded in what was said.""",
-    ),
-    "lecture": SummaryTemplate(
-        name="lecture",
-        system=(
-            "You are a study assistant turning a lecture or talk transcript "
-            f"into revision notes. {_GROUND_RULES}"
-        ),
-        instructions="""\
-# <a short descriptive lecture title>
-
-## Topic
-One sentence stating what the lecture covers.
-
-## Key Concepts
-- the main concepts, terms, and ideas introduced
-
-## Summary
-A concise paragraph tying the concepts together.
-
-## Study Questions
-- a few questions a student could use to test their understanding""",
-    ),
-    "personal": SummaryTemplate(
-        name="personal",
-        system=(
-            "You are a personal assistant condensing a voice memo into a "
-            f"short note for its author. {_GROUND_RULES}"
-        ),
-        instructions="""\
-# <a short descriptive title>
-
-## TL;DR
-One or two sentences capturing the gist.
-
-## Highlights
-- the moments or thoughts worth remembering
-
-## To-dos
-- anything the author said they should do (write "None" if there are none)""",
-    ),
-}
+# Only prompts captured from the user's signed-in Plaud Web "最近使用" surface
+# belong in the built-in catalog. Do not add locally authored substitute prompts.
+TEMPLATES: dict[str, SummaryTemplate] = {}
 
 
 def _plaud_template(
@@ -383,11 +273,11 @@ Transcript:
 
 
 def get_template(name: str) -> SummaryTemplate:
-    """Look up a template case-insensitively; unknown names fall back to "default"."""
+    """Look up a template; unknown/legacy names fall back to Plaud Autopilot."""
     template = TEMPLATES.get(name.strip().lower())
     if template is None:
-        log.warning("unknown summary template %r, falling back to 'default'", name)
-        return TEMPLATES["default"]
+        log.warning("unknown summary template %r, falling back to Plaud Autopilot", name)
+        return TEMPLATES["plaud-autopilot"]
     return template
 
 
@@ -397,6 +287,7 @@ def bootstrap_note_templates(session) -> None:
 
     from ..db.models import NoteTemplate
 
+    removed_keys: list[str] = []
     for row in session.scalars(
         select(NoteTemplate).where(
             NoteTemplate.is_builtin.is_(True),
@@ -405,6 +296,18 @@ def bootstrap_note_templates(session) -> None:
     ):
         if row.key not in TEMPLATES:
             row.is_active = False
+            removed_keys.append(row.key)
+
+    if removed_keys:
+        from sqlalchemy import update
+
+        from ..db.models import PlaudFile
+
+        session.execute(
+            update(PlaudFile)
+            .where(PlaudFile.note_template_key.in_(removed_keys))
+            .values(note_template_key="plaud-autopilot")
+        )
 
     existing = set(session.scalars(select(NoteTemplate.key)).all())
     for key, template in TEMPLATES.items():
@@ -475,9 +378,7 @@ def render_resolved_prompt(
             template.system or None,
             f"{template.instructions}\n\nTranscript:\n---\n{transcript_text}\n---\n",
         )
-    prompt = _PROMPT_FRAME.format(
-        instructions=template.instructions, transcript=transcript_text
-    )
+    prompt = _PROMPT_FRAME.format(instructions=template.instructions, transcript=transcript_text)
     return template.system, prompt
 
 

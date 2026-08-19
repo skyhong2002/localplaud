@@ -7,7 +7,7 @@ def _reset(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'auto.db'}")
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'auto.db'}")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__TRANSCRIBE", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__DIARIZE", "false")
@@ -22,19 +22,17 @@ def _reset(monkeypatch, tmp_path):
 def test_recommendation_is_deterministic_and_multilingual():
     from localplaud.template_auto import recommend_template
 
-    meeting = recommend_template(
-        title="產品同步會議", transcript="今天議程包含決議與待辦。"
-    )
-    assert meeting["key"] == "meeting" and meeting["confidence"] == "high"
+    meeting = recommend_template(title="產品同步會議", transcript="今天議程包含決議與待辦。")
+    assert meeting["key"] == "plaud-autopilot" and meeting["confidence"] == "high"
     assert meeting == recommend_template(
         title="產品同步會議", transcript="今天議程包含決議與待辦。"
     )
     lecture = recommend_template(
         title="Machine Learning Lecture", transcript="The professor begins the lesson."
     )
-    assert lecture["key"] == "lecture"
+    assert lecture["key"] == "plaud-autopilot"
     fallback = recommend_template(title="2026-07-11", transcript="ordinary discussion")
-    assert fallback["key"] == "default" and fallback["confidence"] == "low"
+    assert fallback["key"] == "plaud-autopilot" and fallback["confidence"] == "high"
 
 
 def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tmp_path):
@@ -64,9 +62,9 @@ def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tm
         )
         session.add(template_profile)
         session.flush()
-        meeting_template = session.query(NoteTemplate).filter_by(
-            key="meeting", is_active=True
-        ).one()
+        meeting_template = (
+            session.query(NoteTemplate).filter_by(key="plaud-autopilot", is_active=True).one()
+        )
         meeting_template.execution_profile_id = template_profile.id
         session.add(
             PlaudFile(
@@ -95,14 +93,14 @@ def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tm
     client = TestClient(app)
     preview = client.get("/api/files/auto/note-template/recommendation")
     assert preview.status_code == 200
-    assert preview.json()["key"] == "meeting"
+    assert preview.json()["key"] == "plaud-autopilot"
     assert preview.json()["template"]["version"] == 1
     assert client.put("/api/files/auto/note-template", json={"key": "auto"}).status_code == 200
 
     def fake_summary(transcript, resolved):
-        assert resolved.pipeline.summary_template == "meeting"
+        assert resolved.pipeline.summary_template == "plaud-autopilot"
         return {
-            "template": "meeting",
+            "template": "plaud-autopilot",
             "title": "Product sync",
             "content_md": "# Product sync",
             "provider": "fake",
@@ -114,18 +112,21 @@ def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tm
     with session_scope() as session:
         summary = session.query(Summary).filter_by(file_id="auto").one()
         stage = next(
-            item for item in session.get(PlaudFile, "auto").stage_runs
+            item
+            for item in session.get(PlaudFile, "auto").stage_runs
             if item.stage == StageName.summarize
         )
-        assert summary.template == "meeting"
-        assert stage.detail["auto_template"]["key"] == "meeting"
-        assert stage.detail["auto_template"]["engine"] == "local-deterministic-v1"
+        assert summary.template == "plaud-autopilot"
+        assert stage.detail["auto_template"]["key"] == "plaud-autopilot"
+        assert stage.detail["auto_template"]["engine"] == "plaud-recent-template-v1"
         upstream = next(
-            item for item in session.get(PlaudFile, "auto").stage_runs
+            item
+            for item in session.get(PlaudFile, "auto").stage_runs
             if item.stage == StageName.transcribe
         )
         downstream = next(
-            item for item in session.get(PlaudFile, "auto").stage_runs
+            item
+            for item in session.get(PlaudFile, "auto").stage_runs
             if item.stage == StageName.index
         )
         assert not any(
@@ -138,12 +139,13 @@ def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tm
             summary.resolved_profile_snapshot,
         ):
             assert any(
-                item["kind"] == "template" and item["template_key"] == "meeting"
+                item["kind"] == "template" and item["template_key"] == "plaud-autopilot"
                 for item in snapshot["layer_provenance"]
             )
-        attempt = session.query(StageAttempt).filter_by(
-            file_id="auto", stage=StageName.summarize
-        ).one()
-        assert attempt.resolved_profile_snapshot["layers"] == summary.resolved_profile_snapshot[
-            "layers"
-        ]
+        attempt = (
+            session.query(StageAttempt).filter_by(file_id="auto", stage=StageName.summarize).one()
+        )
+        assert (
+            attempt.resolved_profile_snapshot["layers"]
+            == summary.resolved_profile_snapshot["layers"]
+        )

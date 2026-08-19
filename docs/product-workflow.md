@@ -199,10 +199,11 @@ setting.
   and usage/cost data where available. Later profile edits never alter old
   provenance.
 - An experimental trusted-single-user Codex-backed text provider may use a supported
-  local Codex CLI/app-server integration. It must not scrape or copy auth tokens,
-  masquerade as an OpenAI-compatible API, become an unattended public-server
-  default, or be treated as evidence that OpenAI API usage is included with a
-  ChatGPT/Codex subscription.
+  local Codex CLI/app-server integration for explicitly selected correction, notes,
+  and mind-map stages. It must read and enforce a protected subscription reserve
+  before inference, must not scrape or copy auth tokens, masquerade as an
+  OpenAI-compatible API, become an unattended public-server default, or be treated
+  as evidence that OpenAI API usage is included with a ChatGPT/Codex subscription.
 
 ### 6. Automation
 
@@ -585,6 +586,11 @@ execution, and unavailable providers never trigger an implicit fallback. A produ
 recording has completed the OpenCode Go path end to end: the immutable `ai_polish`
 revision became the canonical input for notes, mind map, and embedding chunks while
 raw ASR remained directly inspectable.
+The trusted-single-user Codex CLI boundary now also advertises generated-note and
+mind-map capabilities, uses GPT-5.6-sol at high reasoning effort when explicitly
+selected, and reads the ChatGPT subscription window before every model turn. A 5%
+reserve plus 2% call headroom fails closed before the user's 3% floor can be reached;
+API-key auth remains rejected by default and Ask remains outside this boundary.
 Saved Ask answers are editable note bodies with durable follow-up threads. Library
 and recording Ask surfaces expose exact-scope conversation history through a
 searchable, paginated desktop/mobile drawer. Threads can be renamed or deleted;
@@ -622,14 +628,16 @@ opening its workspace first.
 The Templates workspace now separates My Space and Explore, with server-side search,
 scenario/category browsing, provenance, descriptions, authorship/popularity signals,
 prompt preview, immutable version editing, and copy-to-workspace. Other major gaps
-include automation and UI polish. Auto template selection is local and deterministic,
-uses title/transcript/duration signals, previews its reasoning before processing, and
-persists the actual selected template plus recommendation engine provenance. Because
-the recommendation depends on the transcript, speech/correction stages retain the
-pre-template profile snapshot while notes, mind maps, and indexing re-resolve against
-the selected template. Reuse accepts an explicit current fallback candidate without
-repeating provider calls, and a changed template key/version invalidates the mind-map
-input lineage.
+include automation and UI polish. Automatic mode now selects the exact Plaud
+Autopilot prompt captured from the user's read-only Recent templates surface; the
+five locally authored default/meeting/call/lecture/personal substitutes are archived
+and legacy selections migrate to Autopilot. The other active built-ins are likewise
+read-only Plaud Recent prompt snapshots rather than localplaud-authored templates.
+The selected template and engine provenance remain durable. Speech/correction stages
+retain the pre-template profile snapshot while notes, mind maps, and indexing
+re-resolve against the selected template. Reuse accepts an explicit current fallback
+candidate without repeating provider calls, and a changed template key/version
+invalidates the mind-map input lineage.
 Provider/model/profile management and the versioned remote-worker protocol
 are implemented. Local hardware/runtime detection now provides evidence-backed,
 ranked Apple MLX, NVIDIA CUDA, and CPU ASR recommendations with guarded one-click

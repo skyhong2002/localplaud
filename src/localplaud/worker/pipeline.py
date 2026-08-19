@@ -189,13 +189,9 @@ def _assert_processing_claim_in_session(
         ).rowcount
         row = session.get(PlaudFile, file_id, populate_existing=True)
         if locked != 1 and row is not None and expected_token is not None:
-            raise PipelineAlreadyRunning(
-                f"processing claim for {file_id} is no longer active"
-            )
+            raise PipelineAlreadyRunning(f"processing claim for {file_id} is no longer active")
     else:
-        row = session.scalar(
-            select(PlaudFile).where(PlaudFile.id == file_id).with_for_update()
-        )
+        row = session.scalar(select(PlaudFile).where(PlaudFile.id == file_id).with_for_update())
     if row is None:
         raise ValueError(f"unknown file {file_id}")
     if expected_token is None:
@@ -246,8 +242,11 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
 
     family_config = getattr(resolved, family)
     provider = selected.get("provider_type") or str(selected["connection"]).split(":", 1)[-1]
-    if provider == "codex-local" and stage != "correct":
-        raise ValueError(f"codex-local is correction-only and cannot run stage {stage}")
+    if provider == "codex-local" and stage not in {"correct", "summarize", "mind_map"}:
+        raise ValueError(
+            "codex-local supports only correction, summaries, and mind maps; "
+            f"it cannot run stage {stage}"
+        )
     family_config.provider = provider
     provider_config = getattr(family_config, provider.replace("-", "_"), None)
     for key, value in selected.get("configuration", {}).items():
@@ -481,9 +480,7 @@ def _set_stage_in_session(
             dispatch_reservation_ids = list(
                 (attempt.usage or {}).get("dispatch_reservation_ids") or []
             )
-            reserved_cost = provider_cost_reservation_total(
-                session, dispatch_reservation_ids
-            )
+            reserved_cost = provider_cost_reservation_total(session, dispatch_reservation_ids)
             finalize_provider_cost_reservations(
                 session,
                 dispatch_reservation_ids,
@@ -570,11 +567,7 @@ def _begin_stage_in_session(session, file_id: str, stage: StageName) -> str | No
     running_detail = (
         previous_detail
         if previous_detail.get("stale")
-        else (
-            {"stale_generation": stale_generation}
-            if stale_generation is not None
-            else {}
-        )
+        else ({"stale_generation": stale_generation} if stale_generation is not None else {})
     )
     _set_stage_in_session(
         session,
@@ -673,9 +666,7 @@ def _rehydrate_revision(rev: TranscriptRevision, base: TranscriptRow | None) -> 
     )
 
 
-def _revision_matches_raw_structure(
-    revision: TranscriptRevision, raw: TranscriptRow
-) -> bool:
+def _revision_matches_raw_structure(revision: TranscriptRevision, raw: TranscriptRow) -> bool:
     """Return whether a text-only revision still overlays the current raw lane."""
     if revision.base_transcript_id != raw.id or revision.source != raw.source:
         return False
@@ -753,22 +744,17 @@ def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
                 snapshot=snapshot,
                 usage=usage,
             )
-            reservation_ids = list(
-                (attempt.usage or {}).get("dispatch_reservation_ids") or []
-            )
+            reservation_ids = list((attempt.usage or {}).get("dispatch_reservation_ids") or [])
             if reservation_id not in reservation_ids:
                 reservation_ids.append(reservation_id)
             attempt.usage = normalize_usage(usage) | {
                 "projection": True,
                 "dispatch_reservation_ids": reservation_ids,
             }
-            attempt.estimated_cost_usd = max(
-                float(attempt.estimated_cost_usd or 0), projected
-            )
+            attempt.estimated_cost_usd = max(float(attempt.estimated_cost_usd or 0), projected)
             return {
                 "projected_usd": projected,
-                "enforced": (snapshot.get("policy") or {}).get("cost_ceiling")
-                is not None,
+                "enforced": (snapshot.get("policy") or {}).get("cost_ceiling") is not None,
                 "pricing": pricing,
                 "dispatch_reservation_id": reservation_id,
             }
@@ -1164,9 +1150,7 @@ def _evaluate_transcript_automations(file_id: str) -> tuple[bool, list[dict]]:
     from ..automations import evaluate_recording
 
     claim = current_processing_claim()
-    processing_owner_token = (
-        claim.token if claim is not None and claim.file_id == file_id else None
-    )
+    processing_owner_token = claim.token if claim is not None and claim.file_id == file_id else None
 
     try:
         results = evaluate_recording(
@@ -1687,8 +1671,8 @@ def _process_file_claimed(
         # transcript exists, so pending rules run here — before notes — and a
         # matched template/profile/organization action shapes this same cycle.
         # Completed (rule, version, recording) runs are never repeated.
-        automations_changed, deferred_automation_deliveries = (
-            _evaluate_transcript_automations(file_id)
+        automations_changed, deferred_automation_deliveries = _evaluate_transcript_automations(
+            file_id
         )
         if automations_changed:
             with session_scope() as session:
@@ -1803,7 +1787,7 @@ def mind_map_rebuild_source(session, row: PlaudFile, settings: Settings) -> Summ
         if live_map is not None
         else None
     )
-    for key in (recorded, row.note_template_key, settings.pipeline.summary_template, "default"):
+    for key in (recorded, row.note_template_key, settings.pipeline.summary_template):
         if key and key != "auto" and key in live:
             return live[key]
     if len(live) == 1:
@@ -2027,7 +2011,11 @@ def _run_derived_stages(
     pcfg = settings.pipeline
     partial_errors: list[str] = []
     transcript_lineage = _transcript_lineage(file_id, settings)
-    template_key = "default" if requested_template_key == "auto" else requested_template_key
+    template_key = (
+        settings.pipeline.summary_template
+        if requested_template_key == "auto"
+        else requested_template_key
+    )
     auto_recommendation = None
     derived_snapshot = snapshot
     derived_profile_token = None
@@ -2579,9 +2567,7 @@ def _immutable_text_key(value: str) -> str:
     return "".join(value.split())
 
 
-def _persist_diarized_transcript(
-    file_id: str, transcript: Transcript
-) -> dict[str, str]:
+def _persist_diarized_transcript(file_id: str, transcript: Transcript) -> dict[str, str]:
     """Update speaker evidence in place and invalidate speaker-derived artifacts."""
     with session_scope() as session:
         _assert_processing_claim_in_session(session, file_id)
@@ -2961,8 +2947,7 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
             map_run = next(
                 run
                 for run in row.stage_runs
-                if run.stage == StageName.mind_map
-                and bool((run.detail or {}).get("mind_map_only"))
+                if run.stage == StageName.mind_map and bool((run.detail or {}).get("mind_map_only"))
             )
             detail = map_run.detail or {}
             scoped_count = int(detail.get("mind_map_retry_count") or 0)

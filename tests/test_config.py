@@ -60,6 +60,10 @@ def test_defaults_without_env(monkeypatch, tmp_path):
     assert s.pipeline.polish_chunk_chars == 12_000
     assert s.llm.ollama.polish_chunk_chars == 4_000
     assert s.llm.codex_local.polish_chunk_chars == 48_000
+    assert s.llm.codex_local.summary_chunk_chars == 240_000
+    assert s.llm.codex_local.model == "gpt-5.6-sol"
+    assert s.llm.codex_local.reasoning_effort == "high"
+    assert s.llm.codex_local.quota_reserve_percent == 5
     assert s.diarize.provider == "pyannote"
     assert s.diarize.model == "pyannote/speaker-diarization-community-1"
 
@@ -67,7 +71,7 @@ def test_defaults_without_env(monkeypatch, tmp_path):
 def test_codex_local_cannot_become_the_global_llm_provider(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("LOCALPLAUD_LLM__PROVIDER", "codex-local")
-    with pytest.raises(ValidationError, match="correction-only"):
+    with pytest.raises(ValidationError, match="profile-scoped"):
         Settings()
 
 

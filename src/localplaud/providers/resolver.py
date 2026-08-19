@@ -93,16 +93,20 @@ def resolve_profile(
             if details
             else capability.data_egress
         )
+        codex_stages = {
+            ProviderStage.correct,
+            ProviderStage.summarize,
+            ProviderStage.mind_map,
+        }
+        if details and details.get("provider_type") == "codex-local" and stage not in codex_stages:
+            raise ResolutionError(
+                "codex-local supports only correction, summaries, and mind maps; "
+                f"it cannot run stage {stage.value}"
+            )
         if (
             details
             and details.get("provider_type") == "codex-local"
-            and stage != ProviderStage.correct
-        ):
-            raise ResolutionError(
-                f"codex-local is correction-only and cannot run stage {stage.value}"
-            )
-        if details and details.get("provider_type") == "codex-local" and (
-            execution_target != "cloud" or not data_egress
+            and (execution_target != "cloud" or not data_egress)
         ):
             raise ResolutionError("codex-local requires cloud execution with data egress")
         if no_egress and data_egress:

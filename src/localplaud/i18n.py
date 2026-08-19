@@ -307,7 +307,7 @@ _ZH_HANT_TW = {
     "Select generation method": "選擇生成方式",
     "Auto generation": "自動生成",
     "Custom generation": "自訂生成",
-    "localplaud picks a note template from the recording and uses the resolved execution profile.": "localplaud 會依錄音內容挑選筆記範本，並使用解析後的執行設定檔。",
+    "Automatic uses your captured Plaud Autopilot template and the resolved execution profile.": "自動模式會使用從 Plaud 擷取的智能總結範本與解析後的執行設定檔。",
     "Choose the note template and execution profile before starting.": "開始前先選擇筆記範本與執行設定檔。",
     "Start generation": "開始生成",
     "Generation runs with your configured providers. The original audio and your edits are never replaced.": "生成會使用你設定的供應商。原始音訊與你的編輯永遠不會被取代。",

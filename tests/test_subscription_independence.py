@@ -329,6 +329,7 @@ def test_cloud_only_recording_fails_gate_with_actionable_checks(monkeypatch, tmp
                 ],
             )
         )
+
     class CloudClient:
         def get_detail(self, file_id):
             return {"id": file_id}
@@ -422,11 +423,13 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
     }
 
     with session_scope() as session:
-        current = next(profile for profile in list_profiles(session) if profile["is_system_default"])
+        current = next(
+            profile for profile in list_profiles(session) if profile["is_system_default"]
+        )
         stages = dict(current["stages"])
         stages["correct"] = {
             "connection": "correct:codex-local",
-            "model": "gpt-5.6-luna",
+            "model": "gpt-5.6-sol",
             "options": {},
         }
         codex_profile = create_profile_version(
@@ -450,11 +453,9 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
         assert row.corrected_transcript is not None
         assert row.corrected_transcript.revision == 1
         assert row.corrected_transcript.provider == "codex-local"
-        assert row.corrected_transcript.model == "gpt-5.6-luna"
+        assert row.corrected_transcript.model == "gpt-5.6-sol"
         assert (
-            row.corrected_transcript.resolved_profile_snapshot["stages"]["correct"][
-                "connection"
-            ]
+            row.corrected_transcript.resolved_profile_snapshot["stages"]["correct"]["connection"]
             == "correct:codex-local"
         )
         assert {summary.input_transcript_revision for summary in row.summaries} == {1}
@@ -473,8 +474,14 @@ def test_acceptance_check_json_stays_ansi_free_under_force_color(monkeypatch, tm
     init_db()
     with session_scope() as session:
         session.add(
-            PlaudFile(id="bare", filename="Bare recording", status=FileStatus.downloaded,
-                      duration_ms=1000, start_time_ms=0, audio_path=str(tmp_path / "a.wav"))
+            PlaudFile(
+                id="bare",
+                filename="Bare recording",
+                status=FileStatus.downloaded,
+                duration_ms=1000,
+                start_time_ms=0,
+                audio_path=str(tmp_path / "a.wav"),
+            )
         )
 
     # Automation environments commonly force color; --json must remain plain

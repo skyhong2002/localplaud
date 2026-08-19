@@ -9,7 +9,7 @@ def _client(monkeypatch, tmp_path):
     import localplaud.db.session as db_session
     from localplaud.config import get_settings
 
-    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path/'auto.db'}")
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'auto.db'}")
     monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "audio"))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(db_session, "_engine", None)
@@ -61,7 +61,7 @@ def test_rule_dry_run_execution_history_and_versioning(monkeypatch, tmp_path):
             "min_duration_minutes": 10,
         },
         "actions": {
-            "note_template_key": "meeting",
+            "note_template_key": "plaud-meeting-minutes",
             "folder_id": folder_id,
             "add_tag_ids": [tag_id],
         },
@@ -70,7 +70,8 @@ def test_rule_dry_run_execution_history_and_versioning(monkeypatch, tmp_path):
     created = client.post("/api/automations/rules", json=body)
     assert created.status_code == 201
     rule = created.json()
-    assert "title contains" in rule["sentence"] and "use meeting notes" in rule["sentence"]
+    assert "title contains" in rule["sentence"]
+    assert "use plaud-meeting-minutes notes" in rule["sentence"]
 
     dry = client.post(f"/api/automations/rules/{rule['id']}/dry-run").json()
     assert dry["mutated"] is False
@@ -85,7 +86,8 @@ def test_rule_dry_run_execution_history_and_versioning(monkeypatch, tmp_path):
     assert ran["recordings_changed"] == 1
     with session_scope() as session:
         row = session.get(PlaudFile, "match")
-        assert row.note_template_key == "meeting" and row.folder_id == folder_id
+        assert row.note_template_key == "plaud-meeting-minutes"
+        assert row.folder_id == folder_id
         assert {tag.id for tag in row.tags} == {tag_id}
         assert session.query(AutomationRun).count() == 1
         notification = session.query(Notification).one()
@@ -95,12 +97,12 @@ def test_rule_dry_run_execution_history_and_versioning(monkeypatch, tmp_path):
     assert client.post("/api/automations/run").json()["recordings_changed"] == 0
     assert len(client.get("/api/automations/notifications").json()["notifications"]) == 1
 
-    body["actions"]["note_template_key"] = "call"
+    body["actions"]["note_template_key"] = "plaud-interview"
     updated = client.put(f"/api/automations/rules/{rule['id']}", json=body)
     assert updated.status_code == 200 and updated.json()["version"] == 2
     assert client.post("/api/automations/run").json()["recordings_changed"] == 1
     with session_scope() as session:
-        assert session.get(PlaudFile, "match").note_template_key == "call"
+        assert session.get(PlaudFile, "match").note_template_key == "plaud-interview"
         assert session.query(AutomationRun).count() == 2
         assert session.query(Notification).count() == 2
     history_page = client.get("/discover")
@@ -120,9 +122,7 @@ def test_autoflow_membership_actions_take_library_first_fence(monkeypatch, tmp_p
         calls.append(list(file_ids))
         return real_lock(session, file_ids, **kwargs)
 
-    monkeypatch.setattr(
-        provider_service, "lock_recording_membership_changes", observed_lock
-    )
+    monkeypatch.setattr(provider_service, "lock_recording_membership_changes", observed_lock)
     response = client.post(
         "/api/automations/rules",
         json={
@@ -177,13 +177,13 @@ def test_lower_priority_number_wins_and_toggle_stops_execution(monkeypatch, tmp_
         "name": "Broad",
         "priority": 200,
         "trigger": {"origin": "plaud"},
-        "actions": {"note_template_key": "personal"},
+        "actions": {"note_template_key": "plaud-autopilot"},
     }
     specific = {
         "name": "Specific",
         "priority": 10,
         "trigger": {"origin": "plaud", "title_contains": "sync"},
-        "actions": {"note_template_key": "meeting"},
+        "actions": {"note_template_key": "plaud-meeting-minutes"},
     }
     broad_id = client.post("/api/automations/rules", json=broad).json()["id"]
     specific_id = client.post("/api/automations/rules", json=specific).json()["id"]
@@ -192,14 +192,12 @@ def test_lower_priority_number_wins_and_toggle_stops_execution(monkeypatch, tmp_
     from localplaud.db.session import session_scope
 
     with session_scope() as session:
-        assert session.get(PlaudFile, "match").note_template_key == "meeting"
+        assert session.get(PlaudFile, "match").note_template_key == "plaud-meeting-minutes"
     assert client.post(f"/api/automations/rules/{specific_id}/toggle").json()["enabled"] is False
     assert client.delete(f"/api/automations/rules/{broad_id}").status_code == 200
 
 
-def test_autoflow_profile_is_durable_and_never_overwrites_manual_override(
-    monkeypatch, tmp_path
-):
+def test_autoflow_profile_is_durable_and_never_overwrites_manual_override(monkeypatch, tmp_path):
     client, _folder_id, _tag_id = _seed(monkeypatch, tmp_path)
     from localplaud.db.models import (
         ExecutionProfile,
@@ -210,16 +208,12 @@ def test_autoflow_profile_is_durable_and_never_overwrites_manual_override(
     from localplaud.providers.service import resolve_recording_profile
 
     with session_scope() as session:
-        manual_id = session.query(ExecutionProfile.id).filter_by(
-            is_system_default=True
-        ).scalar()
+        manual_id = session.query(ExecutionProfile.id).filter_by(is_system_default=True).scalar()
         automated = ExecutionProfile(key="automated", name="Automated", version=1)
         session.add(automated)
         session.flush()
         automated_id = automated.id
-        session.add(
-            RecordingProfileOverride(file_id="match", profile_id=manual_id)
-        )
+        session.add(RecordingProfileOverride(file_id="match", profile_id=manual_id))
 
     rule = client.post(
         "/api/automations/rules",
@@ -233,15 +227,16 @@ def test_autoflow_profile_is_durable_and_never_overwrites_manual_override(
     assert client.post("/api/automations/run").json()["recordings_changed"] == 1
     with session_scope() as session:
         override = session.get(RecordingProfileOverride, "match")
-        assignment = session.get(
-            RecordingRuleProfileAssignment, ("match", rule["id"])
-        )
+        assignment = session.get(RecordingRuleProfileAssignment, ("match", rule["id"]))
         assert override.profile_id == manual_id
         assert assignment.profile_id == automated_id
         assert assignment.priority_snapshot == 8
-        assert resolve_recording_profile(session, "match").to_dict()[
-            "layer_provenance"
-        ][-2]["profile_id"] == manual_id
+        assert (
+            resolve_recording_profile(session, "match").to_dict()["layer_provenance"][-2][
+                "profile_id"
+            ]
+            == manual_id
+        )
 
     with session_scope() as session:
         replacement = ExecutionProfile(key="replacement", name="Replacement", version=1)
@@ -268,17 +263,13 @@ def test_autoflow_profile_is_durable_and_never_overwrites_manual_override(
     )
     assert automations.evaluate_recording("match")[0]["status"] == "failed"
     with session_scope() as session:
-        assignment = session.get(
-            RecordingRuleProfileAssignment, ("match", rule["id"])
-        )
+        assignment = session.get(RecordingRuleProfileAssignment, ("match", rule["id"]))
         assert assignment.profile_id == automated_id
         assert assignment.rule_version == 1
 
     assert client.delete(f"/api/automations/rules/{rule['id']}").status_code == 200
     with session_scope() as session:
-        assignment = session.get(
-            RecordingRuleProfileAssignment, ("match", rule["id"])
-        )
+        assignment = session.get(RecordingRuleProfileAssignment, ("match", rule["id"]))
         assert assignment is not None and assignment.automation_run_id is None
 
 
@@ -293,27 +284,36 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
         },
     )
     assert invalid.status_code == 422
-    assert client.post(
-        "/api/automations/rules",
-        json={"name": "No action", "trigger": {}, "actions": {}},
-    ).status_code == 422
-    assert client.post(
-        "/api/automations/rules",
-        json={
-            "name": "Duplicate export",
-            "trigger": {},
-            "actions": {"export_formats": ["txt", "txt"]},
-        },
-    ).status_code == 422
+    assert (
+        client.post(
+            "/api/automations/rules",
+            json={"name": "No action", "trigger": {}, "actions": {}},
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/automations/rules",
+            json={
+                "name": "Duplicate export",
+                "trigger": {},
+                "actions": {"export_formats": ["txt", "txt"]},
+            },
+        ).status_code
+        == 422
+    )
     long_name = "L" * 120
-    assert client.post(
-        "/api/automations/rules",
-        json={
-            "name": long_name,
-            "trigger": {},
-            "actions": {"folder_id": folder_id},
-        },
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/automations/rules",
+            json={
+                "name": long_name,
+                "trigger": {},
+                "actions": {"folder_id": folder_id},
+            },
+        ).status_code
+        == 201
+    )
     origin_rule = client.post(
         "/api/automations/rules",
         json={
@@ -326,20 +326,23 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert "source is Local import" in origin_rule.json()["sentence"]
     # An external owner label that collides with a catalog key must stay
     # verbatim — it is another application's proper name, not UI copy.
-    assert client.put(
-        "/api/automations/external-rules",
-        json={
-            "owner_key": "settings-app",
-            "owner_label": "Settings",
-            "external_id": "external-1",
-            "name": "External settings rule",
-            "enabled": True,
-            "priority": 60,
-            "trigger": {},
-            "actions": {"folder_id": folder_id},
-            "notify": False,
-        },
-    ).status_code == 200
+    assert (
+        client.put(
+            "/api/automations/external-rules",
+            json={
+                "owner_key": "settings-app",
+                "owner_label": "Settings",
+                "external_id": "external-1",
+                "name": "External settings rule",
+                "enabled": True,
+                "priority": 60,
+                "trigger": {},
+                "actions": {"folder_id": folder_id},
+                "notify": False,
+            },
+        ).status_code
+        == 200
+    )
     page = client.get("/discover")
     assert page.status_code == 200
     assert "AutoFlow" in page.text and "Run history" in page.text
@@ -369,16 +372,25 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert "@media(max-width:520px)" in page.text
     assert ".automation-run-row{grid-template-columns:auto minmax(0,1fr)" in page.text
     assert ".automation-run-detail{grid-column:1/-1}" in page.text
-    assert ".automation-run-file,.automation-run-detail{min-width:0;overflow-wrap:anywhere}" in page.text
-    assert ".autoflow-rule-title>strong{min-width:0;max-width:100%;overflow-wrap:anywhere}" in page.text
+    assert (
+        ".automation-run-file,.automation-run-detail{min-width:0;overflow-wrap:anywhere}"
+        in page.text
+    )
+    assert (
+        ".autoflow-rule-title>strong{min-width:0;max-width:100%;overflow-wrap:anywhere}"
+        in page.text
+    )
     assert "grid-template-columns:90px minmax(130px,1fr) minmax(160px,auto)" in page.text
     assert long_name in page.text
 
     preferences = client.get("/api/preferences/workspace").json()
-    assert client.put(
-        "/api/preferences/workspace",
-        json=preferences | {"locale": "zh-Hant-TW"},
-    ).status_code == 200
+    assert (
+        client.put(
+            "/api/preferences/workspace",
+            json=preferences | {"locale": "zh-Hant-TW"},
+        ).status_code
+        == 200
+    )
     translated = client.get("/discover")
     assert "多項規則設定同一欄位時，優先序數字較小者優先" in translated.text
     assert "本機 AutoFlow" in translated.text
@@ -411,9 +423,7 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     assert "本機工作區" in visible
     assert "Rules created and fully editable in this Web App." not in visible
     assert "在此 Web App 建立並可完整編輯的規則。" in visible
-    assert "Mirrored rules stay visible but can only be edited by their owner." not in (
-        visible
-    )
+    assert "Mirrored rules stay visible but can only be edited by their owner." not in (visible)
     assert "外部規則擁有者" in visible
     assert "已授權的 Webhook" in visible
     assert "已授權的電子郵件" in visible
@@ -496,9 +506,7 @@ def test_transcript_keyword_rules_wait_for_canonical_transcript(monkeypatch, tmp
     # revision text wins over raw ASR.
     with session_scope() as session:
         raw_id = session.scalar(
-            select(Transcript.id).where(
-                Transcript.file_id == "match", Transcript.source == "local"
-            )
+            select(Transcript.id).where(Transcript.file_id == "match", Transcript.source == "local")
         )
         session.add(
             TranscriptRevision(
@@ -523,14 +531,17 @@ def test_transcript_keyword_rules_wait_for_canonical_transcript(monkeypatch, tmp
 
 def test_pipeline_transcript_automation_hook_is_idempotent_and_safe(monkeypatch, tmp_path):
     client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
-    assert client.post(
-        "/api/automations/rules",
-        json={
-            "name": "Transcript hook",
-            "trigger": {"transcript_contains": "prototype"},
-            "actions": {"folder_id": folder_id},
-        },
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/automations/rules",
+            json={
+                "name": "Transcript hook",
+                "trigger": {"transcript_contains": "prototype"},
+                "actions": {"folder_id": folder_id},
+            },
+        ).status_code
+        == 201
+    )
 
     from localplaud.db.models import PlaudFile, Transcript
     from localplaud.db.session import session_scope
@@ -730,9 +741,7 @@ def test_notification_inbox_read_dismiss_and_rule_deletion(monkeypatch, tmp_path
         },
     ).json()["id"]
     client.post("/api/automations/run")
-    item = client.get("/api/automations/notifications?unread_only=true").json()[
-        "notifications"
-    ][0]
+    item = client.get("/api/automations/notifications?unread_only=true").json()["notifications"][0]
     assert item["read_at"] is None
     assert "Notify me" in item["title"]
     assert "Notifications" in client.get("/notifications").text
@@ -742,23 +751,24 @@ def test_notification_inbox_read_dismiss_and_rule_deletion(monkeypatch, tmp_path
     assert client.get("/api/automations/notifications?unread_only=true").json() == {
         "notifications": []
     }
-    assert client.post(
-        f"/api/automations/notifications/{item['id']}/read?read=false"
-    ).json()["read_at"] is None
+    assert (
+        client.post(f"/api/automations/notifications/{item['id']}/read?read=false").json()[
+            "read_at"
+        ]
+        is None
+    )
 
     assert client.delete(f"/api/automations/rules/{rule_id}").status_code == 200
     preserved = client.get("/api/automations/notifications").json()["notifications"][0]
     assert preserved["automation_run_id"] is None
     assert preserved["detail"]["rule_name"] == "Notify me"
-    assert client.delete(
-        f"/api/automations/notifications/{item['id']}"
-    ).json() == {"dismissed": True}
+    assert client.delete(f"/api/automations/notifications/{item['id']}").json() == {
+        "dismissed": True
+    }
     assert client.get("/api/automations/notifications").json() == {"notifications": []}
 
 
-def test_notification_failure_does_not_rollback_actions_and_can_retry(
-    monkeypatch, tmp_path
-):
+def test_notification_failure_does_not_rollback_actions_and_can_retry(monkeypatch, tmp_path):
     client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
     client.post(
         "/api/automations/rules",
@@ -795,12 +805,12 @@ def test_notification_failure_does_not_rollback_actions_and_can_retry(
     retried = client.post(f"/api/automations/runs/{run_id}/retry-notification")
     assert retried.status_code == 200
     assert retried.json()["status"] == "delivered"
-    assert client.post(f"/api/automations/runs/{run_id}/retry-notification").json() == retried.json()
+    assert (
+        client.post(f"/api/automations/runs/{run_id}/retry-notification").json() == retried.json()
+    )
 
 
-def test_autoflow_transcript_exports_are_durable_downloadable_and_idempotent(
-    monkeypatch, tmp_path
-):
+def test_autoflow_transcript_exports_are_durable_downloadable_and_idempotent(monkeypatch, tmp_path):
     client, _folder_id, _tag_id = _seed(monkeypatch, tmp_path)
     from localplaud.db.models import AutomationExport, PlaudFile, Transcript
     from localplaud.db.session import session_scope
@@ -858,9 +868,7 @@ def test_autoflow_transcript_exports_are_durable_downloadable_and_idempotent(
     assert client.get(f"/api/automations/exports/{txt['id']}/download").status_code == 409
     retried = client.post(f"/api/automations/exports/{txt['id']}/retry").json()
     assert retried["status"] == "completed"
-    assert b"hello world" in client.get(
-        f"/api/automations/exports/{txt['id']}/download"
-    ).content
+    assert b"hello world" in client.get(f"/api/automations/exports/{txt['id']}/download").content
     assert client.delete(f"/api/automations/rules/{rule_id}").status_code == 200
     preserved = client.get(f"/api/automations/exports/{txt['id']}/download")
     assert preserved.status_code == 200
@@ -868,9 +876,7 @@ def test_autoflow_transcript_exports_are_durable_downloadable_and_idempotent(
         assert session.get(AutomationExport, txt["id"]).automation_run_id is None
 
 
-def test_autoflow_export_renders_content_and_provenance_from_one_snapshot(
-    monkeypatch, tmp_path
-):
+def test_autoflow_export_renders_content_and_provenance_from_one_snapshot(monkeypatch, tmp_path):
     from pathlib import Path
 
     _client(monkeypatch, tmp_path)
@@ -930,9 +936,7 @@ def test_autoflow_export_renders_content_and_provenance_from_one_snapshot(
     assert calls == 1
 
 
-def test_export_failure_isolated_then_retries_after_transcript_exists(
-    monkeypatch, tmp_path
-):
+def test_export_failure_isolated_then_retries_after_transcript_exists(monkeypatch, tmp_path):
     client, folder_id, _tag_id = _seed(monkeypatch, tmp_path)
     client.post(
         "/api/automations/rules",

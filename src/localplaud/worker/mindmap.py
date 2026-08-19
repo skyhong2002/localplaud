@@ -20,6 +20,7 @@ from .summarize import (
     _llm_provider_model,
     _reduction_max_tokens,
     _render_transcript,
+    _summary_chunk_chars,
 )
 
 log = logging.getLogger(__name__)
@@ -140,7 +141,7 @@ def generate_mind_map(
     """
     llm = build_llm(settings.llm)
     transcript_text = _render_transcript(transcript)
-    chunk_chars = settings.pipeline.summary_chunk_chars
+    chunk_chars = _summary_chunk_chars(settings, llm)
     chunks = _chunk_text(transcript_text, chunk_chars)
     map_calls = 0
     reduce_calls = 0
