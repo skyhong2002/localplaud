@@ -3295,7 +3295,23 @@ def process_pending(
             return event_time, fresh_tiebreak, row.id
 
         rows.sort(key=queue_key, reverse=True)
-        jobs = [(item.id, scope) for item, scope in (rows[:limit] if limit is not None else rows)]
+        selected = rows[:limit] if limit is not None else rows
+        # When a large full-pipeline retry backlog becomes due while derived
+        # regeneration is still pending, let ASR start without starving meeting
+        # notes.  The configured concurrency still controls simultaneous work;
+        # this only reserves at most one daemon-batch slot for an old full retry.
+        if limit is not None and limit >= 2:
+            full_retries = [
+                item
+                for item in rows
+                if item[1] == "full" and item[0].status != FileStatus.downloaded
+            ]
+            narrow_work = [item for item in rows if item[1] in {"derived", "mind_map"}]
+            if full_retries and narrow_work:
+                full_retry_ids = {item[0].id for item in full_retries}
+                non_retry_rows = [item for item in rows if item[0].id not in full_retry_ids]
+                selected = [full_retries[0], *non_retry_rows[: limit - 1]]
+        jobs = [(item.id, scope) for item, scope in selected]
     if not jobs:
         return 0
 

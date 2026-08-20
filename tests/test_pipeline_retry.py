@@ -154,6 +154,58 @@ def test_due_retry_is_not_starved_by_older_download_backlog(monkeypatch, tmp_pat
     assert seen == ["due-retry"]
 
 
+def test_pending_batch_interleaves_one_full_retry_with_derived_work(monkeypatch, tmp_path):
+    settings = _reset(monkeypatch, tmp_path)
+    import localplaud.worker.pipeline as pipeline
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageRun, StageStatus
+    from localplaud.db.session import session_scope
+
+    audio = tmp_path / "interleaved.wav"
+    audio.write_bytes(b"RIFF")
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        session.add_all(
+            [
+                PlaudFile(
+                    id=f"full-{index}",
+                    status=FileStatus.partial,
+                    audio_path=str(audio),
+                    pipeline_next_retry_at=now - timedelta(seconds=index + 1),
+                )
+                for index in range(3)
+            ]
+            + [
+                PlaudFile(
+                    id=f"derived-{index}",
+                    status=FileStatus.partial,
+                    stage_runs=[
+                        StageRun(
+                            stage=StageName.summarize,
+                            status=StageStatus.pending,
+                            detail={"derived_only": True},
+                        )
+                    ],
+                )
+                for index in range(3)
+            ]
+        )
+
+    full: list[str] = []
+    derived: list[str] = []
+    monkeypatch.setattr(
+        pipeline, "process_file", lambda file_id, *_args, **_kwargs: full.append(file_id)
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "process_derived_artifacts",
+        lambda file_id, *_args, **_kwargs: derived.append(file_id),
+    )
+
+    assert pipeline.process_pending(settings, limit=4) == 4
+    assert len(full) == 1
+    assert len(derived) == 3
+
+
 def test_pending_batch_revalidates_retry_deadline_before_each_job(monkeypatch, tmp_path):
     settings = _reset(monkeypatch, tmp_path)
     import localplaud.worker.pipeline as pipeline
