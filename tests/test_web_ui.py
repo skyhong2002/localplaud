@@ -945,6 +945,8 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "window.matchMedia('(min-width:1200px)')" in r.text
     assert ".recording-workspace-layout.ask-dock-open { grid-template-columns:minmax(0,1fr) minmax(280px,360px); }" in r.text
     assert "if(dockRequest)setAskDock(true)" in r.text
+    assert "params.get('tab')||'notes'" in r.text
+    assert "get('tab')||'transcript'" not in r.text
     assert "item.setAttribute('aria-selected',String(active))" in r.text
     assert "item.tabIndex=active?0:-1" in r.text
     assert "function openDialog(backdrop,opener)" in r.text
