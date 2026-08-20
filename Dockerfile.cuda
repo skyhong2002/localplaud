@@ -30,13 +30,15 @@ RUN python3.12 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /build
-COPY pyproject.toml README.md ./
+COPY pyproject.toml ./
 
 # Pin a pyannote 4-compatible CUDA pair before installing localplaud. Without
 # this, pip replaces an older torch with an unrelated latest CUDA wheel. Build
 # a minimal package first so dependency layers remain cached when only app code
-# changes; the real package is installed without dependency resolution below.
-RUN mkdir -p src/localplaud \
+# or documentation changes; the real package is installed without dependency
+# resolution below.
+RUN printf '# localplaud\n' > README.md \
+    && mkdir -p src/localplaud \
     && touch src/localplaud/__init__.py \
     && pip install torch==2.8.0 torchaudio==2.8.0 \
         --index-url https://download.pytorch.org/whl/cu128 \
@@ -44,6 +46,7 @@ RUN mkdir -p src/localplaud \
     && pip install torchcodec==0.7 \
     && rm -rf src
 
+COPY README.md ./
 COPY src ./src
 RUN pip install --no-deps --force-reinstall .
 

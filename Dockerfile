@@ -21,9 +21,15 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /build
-COPY pyproject.toml README.md ./
+COPY pyproject.toml ./
+RUN printf '# localplaud\n' > README.md \
+    && mkdir -p src/localplaud \
+    && touch src/localplaud/__init__.py \
+    && pip install ".[${EXTRAS}]" \
+    && rm -rf src
+COPY README.md ./
 COPY src ./src
-RUN pip install ".[${EXTRAS}]"
+RUN pip install --no-deps --force-reinstall .
 
 # --------------------------------------------------------------------------- #
 # Runtime stage: slim image with ffmpeg and the prebuilt venv.
