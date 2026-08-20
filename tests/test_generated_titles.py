@@ -60,6 +60,8 @@ def test_clean_generated_title_strips_markup_and_caps():
     assert _clean_generated_title("會談內容") is None
     assert _clean_generated_title("錄音內容摘要") is None
     assert _clean_generated_title("Meeting summary") is None
+    assert _clean_generated_title("研究發表會重點摘要") is None
+    assert _clean_generated_title("論文場次摘要") is None
     assert _clean_generated_title("討論摘要") is None
     assert _clean_generated_title("讨论摘要") is None
     assert _clean_generated_title("討論內容摘要") is None
