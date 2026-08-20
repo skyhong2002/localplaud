@@ -846,6 +846,26 @@ def _ingest_artifacts_for(client, file_id: str) -> bool:
     return stored
 
 
+def _unique_cloud_note_templates(notes: list[dict]) -> list[dict]:
+    """Keep every Plaud note when its API repeats the same data-type key."""
+    used: set[str] = set()
+    counts: dict[str, int] = {}
+    result: list[dict] = []
+    for note in notes:
+        base = str(note.get("key") or "plaud-note").strip() or "plaud-note"
+        counts[base] = counts.get(base, 0) + 1
+        number = counts[base]
+        suffix = "" if number == 1 else f"__{number}"
+        candidate = f"{base[: 64 - len(suffix)]}{suffix}"
+        while candidate in used:
+            counts[base] += 1
+            suffix = f"__{counts[base]}"
+            candidate = f"{base[: 64 - len(suffix)]}{suffix}"
+        used.add(candidate)
+        result.append({**note, "key": candidate})
+    return result
+
+
 def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
     """Refresh Plaud transcript/summary for one metadata import.
 
@@ -860,10 +880,10 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
     notes = client.get_cloud_notes(file_id, detail)
     segments = client.get_cloud_transcript_segments(file_id, detail)
     settings = get_settings()
-    mirrored_notes = [
+    mirrored_notes = _unique_cloud_note_templates([
         {**note, "markdown": _mirror_note_assets(note, file_id=file_id, settings=settings)}
         for note in notes
-    ]
+    ])
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
         if row is None:

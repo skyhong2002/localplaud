@@ -287,6 +287,43 @@ def test_recording_cloud_refresh_imports_all_notes_and_stamps_sync(
         }
 
 
+def test_cloud_refresh_preserves_duplicate_plaud_note_types(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile, Summary
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import refresh_cloud_artifacts_for
+
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="duplicate-notes", filename="Duplicate notes"))
+
+    class FakeClient:
+        def get_detail(self, _file_id):
+            return {}
+
+        def get_cloud_notes(self, _file_id, _detail):
+            return [
+                {"key": "sum_multi_note", "title": "First", "markdown": "One"},
+                {"key": "sum_multi_note", "title": "Second", "markdown": "Two"},
+            ]
+
+        def get_cloud_transcript_segments(self, _file_id, _detail):
+            return []
+
+    assert refresh_cloud_artifacts_for(FakeClient(), "duplicate-notes") == (False, True)
+    with session_scope() as session:
+        rows = (
+            session.query(Summary)
+            .filter_by(file_id="duplicate-notes", source="cloud")
+            .order_by(Summary.id)
+            .all()
+        )
+        assert [(row.template, row.title, row.content_md) for row in rows] == [
+            ("sum_multi_note", "First", "One"),
+            ("sum_multi_note__2", "Second", "Two"),
+        ]
+
+
 def test_recording_cloud_refresh_redacts_provider_error(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from fastapi.testclient import TestClient
