@@ -37,6 +37,8 @@ def test_clean_generated_title_strips_markup_and_caps():
     assert _clean_generated_title("Autopilot") is None
     assert _clean_generated_title("Coverage Notes Summary") is None
     assert _clean_generated_title("Transcript Overview") is None
+    assert _clean_generated_title("逐字稿摘要") is None
+    assert _clean_generated_title("逐字稿內容概覽") is None
     assert _clean_generated_title("轉錄內容概覽") is None
     assert _clean_generated_title("转录内容概览") is None
     assert _clean_generated_title("轉錄內容摘要") is None
