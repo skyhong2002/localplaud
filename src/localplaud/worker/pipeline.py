@@ -163,6 +163,15 @@ _GENERIC_GENERATED_TITLES = frozenset(
         "转录内容摘要",
         "轉錄內容概覽",
         "转录内容概览",
+        "轉錄內容品質異常",
+        "轉錄內容質量異常",
+        "转录内容质量异常",
+        "轉錄品質異常",
+        "逐字稿內容品質異常",
+        "轉錄內容無法可靠總結",
+        "转录内容无法可靠总结",
+        "transcript content quality issue",
+        "transcript cannot be reliably summarized",
         "錄音",
     }
 )
