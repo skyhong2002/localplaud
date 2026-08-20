@@ -65,6 +65,7 @@ def test_clean_generated_title_strips_markup_and_caps():
     assert _clean_generated_title("討論摘要") is None
     assert _clean_generated_title("讨论摘要") is None
     assert _clean_generated_title("討論內容摘要") is None
+    assert _clean_generated_title("社區管委會會議重點摘要") is None
     assert _generated_title_candidate(None, "\n# AI heading\nbody") == "AI heading"
     assert _generated_title_candidate(None, "## Generated heading\nbody") == "Generated heading"
     assert _generated_title_candidate(None, "Generated first line\nbody") is None

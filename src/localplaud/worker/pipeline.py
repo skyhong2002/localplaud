@@ -2843,6 +2843,16 @@ def _clean_generated_title(raw: object) -> str | None:
             "quality issue",
         )
     )
+    generic_summary_suffix = folded.endswith(
+        (
+            "會議重點摘要",
+            "会议重点摘要",
+            "會談重點摘要",
+            "会谈重点摘要",
+            "討論重點摘要",
+            "讨论重点摘要",
+        )
+    )
     non_space_chars = {char for char in folded if not char.isspace()}
     repeated_noise = len(folded) >= 8 and len(non_space_chars) <= 2
     unbalanced_quotes = any(
@@ -2854,6 +2864,7 @@ def _clean_generated_title(raw: object) -> str | None:
         or text.startswith(boilerplate)
         or low_information_heading
         or transcript_quality_placeholder
+        or generic_summary_suffix
         or repeated_noise
         or unbalanced_quotes
     ):
