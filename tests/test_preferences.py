@@ -174,6 +174,30 @@ def test_api_startup_resumes_remote_jobs_only_when_auto_processing_is_enabled(
     assert calls == ["resumed"] * expected_calls
 
 
+def test_managed_daemon_startup_skips_duplicate_database_init_and_resume(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    from localplaud.api import app as app_module
+    from localplaud.db.session import init_db
+
+    init_db()
+    calls: list[str] = []
+    monkeypatch.setattr(app_module, "init_db", lambda: calls.append("init"))
+    monkeypatch.setattr(
+        app_module, "resume_pending_jobs", lambda: calls.append("resume")
+    )
+    app_module.app.state.database_initialized = True
+    app_module.app.state.managed_daemon = True
+    try:
+        with client:
+            assert client.get("/healthz").status_code == 200
+    finally:
+        del app_module.app.state.database_initialized
+        del app_module.app.state.managed_daemon
+    assert calls == []
+
+
 def test_workspace_timezone_and_clock_apply_to_recorded_dates(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     with client:

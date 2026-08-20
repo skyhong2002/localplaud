@@ -321,7 +321,7 @@ def run():
     try:
         scheduler.start()
         console.print("[green]✓[/] poller + worker ready; starting web UI…")
-        _serve(settings)
+        _serve(settings, database_initialized=True, managed_daemon=True)
     finally:
         try:
             if scheduler.running:
@@ -748,11 +748,20 @@ def serve():
     _serve(get_settings())
 
 
-def _serve(settings):
+def _serve(
+    settings, *, database_initialized: bool = False, managed_daemon: bool = False
+):
     import uvicorn
 
+    target = "localplaud.api.app:app"
+    if database_initialized or managed_daemon:
+        from .api.app import app as web_app
+
+        web_app.state.database_initialized = database_initialized
+        web_app.state.managed_daemon = managed_daemon
+        target = web_app
     uvicorn.run(
-        "localplaud.api.app:app",
+        target,
         host=settings.api.host,
         port=settings.api.port,
         log_level="info",

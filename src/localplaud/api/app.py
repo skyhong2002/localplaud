@@ -114,13 +114,14 @@ def _escape_like_literal(value: str) -> str:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    init_db()
+    if not getattr(app.state, "database_initialized", False):
+        init_db()
     from ..imports import recover_interrupted_imports
 
     recover_interrupted_imports()
     with session_scope() as session:
         auto_process = get_workspace_preferences(session)["auto_process_new_recordings"]
-    if auto_process:
+    if auto_process and not getattr(app.state, "managed_daemon", False):
         import threading
 
         threading.Thread(target=resume_pending_jobs, daemon=True).start()
