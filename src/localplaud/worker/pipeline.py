@@ -1030,6 +1030,7 @@ def queue_library_reprocess(
 
                 invalidate_generated_documents(session, row.id)
                 stale_generation = secrets.token_hex(16)
+                present_stages = {run.stage for run in row.stage_runs}
                 for run in row.stage_runs:
                     if run.stage in derived:
                         run.status = StageStatus.pending
@@ -1041,6 +1042,26 @@ def queue_library_reprocess(
                             "derived_only": True,
                             "reason": "reprocess-all derived_only",
                         }
+                # A transcript can be durable before the first summarize pass
+                # creates downstream StageRun rows.  Derived-only queueing must
+                # create those missing rows or `_pending_scope` cannot see the
+                # work and the recording remains stranded forever.
+                for stage in derived:
+                    if stage not in present_stages:
+                        session.add(
+                            StageRun(
+                                file_id=row.id,
+                                stage=stage,
+                                status=StageStatus.pending,
+                                attempts=0,
+                                detail={
+                                    "stale": True,
+                                    "stale_generation": stale_generation,
+                                    "derived_only": True,
+                                    "reason": "reprocess-all derived_only",
+                                },
+                            )
+                        )
                 row.status = FileStatus.partial
             else:  # resume
                 row.status = FileStatus.partial if row.local_transcript else FileStatus.error

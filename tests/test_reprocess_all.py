@@ -75,13 +75,16 @@ def test_derived_only_targets_transcribed_and_marks_stale(monkeypatch, tmp_path)
     assert result["skipped"] == 1  # the downloaded-no-transcript one
     with session_scope() as session:
         assert session.get(PlaudFile, "done1").status == FileStatus.partial
-        run = session.scalar(
-            select(StageRun).where(
-                StageRun.file_id == "done1", StageRun.stage == StageName.summarize
-            )
+        runs = list(
+            session.scalars(select(StageRun).where(StageRun.file_id == "done1"))
         )
-        assert run.detail.get("derived_only") is True
-        assert run.detail.get("stale") is True
+        assert {run.stage for run in runs} == {
+            StageName.summarize,
+            StageName.mind_map,
+            StageName.index,
+        }
+        assert all(run.detail.get("derived_only") is True for run in runs)
+        assert all(run.detail.get("stale") is True for run in runs)
 
 
 def test_force_resets_all_stages_to_pending(monkeypatch, tmp_path):
