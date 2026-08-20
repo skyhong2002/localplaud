@@ -844,6 +844,21 @@ def test_detail_page_renders(monkeypatch, tmp_path):
         )
     r = c.get("/file/r1")
     assert r.status_code == 200
+    assert (
+        'id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" '
+        'aria-selected="true"'
+    ) in r.text
+    assert '>Meeting notes</button>' in r.text
+    assert 'id="recording-panel-notes" role="tabpanel"' in r.text
+    assert (
+        'id="recording-panel-notes" role="tabpanel" '
+        'aria-labelledby="recording-tab-notes" data-panel="notes" hidden'
+    ) not in r.text
+    transcript_view = c.get("/file/r1", params={"tab": "transcript"})
+    assert (
+        'id="recording-tab-transcript" role="tab" '
+        'aria-controls="recording-panel-transcript" aria-selected="true"'
+    ) in transcript_view.text
     assert "SPEAKER_00" in r.text
     assert 'id="app-view" hx-history-elt' in r.text
     assert '<aside class="sidebar" id="workspace-sidebar">' in r.text

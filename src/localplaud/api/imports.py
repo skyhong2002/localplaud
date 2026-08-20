@@ -41,7 +41,7 @@ _MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 @router.post("/plaud/metadata", status_code=202)
 def import_plaud_metadata() -> dict:
     try:
-        return start_plaud_metadata_import()
+        return start_plaud_metadata_import(refresh_artifacts=True)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

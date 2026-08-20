@@ -58,7 +58,7 @@
     {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
     <div class="tabs" role="tablist" aria-label="{{ t('Recording workspace') }}">
       <button id="recording-tab-transcript" role="tab" aria-controls="recording-panel-transcript" aria-selected="{{ 'true' if active_tab == 'transcript' else 'false' }}" tabindex="{{ '0' if active_tab == 'transcript' else '-1' }}" data-panel="transcript" class="{% if active_tab == 'transcript' %}on{% endif %}">{{ t('Transcript') }}</button>
-      <button id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' else '-1' }}" data-panel="notes" class="{% if active_tab == 'notes' %}on{% endif %}">{{ t('Notes') }}</button>
+      <button id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' else '-1' }}" data-panel="notes" class="{% if active_tab == 'notes' %}on{% endif %}">{{ t('Meeting notes') }}</button>
       <button id="recording-tab-mindmap" role="tab" aria-controls="recording-panel-mindmap" aria-selected="{{ 'true' if active_tab == 'mindmap' else 'false' }}" tabindex="{{ '0' if active_tab == 'mindmap' else '-1' }}" data-panel="mindmap" class="{% if active_tab == 'mindmap' %}on{% endif %}">{{ t('Mind map') }}</button>
       <button id="recording-tab-ask" role="tab" aria-controls="recording-panel-ask" aria-selected="{{ 'true' if active_tab == 'ask' else 'false' }}" tabindex="{{ '0' if active_tab == 'ask' else '-1' }}" data-panel="ask" class="{% if active_tab == 'ask' %}on{% endif %}">{{ t('Ask') }}</button>
     </div>

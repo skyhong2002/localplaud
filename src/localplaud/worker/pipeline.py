@@ -1064,8 +1064,10 @@ def queue_library_reprocess(
                         )
                 row.status = FileStatus.partial
             else:  # resume
-                row.status = FileStatus.partial if row.local_transcript else FileStatus.error
-            row.error = f"Queued by reprocess-all ({mode})."
+                row.status = FileStatus.partial if row.local_transcript else FileStatus.downloaded
+            # Queue state is not an error. Preserve real failures in stage-run
+            # history, while removing the misleading red recording alert.
+            row.error = None
             row.pipeline_last_failure_at = now
             row.pipeline_next_retry_at = now
     result["queued_ids"] = queued_ids[:50]

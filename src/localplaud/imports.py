@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -15,6 +16,8 @@ from .plaud import make_plaud_client
 from .poller.poll import _apply_dto, _download_one, refresh_cloud_artifacts_for
 
 _start_lock = threading.Lock()
+_PLAUD_FULL_SYNC_DELAY_SECONDS = 1.0
+_PLAUD_RATE_LIMIT_RETRY_DELAYS = (2.0, 4.0, 8.0, 16.0)
 
 
 def import_run_to_dict(row: ImportRun) -> dict:
@@ -57,7 +60,9 @@ def latest_import_run() -> dict | None:
         return import_run_to_dict(row) if row is not None else None
 
 
-def start_plaud_metadata_import(settings: Settings | None = None) -> dict:
+def start_plaud_metadata_import(
+    settings: Settings | None = None, *, refresh_artifacts: bool = False
+) -> dict:
     settings = settings or get_settings()
     with _start_lock, session_scope() as session:
         running = session.scalar(
@@ -72,14 +77,33 @@ def start_plaud_metadata_import(settings: Settings | None = None) -> dict:
         result = import_run_to_dict(row)
     threading.Thread(
         target=_run_plaud_metadata_import,
-        args=(run_id, settings),
+        args=(run_id, settings, refresh_artifacts),
         daemon=True,
         name=f"plaud-metadata-{run_id[:8]}",
     ).start()
     return result
 
 
-def _run_plaud_metadata_import(run_id: str, settings: Settings) -> None:
+def _is_plaud_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    return any(marker in message for marker in ("429", "rate limit", "too many requests"))
+
+
+def _refresh_cloud_artifacts_with_retry(client, file_id: str) -> tuple[bool, bool]:
+    """Retry only transient Plaud throttling; preserve all other failures."""
+    for delay in (*_PLAUD_RATE_LIMIT_RETRY_DELAYS, None):
+        try:
+            return refresh_cloud_artifacts_for(client, file_id)
+        except Exception as exc:  # noqa: BLE001 - provider adapters share no base error
+            if delay is None or not _is_plaud_rate_limit_error(exc):
+                raise
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def _run_plaud_metadata_import(
+    run_id: str, settings: Settings, refresh_artifacts: bool = False
+) -> None:
     try:
         _update_run(run_id, status="running", started_at=datetime.now(UTC))
         with make_plaud_client(settings.plaud) as client:
@@ -105,7 +129,7 @@ def _run_plaud_metadata_import(run_id: str, settings: Settings) -> None:
                     is_changed = not is_new and any(
                         previous.get(key) != value for key, value in incoming.items()
                     )
-                    needs_refresh = (
+                    needs_refresh = refresh_artifacts or (
                         is_new or is_changed or row.cloud_artifacts_synced_at is None
                     )
                     _apply_dto(row, dto)
@@ -137,7 +161,7 @@ def _run_plaud_metadata_import(run_id: str, settings: Settings) -> None:
                 last_error = None
                 if needs_refresh:
                     try:
-                        has_transcript, has_summary = refresh_cloud_artifacts_for(
+                        has_transcript, has_summary = _refresh_cloud_artifacts_with_retry(
                             client, dto.id
                         )
                         with session_scope() as session:
@@ -163,6 +187,11 @@ def _run_plaud_metadata_import(run_id: str, settings: Settings) -> None:
                     skipped=not needs_refresh,
                     last_error=last_error,
                 )
+                if refresh_artifacts and needs_refresh:
+                    # The official MCP throttles bursty full-library detail calls.
+                    # A small steady delay is much faster than repeatedly failing
+                    # most of a long import and restarting it from the beginning.
+                    time.sleep(_PLAUD_FULL_SYNC_DELAY_SECONDS)
         _update_run(run_id, status="completed", completed_at=datetime.now(UTC))
     except Exception as exc:  # noqa: BLE001
         _update_run(

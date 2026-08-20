@@ -248,7 +248,7 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         assert "對外資料傳送須明確啟用" in settings.text
         assert "SMTP 傳送須明確啟用" in settings.text
         assert "診斷檔只包含彙總計數" in settings.text
-        assert "從 Plaud 匯入中繼資料" in settings.text
+        assert "同步 Plaud 錄音與會議記錄" in settings.text
         assert "localStatus.textContent=`${tr('Importing')}" in settings.text
         assert "label.textContent=`${tr('Complete')}" in settings.text
         assert "button.textContent=tr('Uploading…')" in settings.text

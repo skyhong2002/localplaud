@@ -54,8 +54,11 @@ def test_resume_queues_eligible_and_skips_no_audio(monkeypatch, tmp_path):
     with session_scope() as session:
         # done recording with a transcript is re-queued as partial
         assert session.get(PlaudFile, "done1").status == FileStatus.partial
-        # unprocessed recording without a transcript is queued as error
-        assert session.get(PlaudFile, "dl1").status == FileStatus.error
+        # A normal queue is not a failure: fresh work remains downloaded and
+        # neither recording receives a misleading error alert.
+        assert session.get(PlaudFile, "dl1").status == FileStatus.downloaded
+        assert session.get(PlaudFile, "done1").error is None
+        assert session.get(PlaudFile, "dl1").error is None
         assert session.get(PlaudFile, "noaudio").status == FileStatus.downloaded
 
 

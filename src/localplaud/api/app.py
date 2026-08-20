@@ -1620,8 +1620,8 @@ def bulk_files(body: BulkFilesBody) -> dict:
             raise HTTPException(status_code=409, detail="a selected recording is processing")
         for row in rows:
             reset_pipeline_retry(row)
-            row.status = FileStatus.partial if row.local_transcript else FileStatus.error
-            row.error = "Queued by bulk Resume."
+            row.status = FileStatus.partial if row.local_transcript else FileStatus.downloaded
+            row.error = None
             row.pipeline_last_failure_at = now
             row.pipeline_next_retry_at = now
     return {"action": body.action, "updated": len(file_ids), "queued": file_ids}
@@ -2731,7 +2731,7 @@ def file_detail(
         if ask_thread is not None
         else tab
         if tab in {"transcript", "notes", "mindmap", "ask"}
-        else "transcript"
+        else "notes"
     )
     if not workspace and _wants_progressive_shell(request):
         keep_filelist = request.headers.get("x-localplaud-preserve-filelist", "").lower() == "true"

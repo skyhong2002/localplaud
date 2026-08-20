@@ -777,8 +777,8 @@
         </div>
         <div class="plaud-import-card" id="plaud-import-panel" role="tabpanel" aria-labelledby="plaud-import-tab" hidden>
           <span class="import-icon"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span></span><strong>{{ t('Mirror your Plaud library') }}</strong>
-          <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Imports the latest recording metadata and any existing Plaud transcript or summary. Audio stays in Plaud until you request it from a recording.') }}</p>
-          <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">{{ t('Import metadata from Plaud') }}</button>
+          <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Syncs all recording metadata and any existing Plaud transcripts and notes. Audio stays in Plaud until you request it from a recording.') }}</p>
+          <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">{{ t('Sync Plaud recordings and notes') }}</button>
           <div id="plaud-import-progress" role="status" aria-live="polite" hidden style="width:100%;max-width:440px">
             <div class="import-progress" role="progressbar" aria-labelledby="plaud-import-progress-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span style="width:0%"></span></div>
             <div class="sub" id="plaud-import-progress-label" data-progress-label></div>
@@ -825,7 +825,7 @@
       function setMenu(open,{restoreFocus=false}={}){menu.hidden=!open;button.setAttribute('aria-expanded',String(open));if(!open&&restoreFocus)button.focus();}
       function stopImportWork(){if(progressTimer)clearTimeout(progressTimer);progressTimer=null;requestController?.abort();requestController=null;}
       function setDialogBusy(value){busy=value;importModal.setBusy(value);closeButton.disabled=value;tabs.forEach(tab=>{tab.disabled=value;});input.disabled=value;drop.setAttribute('aria-disabled',String(value));}
-      function setPlaudBusy(value){plaudButton.disabled=value;plaudButton.textContent=tr(value?'Importing…':'Import metadata from Plaud');}
+      function setPlaudBusy(value){plaudButton.disabled=value;plaudButton.textContent=tr(value?'Importing…':'Sync Plaud recordings and notes');}
       async function requestJson(url,options,fallback,acceptableStatuses=[]){const controller=new AbortController();requestController?.abort();requestController=controller;let response;try{response=await fetch(url,{...options,signal:controller.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr(fallback));}finally{if(requestController===controller)requestController=null;}let data={};try{data=await response.json();}catch(_error){}if(!response.ok&&!acceptableStatuses.includes(response.status))throw new Error(detailMessage(data,fallback));return data;}
       function selectMode(mode,{focus=false}={}){stopImportWork();setDialogBusy(false);setPlaudBusy(false);devicePanel.hidden=mode!=='device';plaudPanel.hidden=mode!=='plaud';for(const tab of tabs){const active=tab.dataset.importTab===mode;tab.classList.toggle('on',active);tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;if(active&&focus)tab.focus();}document.getElementById('import-title').textContent=tr(mode==='plaud'?'Import from Plaud':'Import audio');if(mode==='plaud')pollPlaudImport();}
       function choose(mode,trigger){setMenu(false);selectMode(mode);importModal.open(trigger,tabs.find(tab=>tab.dataset.importTab===mode));}

@@ -109,10 +109,12 @@ def test_metadata_import_mirrors_artifacts_without_downloading(monkeypatch, tmp_
 
     import localplaud.imports as imports
 
-    def run_import(run_id):
+    def run_import(run_id, *, refresh_artifacts=False):
         with session_scope() as session:
             session.add(ImportRun(id=run_id, source="plaud", status="queued"))
-        _run_plaud_metadata_import(run_id, settings)
+        _run_plaud_metadata_import(
+            run_id, settings, refresh_artifacts=refresh_artifacts
+        )
 
     refresh_calls: list[str] = []
 
@@ -133,9 +135,18 @@ def test_metadata_import_mirrors_artifacts_without_downloading(monkeypatch, tmp_
         )
         assert imports.import_run_to_dict(run)["skipped"] == 2
 
+    monkeypatch.setattr(imports.time, "sleep", lambda _seconds: None)
+    refresh_calls.clear()
+    run_import("full-refresh", refresh_artifacts=True)
+    assert refresh_calls == ["p1", "p2"]
+    with session_scope() as session:
+        run = session.get(ImportRun, "full-refresh")
+        assert (run.processed, run.skipped_count, run.failed_count) == (2, 0, 0)
+
     fake.files[0] = PlaudFileDTO(
         id="p1", filename="Cloud meeting renamed", duration=42_000
     )
+    refresh_calls.clear()
     run_import("changed")
     assert refresh_calls == ["p1"]
     with session_scope() as session:
@@ -164,6 +175,40 @@ def test_metadata_import_mirrors_artifacts_without_downloading(monkeypatch, tmp_
     with session_scope() as session:
         assert session.get(PlaudFile, "p2").cloud_artifacts_synced_at is not None
         assert session.get(ImportRun, "retry-refresh").skipped_count == 1
+
+
+def test_cloud_artifact_refresh_retries_only_rate_limits(monkeypatch):
+    import localplaud.imports as imports
+
+    calls = 0
+    delays: list[float] = []
+
+    def throttled(_client, _file_id):
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise RuntimeError("Plaud MCP get_file failed: HTTP 429 rate limit")
+        return True, True
+
+    monkeypatch.setattr(imports, "refresh_cloud_artifacts_for", throttled)
+    monkeypatch.setattr(imports.time, "sleep", delays.append)
+    assert imports._refresh_cloud_artifacts_with_retry(object(), "p1") == (True, True)
+    assert calls == 3
+    assert delays == [2.0, 4.0]
+
+    monkeypatch.setattr(
+        imports,
+        "refresh_cloud_artifacts_for",
+        lambda _client, _file_id: (_ for _ in ()).throw(RuntimeError("bad payload")),
+    )
+    delays.clear()
+    try:
+        imports._refresh_cloud_artifacts_with_retry(object(), "p2")
+    except RuntimeError as exc:
+        assert str(exc) == "bad payload"
+    else:
+        raise AssertionError("non-rate-limit errors must not retry")
+    assert delays == []
 
 
 def test_recording_cloud_refresh_imports_all_notes_and_stamps_sync(
