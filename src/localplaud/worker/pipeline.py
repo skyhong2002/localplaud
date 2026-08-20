@@ -1441,6 +1441,13 @@ def _process_file_claimed(
         else:
             _skip_stage(file_id, StageName.transcribe, "disabled")
 
+        # A transcript is already useful before the slower alignment,
+        # diarization, and correction stages finish. Give it a durable AI title
+        # immediately so a downstream failure never leaves an unnamed item in
+        # the library. The final primary Plaud-template note may refine it.
+        if transcript is not None and transcript_source == "local":
+            _ensure_generated_title(file_id, transcript, settings, snapshot)
+
         # --- align (provider timestamps or explicitly selected forced alignment) -- #
         if transcript is None:
             _skip_stage(file_id, StageName.align, "no transcript")
@@ -2857,6 +2864,47 @@ def _has_generated_title(file_id: str) -> bool:
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
         return bool(row and _clean_generated_title(row.generated_title))
+
+
+def _ensure_generated_title(
+    file_id: str,
+    transcript: Transcript,
+    settings: Settings,
+    snapshot: dict,
+) -> bool:
+    """Best-effort title generation at the transcript durability boundary."""
+    if _has_generated_title(file_id):
+        return True
+    title_settings = _settings_for_stage(settings, snapshot, "summarize")
+    try:
+        title = _clean_generated_title(
+            summarize.generate_recording_title(transcript, title_settings)
+        )
+    except Exception:  # noqa: BLE001 - later summary remains an independent retry path
+        log.exception("Initial AI title generation failed for %s", file_id)
+        return False
+    if not title:
+        log.warning("Initial AI title generation returned no usable title for %s", file_id)
+        return False
+    selected = (snapshot.get("stages") or {}).get("summarize") or {}
+    with session_scope() as session:
+        row = _assert_processing_claim_in_session(session, file_id)
+        # Preserve a valid title if another resumable path populated it while
+        # the provider call was in flight.
+        if _clean_generated_title(row.generated_title):
+            return True
+        row.generated_title = title
+        row.generated_title_provider = selected.get("provider_type") or title_settings.llm.provider
+        provider_config = getattr(
+            title_settings.llm,
+            str(title_settings.llm.provider).replace("-", "_"),
+            None,
+        )
+        row.generated_title_model = selected.get("model") or getattr(
+            provider_config, "model", None
+        )
+        row.generated_title_at = datetime.now(UTC)
+    return True
 
 
 def _apply_generated_title(

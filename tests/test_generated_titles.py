@@ -165,6 +165,45 @@ def test_apply_generated_title_preserves_manual_display_and_ignores_secondary_te
         assert session.get(PlaudFile, "auto").generated_title == "Auto-selected heading"
 
 
+def test_ensure_generated_title_runs_at_transcript_boundary(monkeypatch, tmp_path):
+    _init_db(monkeypatch, tmp_path)
+    from localplaud.asr.base import Segment, Transcript
+    from localplaud.config import get_settings
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker import pipeline
+
+    settings = get_settings()
+    transcript = Transcript(
+        segments=[Segment(start=0, end=1, text="討論口琴社暑期演出")],
+        provider="test-asr",
+        model="test-model",
+    )
+    with session_scope() as session:
+        session.add(PlaudFile(id="fresh", filename="raw"))
+
+    monkeypatch.setattr(
+        pipeline.summarize,
+        "generate_recording_title",
+        lambda *_args, **_kwargs: "口琴社暑期演出規劃",
+    )
+    snapshot = {
+        "stages": {
+            "summarize": {
+                "provider_type": "codex-local",
+                "model": "gpt-5.6-sol",
+            }
+        }
+    }
+    assert pipeline._ensure_generated_title("fresh", transcript, settings, snapshot)
+    with session_scope() as session:
+        row = session.get(PlaudFile, "fresh")
+        assert row.generated_title == "口琴社暑期演出規劃"
+        assert row.generated_title_provider == "codex-local"
+        assert row.generated_title_model == "gpt-5.6-sol"
+        assert row.generated_title_at is not None
+
+
 def test_backfill_titles_cli_fills_every_local_transcript(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
     from typer.testing import CliRunner

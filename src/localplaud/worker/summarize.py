@@ -209,6 +209,45 @@ Transcript evidence:
     return title.strip() if isinstance(title, str) and title.strip() else None
 
 
+def generate_recording_title(transcript: AsrTranscript, settings: Settings) -> str | None:
+    """Generate the first title as soon as a local transcript is durable.
+
+    The primary Plaud-template note remains authoritative and may replace this
+    provisional title later.  Keeping this call title-only prevents alignment,
+    diarization, or correction failures from leaving a usable transcript unnamed.
+    """
+    llm = build_llm(settings.llm)
+    evidence = _render_transcript(transcript, max_chars=4_000)
+    raw = llm.complete(
+        f"""\
+Return one concise, recording-specific title grounded only in this transcript.
+Name the most concrete subject, event, people, or observable content. Never
+return labels such as summary, transcript overview, recording summary, meeting
+summary, or their Chinese equivalents. For noisy or low-information audio,
+name what is actually present instead of saying it cannot be summarized.
+
+Transcript evidence:
+---
+{evidence}
+---
+""",
+        system=(
+            "You generate only a recording title. Use the recording's dominant "
+            "language; use Traditional Chinese with Taiwan wording for Chinese "
+            "recordings. Return no note or explanation."
+        ),
+        temperature=0.1,
+        max_tokens=120,
+        json_schema=_TITLE_REPAIR_SCHEMA,
+    )
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return raw.strip() or None
+    title = parsed.get("title") if isinstance(parsed, dict) else None
+    return title.strip() if isinstance(title, str) and title.strip() else None
+
+
 def _summary_output(raw: str) -> tuple[str | None, str, dict[str, list[str]] | None]:
     """Accept the typed one-call contract, with Markdown fallback for adapters
     that do not implement structured output."""
