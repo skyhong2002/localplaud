@@ -2781,7 +2781,17 @@ def _clean_generated_title(raw: object) -> str | None:
     )
     non_space_chars = {char for char in folded if not char.isspace()}
     repeated_noise = len(folded) >= 8 and len(non_space_chars) <= 2
-    if len(text) > 80 or text.startswith(boilerplate) or low_information_heading or repeated_noise:
+    unbalanced_quotes = any(
+        text.count(opening) != text.count(closing)
+        for opening, closing in (("“", "”"), ("「", "」"), ("『", "』"))
+    )
+    if (
+        len(text) > 80
+        or text.startswith(boilerplate)
+        or low_information_heading
+        or repeated_noise
+        or unbalanced_quotes
+    ):
         return None
     return text or None
 

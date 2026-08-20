@@ -28,6 +28,7 @@ def test_clean_generated_title_strips_markup_and_caps():
     assert _clean_generated_title("# 「會議：口琴社」  ") == "會議：口琴社"
     assert _clean_generated_title('  "A Quoted Title"\n') == "A Quoted Title"
     assert _clean_generated_title("眾人驚呼「哇，一定是高級」") == "眾人驚呼「哇，一定是高級」"
+    assert _clean_generated_title("眾人驚呼「哇，一定是高級") is None
     assert _clean_generated_title("   ") is None
     assert _clean_generated_title(None) is None
     assert _clean_generated_title("x" * 500) is None
