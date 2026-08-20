@@ -43,6 +43,8 @@ def test_clean_generated_title_strips_markup_and_caps():
     assert _clean_generated_title("转录内容摘要") is None
     assert _clean_generated_title("轉錄內容質量異常") is None
     assert _clean_generated_title("轉錄內容無法可靠總結") is None
+    assert _clean_generated_title("逐字稿內容異常，無法可靠總結") is None
+    assert _clean_generated_title("Transcript quality issue prevents reliable summary") is None
     assert _clean_generated_title("Mind map") is None
     assert _clean_generated_title("智能總結") is None
     assert _clean_generated_title("Autopilot 模板") is None

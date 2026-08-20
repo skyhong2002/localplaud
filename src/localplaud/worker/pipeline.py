@@ -2788,6 +2788,22 @@ def _clean_generated_title(raw: object) -> str | None:
         or folded.startswith("consolidated coverage")
         or folded in _GENERIC_GENERATED_TITLES
     )
+    transcript_quality_placeholder = any(
+        marker in folded for marker in ("逐字稿", "轉錄", "转录", "transcript")
+    ) and any(
+        marker in folded
+        for marker in (
+            "內容異常",
+            "内容异常",
+            "品質異常",
+            "質量異常",
+            "质量异常",
+            "無法可靠",
+            "无法可靠",
+            "cannot be reliably",
+            "quality issue",
+        )
+    )
     non_space_chars = {char for char in folded if not char.isspace()}
     repeated_noise = len(folded) >= 8 and len(non_space_chars) <= 2
     unbalanced_quotes = any(
@@ -2798,6 +2814,7 @@ def _clean_generated_title(raw: object) -> str | None:
         len(text) > 80
         or text.startswith(boilerplate)
         or low_information_heading
+        or transcript_quality_placeholder
         or repeated_noise
         or unbalanced_quotes
     ):
