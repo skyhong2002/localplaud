@@ -2751,7 +2751,10 @@ def _clean_generated_title(raw: object) -> str | None:
     if not raw or not str(raw).strip():
         return None
     text = str(raw).strip().lstrip("#").strip()
-    text = text.strip("\"'“”「」『』").strip()
+    for opening, closing in (('"', '"'), ("'", "'"), ("“", "”"), ("「", "」"), ("『", "』")):
+        if len(text) >= 2 and text.startswith(opening) and text.endswith(closing):
+            text = text[len(opening) : -len(closing)].strip()
+            break
     text = text.replace("**", "").replace("__", "").replace("`", "")
     text = " ".join(text.split())
     text = to_traditional(text) or ""
@@ -2778,12 +2781,7 @@ def _clean_generated_title(raw: object) -> str | None:
     )
     non_space_chars = {char for char in folded if not char.isspace()}
     repeated_noise = len(folded) >= 8 and len(non_space_chars) <= 2
-    if (
-        len(text) > 80
-        or text.startswith(boilerplate)
-        or low_information_heading
-        or repeated_noise
-    ):
+    if len(text) > 80 or text.startswith(boilerplate) or low_information_heading or repeated_noise:
         return None
     return text or None
 
