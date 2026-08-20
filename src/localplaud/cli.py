@@ -526,7 +526,10 @@ def backfill_titles(
         for r in rows:
             if limit is not None and changed >= limit:
                 break
-            if r.generated_title and not force:
+            # A legacy template label such as ``Autopilot`` is populated but is
+            # not a useful AI title, so include it in the normal (non-force)
+            # repair pass.
+            if _clean_generated_title(r.generated_title) and not force:
                 skipped += 1
                 continue
             summaries = list(

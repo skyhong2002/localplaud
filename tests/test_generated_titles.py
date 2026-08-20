@@ -32,6 +32,20 @@ def test_clean_generated_title_strips_markup_and_caps():
     assert _clean_generated_title("x" * 500) is None
     assert _clean_generated_title("以下是根據您提供的內容整理出的摘要") is None
     assert _clean_generated_title("**清楚的會議標題**") == "清楚的會議標題"
+    assert _clean_generated_title("Autopilot") is None
+    assert _clean_generated_title("Coverage Notes Summary") is None
+    assert _clean_generated_title("Transcript Overview") is None
+    assert _clean_generated_title("Mind map") is None
+    assert _clean_generated_title("智能總結") is None
+    assert _clean_generated_title("Autopilot 模板") is None
+    assert _clean_generated_title("Key Points") is None
+    assert _clean_generated_title("自適應結構") is None
+    assert _clean_generated_title("Transcript 總結") is None
+    assert _clean_generated_title("SPEAKER_02: 安") is None
+    assert _clean_generated_title("安安安安安安安安") is None
+    assert _clean_generated_title("Tips") is None
+    assert _clean_generated_title("Content Summary") is None
+    assert _clean_generated_title("會談內容") is None
     assert _generated_title_candidate(None, "\n# AI heading\nbody") == "AI heading"
     assert _generated_title_candidate(None, "## Generated heading\nbody") == "Generated heading"
     assert _generated_title_candidate(None, "Generated first line\nbody") is None

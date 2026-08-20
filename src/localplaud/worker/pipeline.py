@@ -75,6 +75,70 @@ log = logging.getLogger(__name__)
 _PROFILE_SNAPSHOT: ContextVar[dict | None] = ContextVar("resolved_profile_snapshot", default=None)
 _PROCESSING_LEASE = timedelta(hours=24)
 _STALE_GENERATION_UNSET = object()
+_GENERIC_GENERATED_TITLES = frozenset(
+    {
+        "autopilot",
+        "autopilot 模板",
+        "action items",
+        "consolidated coverage notes",
+        "content summary",
+        "coverage notes summary",
+        "coverage notes",
+        "coverage notes consolidation",
+        "generated title",
+        "intelligent summary",
+        "mind map",
+        "mindmap",
+        "key points",
+        "tips",
+        "no title",
+        "recording",
+        "summary",
+        "transcript",
+        "transcript overview",
+        "transcript summary",
+        "untitled",
+        "完整逐字稿",
+        "完整轉錄（供外部使用）",
+        "心智圖",
+        "摘要",
+        "總結",
+        "智能總結",
+        "意圖分析",
+        "採訪",
+        "關鍵數據",
+        "深度詳盡的演講細節、引言與概念",
+        "會議要點",
+        "會議紀要",
+        "會議內容回顧",
+        "會議與討論",
+        "會議記錄轉為完整敘述紀錄",
+        "會談內容",
+        "會談內容概述",
+        "研究訪談",
+        "重點摘要",
+        "覆蓋重點",
+        "全場景自適應",
+        "全場景適應",
+        "自動結構",
+        "自動化結構",
+        "自動化總結結構",
+        "自動總結結構",
+        "自適應結構",
+        "課程內容",
+        "論壇討論",
+        "技術與非技術對話",
+        "討論與建議",
+        "附加信息",
+        "其他對話片段",
+        "進一步對話片段",
+        "未命名",
+        "無標題",
+        "這段",
+        "逐字稿",
+        "錄音",
+    }
+)
 
 
 class PipelineAlreadyRunning(RuntimeError):
@@ -2658,7 +2722,26 @@ def _clean_generated_title(raw: object) -> str | None:
         "這段文字",
         "這是一段",
     )
-    if len(text) > 80 or text.startswith(boilerplate):
+    # Older adapters occasionally returned the template/processing-step name
+    # instead of a recording-specific title.  A non-empty value is not enough:
+    # these labels tell the user nothing about the recording and must be
+    # regenerated from the primary Plaud template.
+    folded = text.casefold().rstrip(":：").strip()
+    low_information_heading = (
+        folded.startswith("speaker_")
+        or folded.startswith("transcript ")
+        or folded.startswith("coverage notes")
+        or folded.startswith("consolidated coverage")
+        or folded in _GENERIC_GENERATED_TITLES
+    )
+    non_space_chars = {char for char in folded if not char.isspace()}
+    repeated_noise = len(folded) >= 8 and len(non_space_chars) <= 2
+    if (
+        len(text) > 80
+        or text.startswith(boilerplate)
+        or low_information_heading
+        or repeated_noise
+    ):
         return None
     return text or None
 

@@ -348,8 +348,11 @@ can be restored with one action; every local user-facing/search/export surface u
 the override consistently. Every recording with a canonical local transcript also
 has a locally generated AI title with provider, model, and creation-time provenance.
 The pipeline's primary note supplies it (including Auto-selected templates), and a
-provider formatting omission falls back to that AI artifact's H1 or first meaningful
-line. A manual override remains display-preferred without deleting the AI title.
+provider formatting omission falls back to that AI artifact's Markdown heading.
+Template names, intermediate coverage labels, speaker labels, repeated noise, and
+other generic headings are not accepted as recording titles; they remain due for
+AI regeneration. A manual override remains display-preferred without deleting the
+AI title.
 
 Folder and tag metadata is editable directly from the recording header through the
 same atomic organization contract used by Library bulk actions. Counts and filters
