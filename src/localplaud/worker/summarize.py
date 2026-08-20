@@ -147,6 +147,67 @@ _SUMMARY_OUTPUT_SCHEMA = {
     "required": ["title", "content_md", "tags"],
 }
 
+_TITLE_REPAIR_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {"title": {"type": "string"}},
+    "required": ["title"],
+}
+
+
+def repair_recording_title(
+    transcript: AsrTranscript,
+    summary_content: str,
+    rejected_title: str | None,
+    settings: Settings,
+) -> str | None:
+    """Ask the selected summary model for a title-only repair.
+
+    This is a typed output repair, not a replacement or modification of the
+    stored Plaud template. It is used only when that template returned a
+    category label instead of a recording-specific title.
+    """
+    llm = build_llm(settings.llm)
+    evidence = _render_transcript(transcript, max_chars=4_000)
+    prompt = f"""\
+The Plaud-template note below is valid, but its proposed title is too generic.
+Return one concise, recording-specific title grounded in the evidence. Name the
+most concrete subject, event, people, or observable content. Never return labels
+such as summary, transcript overview, recording summary, meeting summary, or
+their Chinese equivalents. For noisy or low-information audio, name what is
+actually present (for example, repeated intro, promotion, and subtitle credits)
+instead of saying that the transcript cannot be summarized.
+
+Rejected title: {rejected_title or "(missing)"}
+
+Plaud-template note:
+---
+{summary_content[:8_000]}
+---
+
+Transcript evidence:
+---
+{evidence}
+---
+"""
+    raw = llm.complete(
+        prompt,
+        system=(
+            "You repair only a recording title. Do not rewrite the note or its Plaud "
+            "template. Use the recording's dominant language; use Traditional Chinese "
+            "with Taiwan wording for Chinese recordings."
+        ),
+        temperature=0.1,
+        max_tokens=120,
+        json_schema=_TITLE_REPAIR_SCHEMA,
+    )
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return raw.strip() or None
+    title = parsed.get("title") if isinstance(parsed, dict) else None
+    return title.strip() if isinstance(title, str) and title.strip() else None
+
 
 def _summary_output(raw: str) -> tuple[str | None, str, dict[str, list[str]] | None]:
     """Accept the typed one-call contract, with Markdown fallback for adapters

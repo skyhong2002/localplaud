@@ -2155,6 +2155,19 @@ def _run_derived_stages(
                             result.setdefault("provider", "remote-worker")
                         else:
                             result = summarize.summarize(transcript, candidate_settings)
+                        title_repair_calls = 0
+                        if not _generated_title_candidate(
+                            result.get("title"), result.get("content_md")
+                        ):
+                            if _remote_selection(candidate, "summarize"):
+                                raise RuntimeError("AI summary returned no usable recording title")
+                            result["title"] = summarize.repair_recording_title(
+                                transcript,
+                                result.get("content_md") or "",
+                                result.get("title"),
+                                candidate_settings,
+                            )
+                            title_repair_calls = 1
                         _persist_summary(
                             file_id,
                             result,
@@ -2172,6 +2185,7 @@ def _run_derived_stages(
                                 "coverage": result.get("coverage", {}),
                                 "transcript": transcript_lineage,
                                 "auto_template": auto_recommendation,
+                                "title_repair_calls": title_repair_calls,
                                 "cost_budget": cost_budget,
                             },
                             "usage": {
@@ -2181,6 +2195,7 @@ def _run_derived_stages(
                                     (result.get("coverage") or {}).get("map_calls", 0)
                                     + (result.get("coverage") or {}).get("reduce_calls", 0)
                                     + 1
+                                    + title_repair_calls
                                 ),
                             },
                         }

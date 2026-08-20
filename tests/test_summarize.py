@@ -255,3 +255,31 @@ def test_summary_output_falls_back_to_plain_markdown():
     assert title == "Weekly Sync"
     assert content == "# Weekly Sync\n\n- Ship Friday"
     assert tags is None
+
+
+def test_title_repair_uses_typed_title_only_contract(monkeypatch):
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import repair_recording_title
+
+    class FakeLlm:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, prompt, **kwargs):
+            self.calls.append((prompt, kwargs))
+            return '{"title":"重複片頭、欄目推廣與字幕署名"}'
+
+    llm = FakeLlm()
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: llm)
+
+    title = repair_recording_title(
+        _transcript(Segment(text="優優獨播劇場；中文字幕志願者", start=0, end=1)),
+        "內容主要是重複片頭與字幕署名。",
+        "轉錄內容概覽",
+        Settings(),
+    )
+
+    assert title == "重複片頭、欄目推廣與字幕署名"
+    assert "Rejected title: 轉錄內容概覽" in llm.calls[0][0]
+    assert llm.calls[0][1]["json_schema"]["required"] == ["title"]
+    assert llm.calls[0][1]["max_tokens"] == 120
