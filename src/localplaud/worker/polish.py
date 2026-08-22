@@ -93,6 +93,9 @@ def polish_transcript(
     kept_source = 0
     kept_missing = 0
     kept_emptied = 0
+    kept_invalid = 0
+    remapped_chunks = 0
+    single_segment_retries: dict[int, int] = {}
     last_split_reason: str | None = None
     output_chars = 0
     request_input_chars = 0
@@ -170,12 +173,16 @@ def polish_transcript(
         request_json = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
         attempts += 1
         request_input_chars += len(SYSTEM_PROMPT) + len(request_json)
+        # The output is roughly the corrected input text plus JSON scaffolding.
+        # CJK text can reach ~2 tokens per character, so a flat budget truncates
+        # long chunks mid-string and the response fails to parse.
+        target_chars = sum(len(str(item["text"] or "")) for item in targets)
         try:
             raw_response = provider.complete(
                 request_json,
                 system=SYSTEM_PROMPT,
                 temperature=0.1,
-                max_tokens=max(2048, len(targets) * 80),
+                max_tokens=max(2048, len(targets) * 80 + target_chars * 2),
                 json_schema=RESPONSE_SCHEMA,
             )
             response_output_chars += len(raw_response)
@@ -196,7 +203,22 @@ def polish_transcript(
             expected = set(target_indexes)
             unexpected = set(by_id) - expected
             if unexpected:
-                raise LLMOutputInvalid("transcript polish returned unexpected segment IDs")
+                # Local models sometimes ignore the given IDs and renumber the
+                # segments from 0 or 1. When the response is a complete,
+                # in-order renumbering, map it back positionally instead of
+                # discarding otherwise valid corrections.
+                returned_ids = [item["id"] for item in returned]
+                if len(returned_ids) == len(target_indexes) and returned_ids in (
+                    list(range(len(returned_ids))),
+                    list(range(1, len(returned_ids) + 1)),
+                ):
+                    by_id = {
+                        index: by_id[given]
+                        for index, given in zip(target_indexes, returned_ids, strict=True)
+                    }
+                    remapped_chunks += 1
+                else:
+                    raise LLMOutputInvalid("transcript polish returned unexpected segment IDs")
             # A local model can omit a segment while otherwise returning valid
             # corrections. Preserve those source segments instead of recursively
             # rerunning the whole chunk: omission must never lose transcript text,
@@ -222,7 +244,22 @@ def polish_transcript(
                 kept_emptied += len(emptied)
         except LLMOutputInvalid as exc:
             if end - start <= 1:
-                raise
+                if single_segment_retries.get(start, 0) < 1:
+                    single_segment_retries[start] = 1
+                    pending[0:0] = [(start, end)]
+                    split_retries += 1
+                    last_split_reason = str(exc)
+                    report_progress()
+                    continue
+                # One segment the model cannot return validly must not fail the
+                # whole stage: keep the original timed text (already present in
+                # ``polished``) and move on, recording the degradation.
+                kept_source += len(target_indexes)
+                kept_invalid += len(target_indexes)
+                last_split_reason = str(exc)
+                target_segments_completed += len(target_indexes)
+                report_progress()
+                continue
             midpoint = start + (end - start) // 2
             pending[0:0] = [(start, midpoint), (midpoint, end)]
             split_retries += 1
@@ -268,6 +305,8 @@ def polish_transcript(
             "kept_source_segments": kept_source,
             "kept_missing_segments": kept_missing,
             "kept_emptied_segments": kept_emptied,
+            "kept_invalid_segments": kept_invalid,
+            "remapped_renumbered_chunks": remapped_chunks,
             "last_split_reason": last_split_reason,
             "skipped_empty_segments": skipped_empty_segments,
             "segments": len(source),

@@ -45,6 +45,7 @@
           <div class="recording-meta">
             <span>{{ f.start_time_ms | dt }}</span><span>·</span><span>{{ f.duration_ms | dur }}</span>
             {% if f.status != 'done' %}<span>·</span><span class="st {{ f.status }}" id="recording-state-label" aria-live="polite">{{ t('Generating…') if f.status == 'processing' else t(f.status) }}</span>{% endif %}
+            {% if auto_skipped_overlong %}<span>·</span><span class="sub" style="font-size:11.5px">{{ t('Skipped automatically: recording reaches the length cap and is likely accidental. Use Import audio / Resume processing to run it anyway.') }}</span>{% endif %}
           </div>
           <div class="recording-org">
             {% if f.folder %}<a class="chip on" href="/?folder={{ f.folder.id }}">{{ f.folder.name }}</a>{% endif %}

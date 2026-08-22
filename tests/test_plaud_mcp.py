@@ -182,3 +182,50 @@ def test_mcp_auth_status_does_not_read_or_expose_tokens(tmp_path):
     status = PlaudMcpClient.auth_status(cfg)
     assert status["ok"] is True
     assert "do-not-expose" not in str(status)
+
+
+def test_mcp_call_tool_accepts_json_with_trailing_advisory_note(monkeypatch):
+    """get_file appends a plain-text note after the JSON document for
+    AI-processed recordings; the JSON prefix must still parse."""
+    client = _client_without_process(monkeypatch)
+    payload = {"id": "f1", "presigned_url": "https://example.com/a.mp3"}
+    text = (
+        __import__("json").dumps(payload, indent=2)
+        + "\n\nNote: source_list `transaction_polish` returned an empty "
+        "`data_content` — call get_transcript with the matching `block`."
+    )
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda method, params=None: {"content": [{"type": "text", "text": text}]},
+    )
+    assert client.get_detail("f1") == payload
+
+
+def test_mcp_download_audio_rejects_empty_body(monkeypatch, tmp_path):
+    import httpx
+    import pytest
+
+    from localplaud.plaud.common import PlaudError
+    from localplaud.plaud.models import PlaudFileDTO
+
+    client = _client_without_process(monkeypatch)
+    monkeypatch.setattr(
+        client,
+        "get_detail",
+        lambda _fid: {"presigned_url": "https://cdn.example.com/audio.mp3"},
+    )
+    monkeypatch.setattr(
+        "localplaud.plaud.mcp._assert_safe_fetch_url", lambda _url: None
+    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b""))
+    original_client = httpx.Client
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        lambda **kwargs: original_client(transport=transport, **kwargs),
+    )
+    dto = PlaudFileDTO(id="f1", filename="Empty")
+    with pytest.raises(PlaudError, match="empty body"):
+        client.download_audio(dto, tmp_path)
+    assert list(tmp_path.iterdir()) == []

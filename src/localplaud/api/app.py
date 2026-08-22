@@ -3216,8 +3216,16 @@ def file_detail(
                 else None
             ),
         }
+    skip_threshold_ms = get_settings().pipeline.auto_skip_threshold_ms()
     ctx = _base_ctx(request, "recordings") | {
         "f": f,
+        "auto_skipped_overlong": bool(
+            skip_threshold_ms is not None
+            and f.get("duration_ms") is not None
+            and f["duration_ms"] >= skip_threshold_ms
+            and f.get("status") in ("metadata_only", "downloaded")
+            and not f.get("transcript")
+        ),
         "files": files,
         "q": filelist_params["q"],
         "filelist_context": filelist_context,

@@ -140,10 +140,18 @@ class PlaudMcpClient:
             raise PlaudError(f"Plaud MCP {name} failed: {text or 'unknown error'}")
         for item in result.get("content", []):
             if item.get("type") == "text":
+                text = item.get("text", "")
                 try:
-                    return json.loads(item.get("text", ""))
+                    return json.loads(text)
                 except json.JSONDecodeError:
-                    return item.get("text")
+                    # get_file appends a plain-text advisory note after the
+                    # JSON document for recordings with link-only source
+                    # blocks; accept a valid JSON prefix.
+                    try:
+                        parsed, _ = json.JSONDecoder().raw_decode(text.lstrip())
+                        return parsed
+                    except json.JSONDecodeError:
+                        return text
         return result.get("structuredContent") or {}
 
     def check_auth(self) -> dict:
@@ -224,6 +232,9 @@ class PlaudMcpClient:
                             f"audio for {file.id} exceeds {_MAX_AUDIO_BYTES} bytes; aborting"
                         )
                     handle.write(chunk)
+        if written == 0:
+            dest.unlink(missing_ok=True)
+            raise PlaudError(f"audio download for {file.id} returned an empty body")
         return dest
 
     def get_cloud_summary_md(self, file_id: str, detail: dict | None = None) -> str | None:

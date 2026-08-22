@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import time
 
 import typer
@@ -259,6 +261,11 @@ def run():
     )
     from .providers.usage import recover_provider_dispatch_reservations
     from .worker.claims import processing_owner
+
+    # Under launchd the log files otherwise fill with thousands of
+    # carriage-returned "Loading weights" progress bars per model load.
+    if not sys.stderr.isatty():
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
     settings = get_settings()
     init_db()
@@ -751,7 +758,17 @@ def serve():
 def _serve(
     settings, *, database_initialized: bool = False, managed_daemon: bool = False
 ):
+    import logging
+
     import uvicorn
+
+    class _DropHealthzAccessLogs(logging.Filter):
+        """Keep uptime-monitor /healthz probes out of the access log."""
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            return "/healthz" not in record.getMessage()
+
+    logging.getLogger("uvicorn.access").addFilter(_DropHealthzAccessLogs())
 
     target = "localplaud.api.app:app"
     if database_initialized or managed_daemon:

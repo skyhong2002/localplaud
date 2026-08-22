@@ -114,6 +114,7 @@ _ZH_HANT_TW = {
     "Processing now": "處理中",
     "hours mirrored": "小時已同步",
     "Audio stays in Plaud": "音訊仍保留在 Plaud",
+    "Skipped automatically: recording reaches the length cap and is likely accidental. Use Import audio / Resume processing to run it anyway.": "已自動跳過：錄音長度達到裝置上限，很可能是誤錄。若仍要處理，請使用「匯入音訊」或「繼續處理」。",
     "Available for local processing": "可在本機處理",
     "Durable local stages": "可續跑的本機階段",
     "Recent recordings": "最近錄音",

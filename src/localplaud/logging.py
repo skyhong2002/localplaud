@@ -21,7 +21,8 @@ def setup_logging(level: str | None = None) -> None:
         datefmt="[%X]",
         handlers=[RichHandler(rich_tracebacks=True, show_path=False)],
     )
-    # Quiet noisy libraries.
-    for noisy in ("httpx", "httpcore", "urllib3"):
+    # Quiet noisy libraries. APScheduler otherwise logs four INFO lines per
+    # 30-second heartbeat; its skip/overrun warnings still come through.
+    for noisy in ("httpx", "httpcore", "urllib3", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     _configured = True

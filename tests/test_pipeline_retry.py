@@ -116,7 +116,50 @@ def test_pending_queue_prioritizes_fresh_and_only_due_retries(monkeypatch, tmp_p
     assert seen == ["fresh", "due", "legacy"]
 
 
-def test_due_retry_is_not_starved_by_older_download_backlog(monkeypatch, tmp_path):
+def test_fresh_download_is_not_starved_by_churning_retries(monkeypatch, tmp_path):
+    """A due retry's timestamp is always ≈now, so ranking purely by event time
+    let a failing-and-rescheduling backlog starve a new recording forever.
+    Fresh downloads are finite (each processed file leaves the class), so they
+    take absolute priority."""
+    settings = _reset(monkeypatch, tmp_path)
+    import localplaud.worker.pipeline as pipeline
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    audio = tmp_path / "queue.wav"
+    audio.write_bytes(b"RIFF")
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        session.add_all(
+            [
+                PlaudFile(
+                    id=f"churn-{index}",
+                    status=FileStatus.partial,
+                    audio_path=str(audio),
+                    start_time_ms=int((now - timedelta(days=100 + index)).timestamp() * 1000),
+                    pipeline_retry_count=1,
+                    pipeline_next_retry_at=now - timedelta(seconds=index + 1),
+                )
+                for index in range(5)
+            ]
+            + [
+                PlaudFile(
+                    id="fresh-today",
+                    status=FileStatus.downloaded,
+                    audio_path=str(audio),
+                    start_time_ms=int((now - timedelta(hours=8)).timestamp() * 1000),
+                )
+            ]
+        )
+    seen: list[str] = []
+    monkeypatch.setattr(
+        pipeline, "process_file", lambda file_id, *_args, **_kwargs: seen.append(file_id)
+    )
+    assert pipeline.process_pending(settings, limit=1) == 1
+    assert seen == ["fresh-today"]
+
+
+def test_due_retry_keeps_one_slot_when_downloads_fill_the_batch(monkeypatch, tmp_path):
     settings = _reset(monkeypatch, tmp_path)
     import localplaud.worker.pipeline as pipeline
     from localplaud.db.models import FileStatus, PlaudFile
@@ -150,8 +193,8 @@ def test_due_retry_is_not_starved_by_older_download_backlog(monkeypatch, tmp_pat
     monkeypatch.setattr(
         pipeline, "process_file", lambda file_id, *_args, **_kwargs: seen.append(file_id)
     )
-    assert pipeline.process_pending(settings, limit=1) == 1
-    assert seen == ["due-retry"]
+    assert pipeline.process_pending(settings, limit=2) == 2
+    assert seen == ["backlog-0", "due-retry"]
 
 
 def test_pending_batch_interleaves_one_full_retry_with_derived_work(monkeypatch, tmp_path):
@@ -570,3 +613,52 @@ def test_setup_failure_releases_claim_and_schedules_retry(monkeypatch, tmp_path)
         assert row.pipeline_next_retry_at is not None
         assert row.processing_token is None
         assert row.processing_lease_until is None
+
+
+def test_overlong_recording_is_skipped_until_transcribed(monkeypatch, tmp_path):
+    """Length-cap recordings never enter the automatic queue before ASR, but
+    one that already has a transcript may finish its remaining stages."""
+    settings = _reset(monkeypatch, tmp_path)
+    import localplaud.worker.pipeline as pipeline
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageRun, StageStatus
+    from localplaud.db.session import session_scope
+
+    audio = tmp_path / "cap.wav"
+    audio.write_bytes(b"RIFF")
+    now = datetime.now(UTC)
+    cap_ms = 300 * 60 * 1000
+    with session_scope() as session:
+        session.add_all(
+            [
+                PlaudFile(
+                    id="cap-fresh",
+                    status=FileStatus.downloaded,
+                    audio_path=str(audio),
+                    duration_ms=cap_ms,
+                    start_time_ms=int(now.timestamp() * 1000),
+                ),
+                PlaudFile(
+                    id="cap-transcribed",
+                    status=FileStatus.partial,
+                    audio_path=str(audio),
+                    duration_ms=cap_ms,
+                    pipeline_retry_count=1,
+                    pipeline_next_retry_at=now - timedelta(minutes=1),
+                ),
+            ]
+        )
+        session.add(
+            StageRun(
+                file_id="cap-transcribed",
+                stage=StageName.transcribe,
+                status=StageStatus.completed,
+                attempts=1,
+                detail={},
+            )
+        )
+    seen: list[str] = []
+    monkeypatch.setattr(
+        pipeline, "process_file", lambda file_id, *_args, **_kwargs: seen.append(file_id)
+    )
+    assert pipeline.process_pending(settings) == 1
+    assert seen == ["cap-transcribed"]

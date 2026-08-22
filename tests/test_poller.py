@@ -830,3 +830,37 @@ def test_expired_download_lease_cannot_publish(monkeypatch, tmp_path):
         row = session.get(PlaudFile, "expired-download")
         assert row.status == FileStatus.discovered
         assert row.download_token is None
+
+
+def test_overlong_new_recording_stays_metadata_only(monkeypatch, tmp_path):
+    """A recording at the device's 5-hour cap is treated as accidental: it is
+    listed but never queued for automatic download or processing."""
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import sync_file_list
+
+    init_db()
+
+    class ListingClient:
+        def __init__(self, files):
+            self.files = files
+
+        def iter_files(self, include_trash=False):
+            yield from self.files
+
+    assert sync_file_list(ListingClient([]), settings) == (0, 0)  # baseline
+    new, _changed = sync_file_list(
+        ListingClient(
+            [
+                PlaudFileDTO(id="normal", filename="Normal", duration=60 * 60 * 1000),
+                PlaudFileDTO(id="at-cap", filename="At cap", duration=300 * 60 * 1000),
+            ]
+        ),
+        settings,
+    )
+    assert new == 2
+    with session_scope() as session:
+        assert session.get(PlaudFile, "normal").status == FileStatus.discovered
+        assert session.get(PlaudFile, "at-cap").status == FileStatus.metadata_only

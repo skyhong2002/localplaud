@@ -112,6 +112,17 @@ class PipelineConfig(BaseModel):
     summarize: bool = True
     mind_map: bool = True  # nested Markdown outline rendered as a tree
     index: bool = True  # embeddings for Q&A / semantic search
+    # Recordings at or above this length are treated as accidental (the Plaud
+    # recorder stops at its 5-hour cap) and are left as metadata-only instead of
+    # being auto-downloaded and processed. Manual "Import audio" / "Reprocess"
+    # in the Web App still work on them. Set to null/None to disable.
+    auto_skip_duration_minutes: int | None = Field(default=300, ge=1, le=10_080)
+
+    def auto_skip_threshold_ms(self) -> int | None:
+        """Skip threshold in milliseconds, or None when disabled."""
+        if self.auto_skip_duration_minutes is None:
+            return None
+        return self.auto_skip_duration_minutes * 60_000
     # Number of files processed concurrently by the worker.
     concurrency: int = 1
     # The daemon yields after a small newest-first batch so fresh recordings

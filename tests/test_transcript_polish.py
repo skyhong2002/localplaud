@@ -400,3 +400,101 @@ def test_polish_uses_provider_specific_large_context_batch(monkeypatch):
 
     assert len(provider.requests) == 1
     assert result["detail"]["chunk_chars"] == 10_000
+
+
+def test_polish_remaps_complete_renumbered_ids(monkeypatch):
+    """Local models sometimes renumber segments from 1; a complete, in-order
+    renumbering is mapped back positionally instead of being discarded."""
+
+    class RenumberingPolisher(FakePolisher):
+        def complete(self, prompt, **kwargs):
+            request = json.loads(prompt)
+            self.requests.append(request)
+            return json.dumps(
+                {
+                    "segments": [
+                        {"id": position + 1, "text": item["text"].replace("我我", "我")}
+                        for position, item in enumerate(request["target_segments"])
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+    provider = RenumberingPolisher()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        segments=[
+            Segment(text="我我今天開會", start=0, end=1),
+            Segment(text="好的", start=1, end=2),
+        ]
+    )
+
+    result = polish_transcript(transcript, Settings())
+
+    assert [segment.text for segment in result["transcript"].segments] == [
+        "我今天開會",
+        "好的",
+    ]
+    assert result["detail"]["remapped_renumbered_chunks"] == 1
+    assert result["detail"]["split_retries"] == 0
+
+
+def test_polish_keeps_source_when_single_segment_stays_invalid(monkeypatch):
+    """One uncorrectable segment degrades to its original timed text instead of
+    failing the whole stage; the single-segment chunk is retried exactly once."""
+
+    class BrokenSegmentPolisher(FakePolisher):
+        def complete(self, prompt, **kwargs):
+            request = json.loads(prompt)
+            self.requests.append(request)
+            targets = request["target_segments"]
+            if any(item["text"] == "毀損" for item in targets):
+                return '{"segments":[{"id":7777,"text":"trunca'
+            return json.dumps({"segments": targets}, ensure_ascii=False)
+
+    provider = BrokenSegmentPolisher()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        segments=[
+            Segment(text="開場", start=0, end=1),
+            Segment(text="毀損", start=1, end=2),
+            Segment(text="結尾", start=2, end=3),
+        ]
+    )
+
+    result = polish_transcript(transcript, Settings())
+
+    assert [segment.text for segment in result["transcript"].segments] == [
+        "開場",
+        "毀損",
+        "結尾",
+    ]
+    detail = result["detail"]
+    assert detail["kept_invalid_segments"] == 1
+    assert detail["kept_source_segments"] >= 1
+    retried = [
+        request
+        for request in provider.requests
+        if [item["text"] for item in request["target_segments"]] == ["毀損"]
+    ]
+    assert len(retried) == 2  # first single-segment attempt + one retry
+
+
+def test_polish_token_budget_scales_with_target_text(monkeypatch):
+    class BudgetProbe(FakePolisher):
+        def __init__(self):
+            super().__init__()
+            self.budgets = []
+
+        def complete(self, prompt, **kwargs):
+            self.budgets.append(kwargs["max_tokens"])
+            return super().complete(prompt, **kwargs)
+
+    provider = BudgetProbe()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    long_text = "會議紀錄" * 500  # 2000 CJK chars ≈ well past a flat 2048-token budget
+    transcript = Transcript(segments=[Segment(text=long_text, start=0, end=60)])
+
+    polish_transcript(transcript, Settings())
+
+    assert provider.budgets[0] >= len(long_text) * 2

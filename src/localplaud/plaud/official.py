@@ -321,6 +321,9 @@ class PlaudOfficialClient:
                             f"audio for {file.id} exceeds {_MAX_AUDIO_BYTES} bytes; aborting"
                         )
                     fh.write(chunk)
+        if written == 0:
+            dest.unlink(missing_ok=True)
+            raise PlaudError(f"audio download for {file.id} returned an empty body")
         log.info("Downloaded %s -> %s (%d bytes)", file.id, dest, written)
         return dest
 

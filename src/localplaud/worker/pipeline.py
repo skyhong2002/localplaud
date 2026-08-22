@@ -3188,6 +3188,21 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
         return None
     if row.status not in (FileStatus.downloaded, FileStatus.error, FileStatus.partial):
         return None
+    threshold_ms = settings.pipeline.auto_skip_threshold_ms()
+    if (
+        threshold_ms is not None
+        and row.duration_ms is not None
+        and row.duration_ms >= threshold_ms
+        and not any(
+            run.stage == StageName.transcribe and run.status == StageStatus.completed
+            for run in row.stage_runs
+        )
+    ):
+        # Recordings at/over the device's length cap are treated as accidental:
+        # they never enter the automatic queue before ASR has been done. Manual
+        # Reprocess calls process_file directly and is unaffected; once a
+        # transcript exists the remaining stages are allowed to finish.
+        return None
 
     derived_stages = {StageName.summarize, StageName.mind_map, StageName.index}
     derived_only = any(
@@ -3268,7 +3283,11 @@ def process_pending(
                 value = value.replace(tzinfo=UTC)
             return value.timestamp()
 
-        def queue_key(item) -> tuple[float, int, str]:
+        def queue_key(item) -> tuple[int, float, str]:
+            # Fresh downloads always outrank retries. Retry timestamps are
+            # recent by construction (a due backoff is near "now"), so ranking
+            # purely by event time let a churning retry backlog starve a new
+            # recording that carries its older start time.
             row, scope = item
             if row.status == FileStatus.downloaded:
                 event_time = (
@@ -3292,7 +3311,7 @@ def process_pending(
                     row.pipeline_next_retry_at or row.pipeline_last_failure_at or row.created_at
                 )
                 fresh_tiebreak = 0
-            return event_time, fresh_tiebreak, row.id
+            return fresh_tiebreak, event_time, row.id
 
         rows.sort(key=queue_key, reverse=True)
         selected = rows[:limit] if limit is not None else rows
@@ -3311,6 +3330,16 @@ def process_pending(
                 full_retry_ids = {item[0].id for item in full_retries}
                 non_retry_rows = [item for item in rows if item[0].id not in full_retry_ids]
                 selected = [full_retries[0], *non_retry_rows[: limit - 1]]
+            # Symmetrically, when fresh downloads fill the whole batch, keep
+            # one slot for the top due retry so backoff work still progresses
+            # while a download burst drains.
+            retries = [item for item in rows if item[0].status != FileStatus.downloaded]
+            if (
+                retries
+                and len(rows) > len(selected)
+                and all(item[0].status == FileStatus.downloaded for item in selected)
+            ):
+                selected = [*selected[: limit - 1], retries[0]]
         jobs = [(item.id, scope) for item, scope in selected]
     if not jobs:
         return 0

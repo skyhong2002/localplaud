@@ -249,14 +249,22 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                         download_lease_until=None,
                     )
                 )
+            skip_ms = settings.pipeline.auto_skip_threshold_ms()
             for dto in client.iter_files(include_trash=settings.poller.include_trash):
                 row = session.get(PlaudFile, dto.id)
                 if row is None:
+                    overlong = (
+                        skip_ms is not None
+                        and dto.duration is not None
+                        and dto.duration >= skip_ms
+                    )
                     row = PlaudFile(
                         id=dto.id,
                         status=(
                             FileStatus.discovered
-                            if settings.poller.auto_download and catalog_initialized
+                            if settings.poller.auto_download
+                            and catalog_initialized
+                            and not overlong
                             else FileStatus.metadata_only
                         ),
                         origin="plaud",
@@ -264,7 +272,16 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                     _apply_dto(row, dto)
                     session.add(row)
                     new_count += 1
-                    log.info("New file discovered: %s (%s)", dto.id, dto.filename)
+                    if overlong:
+                        log.info(
+                            "New file %s (%s) is %.1f h long — likely accidental; "
+                            "keeping metadata-only (pipeline.auto_skip_duration_minutes)",
+                            dto.id,
+                            dto.filename,
+                            (dto.duration or 0) / 3_600_000,
+                        )
+                    else:
+                        log.info("New file discovered: %s (%s)", dto.id, dto.filename)
                 else:
                     _apply_dto(row, dto)
             if session.get(KeyValue, _CATALOG_BASELINE_KEY) is None:

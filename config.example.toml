@@ -65,6 +65,11 @@ mind_map = true                  # nested Markdown outline rendered as a tree in
 index = true                     # build embeddings for Q&A / search
 concurrency = 1                  # files processed in parallel by the worker
 files_per_cycle = 1              # daemon batch; newest first so fresh files stay responsive
+# Recordings at/over this length (the Plaud recorder stops at its 5-hour cap)
+# are treated as accidental: kept metadata-only, never auto-downloaded or
+# processed. "Import audio" / "Resume processing" in the Web App still work.
+# Comment out or raise to change; remove the limit entirely with a very large value.
+auto_skip_duration_minutes = 300
 retry_max_attempts = 5           # consecutive failed cycles before manual Resume is required
 retry_base_seconds = 300         # exponential delay: 5m, 10m, 20m, …
 retry_max_seconds = 21600        # cap automatic retry delay at 6h
