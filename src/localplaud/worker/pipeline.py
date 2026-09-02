@@ -1098,6 +1098,7 @@ def process_file(
     claim_token: str | None = None,
 ) -> None:
     """Process one recording under an exclusive durable lease."""
+    settings = settings or get_settings()
     token = claim_token or _claim_processing(file_id)
     try:
         with processing_claim(file_id, token):
@@ -1117,10 +1118,23 @@ def process_file(
                     if row.status == FileStatus.processing:
                         row.status = FileStatus.error
                         row.error = str(exc)[:2000]
-                        _schedule_pipeline_retry(row, settings or get_settings())
+                        _schedule_pipeline_retry(row, settings)
                 raise
     finally:
         _release_processing(file_id, token)
+        if settings.store.evict_plaud_audio_after_processing:
+            try:
+                from ..local_cleanup import evict_completed_plaud_audio
+
+                result = evict_completed_plaud_audio(file_id)
+                if result["removed_files"]:
+                    log.info(
+                        "Released %d completed Plaud audio cache file(s) for %s",
+                        result["removed_files"],
+                        file_id,
+                    )
+            except Exception:  # noqa: BLE001 - processing result remains valid
+                log.exception("Could not release completed Plaud audio cache for %s", file_id)
 
 
 def process_derived_artifacts(

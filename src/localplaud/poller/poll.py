@@ -238,7 +238,7 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                 session.execute(
                     update(PlaudFile)
                     .where(
-                        PlaudFile.origin == "plaud",
+                        or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None)),
                         PlaudFile.audio_path.is_(None),
                         PlaudFile.status.in_((FileStatus.discovered, FileStatus.error)),
                     )
@@ -660,6 +660,8 @@ def _download_one(
     settings: Settings,
     *,
     claim_acquired: bool = False,
+    cache_only: bool = False,
+    raise_errors: bool = False,
 ) -> bool:
     from ..worker.claims import (
         current_processing_owner,
@@ -676,24 +678,39 @@ def _download_one(
     try:
         now = datetime.now(UTC)
         with session_scope() as session:
-            claimable_status = (
-                PlaudFile.status == FileStatus.downloading
-                if claim_acquired
-                else PlaudFile.status == FileStatus.discovered
-            )
+            predicates = [
+                PlaudFile.id == file_id,
+                PlaudFile.download_token.is_(None),
+            ]
+            if cache_only:
+                predicates.extend(
+                    [
+                        PlaudFile.origin == "plaud",
+                        PlaudFile.audio_path.is_(None),
+                        PlaudFile.status == FileStatus.done,
+                        PlaudFile.processing_token.is_(None),
+                    ]
+                )
+                claim_values = {
+                    "download_token": token,
+                    "download_lease_until": now + _DOWNLOAD_LEASE,
+                }
+            else:
+                predicates.append(
+                    PlaudFile.status == (
+                        FileStatus.downloading if claim_acquired else FileStatus.discovered
+                    )
+                )
+                claim_values = {
+                    "status": FileStatus.downloading,
+                    "error": None,
+                    "download_token": token,
+                    "download_lease_until": now + _DOWNLOAD_LEASE,
+                }
             claimed = session.execute(
                 update(PlaudFile)
-                .where(
-                    PlaudFile.id == file_id,
-                    claimable_status,
-                    PlaudFile.download_token.is_(None),
-                )
-                .values(
-                    status=FileStatus.downloading,
-                    error=None,
-                    download_token=token,
-                    download_lease_until=now + _DOWNLOAD_LEASE,
-                )
+                .where(*predicates)
+                .values(**claim_values)
                 .execution_options(synchronize_session=False)
             ).rowcount
         if claimed != 1:
@@ -724,9 +741,11 @@ def _download_one(
             final_path.parent.mkdir(parents=True, exist_ok=True)
             os.replace(dest, final_path)
             fresh.audio_path = str(final_path)
-            fresh.status = FileStatus.downloaded
+            if not cache_only:
+                fresh.status = FileStatus.downloaded
             fresh.downloaded_at = datetime.now(UTC)
-            fresh.error = None
+            if not cache_only:
+                fresh.error = None
             fresh.download_token = None
             fresh.download_lease_until = None
         if settings.pipeline.cloud_import_enabled:
@@ -741,6 +760,15 @@ def _download_one(
     except Exception as exc:  # noqa: BLE001
         log.error("Download failed for %s: %s", file_id, exc)
         with session_scope() as session:
+            failure_values = {
+                "download_token": None,
+                "download_lease_until": None,
+            }
+            if not cache_only:
+                failure_values |= {
+                    "status": FileStatus.error,
+                    "error": str(exc)[:2000],
+                }
             session.execute(
                 update(PlaudFile)
                 .where(
@@ -748,14 +776,11 @@ def _download_one(
                     PlaudFile.download_token == token,
                     PlaudFile.download_lease_until > datetime.now(UTC),
                 )
-                .values(
-                    status=FileStatus.error,
-                    error=str(exc)[:2000],
-                    download_token=None,
-                    download_lease_until=None,
-                )
+                .values(**failure_values)
                 .execution_options(synchronize_session=False)
             )
+        if raise_errors:
+            raise
         return False
     finally:
         shutil.rmtree(claim_dir, ignore_errors=True)

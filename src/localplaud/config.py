@@ -92,6 +92,10 @@ class PollerConfig(BaseModel):
 
 class StoreConfig(BaseModel):
     database_url: str = "sqlite:///./data/localplaud.db"
+    # Plaud remains the durable raw-audio source. Once every enabled pipeline
+    # stage succeeds, the local original/WAV/waveform copies may be evicted and
+    # restored on demand without changing the recording's completed state.
+    evict_plaud_audio_after_processing: bool = False
     # WAL keeps the Web App readable while the worker writes. Override only for
     # storage that cannot support it (some network filesystems).
     sqlite_journal_mode: Literal["wal", "delete"] = "wal"

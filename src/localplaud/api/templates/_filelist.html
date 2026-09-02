@@ -15,7 +15,7 @@
         <span>{{ f.start_time_ms | dt }}</span><span>·</span><span>{{ f.duration_ms | dur }}</span>
       </div>
       <div class="tags">
-        <span class="card-context">{% if f.pinned %}{{ t('Selected recording') }} · {% endif %}{% if f.folder %}{{ f.folder.name }}{% elif f.origin == 'local' %}{{ t('Local upload') }}{% elif not f.has_audio %}{{ t('Plaud · metadata only') }}{% else %}Plaud{% endif %}{% if f.needs_attention %} · {{ t('Needs attention') }}{% elif f.retry.next_at %} · {{ t('Retry scheduled') }}{% endif %}</span>
+        <span class="card-context">{% if f.pinned %}{{ t('Selected recording') }} · {% endif %}{% if f.folder %}{{ f.folder.name }}{% elif f.origin == 'local' %}{{ t('Local upload') }}{% elif f.audio_on_demand %}{{ t('Plaud · audio on demand') }}{% elif not f.has_audio %}{{ t('Plaud · metadata only') }}{% else %}Plaud{% endif %}{% if f.needs_attention %} · {{ t('Needs attention') }}{% elif f.retry.next_at %} · {{ t('Retry scheduled') }}{% endif %}</span>
         {% if f.status != 'done' %}<span class="st {{ f.status }}">{{ t(f.status) }}</span>{% elif f.has_summary %}<span class="nav-icon" title="{{ t('Notes') }}" style="--nav-icon:url('/static/lucide/sticky-note.svg');width:13px;height:13px;color:var(--faint)"></span>{% endif %}
       </div>
     </a>

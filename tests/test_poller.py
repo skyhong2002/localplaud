@@ -636,6 +636,39 @@ def test_download_claim_prevents_duplicate_cloud_fetch(monkeypatch, tmp_path):
         assert row.audio_path
 
 
+def test_cache_only_download_preserves_completed_status(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "audio"))
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import _download_one
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="cached",
+                filename="Cached",
+                origin="plaud",
+                status=FileStatus.done,
+                raw={"id": "cached", "filename": "Cached"},
+            )
+        )
+
+    class Client:
+        def download_audio(self, _dto, destination):
+            path = destination / "audio.opus"
+            path.write_bytes(b"restored")
+            return path
+
+    assert _download_one(Client(), "cached", {"id": "cached"}, settings, cache_only=True)
+    with session_scope() as session:
+        row = session.get(PlaudFile, "cached")
+        assert row.status == FileStatus.done
+        assert row.audio_path and Path(row.audio_path).read_bytes() == b"restored"
+        assert row.download_token is None and row.download_lease_until is None
+
+
 def test_download_batch_propagates_daemon_owner_to_threads(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "audio"))
     settings = _reset_db(monkeypatch, tmp_path)

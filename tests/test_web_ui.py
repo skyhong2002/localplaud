@@ -1535,10 +1535,50 @@ def test_saved_note_only_recording_can_open_export_and_copy_notes(monkeypatch, t
     assert exported.status_code == 200 and "Local content" in exported.text
 
 
-def test_reprocess_missing_audio(monkeypatch, tmp_path):
+def test_reprocess_missing_audio_restores_plaud_cache(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()  # r1 has no audio_path
-    assert c.post("/file/r1/reprocess").status_code == 400
+    audio = tmp_path / "restored.opus"
+    audio.write_bytes(b"audio")
+
+    def restore(file_id):
+        from localplaud.db.models import PlaudFile
+        from localplaud.db.session import session_scope
+
+        with session_scope() as session:
+            session.get(PlaudFile, file_id).audio_path = str(audio)
+        return audio
+
+    monkeypatch.setattr("localplaud.imports.ensure_plaud_audio", restore)
+    started = []
+
+    class DeferredThread:
+        def __init__(self, *, target, args=(), kwargs=None, daemon=None):
+            self.target, self.args, self.kwargs = target, args, kwargs or {}
+
+        def start(self):
+            started.append((self.target, self.args, self.kwargs))
+
+    monkeypatch.setattr("threading.Thread", DeferredThread)
+    response = c.post("/file/r1/reprocess")
+    assert response.status_code == 200
+    assert started
+
+
+def test_completed_remote_audio_renders_player_and_lazy_audio(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    audio = tmp_path / "lazy.opus"
+    audio.write_bytes(b"lazy-audio")
+    monkeypatch.setattr("localplaud.imports.ensure_plaud_audio", lambda _file_id: audio)
+
+    page = c.get("/file/r1")
+    assert page.status_code == 200
+    assert 'id="persistent-player"' in page.text
+    assert "Audio is stored in Plaud and downloads automatically" in page.text
+    assert 'id="import-recording-audio"' not in page.text
+    assert c.get("/audio/r1").content == b"lazy-audio"
+    assert c.get("/file/r1/export/audio").content == b"lazy-audio"
 
 
 def test_generate_notes_only_queues_derived_stages(monkeypatch, tmp_path):

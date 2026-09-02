@@ -37,6 +37,10 @@ max_concurrent_downloads = 2
 
 [store]
 database_url = "sqlite:///./data/localplaud.db"
+# Keep local uploads forever. When enabled, completed Plaud-backed recordings
+# retain transcripts/notes/indexes but release original audio, WAV, and waveform
+# caches; playback, audio export, and reprocessing fetch the audio again on demand.
+evict_plaud_audio_after_processing = false
 
 # --------------------------------------------------------------------------- #
 # OpenAI free-pool budget gate — opt in only when calling the real OpenAI API.

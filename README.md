@@ -33,12 +33,12 @@ The browser runtime is self-contained: HTMX is vendored with its upstream licens
 and pinned checksum, so normal Web App interaction does not depend on a CDN.
 
 > Record and upload as usual, but do not need to press Plaud's Generate button.
-> localplaud polls the read-only Open API, downloads the audio, and owns every
+> localplaud polls the read-only official Open API or MCP, downloads the audio, and owns every
 > derived artifact. See the [target product workflow](docs/product-workflow.md).
 
 ## Status
 
-The core skeleton works: OAuth polling through **Plaud's official Open API**,
+The core skeleton works: OAuth polling through **Plaud's official Open API or MCP**,
 a safe metadata-only first catalog sync followed by automatic download of new raw
 audio, pluggable local ASR, diarization, LLM notes, embeddings/Q&A, audio
 playback, and a FastAPI Web App. It runs natively and in Docker profiles.
@@ -56,7 +56,9 @@ Add audio / Import from Plaud flows are implemented. A Plaud import refreshes th
 entire metadata catalog plus any existing Plaud transcript/summary while leaving raw
 audio remote until the user requests one recording. After that baseline, scheduled
 polling automatically downloads recordings first observed as new uploads. The
-recording export dialog
+optional `store.evict_plaud_audio_after_processing` policy releases completed
+Plaud-backed audio while retaining every local artifact, then restores the raw
+audio on demand for playback, export, or reprocessing. The recording export dialog
 produces transcript TXT/SRT/VTT/DOCX/PDF formats with timestamp/speaker controls.
 PDF embeds a portable Traditional Chinese font. Generated and Saved notes export as
 Markdown, TXT, DOCX, or PDF; original-audio, mind-map image, and Markdown archive

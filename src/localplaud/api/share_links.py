@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from ..db.models import PlaudFile, ShareLink, StageName
+from ..db.models import FileStatus, PlaudFile, ShareLink, StageName
 from ..db.session import session_scope
 from ..i18n import catalog, translator
 from ..markdown import render_markdown
@@ -242,7 +242,14 @@ def public_share(request: Request, token: str):
                 ),
                 "duration_clock": _duration_clock(recording.duration_ms),
                 "has_audio": options.audio
-                and bool(recording.audio_path and Path(recording.audio_path).exists()),
+                and (
+                    bool(recording.audio_path and Path(recording.audio_path).exists())
+                    or (
+                        (recording.origin or "plaud") == "plaud"
+                        and recording.status == FileStatus.done
+                        and recording.local_transcript is not None
+                    )
+                ),
             },
             "show_transcript": options.transcript,
             "show_notes": options.notes,
@@ -261,11 +268,17 @@ def public_share(request: Request, token: str):
 
 @router.get("/share/{token}/audio")
 def public_share_audio(token: str):
+    from ..imports import ensure_plaud_audio
+
     with session_scope() as session:
         link = _public_link(session, token)
         if not _options(link).audio:
             raise _not_found()
-        path = link.file.audio_path
-    if not path or not Path(path).is_file():
+        file_id = link.file_id
+    try:
+        path = ensure_plaud_audio(file_id)
+    except Exception as exc:  # noqa: BLE001 - public links do not expose provider details
+        raise _not_found() from exc
+    if not path.is_file():
         raise _not_found()
     return audio_file_response(path)

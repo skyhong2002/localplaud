@@ -301,6 +301,65 @@ def test_remove_plaud_audio_returns_to_metadata_only(monkeypatch, tmp_path):
         assert row.status == FileStatus.metadata_only
 
 
+def test_automatic_eviction_preserves_completed_recording(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.local_cleanup import evict_completed_plaud_audio
+
+    result = evict_completed_plaud_audio("clean")
+    assert result == {"file_id": "clean", "removed_files": 3, "status": "done"}
+    with session_scope() as session:
+        row = session.get(PlaudFile, "clean")
+        assert row.status == FileStatus.done
+        assert row.audio_path is None and row.wav_path is None
+        assert row.local_transcript is not None
+        assert any(summary.source == "local" for summary in row.summaries)
+        assert len(row.stage_runs) == 1
+
+
+def test_automatic_eviction_ignores_noncompleted_and_local_audio(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.local_cleanup import evict_completed_plaud_audio
+
+    with session_scope() as session:
+        row = session.get(PlaudFile, "clean")
+        row.status = FileStatus.partial
+        upload = session.get(PlaudFile, "upload")
+        upload.status = FileStatus.done
+    assert evict_completed_plaud_audio("clean")["removed_files"] == 0
+    assert evict_completed_plaud_audio("upload")["removed_files"] == 0
+
+
+def test_process_file_evicts_only_after_releasing_claim(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker import pipeline
+
+    settings = get_settings().model_copy(deep=True)
+    settings.store.evict_plaud_audio_after_processing = True
+    observed = []
+
+    def complete(file_id, **_kwargs):
+        with session_scope() as session:
+            session.get(PlaudFile, file_id).status = FileStatus.done
+
+    def evict(file_id):
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            observed.append((row.status, row.processing_token))
+        return {"removed_files": 1}
+
+    monkeypatch.setattr(pipeline, "_process_file_claimed", complete)
+    monkeypatch.setattr("localplaud.local_cleanup.evict_completed_plaud_audio", evict)
+    pipeline.process_file("clean", settings=settings)
+    assert observed == [(FileStatus.done, None)]
+
+
 def test_remove_audio_rejects_live_download_and_clears_expired_claim(monkeypatch, tmp_path):
     client, audio, _wav, _waveform = _client(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, PlaudFile

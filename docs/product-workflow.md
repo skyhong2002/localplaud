@@ -368,6 +368,16 @@ be removed and re-imported later, while local ASR/notes/map/index/history can be
 separately. Plaud metadata/cloud artifacts, Saved notes, Ask history, title/folder/
 tags, and the remote source are preserved by both operations.
 
+Plaud raw audio can also operate as a reclaimable local cache. When
+`store.evict_plaud_audio_after_processing` is enabled, a successfully completed
+Plaud-backed recording releases its downloaded original, transcoded WAV, and
+waveform cache after its processing claim is closed. The recording remains `done`:
+all local transcripts, corrections, speakers, notes, mind map, indexes, provenance,
+and history stay available. Playback, original-audio export, and full reprocessing
+restore the raw audio through the configured read-only Plaud transport under one
+durable download claim. Local uploads are never eligible for this eviction because
+localplaud may hold their only copy.
+
 ### 7. Settings and system health
 
 - Plaud OAuth and last successful sync.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import select, update
@@ -240,27 +241,108 @@ def start_plaud_audio_import(file_id: str, settings: Settings | None = None) -> 
         row = session.get(PlaudFile, file_id)
         if row is None:
             raise LookupError("recording not found")
-        if row.audio_path:
+        path = Path(row.audio_path) if row.audio_path else None
+        if path is not None and path.is_file():
             return {"file_id": file_id, "status": row.status.value, "has_audio": True}
-        if row.status == FileStatus.downloading:
+        if row.audio_path:
+            row.audio_path = None
+            row.wav_path = None
+        lease = row.download_lease_until
+        if lease is not None and lease.tzinfo is None:
+            lease = lease.replace(tzinfo=UTC)
+        if row.status == FileStatus.downloading or (
+            row.download_token and lease is not None and lease > datetime.now(UTC)
+        ):
             return {"file_id": file_id, "status": "downloading", "has_audio": False}
-        if row.origin != "plaud":
+        if (row.origin or "plaud") != "plaud":
             raise ValueError("this recording is not backed by Plaud cloud audio")
-        row.status = FileStatus.downloading
-        row.error = None
+        cache_only = row.status == FileStatus.done
+        if not cache_only:
+            row.status = FileStatus.downloading
+            row.error = None
         raw = dict(row.raw or {})
     threading.Thread(
         target=_run_audio_import,
-        args=(file_id, raw, settings),
+        args=(file_id, raw, settings, cache_only),
         daemon=True,
         name=f"plaud-audio-{file_id[:8]}",
     ).start()
-    return {"file_id": file_id, "status": "downloading", "has_audio": False}
+    return {
+        "file_id": file_id,
+        "status": "downloading" if not cache_only else "done",
+        "has_audio": False,
+    }
 
 
-def _run_audio_import(file_id: str, raw: dict, settings: Settings) -> None:
+def _run_audio_import(
+    file_id: str, raw: dict, settings: Settings, cache_only: bool = False
+) -> None:
     with make_plaud_client(settings.plaud) as client:
-        _download_one(client, file_id, raw, settings, claim_acquired=True)
+        _download_one(
+            client,
+            file_id,
+            raw,
+            settings,
+            claim_acquired=not cache_only,
+            cache_only=cache_only,
+        )
+
+
+def ensure_plaud_audio(
+    file_id: str,
+    settings: Settings | None = None,
+    *,
+    timeout_seconds: float = 180.0,
+) -> Path:
+    """Return local audio, restoring a completed Plaud cache on demand.
+
+    The download claim is durable and shared with imports/polling. Concurrent
+    playback, waveform, export, or reprocess requests therefore wait for one
+    publisher instead of downloading the same recording multiple times.
+    """
+    settings = settings or get_settings()
+    deadline = time.monotonic() + timeout_seconds
+    attempted = False
+    while True:
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            if row is None:
+                raise LookupError("recording not found")
+            path = Path(row.audio_path) if row.audio_path else None
+            if path is not None and path.is_file():
+                return path
+            if (row.origin or "plaud") != "plaud":
+                raise ValueError("recording audio is unavailable and is not backed by Plaud")
+            if row.status != FileStatus.done:
+                raise ValueError("recording audio has not been imported")
+            if row.audio_path and path is not None and not path.exists():
+                row.audio_path = None
+                row.wav_path = None
+            raw = dict(row.raw or {})
+            lease = row.download_lease_until
+            if lease is not None and lease.tzinfo is None:
+                lease = lease.replace(tzinfo=UTC)
+            download_active = bool(
+                row.download_token and lease is not None and lease > datetime.now(UTC)
+            )
+
+        if not download_active and not attempted:
+            attempted = True
+            with make_plaud_client(settings.plaud) as client:
+                if _download_one(
+                    client,
+                    file_id,
+                    raw,
+                    settings,
+                    cache_only=True,
+                    raise_errors=True,
+                ):
+                    continue
+        elif attempted and not download_active:
+            raise RuntimeError("Plaud audio download did not publish a local cache")
+        if time.monotonic() >= deadline:
+            raise TimeoutError("timed out waiting for Plaud audio download")
+        time.sleep(0.25)
 
 
 def audio_import_status(file_id: str) -> dict:
@@ -270,7 +352,7 @@ def audio_import_status(file_id: str) -> dict:
             raise LookupError("recording not found")
         return {
             "file_id": file_id,
-            "status": row.status.value,
-            "has_audio": bool(row.audio_path),
+            "status": "downloading" if row.download_token else row.status.value,
+            "has_audio": bool(row.audio_path and Path(row.audio_path).is_file()),
             "error": row.error,
         }

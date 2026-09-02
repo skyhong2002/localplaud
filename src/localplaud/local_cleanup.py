@@ -146,6 +146,48 @@ def remove_local_audio(file_id: str) -> dict:
     return {"file_id": file_id, "removed_files": removed, "status": "metadata_only"}
 
 
+def evict_completed_plaud_audio(file_id: str) -> dict:
+    """Release completed Plaud audio while preserving every derived artifact.
+
+    Unlike the explicit user cleanup above, automatic cache eviction must not
+    turn a successfully processed recording back into ``metadata_only``. The
+    Plaud recording id remains its durable remote locator, and access paths can
+    restore the bytes later without re-running the pipeline.
+    """
+    from .worker.pipeline import processing_claim_active
+
+    quarantined: list[tuple[Path, Path]] = []
+    try:
+        with session_scope() as session:
+            lock_cost_budget(session, file_id)
+            row = session.get(PlaudFile, file_id)
+            if row is None:
+                raise LookupError("recording not found")
+            if (row.origin or "plaud") != "plaud" or row.status != FileStatus.done:
+                return {"file_id": file_id, "removed_files": 0, "status": row.status.value}
+            if processing_claim_active(row) or row.status == FileStatus.processing:
+                raise ValueError("recording is currently processing")
+            now = datetime.now(UTC)
+            if row.download_token and _lease_active(row.download_lease_until, now):
+                raise ValueError("recording audio is currently in use or downloading")
+            paths = [row.audio_path, row.wav_path]
+            parent = Path(row.audio_path).parent if row.audio_path else None
+            if parent and parent.exists():
+                paths.extend(str(cache) for cache in parent.glob("waveform-*.json"))
+            quarantined = _quarantine(paths)
+            row.audio_path = None
+            row.wav_path = None
+            row.downloaded_at = None
+            row.download_token = None
+            row.download_lease_until = None
+            # Intentionally keep FileStatus.done and the completed stage ledger.
+    except Exception:
+        _restore_quarantine(quarantined)
+        raise
+    removed = _delete_quarantine(quarantined)
+    return {"file_id": file_id, "removed_files": removed, "status": "done"}
+
+
 def delete_local_processing(file_id: str) -> dict:
     result = delete_local_processing_many([file_id])
     return {

@@ -26,18 +26,18 @@
       <button class="icon-action" id="open-share" type="button" aria-label="{{ t('Share') }}" title="{{ t('Share') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span><span class="action-label">{{ t('Share') }}</span></button>
       {% if f.transcript or f.summaries or f.user_notes or f.has_audio %}<button class="icon-action" id="open-export" type="button" aria-label="{{ t('Export') }}" title="{{ t('Export') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span><span class="action-label">{{ t('Export') }}</span></button>{% endif %}
       <details class="recording-more"><summary class="icon-action icon-only" aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></summary><div class="recording-menu">
-        {% if not f.has_audio and f.origin == 'plaud' %}<button id="import-recording-audio" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Import audio') }}</button>{% endif %}
+        {% if not f.has_audio and f.origin == 'plaud' and not f.audio_on_demand %}<button id="import-recording-audio" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Import audio') }}</button>{% endif %}
         {% if f.origin == 'plaud' and not f.is_trash %}<button id="refresh-plaud-cloud" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Refresh Plaud cloud artifacts') }}</button>{% endif %}
         {% if f.local_title %}<button id="clear-local-title" type="button">{{ t('Use Plaud title') }}</button>{% endif %}
         <button id="menu-edit-recording-metadata" type="button">{{ t('Folder and tags') }}</button>
-        {% if f.has_audio %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>{% endif %}
+        {% if f.has_audio or f.audio_on_demand %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>{% endif %}
         <button id="menu-processing-details" type="button">{{ t('Processing details') }}</button>
       </div></details>
     </div>
   </header>
   <div class="detail-body">
   {% include "_filelist.html" %}
-  <section class="pane recording-pane{% if f.has_audio %} has-player{% endif %}"><div class="pane-inner">
+  <section class="pane recording-pane{% if f.has_audio or f.audio_on_demand %} has-player{% endif %}"><div class="pane-inner">
     <div class="recording-header">
       <div class="recording-heading">
         {% if f.local_title %}<div class="sub" style="font-size:11.5px;margin:2px 5px">{{ t('Plaud title') }}: {{ f.cloud_filename or t('Untitled') }}</div>{% endif %}
@@ -63,7 +63,7 @@
       <button id="recording-tab-mindmap" role="tab" aria-controls="recording-panel-mindmap" aria-selected="{{ 'true' if active_tab == 'mindmap' else 'false' }}" tabindex="{{ '0' if active_tab == 'mindmap' else '-1' }}" data-panel="mindmap" class="{% if active_tab == 'mindmap' %}on{% endif %}">{{ t('Mind map') }}</button>
       <button id="recording-tab-ask" role="tab" aria-controls="recording-panel-ask" aria-selected="{{ 'true' if active_tab == 'ask' else 'false' }}" tabindex="{{ '0' if active_tab == 'ask' else '-1' }}" data-panel="ask" class="{% if active_tab == 'ask' %}on{% endif %}">{{ t('Ask') }}</button>
     </div>
-    <div id="reprocess-msg" class="sub" aria-live="polite" style="margin:6px 0; font-size:13px">{% if not f.has_audio and f.origin == 'plaud' %}{{ t('Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.') }}{% endif %}</div>
+    <div id="reprocess-msg" class="sub" aria-live="polite" style="margin:6px 0; font-size:13px">{% if f.audio_on_demand %}{{ t('Processing is complete. Audio is stored in Plaud and downloads automatically when played, exported, or reprocessed.') }}{% elif not f.has_audio and f.origin == 'plaud' %}{{ t('Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.') }}{% endif %}</div>
     {% if f.error %}<div class="recording-alert"><span class="nav-icon" style="--nav-icon:url('/static/lucide/triangle-alert.svg')"></span><div class="recording-alert-body"><strong>{{ t('Processing paused') }}</strong><div class="sub" style="font-size:11.5px;margin-top:3px">{% if f.retry.exhausted %}{{ t('Resume with the active AI profile and a fresh retry budget.') }}{% elif f.retry.next_at %}{{ t('Automatic retry scheduled for') }} {{ f.retry.next_at }}.{% else %}{{ t('Resume the missing or failed stages when ready.') }}{% endif %}</div><details class="technical-error"><summary>{{ t('Technical details') }}</summary><div>{{ f.error }}</div></details></div>{% if f.has_audio %}<div class="recording-alert-actions"><button class="icon-action" hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML">{{ t('Resume') }}</button></div>{% endif %}</div>{% endif %}
 
     <details class="recording-advanced" id="recording-advanced">
@@ -138,7 +138,7 @@
       </div>
     </details>
 
-    {% if f.has_audio %}
+    {% if f.has_audio or f.audio_on_demand %}
     <section id="persistent-player" class="recording-player">
       <audio id="player" preload="metadata" src="/audio/{{ f.id }}"></audio>
       <div class="player-waveform"><canvas id="waveform" height="54" aria-label="{{ t('Audio waveform') }}"></canvas><input id="player-progress" type="range" min="0" max="1000" value="0" aria-label="{{ t('Playback position') }}"></div>
@@ -498,7 +498,7 @@
         <strong>{{ t('Combined archive') }}</strong>
         <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
           {% if f.transcript or f.summaries or f.user_notes %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:7px 11px">{{ t('Markdown archive') }}</a>{% endif %}
-          {% if f.has_audio %}<a class="btn sec" href="/file/{{ f.id }}/export/audio" style="padding:7px 11px">{{ t('Original audio') }}</a>{% endif %}
+          {% if f.has_audio or f.audio_on_demand %}<a class="btn sec" href="/file/{{ f.id }}/export/audio" style="padding:7px 11px">{{ t('Original audio') }}</a>{% endif %}
         </div>
       </section>
       <div id="export-result" class="sub" role="status" aria-live="polite" style="font-size:12px;min-height:17px"></div>

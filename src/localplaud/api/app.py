@@ -11,6 +11,7 @@ import secrets
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from html import escape
 from pathlib import Path
 from threading import Lock
 from typing import Annotated, Literal
@@ -452,6 +453,12 @@ def _file_summary(r: PlaudFile) -> dict:
         "has_summary": any(s.source == "local" for s in r.summaries),
         "has_imported_summary": any(s.source in {"cloud", "plaud"} for s in r.summaries),
         "has_audio": bool(r.audio_path),
+        "audio_on_demand": bool(
+            not r.audio_path
+            and (r.origin or "plaud") == "plaud"
+            and r.status == FileStatus.done
+            and r.local_transcript is not None
+        ),
         "origin": r.origin or "plaud",
         "speakers": transcript.has_speakers if transcript else False,
         "folder": (
@@ -543,6 +550,12 @@ def _file_summaries(session, rows: list[PlaudFile]) -> list[dict]:
                 "has_summary": local_summary,
                 "has_imported_summary": bool(summary_sources[row.id] & {"cloud", "plaud"}),
                 "has_audio": bool(row.audio_path),
+                "audio_on_demand": bool(
+                    not row.audio_path
+                    and (row.origin or "plaud") == "plaud"
+                    and row.status == FileStatus.done
+                    and local_speakers is not None
+                ),
                 "origin": row.origin or "plaud",
                 "speakers": bool(canonical_speakers),
                 "folder": folder_map.get(row.folder_id),
@@ -2281,11 +2294,18 @@ _waveform_jobs_lock = Lock()
 
 @app.get("/audio/{file_id}")
 def audio(file_id: str):
-    with session_scope() as session:
-        r = session.get(PlaudFile, file_id)
-        path = r.audio_path if r else None
-    if not path or not Path(path).exists():
-        return JSONResponse({"error": "audio not downloaded"}, status_code=404)
+    from ..imports import ensure_plaud_audio
+
+    try:
+        path = ensure_plaud_audio(file_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        # Historically this endpoint treats every unavailable audio source as
+        # missing, whether the row exists or not.
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - expose a bounded provider failure
+        raise HTTPException(status_code=502, detail=f"could not restore Plaud audio: {exc}") from exc
     return audio_file_response(path)
 
 
@@ -2293,13 +2313,19 @@ def audio(file_id: str):
 def audio_waveform(file_id: str, buckets: int = 180):
     import subprocess
 
+    from ..imports import ensure_plaud_audio
     from ..waveform import cached_waveform_peaks, waveform_peaks
 
-    with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
-        path = row.audio_path if row else None
-    if not path or not Path(path).exists():
-        raise HTTPException(status_code=409, detail="recording audio has not been imported")
+    try:
+        path = ensure_plaud_audio(file_id)
+    except LookupError as exc:
+        # Preserve the waveform endpoint's historical "audio unavailable"
+        # contract even when the recording id itself does not exist.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"could not restore Plaud audio: {exc}") from exc
     buckets = min(max(int(buckets), 32), 500)
     try:
         peaks = cached_waveform_peaks(path, buckets=buckets)
@@ -2945,6 +2971,12 @@ def file_detail(
             "duration_ms": r.duration_ms,
             "start_time_ms": r.start_time_ms,
             "has_audio": bool(r.audio_path and Path(r.audio_path).exists()),
+            "audio_on_demand": bool(
+                not (r.audio_path and Path(r.audio_path).exists())
+                and (r.origin or "plaud") == "plaud"
+                and r.status == FileStatus.done
+                and r.local_transcript is not None
+            ),
             "is_trash": r.is_trash,
             "has_local_transcript": r.local_transcript is not None,
             "origin": r.origin or "plaud",
@@ -4016,11 +4048,16 @@ def export_mind_map_png(file_id: str):
 
 @app.get("/file/{file_id}/export/audio")
 def export_original_audio(file_id: str):
-    with session_scope() as session:
-        row = session.get(PlaudFile, file_id)
-        path = Path(row.audio_path) if row and row.audio_path else None
-    if path is None or not path.exists():
-        raise HTTPException(status_code=409, detail="recording audio has not been imported")
+    from ..imports import ensure_plaud_audio
+
+    try:
+        path = ensure_plaud_audio(file_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"could not restore Plaud audio: {exc}") from exc
     return audio_file_response(path, filename=f"{file_id}{path.suffix}")
 
 
@@ -4029,6 +4066,7 @@ def reprocess(file_id: str, force: bool = False):
     """Kick off a pipeline re-run for one recording in the background."""
     import threading
 
+    from ..imports import ensure_plaud_audio
     from ..poller.poll import current_daemon_owner
     from ..worker.claims import processing_claim, processing_owner
     from ..worker.pipeline import (
@@ -4042,11 +4080,20 @@ def reprocess(file_id: str, force: bool = False):
 
     with session_scope() as session:
         r = session.get(PlaudFile, file_id)
-        if r is None or not r.audio_path:
+        if r is None:
             return HTMLResponse(
-                '<span style="color:var(--err)">no audio to reprocess</span>', status_code=400
+                '<span style="color:var(--err)">recording not found</span>', status_code=404
             )
         previous_status, previous_error = r.status, r.error
+        has_audio = bool(r.audio_path and Path(r.audio_path).exists())
+    if not has_audio:
+        try:
+            ensure_plaud_audio(file_id)
+        except Exception as exc:  # noqa: BLE001 - provider errors are user-actionable here
+            return HTMLResponse(
+                f'<span style="color:var(--err)">could not restore Plaud audio: {escape(str(exc))}</span>',
+                status_code=502,
+            )
     try:
         with processing_owner(current_daemon_owner()):
             claim_token = claim_processing_work(file_id, require_audio=True)
