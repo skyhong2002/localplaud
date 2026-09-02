@@ -1575,6 +1575,7 @@ def test_completed_remote_audio_renders_player_and_lazy_audio(monkeypatch, tmp_p
     page = c.get("/file/r1")
     assert page.status_code == 200
     assert 'id="persistent-player"' in page.text
+    assert "audio on demand" in page.text.lower()
     assert "Audio is stored in Plaud and downloads automatically" in page.text
     assert 'id="import-recording-audio"' not in page.text
     assert c.get("/audio/r1").content == b"lazy-audio"

@@ -328,6 +328,7 @@ _ZH_HANT_TW = {
     "Local upload": "本機上傳",
     "Plaud · metadata only": "Plaud · 僅中繼資料",
     "Plaud · audio on demand": "Plaud · 音訊隨選下載",
+    "Audio on demand": "音訊隨選下載",
     "retry exhausted": "重試已用盡",
     "retry scheduled": "已排定重試",
     "Retry scheduled": "已排定重試",
