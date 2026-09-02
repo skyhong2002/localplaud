@@ -1122,19 +1122,25 @@ def process_file(
                 raise
     finally:
         _release_processing(file_id, token)
-        if settings.store.evict_plaud_audio_after_processing:
-            try:
-                from ..local_cleanup import evict_completed_plaud_audio
+        _maybe_evict_completed_plaud_audio(file_id, settings)
 
-                result = evict_completed_plaud_audio(file_id)
-                if result["removed_files"]:
-                    log.info(
-                        "Released %d completed Plaud audio cache file(s) for %s",
-                        result["removed_files"],
-                        file_id,
-                    )
-            except Exception:  # noqa: BLE001 - processing result remains valid
-                log.exception("Could not release completed Plaud audio cache for %s", file_id)
+
+def _maybe_evict_completed_plaud_audio(file_id: str, settings: Settings) -> None:
+    """Apply the completed-audio policy after every processing claim is closed."""
+    if not settings.store.evict_plaud_audio_after_processing:
+        return
+    try:
+        from ..local_cleanup import evict_completed_plaud_audio
+
+        result = evict_completed_plaud_audio(file_id)
+        if result["removed_files"]:
+            log.info(
+                "Released %d completed Plaud audio cache file(s) for %s",
+                result["removed_files"],
+                file_id,
+            )
+    except Exception:  # noqa: BLE001 - processing result remains valid
+        log.exception("Could not release completed Plaud audio cache for %s", file_id)
 
 
 def process_derived_artifacts(
@@ -1150,6 +1156,7 @@ def process_derived_artifacts(
     durable claim, resolved profiles, fallback policy, cost guard, attempts,
     provenance, and stage state transitions as the full pipeline.
     """
+    settings = settings or get_settings()
     token = claim_token or _claim_processing(file_id, require_audio=False)
     try:
         with processing_claim(file_id, token):
@@ -1167,10 +1174,11 @@ def process_derived_artifacts(
                     if row.status == FileStatus.processing:
                         row.status = FileStatus.error
                         row.error = str(exc)[:2000]
-                        _schedule_pipeline_retry(row, settings or get_settings())
+                        _schedule_pipeline_retry(row, settings)
                 raise
     finally:
         _release_processing(file_id, token)
+        _maybe_evict_completed_plaud_audio(file_id, settings)
 
 
 def process_mind_map_only(
@@ -1188,6 +1196,7 @@ def process_mind_map_only(
     and the displaced mind map is archived to version history exactly like a
     regeneration.
     """
+    settings = settings or get_settings()
     token = claim_token or _claim_processing(
         file_id, require_audio=False, retry_scope=StageName.mind_map
     )
@@ -1211,12 +1220,13 @@ def process_mind_map_only(
                             run.status = StageStatus.failed
                             run.error = str(exc)[:2000]
                             run.completed_at = datetime.now(UTC)
-                            _schedule_mind_map_retry(row, run, settings or get_settings())
+                            _schedule_mind_map_retry(row, run, settings)
                         else:
-                            _schedule_pipeline_retry(row, settings or get_settings())
+                            _schedule_pipeline_retry(row, settings)
                 raise
     finally:
         _release_processing(file_id, token)
+        _maybe_evict_completed_plaud_audio(file_id, settings)
 
 
 def claim_mind_map_rebuild(file_id: str) -> str:

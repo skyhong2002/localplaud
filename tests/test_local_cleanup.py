@@ -360,6 +360,35 @@ def test_process_file_evicts_only_after_releasing_claim(monkeypatch, tmp_path):
     assert observed == [(FileStatus.done, None)]
 
 
+def test_derived_resume_evicts_after_releasing_claim(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker import pipeline
+
+    settings = get_settings().model_copy(deep=True)
+    settings.store.evict_plaud_audio_after_processing = True
+    with session_scope() as session:
+        session.get(PlaudFile, "clean").status = FileStatus.partial
+    observed = []
+
+    def complete(file_id, **_kwargs):
+        with session_scope() as session:
+            session.get(PlaudFile, file_id).status = FileStatus.done
+
+    def evict(file_id):
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            observed.append((row.status, row.processing_token))
+        return {"removed_files": 1}
+
+    monkeypatch.setattr(pipeline, "_process_derived_artifacts_claimed", complete)
+    monkeypatch.setattr("localplaud.local_cleanup.evict_completed_plaud_audio", evict)
+    pipeline.process_derived_artifacts("clean", settings=settings)
+    assert observed == [(FileStatus.done, None)]
+
+
 def test_remove_audio_rejects_live_download_and_clears_expired_claim(monkeypatch, tmp_path):
     client, audio, _wav, _waveform = _client(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, PlaudFile
