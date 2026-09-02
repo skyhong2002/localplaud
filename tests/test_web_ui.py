@@ -1572,6 +1572,8 @@ def test_completed_remote_audio_renders_player_and_lazy_audio(monkeypatch, tmp_p
     audio.write_bytes(b"lazy-audio")
     monkeypatch.setattr("localplaud.imports.ensure_plaud_audio", lambda _file_id: audio)
 
+    library = c.get("/")
+    assert "Audio on demand" in library.text
     page = c.get("/file/r1")
     assert page.status_code == 200
     assert 'id="persistent-player"' in page.text
