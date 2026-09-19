@@ -85,6 +85,13 @@ kept beside the worker's local secrets rather than committed.
 
 Operational caveats learned the hard way:
 
+- A running WSL container is not proof that CUDA works. If host
+  `/usr/lib/wsl/lib/nvidia-smi` succeeds but the worker container reports
+  `GPU access blocked by the operating system`, first check that no jobs are
+  running, then restart the worker and Ollama containers. Verify CUDA from
+  inside both containers and complete a real transcription through the
+  controller before requeueing exhausted work. Keep the existing model/data
+  volumes and take a consistent controller database backup before bulk recovery.
 - Keep controller and worker on the **same code/protocol revision**. The worker
   bind-mounts `src/` over the image, so a `git pull` on the worker host changes
   behavior without an image rebuild — and forgetting to pull leaves the two

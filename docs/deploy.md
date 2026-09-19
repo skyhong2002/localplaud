@@ -176,6 +176,9 @@ See [ADR 0006](adr/0006-security-posture.md).
 - One-off sync: `docker compose exec <service> localplaud poll --once`
 - The `run` command already polls on a schedule, processes the backlog, and
   serves the UI; nothing else to cron.
+- A failed Plaud sync is reported separately and does not stop processing
+  recordings whose audio is already stored locally. Resume resets exhausted
+  retries while preserving completed artifacts and user edits.
 - To attach a separate GPU worker, configure its dedicated
   `LOCALPLAUD_WORKER_TOKEN`, expose the authenticated worker API through HTTPS,
   then register it in Settings. See [remote-worker.md](remote-worker.md).

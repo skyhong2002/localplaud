@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import select
 import subprocess
 import threading
@@ -141,6 +142,19 @@ class PlaudMcpClient:
         for item in result.get("content", []):
             if item.get("type") == "text":
                 text = item.get("text", "")
+                # Recent official servers wrap recording JSON in a labelled
+                # data block. Decode only that block, never the advisory prose.
+                wrapped = re.search(
+                    r'^\s*<(?P<tag>untrusted-user-data-[A-Za-z0-9-]+)(?: source="plaud-recording")?>\s*'
+                    r"(?P<data>.*?)\s*</(?P=tag)>",
+                    text,
+                    flags=re.DOTALL | re.MULTILINE,
+                )
+                if wrapped:
+                    try:
+                        return json.loads(wrapped.group("data"))
+                    except json.JSONDecodeError as exc:
+                        raise PlaudError(f"Plaud MCP {name} returned invalid wrapped JSON") from exc
                 try:
                     return json.loads(text)
                 except json.JSONDecodeError:
@@ -182,7 +196,10 @@ class PlaudMcpClient:
                 if isinstance(payload, dict)
                 else payload
             )
-            items = items or []
+            if not isinstance(items, list) or any(
+                not isinstance(item, dict) or not item.get("id") for item in items
+            ):
+                raise PlaudError("Plaud MCP list_files returned an invalid recording list")
             for item in items:
                 duration = item.get("duration")
                 start = _parse_iso_ms(item.get("start_at"))

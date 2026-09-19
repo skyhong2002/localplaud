@@ -253,7 +253,6 @@ def run():
     from .db.session import init_db
     from .poller.poll import (
         _DAEMON_HEARTBEAT_INTERVAL_SECONDS,
-        poll_once,
         refresh_daemon_owner,
         register_daemon_owner,
         release_daemon_owner,
@@ -298,8 +297,7 @@ def run():
             return
         try:
             with processing_owner(daemon_owner):
-                poll_once(settings)
-                process_automatic_pending(settings, daemon_owner=daemon_owner)
+                run_processing_cycle(settings, daemon_owner=daemon_owner)
         except Exception as exc:  # noqa: BLE001
             console.print(f"[yellow]cycle error:[/] {exc}")
         finally:
@@ -335,6 +333,17 @@ def run():
                 scheduler.shutdown(wait=True)
         finally:
             release_daemon_owner(daemon_owner)
+
+
+def run_processing_cycle(settings, *, daemon_owner: str | None = None) -> int:
+    """Keep downloaded recordings moving even when Plaud synchronization fails."""
+    from .poller.poll import poll_once
+
+    try:
+        poll_once(settings)
+    except Exception as exc:  # noqa: BLE001 - ingestion must not gate local recovery
+        console.print(f"[yellow]sync error:[/] {exc}")
+    return process_automatic_pending(settings, daemon_owner=daemon_owner)
 
 
 def process_automatic_pending(settings=None, *, daemon_owner: str | None = None) -> int:
