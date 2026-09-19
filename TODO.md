@@ -78,7 +78,9 @@ Full pre-audit engineering detail lives in this file's git history.
 
 - **September recovery follow-up.** The official MCP recording-data envelope is
   decoded without treating its advisory prose as JSON. Plaud sync errors no
-  longer block the local processing queue. WSL container CUDA access must be
+  longer block the local processing queue. MCP `of_` transport IDs resolve to
+  the existing recording IDs, preserving local artifacts instead of importing
+  duplicates. WSL container CUDA access must be
   verified independently of container uptime; continue monitoring the resumed
   backlog until all stage failures are resolved.
 - **Drain the repaired backlog.** The 2026-08-19 repair restored the missing

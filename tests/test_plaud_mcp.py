@@ -12,6 +12,7 @@ def _client_without_process(monkeypatch):
     def initialize(client, cfg):
         client.cfg = cfg
         client._detail_cache = {}
+        client._file_ids = {}
 
     monkeypatch.setattr(PlaudMcpClient, "__init__", initialize)
     return PlaudMcpClient(PlaudMcpConfig())
@@ -100,6 +101,52 @@ def test_mcp_rejects_malformed_wrapped_json(monkeypatch):
     )
     with pytest.raises(PlaudError, match="invalid wrapped JSON"):
         list(client.iter_files())
+
+
+def test_mcp_preserves_local_identity_and_uses_prefixed_transport_id(monkeypatch):
+    client = _client_without_process(monkeypatch)
+    file_id = "a" * 32
+    calls = []
+
+    def call(name, args=None):
+        calls.append((name, args))
+        if name == "list_files":
+            return {"data": [{"id": f"of_{file_id}", "duration": 1000}]}
+        assert args == {"file_id": f"of_{file_id}"}
+        return {"id": f"of_{file_id}"} if name == "get_file" else []
+
+    monkeypatch.setattr(client, "_call_tool", call)
+    assert [item.id for item in client.iter_files()] == [file_id]
+    client.get_detail(file_id)
+    client.get_cloud_notes(file_id)
+    client.get_cloud_transcript_segments(file_id)
+    assert [name for name, _ in calls] == [
+        "list_files", "get_file", "get_note", "get_transcript"
+    ]
+
+
+@pytest.mark.parametrize("error", ["API error: 404", "API error: 401", "timeout"])
+def test_mcp_on_demand_audio_negotiates_only_a_missing_id(monkeypatch, error):
+    from localplaud.plaud.common import PlaudError
+
+    client = _client_without_process(monkeypatch)
+    file_id = "b" * 32
+    calls = []
+
+    def call(name, args=None):
+        calls.append(args["file_id"])
+        if args["file_id"] == file_id:
+            raise PlaudError(error)
+        return {"presigned_url": "https://example.com/audio.mp3"}
+
+    monkeypatch.setattr(client, "_call_tool", call)
+    if "404" in error:
+        assert client.get_detail(file_id)["presigned_url"].endswith("audio.mp3")
+        assert calls == [file_id, f"of_{file_id}"]
+    else:
+        with pytest.raises(PlaudError, match=error):
+            client.get_detail(file_id)
+        assert calls == [file_id]
 
 
 def test_mcp_cloud_artifacts_stay_explicit(monkeypatch):

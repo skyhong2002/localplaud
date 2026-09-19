@@ -20,6 +20,49 @@ def _reset_db(monkeypatch, tmp_path):
     return get_settings(reload=True)
 
 
+def test_mcp_prefixed_ids_reuse_existing_recording_and_user_work(monkeypatch, tmp_path):
+    from localplaud.config import PlaudMcpConfig
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.models import Transcript as TranscriptRow
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.plaud.mcp import PlaudMcpClient
+    from localplaud.poller.poll import sync_file_list
+
+    settings = _reset_db(monkeypatch, tmp_path)
+    init_db()
+    file_id = "c" * 32
+    with session_scope() as session:
+        session.add(PlaudFile(
+            id=file_id, filename="Old cloud title", local_title="My title",
+            status=FileStatus.partial, audio_path="original.mp3",
+        ))
+        session.flush()
+        session.add(TranscriptRow(
+            file_id=file_id, source="local", provider="remote-worker",
+            segments=[{"start": 0, "end": 1, "text": "Local transcript"}],
+        ))
+
+    def initialize(client, cfg):
+        client.cfg = cfg
+        client._file_ids = {}
+        client._detail_cache = {}
+
+    monkeypatch.setattr(PlaudMcpClient, "__init__", initialize)
+    client = PlaudMcpClient(PlaudMcpConfig())
+    monkeypatch.setattr(client, "_call_tool", lambda *args: {
+        "data": [{"id": f"of_{file_id}", "name": "New cloud title", "duration": 1000}]
+    })
+    assert sync_file_list(client, settings) == (0, 0)
+    with session_scope() as session:
+        row = session.query(PlaudFile).one()
+        assert row.id == file_id
+        assert row.local_title == "My title"
+        assert row.audio_path == "original.mp3"
+        assert row.status == FileStatus.partial
+        assert row.local_transcript.source == "local"
+        assert row.local_transcript.segments[0]["text"] == "Local transcript"
+
+
 def test_reset_inflight_recovers_crashed_rows(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import (

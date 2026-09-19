@@ -41,6 +41,7 @@ class PlaudMcpClient:
         self._next_id = 0
         self._lock = threading.Lock()
         self._detail_cache: dict[str, dict] = {}
+        self._file_ids: dict[str, str] = {}
         try:
             self._process = subprocess.Popen(
                 [cfg.command, *cfg.args],
@@ -204,8 +205,13 @@ class PlaudMcpClient:
                 duration = item.get("duration")
                 start = _parse_iso_ms(item.get("start_at"))
                 duration_ms = int(duration) if duration not in (None, "") else None
+                wire_id = item["id"]
+                # MCP now prefixes official file IDs with of_. Preserve the
+                # established database identity and all its local revisions.
+                file_id = wire_id[3:] if re.fullmatch(r"of_[0-9a-f]{32}", wire_id) else wire_id
+                self._file_ids[file_id] = wire_id
                 yield PlaudFileDTO(
-                    id=item["id"],
+                    id=file_id,
                     filename=item.get("name") or "",
                     duration=duration_ms,
                     start_time=start,
@@ -218,9 +224,25 @@ class PlaudMcpClient:
                 break
             page += 1
 
+    def _call_file_tool(self, name: str, file_id: str) -> Any:
+        wire_id = self._file_ids.get(file_id, file_id)
+        try:
+            return self._call_tool(name, {"file_id": wire_id})
+        except PlaudError as exc:
+            # On-demand audio can be fetched before this client lists files.
+            # Only retry the known namespace change after a not-found reply;
+            # authentication and other failures must retain their real cause.
+            if wire_id != file_id or not re.fullmatch(r"[0-9a-f]{32}", file_id):
+                raise
+            if not re.search(r"\b404\b", str(exc)):
+                raise
+            result = self._call_tool(name, {"file_id": f"of_{file_id}"})
+            self._file_ids[file_id] = f"of_{file_id}"
+            return result
+
     def get_detail(self, file_id: str) -> dict:
         if file_id not in self._detail_cache:
-            detail = self._call_tool("get_file", {"file_id": file_id})
+            detail = self._call_file_tool("get_file", file_id)
             if not isinstance(detail, dict):
                 raise PlaudError(f"Plaud MCP returned invalid detail for {file_id}")
             self._detail_cache[file_id] = detail
@@ -268,7 +290,7 @@ class PlaudMcpClient:
         detail = detail if detail is not None else self.get_detail(file_id)
         if "note_list" in detail:
             return _cloud_notes(detail)
-        result = self._call_tool("get_note", {"file_id": file_id})
+        result = self._call_file_tool("get_note", file_id)
         # The MCP get_note tool answers with raw note_list entries.
         if isinstance(result, list):
             return _cloud_notes({"note_list": result, "source_list": []})
@@ -303,7 +325,7 @@ class PlaudMcpClient:
         if isinstance(detail, dict) and detail.get("source_list"):
             return _transcript_from_source_list(detail["source_list"], context=file_id)
         # The MCP get_transcript tool answers with the raw source_list entries.
-        result = self._call_tool("get_transcript", {"file_id": file_id})
+        result = self._call_file_tool("get_transcript", file_id)
         if isinstance(result, list):
             return _transcript_from_source_list(result, context=file_id)
         if isinstance(result, dict):
