@@ -99,6 +99,8 @@ def test_template_leaks_cannot_be_saved_or_hidden_by_note_subheadings():
         "Autopilot 模板使用示例",
         "Autopilot 智能總結：會議與反思",
         "Autopilot 總結：音樂理論與練習指導",
+        "Autopilot: 智能內容結構匹配",
+        "Autopilot: Intelligent Structure Matching",
         "內容智能匹配總結結構",
         "會議總結：新版部署",
         "Content Summary: Deployment",

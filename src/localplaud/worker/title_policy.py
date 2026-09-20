@@ -27,8 +27,8 @@ def has_template_title_leak(title: object) -> bool:
     text = str(title or "").strip().lstrip("# *`\"'").casefold()
     return bool(
         re.match(
-            r"(?:plaud[ :：-]*)?autopilot\s*(?:模板|範本|模版|智能|智慧|總結|总结|摘要|"
-            r"使用示例|使用說明|使用说明|使用指南|template|summary)", text
+            r"(?:plaud[ :：-]*)?autopilot\s*[:：-]?\s*(?:模板|範本|模版|智能|智慧|總結|总结|摘要|"
+            r"使用示例|使用說明|使用说明|使用指南|template|summary|intelligent structure)", text
         )
         or re.match(r"(?:會議|会议|內容|内容|錄音|录音)?(?:總結|总结|摘要)\s*[:：]", text)
         or re.match(r"(?:meeting |recording |content )?summary\s*:", text)
