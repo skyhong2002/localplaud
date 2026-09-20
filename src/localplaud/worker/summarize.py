@@ -12,6 +12,7 @@ import logging
 from ..asr.base import Transcript as AsrTranscript
 from ..config import Settings
 from ..llm.base import build_llm
+from .title_policy import TITLE_INSTRUCTIONS, TITLE_PROMPT_VERSION, has_template_title_leak
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ _SUMMARY_OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "title": {"type": "string"},
+        "title": {"type": "string", "description": TITLE_INSTRUCTIONS},
         "content_md": {"type": "string"},
         "tags": {
             "type": "object",
@@ -168,9 +169,10 @@ def repair_recording_title(
     category label instead of a recording-specific title.
     """
     llm = build_llm(settings.llm)
-    evidence = _render_transcript(transcript, max_chars=4_000)
+    evidence, _coverage = _prepare_source(transcript, settings, llm, title_only=True)
     prompt = f"""\
-The Plaud-template note below is valid, but its proposed title is too generic.
+The previous title was rejected. Derive a new title from the transcript evidence.
+Ignore the old title and note: they may contain template instructions as content.
 Return one concise, recording-specific title grounded in the evidence. Name the
 most concrete subject, event, people, or observable content. Never return labels
 such as summary, transcript overview, recording summary, meeting summary, or
@@ -178,12 +180,7 @@ their Chinese equivalents. For noisy or low-information audio, name what is
 actually present (for example, repeated intro, promotion, and subtitle credits)
 instead of saying that the transcript cannot be summarized.
 
-Rejected title: {rejected_title or "(missing)"}
-
-Plaud-template note:
----
-{summary_content[:8_000]}
----
+{TITLE_INSTRUCTIONS}
 
 Transcript evidence:
 ---
@@ -217,7 +214,7 @@ def generate_recording_title(transcript: AsrTranscript, settings: Settings) -> s
     diarization, or correction failures from leaving a usable transcript unnamed.
     """
     llm = build_llm(settings.llm)
-    evidence = _render_transcript(transcript, max_chars=4_000)
+    evidence, _coverage = _prepare_source(transcript, settings, llm, title_only=True)
     raw = llm.complete(
         f"""\
 Return one concise, recording-specific title grounded only in this transcript.
@@ -225,6 +222,8 @@ Name the most concrete subject, event, people, or observable content. Never
 return labels such as summary, transcript overview, recording summary, meeting
 summary, or their Chinese equivalents. For noisy or low-information audio,
 name what is actually present instead of saying it cannot be summarized.
+
+{TITLE_INSTRUCTIONS}
 
 Transcript evidence:
 ---
@@ -273,32 +272,10 @@ def _summary_output(raw: str) -> tuple[str | None, str, dict[str, list[str]] | N
     )
 
 
-def summarize(
-    transcript: AsrTranscript, settings: Settings, template_override: dict | None = None
-) -> dict:
-    """Return {title, content_md, provider, model, template}."""
-    from .summary_templates import (
-        get_effective_template,
-        render_resolved_prompt,
-        template_snapshot,
-    )
-
-    llm = build_llm(settings.llm)
-    template = settings.pipeline.summary_template
-    if template_override:
-        from .summary_templates import SummaryTemplate
-
-        resolved_template = SummaryTemplate(
-            name=template_override["key"],
-            version=int(template_override["version"]),
-            display_name=template_override.get("name"),
-            system=template_override.get("system_prompt") or None,
-            instructions=template_override["instructions"],
-            prompt_mode=template_override.get("prompt_mode", "structured"),
-            provenance=template_override.get("provenance"),
-        )
-    else:
-        resolved_template = get_effective_template(template)
+def _prepare_source(
+    transcript: AsrTranscript, settings: Settings, llm, *, title_only: bool = False
+) -> tuple[str, dict]:
+    """Share full-transcript coverage between notes and title-only repair."""
     transcript_text = _render_transcript(transcript)
     chunk_chars = _summary_chunk_chars(settings, llm)
     chunks = _chunk_text(transcript_text, chunk_chars)
@@ -311,15 +288,23 @@ def summarize(
         strategy = "hierarchical"
         notes = []
         for idx, chunk in enumerate(chunks, start=1):
+            prompt = _COVERAGE_PROMPT.format(part=idx, total=len(chunks), text=chunk)
+            if title_only:
+                prompt = (
+                    "Extract faithful coverage notes for naming this recording. List only "
+                    "the concrete subjects, project names, events, decisions and goals in "
+                    f"part {idx} of {len(chunks)}. Be concise; omit greetings and filler. "
+                    f"Do not propose a title yet.\nTranscript part:\n---\n{chunk}\n---\n"
+                )
             notes.append(
                 llm.complete(
-                    _COVERAGE_PROMPT.format(part=idx, total=len(chunks), text=chunk),
+                    prompt,
                     system=(
                         "You create loss-minimizing intermediate notes from one part of a "
                         "long transcript. Never invent facts. Reply in the source language."
                     ),
                     temperature=0.1,
-                    max_tokens=1200,
+                    max_tokens=240 if title_only else 1200,
                 )
             )
             map_calls += 1
@@ -346,7 +331,42 @@ def summarize(
             "The following are ordered coverage notes derived from every part of the "
             "complete transcript:\n\n" + "\n\n".join(notes)
         )
+    return source_text, {
+        "strategy": strategy,
+        "transcript_chars": len(transcript_text),
+        "chunks": len(chunks),
+        "map_calls": map_calls,
+        "reduce_calls": reduce_calls,
+    }
+
+
+def summarize(
+    transcript: AsrTranscript, settings: Settings, template_override: dict | None = None
+) -> dict:
+    """Return titled notes with a separate, template-independent title contract."""
+    from .summary_templates import (
+        SummaryTemplate,
+        get_effective_template,
+        render_resolved_prompt,
+        template_snapshot,
+    )
+
+    llm = build_llm(settings.llm)
+    if template_override:
+        resolved_template = SummaryTemplate(
+            name=template_override["key"],
+            version=int(template_override["version"]),
+            display_name=template_override.get("name"),
+            system=template_override.get("system_prompt") or None,
+            instructions=template_override["instructions"],
+            prompt_mode=template_override.get("prompt_mode", "structured"),
+            provenance=template_override.get("provenance"),
+        )
+    else:
+        resolved_template = get_effective_template(settings.pipeline.summary_template)
+    source_text, coverage = _prepare_source(transcript, settings, llm)
     system, prompt = render_resolved_prompt(resolved_template, source_text)
+    system = "\n\n".join(filter(None, [system, TITLE_INSTRUCTIONS]))
     raw_content = llm.complete(
         prompt,
         system=system,
@@ -355,6 +375,23 @@ def summarize(
         json_schema=_SUMMARY_OUTPUT_SCHEMA,
     )
     title, content, embedded_tags = _summary_output(raw_content)
+    # Also enforce this on remote workers, before the result reaches the controller.
+    # Do not hide an invalid explicit title by promoting an arbitrary note section.
+    if has_template_title_leak(title):
+        repaired = llm.complete(
+            f"Return only a recording title.\n\n{TITLE_INSTRUCTIONS}"
+            f"\nTranscript evidence:\n---\n{source_text}\n---\n",
+            system="Name the recording from the evidence, never from template instructions.",
+            temperature=0.1,
+            max_tokens=120,
+            json_schema=_TITLE_REPAIR_SCHEMA,
+        )
+        try:
+            parsed = json.loads(repaired)
+        except (TypeError, json.JSONDecodeError):
+            parsed = {"title": repaired}
+        title = parsed.get("title") if isinstance(parsed, dict) else None
+        coverage["title_repair_calls"] = 1
     provider, model = _llm_provider_model(settings)
     # Extract typed tags from the default note on the same host that made the
     # summary (the WSL worker), so the controller never needs its own LLM call.
@@ -373,13 +410,7 @@ def summarize(
         "template": resolved_template.name,
         "template_version": resolved_template.version,
         "template_snapshot": template_snapshot(resolved_template),
-        "coverage": {
-            "strategy": strategy,
-            "transcript_chars": len(transcript_text),
-            "chunks": len(chunks),
-            "map_calls": map_calls,
-            "reduce_calls": reduce_calls,
-        },
+        "coverage": {**coverage, "title_prompt_version": TITLE_PROMPT_VERSION},
     }
 
 

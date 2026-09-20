@@ -280,6 +280,57 @@ def test_title_repair_uses_typed_title_only_contract(monkeypatch):
     )
 
     assert title == "重複片頭、欄目推廣與字幕署名"
-    assert "Rejected title: 轉錄內容概覽" in llm.calls[0][0]
+    assert "轉錄內容概覽" not in llm.calls[0][0]
+    assert "優優獨播劇場" in llm.calls[0][0]
     assert llm.calls[0][1]["json_schema"]["required"] == ["title"]
     assert llm.calls[0][1]["max_tokens"] == 120
+
+
+def test_title_repair_covers_tail_and_excludes_contaminated_note(monkeypatch):
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import repair_recording_title
+
+    calls = []
+
+    class Llm:
+        def complete(self, prompt, **kwargs):
+            calls.append(prompt)
+            if prompt.startswith("Extract faithful coverage notes"):
+                return "launch decision" if "TAIL_DECISION" in prompt else "greeting"
+            return '{"title":"Launch rollout decision"}'
+
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
+    title = repair_recording_title(
+        _transcript(Segment(text="hello " * 900 + "TAIL_DECISION", start=0, end=90)),
+        "CONTAMINATED_TEMPLATE_DESCRIPTION", "Autopilot 模板總結", Settings(),
+    )
+    assert title == "Launch rollout decision"
+    assert "TAIL_DECISION" in "".join(calls)
+    assert "CONTAMINATED_TEMPLATE_DESCRIPTION" not in "".join(calls)
+
+
+def test_summary_repairs_template_title_without_rewriting_note(monkeypatch):
+    import json
+
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import summarize
+
+    calls = []
+    note = "## 決策\n週五部署新版。"
+
+    class Llm:
+        def complete(self, prompt, **kwargs):
+            calls.append((prompt, kwargs))
+            if len(calls) == 1:
+                return json.dumps({"title": "Autopilot 模板總結：部署", "content_md": note,
+                                   "tags": {"topics": ["部署"], "people": [], "orgs": []}})
+            return '{"title":"新版部署：週五上線與驗收安排"}'
+
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
+    result = summarize(_transcript(Segment(text="週五部署新版", start=0, end=1)), Settings())
+    assert result["title"] == "新版部署：週五上線與驗收安排"
+    assert result["content_md"] == note
+    assert result["coverage"]["title_repair_calls"] == 1
+    assert result["coverage"]["title_prompt_version"] == "recording-title/v2"
+    assert "Template names and descriptions are instructions" in calls[0][1]["system"]
+    assert "Autopilot 模板提供" not in calls[1][0]

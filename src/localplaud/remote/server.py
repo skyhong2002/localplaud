@@ -175,9 +175,19 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
             "model": settings.diarize.model,
         }
     elif request.stage == JobStage.summarize:
-        from ..worker.summarize import summarize
+        from ..worker.summarize import _llm_provider_model, generate_recording_title, summarize
+        from ..worker.title_policy import TITLE_PROMPT_VERSION
 
-        payload = summarize(transcript, settings, request.options.get("template"))
+        if request.options.get("title_only"):
+            provider, model = _llm_provider_model(settings)
+            payload = {
+                "title": generate_recording_title(transcript, settings),
+                "provider": provider,
+                "model": model,
+                "title_prompt_version": TITLE_PROMPT_VERSION,
+            }
+        else:
+            payload = summarize(transcript, settings, request.options.get("template"))
     elif request.stage == JobStage.mind_map:
         from ..worker.mindmap import generate_mind_map
 

@@ -354,6 +354,13 @@ other generic headings are not accepted as recording titles; they remain due for
 AI regeneration. A manual override remains display-preferred without deleting the
 AI title.
 
+The recording title follows a separate versioned contract: concrete subject/event,
+optionally a colon and distinctive issues or decisions, using Taiwan Traditional
+Chinese for Chinese audio. Template descriptions are never source evidence.
+Template-prefixed titles are rejected even if followed by a plausible topic; a
+title-only retry uses full-transcript coverage rather than a contaminated note or
+the opening few minutes. Stored template snapshots remain unchanged.
+
 Folder and tag metadata is editable directly from the recording header through the
 same atomic organization contract used by Library bulk actions. Counts and filters
 update immediately, and clearing organization remains entirely local.

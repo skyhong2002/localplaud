@@ -59,6 +59,24 @@ def _request(key="same-job"):
     }
 
 
+def test_title_only_worker_returns_provenance_without_generating_notes(monkeypatch):
+    import base64
+
+    from localplaud.config import Settings
+    from localplaud.remote import server
+    from localplaud.worker import summarize
+
+    monkeypatch.setattr(server, "get_settings", lambda: Settings())
+    monkeypatch.setattr(summarize, "generate_recording_title", lambda *_: "新版部署安排")
+    monkeypatch.setattr(summarize, "summarize", lambda *_: pytest.fail("notes must not run"))
+    request = _request("title-only")
+    request["options"] = {"title_only": True}
+    artifact = server._execute(JobSubmitRequest(**request))[0]
+    result = json.loads(base64.b64decode(artifact["data_base64"]))
+    assert result == {"title": "新版部署安排", "provider": "ollama", "model": "test",
+                      "title_prompt_version": "recording-title/v2"}
+
+
 def test_worker_auth_handshake_idempotency_and_persistence(monkeypatch, tmp_path):
     import localplaud.remote.server as server
     from localplaud.db.models import RemoteJob

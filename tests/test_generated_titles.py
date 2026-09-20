@@ -91,6 +91,24 @@ def test_display_title_precedence_and_source():
     assert empty.title_source == "id"
 
 
+def test_template_leaks_cannot_be_saved_or_hidden_by_note_subheadings():
+    from localplaud.worker.pipeline import _clean_generated_title, _generated_title_candidate
+
+    for bad in (
+        "Autopilot 模板總結：系統設計與架構",
+        "Autopilot 模板使用示例",
+        "Autopilot 智能總結：會議與反思",
+        "Autopilot 總結：音樂理論與練習指導",
+        "內容智能匹配總結結構",
+        "會議總結：新版部署",
+        "Content Summary: Deployment",
+    ):
+        assert _clean_generated_title(bad) is None
+        assert _generated_title_candidate(bad, "## 發布時程\n- 週五") is None
+    assert _clean_generated_title("Tesla Autopilot 駕駛測試") == "Tesla Autopilot 駕駛測試"
+    assert _clean_generated_title("Autopilot 駕駛輔助系統測試") == "Autopilot 駕駛輔助系統測試"
+
+
 def test_apply_generated_title_sets_provenance_when_unnamed(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
     from localplaud.config import get_settings

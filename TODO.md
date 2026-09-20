@@ -233,3 +233,9 @@ this file's git history (pre-2026-07-31 versions).
 - Caddy vhost: block for `plaud.observe.tw` in `/usr/local/etc/caddy/Caddyfile`;
   Caddy terminates HTTPS while localplaud owns `/login` and browser sessions.
 - Session/creds: `~/Projects/localplaud/.env` (git-ignored)
+# Recording title quality (2026-09-20)
+
+- [x] Separate title instructions from note-template descriptions; reject template
+  prefixes and retry from full-transcript evidence on controller and remote worker.
+- [x] Add reviewable, resumable title-only repair plans with input/provenance checks
+  and preservation of manual names, notes, audio, and processing state.

@@ -2272,6 +2272,7 @@ def _run_derived_stages(
                                 "requests": (
                                     (result.get("coverage") or {}).get("map_calls", 0)
                                     + (result.get("coverage") or {}).get("reduce_calls", 0)
+                                    + (result.get("coverage") or {}).get("title_repair_calls", 0)
                                     + 1
                                     + title_repair_calls
                                 ),
@@ -2821,6 +2822,7 @@ def _clean_generated_title(raw: object) -> str | None:
     heading marks and wrapping quotes/brackets, collapse whitespace, convert
     to Traditional Chinese, and cap length. Returns None when nothing usable."""
     from ..zh import to_traditional
+    from .title_policy import has_template_title_leak
 
     if not raw or not str(raw).strip():
         return None
@@ -2893,6 +2895,7 @@ def _clean_generated_title(raw: object) -> str | None:
         or generic_summary_suffix
         or repeated_noise
         or unbalanced_quotes
+        or has_template_title_leak(text)
     ):
         return None
     return text or None
@@ -2906,6 +2909,10 @@ def _generated_title_candidate(title: object, content_md: object = None) -> str 
     deliberately not promoted: older small-model summaries often began with
     "以下是根據…" and that boilerplate became an unusable 100-character title.
     """
+    from .title_policy import has_template_title_leak
+
+    if has_template_title_leak(title):
+        return None
     explicit = _clean_generated_title(title)
     if explicit:
         return explicit

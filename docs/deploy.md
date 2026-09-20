@@ -185,6 +185,26 @@ See [ADR 0006](adr/0006-security-posture.md).
 
 ## Updating
 
+### Repair existing generated titles
+
+After updating both the controller and any remote workers, plan title-only repairs
+with the recording's existing local/remote Ollama summary profile:
+
+```bash
+python -m localplaud.title_repair --plan data/backups/title-repairs.jsonl
+# Optionally include recent automatic titles, even when syntactically valid:
+python -m localplaud.title_repair --plan data/backups/title-repairs.jsonl --since 2026-09-19
+# Review the private JSONL's before/title pairs, then apply:
+python -m localplaud.title_repair --apply data/backups/title-repairs.jsonl
+```
+
+Planning resumes from the private JSONL and does not rename files. Keep that file
+as title revision history: it records prior values, input lineage/hash, provider,
+model, and prompt version. It contains private titles and must not be committed.
+Application skips manual renames, active processing, changed titles/transcripts,
+and already-applied entries. Audio, notes, ASR, indexes, and notification state are
+untouched. Unsupported provider profiles are skipped, never silently replaced.
+
 ```bash
 git pull
 docker compose --profile <p> up -d --build
