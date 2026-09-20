@@ -279,12 +279,25 @@ def capabilities():
 
 @router.post("/jobs", response_model=JobResponse, dependencies=[Depends(_authorize)])
 def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
+    from ..worker.title_policy import TITLE_PROMPT_VERSION
+
+    title_only = request.stage == JobStage.summarize and request.options.get("title_only")
+    if title_only and request.options.get("title_prompt_version", TITLE_PROMPT_VERSION) != TITLE_PROMPT_VERSION:
+        raise HTTPException(status_code=409, detail="title prompt version is unsupported")
     with session_scope() as session:
         existing = session.scalar(
             select(RemoteJob).where(RemoteJob.idempotency_key == request.idempotency_key)
         )
         if existing is not None:
-            if existing.status != JobStatus.failed:
+            outdated_title = False
+            if title_only and existing.status == JobStatus.succeeded:
+                try:
+                    artifact = next(a for a in existing.artifacts if a["name"] == "result.json")
+                    payload = json.loads(base64.b64decode(artifact["data_base64"]))
+                    outdated_title = payload.get("title_prompt_version") != TITLE_PROMPT_VERSION
+                except (KeyError, StopIteration, ValueError):
+                    outdated_title = True
+            if existing.status != JobStatus.failed and not outdated_title:
                 return _response(existing)
             # A failure is not a durable result. Re-run the job on resubmit so
             # one transient error (an LLM timeout, an OOM) can't poison the

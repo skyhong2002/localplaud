@@ -204,6 +204,10 @@ model, and prompt version. It contains private titles and must not be committed.
 Application skips manual renames, active processing, changed titles/transcripts,
 and already-applied entries. Audio, notes, ASR, indexes, and notification state are
 untouched. Unsupported provider profiles are skipped, never silently replaced.
+If review finds no usable transcript evidence, an entry may explicitly set
+`action` to `restore-source-name`, `title` to `null`, and a nonempty
+`review_reason`. This clears only the generated-title fields and restores the
+existing source name/date, with the same concurrency checks and saved old title.
 
 ```bash
 git pull

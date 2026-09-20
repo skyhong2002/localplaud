@@ -35,6 +35,10 @@ def _before(row) -> dict:
     }
 
 
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 def plan_repair(file_id: str, settings) -> dict:
     """Generate a candidate without changing any recording or processing state."""
     with session_scope() as session:
@@ -48,6 +52,15 @@ def plan_repair(file_id: str, settings) -> dict:
                 Summary.template != "mind_map", Summary.title == row.generated_title,
             ).order_by(Summary.created_at.desc()).limit(1)
         )
+        if note is None:
+            # Early titles, normalized headings and prior title-only repairs do
+            # not necessarily equal Summary.title. Use the durable primary slot.
+            primary = next((run for run in row.stage_runs if run.stage == "summarize"), None)
+            key = ((primary.detail or {}).get("template") if primary else None)
+            key = key or row.note_template_key or settings.pipeline.summary_template
+            note = session.scalar(select(Summary).where(
+                Summary.file_id == file_id, Summary.source == "local", Summary.template == key,
+            ).order_by(Summary.created_at.desc()).limit(1))
         if note is None or not note.resolved_profile_snapshot:
             raise ValueError("no matching local note with a resolved provider profile")
         snapshot = note.resolved_profile_snapshot
@@ -91,14 +104,19 @@ def apply_repair(item: dict, settings) -> bool:
     """Apply a reviewed candidate only while its title and source remain current."""
     if item.get("schema") != "localplaud-title-repair/v1" or item.get("source") != "local":
         raise ValueError("unsupported repair record")
+    restore_source_name = item.get("action") == "restore-source-name"
     title = pipeline._clean_generated_title(item.get("title"))
-    if not title:
+    if restore_source_name:
+        if item.get("title") is not None or not item.get("review_reason"):
+            raise ValueError("restoring a source name requires a review reason and null title")
+    elif not title:
         raise ValueError("invalid repair title")
     independent = settings.model_copy(deep=True)
     independent.pipeline.artifact_mode = "independent"
     with session_scope() as session:
-        if session.bind.dialect.name == "sqlite":
-            session.execute(text("BEGIN IMMEDIATE"))
+        if session.bind.dialect.name != "sqlite":
+            raise ValueError("title repair application currently requires SQLite")
+        session.execute(text("BEGIN IMMEDIATE"))
         row = session.get(PlaudFile, item["file_id"])
         if (row is None or row.local_title or row.is_trash or row.processing_token
                 or _before(row) != item["before"]):
@@ -125,8 +143,12 @@ def apply_repair(item: dict, settings) -> bool:
                 PlaudFile.generated_title == row.generated_title,
                 PlaudFile.generated_title_at == row.generated_title_at,
                 PlaudFile.processing_token.is_(None),
-            ).values(generated_title=title, generated_title_provider=item["provider"],
-                     generated_title_model=item["model"], generated_title_at=datetime.now(UTC))
+            ).values(
+                generated_title=title,
+                generated_title_provider=None if restore_source_name else item["provider"],
+                generated_title_model=None if restore_source_name else item["model"],
+                generated_title_at=None if restore_source_name else datetime.now(UTC),
+            )
         )
         return result.rowcount == 1
 
@@ -158,7 +180,8 @@ def main():
                if row.generated_title and not row.local_title and not row.is_trash
                and not row.processing_token and row.id not in done
                and (not pipeline._clean_generated_title(row.generated_title)
-                    or (args.since and row.generated_title_at and row.generated_title_at >= args.since))]
+                    or (args.since and row.generated_title_at
+                        and _utc(row.generated_title_at) >= _utc(args.since)))]
     if args.limit:
         ids = ids[:args.limit]
     print(f"Planning {len(ids)} recording titles", flush=True)

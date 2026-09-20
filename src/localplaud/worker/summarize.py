@@ -393,20 +393,23 @@ def summarize(
     # Also enforce this on remote workers, before the result reaches the controller.
     # Do not hide an invalid explicit title by promoting an arbitrary note section.
     if has_template_title_leak(title):
-        repaired = llm.complete(
-            f"Return only a recording title.\n\n{TITLE_INSTRUCTIONS}"
-            f"\nTranscript evidence:\n---\n{source_text}\n---\n",
-            system="Name the recording from the evidence, never from template instructions.",
-            temperature=0.1,
-            max_tokens=120,
-            json_schema=_TITLE_REPAIR_SCHEMA,
-        )
-        try:
-            parsed = json.loads(repaired)
-        except (TypeError, json.JSONDecodeError):
-            parsed = {"title": repaired}
-        title = parsed.get("title") if isinstance(parsed, dict) else None
         coverage["title_repair_calls"] = 1
+        try:
+            repaired = llm.complete(
+                f"Return only a recording title.\n\n{TITLE_INSTRUCTIONS}"
+                f"\nTranscript evidence:\n---\n{source_text}\n---\n",
+                system="Name the recording from the evidence, never from template instructions.",
+                temperature=0.1,
+                max_tokens=120,
+                json_schema=_TITLE_REPAIR_SCHEMA,
+            )
+            try:
+                parsed = json.loads(repaired)
+            except (TypeError, json.JSONDecodeError):
+                parsed = {"title": repaired}
+            title = parsed.get("title") if isinstance(parsed, dict) else None
+        except Exception as exc:  # noqa: BLE001 - title failure must preserve usable notes
+            coverage["title_repair_error"] = type(exc).__name__
     provider, model = _llm_provider_model(settings)
     # Extract typed tags from the default note on the same host that made the
     # summary (the WSL worker), so the controller never needs its own LLM call.

@@ -77,6 +77,35 @@ def test_title_only_worker_returns_provenance_without_generating_notes(monkeypat
                       "title_prompt_version": "recording-title/v4"}
 
 
+def test_worker_rejects_unsupported_title_version_and_refreshes_old_cache(monkeypatch, tmp_path):
+    import base64
+
+    from localplaud.remote import server
+    from localplaud.worker.title_policy import TITLE_PROMPT_VERSION
+
+    client = _client(monkeypatch, tmp_path)
+    headers = {"authorization": "Bearer worker-secret"}
+    request = _request("versioned-title")
+    request["options"] = {"title_only": True, "title_prompt_version": "future"}
+    assert client.post("/api/worker/v1/jobs", headers=headers, json=request).status_code == 409
+    request["options"]["title_prompt_version"] = TITLE_PROMPT_VERSION
+    versions = iter(["old", TITLE_PROMPT_VERSION])
+    monkeypatch.setattr(server, "_execute", lambda _: [server._artifact(
+        "result.json", "application/json", json.dumps({"title": "Launch plan",
+                                                       "title_prompt_version": next(versions)}).encode()
+    )])
+    first = client.post("/api/worker/v1/jobs", headers=headers, json=request).json()
+    second = client.post("/api/worker/v1/jobs", headers=headers, json=request).json()
+    assert first["job_id"] == second["job_id"]
+    from localplaud.db.models import RemoteJob
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        row = session.get(RemoteJob, first["job_id"])
+        payload = json.loads(base64.b64decode(row.artifacts[0]["data_base64"]))
+        assert payload["title_prompt_version"] == TITLE_PROMPT_VERSION
+
+
 def test_worker_auth_handshake_idempotency_and_persistence(monkeypatch, tmp_path):
     import localplaud.remote.server as server
     from localplaud.db.models import RemoteJob

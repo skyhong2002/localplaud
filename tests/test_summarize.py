@@ -357,3 +357,25 @@ def test_title_evidence_ignores_short_asr_loops_but_preserves_substantive_tail(m
     assert "字幕署名" not in prompts[0]
     assert "牛肉清湯" in prompts[0]
     assert "下週表演" in prompts[0]
+
+
+def test_title_only_failure_returns_usable_note_for_persistence(monkeypatch):
+    import json
+
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import summarize
+
+    class Llm:
+        calls = 0
+
+        def complete(self, prompt, **kwargs):
+            self.calls += 1
+            if self.calls > 1:
+                raise TimeoutError("unavailable")
+            return json.dumps({"title": "Autopilot 模板總結", "content_md": "## 決策\n週五發布",
+                               "tags": {"topics": [], "people": [], "orgs": []}})
+
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
+    result = summarize(_transcript(Segment(text="週五發布", start=0, end=1)), Settings())
+    assert result["content_md"] == "## 決策\n週五發布"
+    assert result["coverage"]["title_repair_error"] == "TimeoutError"

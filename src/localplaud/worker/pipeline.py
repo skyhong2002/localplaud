@@ -2237,14 +2237,28 @@ def _run_derived_stages(
                         if not _generated_title_candidate(
                             result.get("title"), result.get("content_md")
                         ):
+                            # Notes are already useful even if the independent
+                            # title request fails. Persist them before that request.
+                            _persist_summary(file_id, result, transcript_lineage)
                             if _remote_selection(candidate, "summarize"):
-                                raise RuntimeError("AI summary returned no usable recording title")
-                            result["title"] = summarize.repair_recording_title(
-                                transcript,
-                                result.get("content_md") or "",
-                                result.get("title"),
-                                candidate_settings,
-                            )
+                                from .title_policy import TITLE_PROMPT_VERSION
+
+                                repaired = _run_remote_stage(
+                                    file_id, candidate, "summarize",
+                                    [_remote_json_input("transcript", _transcript_payload(transcript))],
+                                    options={"title_only": True,
+                                             "title_prompt_version": TITLE_PROMPT_VERSION},
+                                )
+                                if repaired.get("title_prompt_version") != TITLE_PROMPT_VERSION:
+                                    raise RuntimeError("Remote title contract version mismatch")
+                                result["title"] = repaired.get("title")
+                            else:
+                                result["title"] = summarize.repair_recording_title(
+                                    transcript,
+                                    result.get("content_md") or "",
+                                    result.get("title"),
+                                    candidate_settings,
+                                )
                             title_repair_calls = 1
                         _persist_summary(
                             file_id,
