@@ -176,9 +176,7 @@ Ignore the old title and note: they may contain template instructions as content
 Return one concise, recording-specific title grounded in the evidence. Name the
 most concrete subject, event, people, or observable content. Never return labels
 such as summary, transcript overview, recording summary, meeting summary, or
-their Chinese equivalents. For noisy or low-information audio, name what is
-actually present (for example, repeated intro, promotion, and subtitle credits)
-instead of saying that the transcript cannot be summarized.
+their Chinese equivalents.
 
 {TITLE_INSTRUCTIONS}
 
@@ -220,8 +218,7 @@ def generate_recording_title(transcript: AsrTranscript, settings: Settings) -> s
 Return one concise, recording-specific title grounded only in this transcript.
 Name the most concrete subject, event, people, or observable content. Never
 return labels such as summary, transcript overview, recording summary, meeting
-summary, or their Chinese equivalents. For noisy or low-information audio,
-name what is actually present instead of saying it cannot be summarized.
+summary, or their Chinese equivalents.
 
 {TITLE_INSTRUCTIONS}
 

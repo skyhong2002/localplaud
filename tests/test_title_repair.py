@@ -36,7 +36,7 @@ def test_plan_is_read_only_apply_is_idempotent_and_preserves_artifacts(recording
     item = plan_repair("rec", recording)
     with session_scope() as session:
         assert session.get(PlaudFile, "rec").generated_title == "Autopilot 模板總結"
-    assert item["prompt_version"] == "recording-title/v2"
+    assert item["prompt_version"] == "recording-title/v3"
     assert item["model"] == "test-model"
     assert apply_repair(item, recording)
     assert not apply_repair(item, recording)

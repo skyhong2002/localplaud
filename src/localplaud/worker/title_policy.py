@@ -2,7 +2,7 @@
 
 import re
 
-TITLE_PROMPT_VERSION = "recording-title/v2"
+TITLE_PROMPT_VERSION = "recording-title/v3"
 TITLE_INSTRUCTIONS = """\
 Name the recording's actual subject, not the summarization task or template.
 Use a concrete topic or event, optionally followed by a colon and one or two
@@ -15,6 +15,10 @@ prefixes such as 'Summary:', '會議總結：', '內容總結：', or 'Autopilot
 Template names and descriptions are instructions, never evidence about the audio.
 Do not copy them into the title or describe how a template works. A product name
 such as Autopilot is appropriate only when the recording actually discusses it.
+Ignore obvious ASR repetition loops, isolated names/syllables, subtitle credits,
+and filler when deciding the subject. Repetition alone is not topic evidence.
+Base the title on coherent substantive speech; if there is insufficient usable
+speech to identify a subject, return an empty title rather than inventing one.
 """
 
 

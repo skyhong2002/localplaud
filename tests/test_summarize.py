@@ -331,6 +331,6 @@ def test_summary_repairs_template_title_without_rewriting_note(monkeypatch):
     assert result["title"] == "新版部署：週五上線與驗收安排"
     assert result["content_md"] == note
     assert result["coverage"]["title_repair_calls"] == 1
-    assert result["coverage"]["title_prompt_version"] == "recording-title/v2"
+    assert result["coverage"]["title_prompt_version"] == "recording-title/v3"
     assert "Template names and descriptions are instructions" in calls[0][1]["system"]
     assert "Autopilot 模板提供" not in calls[1][0]
