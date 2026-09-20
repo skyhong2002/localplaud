@@ -360,6 +360,10 @@ Chinese for Chinese audio. Template descriptions are never source evidence.
 Template-prefixed titles are rejected even if followed by a plausible topic; a
 title-only retry uses full-transcript coverage rather than a contaminated note or
 the opening few minutes. Stored template snapshots remain unchanged.
+Title-only evidence omits repeated short ASR fragments and deduplicates repeated
+utterances without modifying the canonical transcript. When evidence still cannot
+support a reliable name, a reviewed repair can restore the existing source name
+or recording date instead of publishing a guessed subject.
 
 Folder and tag metadata is editable directly from the recording header through the
 same atomic organization contract used by Library bulk actions. Counts and filters

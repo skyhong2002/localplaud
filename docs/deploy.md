@@ -201,7 +201,7 @@ python -m localplaud.title_repair --apply data/backups/title-repairs.jsonl
 Planning resumes from the private JSONL and does not rename files. Keep that file
 as title revision history: it records prior values, input lineage/hash, provider,
 model, and prompt version. It contains private titles and must not be committed.
-Application skips manual renames, active processing, changed titles/transcripts,
+Application currently requires SQLite and skips manual renames, active processing, changed titles/transcripts,
 and already-applied entries. Audio, notes, ASR, indexes, and notification state are
 untouched. Unsupported provider profiles are skipped, never silently replaced.
 If review finds no usable transcript evidence, an entry may explicitly set
