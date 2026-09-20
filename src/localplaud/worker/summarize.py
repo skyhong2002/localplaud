@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 
 from ..asr.base import Transcript as AsrTranscript
 from ..config import Settings
@@ -274,6 +275,23 @@ def _prepare_source(
 ) -> tuple[str, dict]:
     """Share full-transcript coverage between notes and title-only repair."""
     transcript_text = _render_transcript(transcript)
+    original_chars = len(transcript_text)
+    if title_only:
+        # Whisper loops can otherwise outweigh an entire real conversation.
+        # Keep every distinct substantive utterance, including the tail. Remove
+        # repeated isolated fragments and count duplicate long lines only once.
+        counts = Counter(seg.text.strip() for seg in transcript.segments)
+        seen = set()
+        lines = []
+        for seg in transcript.segments:
+            text = seg.text.strip()
+            if not text or (counts[text] >= 3 and len(text) < 12):
+                continue
+            if text in seen:
+                continue
+            seen.add(text)
+            lines.append(f"{seg.speaker}: {text}" if seg.speaker else text)
+        transcript_text = "\n".join(lines)
     chunk_chars = _summary_chunk_chars(settings, llm)
     chunks = _chunk_text(transcript_text, chunk_chars)
     map_calls = 0
@@ -330,7 +348,7 @@ def _prepare_source(
         )
     return source_text, {
         "strategy": strategy,
-        "transcript_chars": len(transcript_text),
+        "transcript_chars": original_chars,
         "chunks": len(chunks),
         "map_calls": map_calls,
         "reduce_calls": reduce_calls,

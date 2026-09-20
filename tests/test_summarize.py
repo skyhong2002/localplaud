@@ -331,6 +331,29 @@ def test_summary_repairs_template_title_without_rewriting_note(monkeypatch):
     assert result["title"] == "新版部署：週五上線與驗收安排"
     assert result["content_md"] == note
     assert result["coverage"]["title_repair_calls"] == 1
-    assert result["coverage"]["title_prompt_version"] == "recording-title/v3"
+    assert result["coverage"]["title_prompt_version"] == "recording-title/v4"
     assert "Template names and descriptions are instructions" in calls[0][1]["system"]
     assert "Autopilot 模板提供" not in calls[1][0]
+
+
+def test_title_evidence_ignores_short_asr_loops_but_preserves_substantive_tail(monkeypatch):
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import generate_recording_title
+
+    prompts = []
+
+    class Llm:
+        def complete(self, prompt, **kwargs):
+            prompts.append(prompt)
+            return '{"title":"晚餐點菜與場地安排"}'
+
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
+    transcript = _transcript(
+        Segment(text="牛肉清湯與青菜各點一份", start=0, end=1),
+        *(Segment(text="字幕署名", start=i, end=i+1) for i in range(1, 100)),
+        Segment(text="最後確認下週表演的場地安排", start=100, end=101),
+    )
+    assert generate_recording_title(transcript, Settings()) == "晚餐點菜與場地安排"
+    assert "字幕署名" not in prompts[0]
+    assert "牛肉清湯" in prompts[0]
+    assert "下週表演" in prompts[0]

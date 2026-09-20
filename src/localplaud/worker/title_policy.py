@@ -2,7 +2,7 @@
 
 import re
 
-TITLE_PROMPT_VERSION = "recording-title/v3"
+TITLE_PROMPT_VERSION = "recording-title/v4"
 TITLE_INSTRUCTIONS = """\
 Name the recording's actual subject, not the summarization task or template.
 Use a concrete topic or event, optionally followed by a colon and one or two

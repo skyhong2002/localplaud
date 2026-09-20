@@ -74,7 +74,7 @@ def test_title_only_worker_returns_provenance_without_generating_notes(monkeypat
     artifact = server._execute(JobSubmitRequest(**request))[0]
     result = json.loads(base64.b64decode(artifact["data_base64"]))
     assert result == {"title": "新版部署安排", "provider": "ollama", "model": "test",
-                      "title_prompt_version": "recording-title/v3"}
+                      "title_prompt_version": "recording-title/v4"}
 
 
 def test_worker_auth_handshake_idempotency_and_persistence(monkeypatch, tmp_path):
