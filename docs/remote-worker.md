@@ -23,6 +23,15 @@ references. Credential-shaped fields such as OAuth/access/refresh tokens, cookie
 authorization, API keys, and Plaud credentials are rejected recursively. URL fetches
 reuse localplaud's SSRF validation and do not follow redirects.
 
+Queued and running jobs retain their input payloads for restart recovery. Once a
+job succeeds, fails, or is cancelled, the worker releases input values while
+retaining their names, types, checksums, job provenance, and result artifacts.
+Terminal manifests carry `input_payloads_released: true` and are audit records,
+not executable requests. Resubmitting a failed job restores the complete request
+before retrying; successful idempotent requests continue to return cached results.
+Released SQLite pages can be reused by later jobs; the database file does not
+automatically shrink on disk.
+
 ## Authentication
 
 Set the same high-entropy value on the worker and controller:

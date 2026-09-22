@@ -211,6 +211,23 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
     return [_artifact("result.json", "application/json", json.dumps(payload).encode())]
 
 
+def release_job_inputs(row: RemoteJob) -> None:
+    """Keep terminal-job provenance and results without retaining uploaded payloads.
+
+    Terminal manifests are audit records, not executable requests. A failed job
+    receives a fresh complete manifest when the controller resubmits it.
+    """
+    if row.status not in {JobStatus.succeeded, JobStatus.failed, JobStatus.cancelled}:
+        raise ValueError("cannot release inputs for an unfinished worker job")
+    manifest = dict(row.input_manifest or {})
+    manifest["inputs"] = [
+        {key: value for key, value in item.items() if key != "value"}
+        for item in manifest.get("inputs", [])
+    ]
+    manifest["input_payloads_released"] = True
+    row.input_manifest = manifest
+
+
 def execute_job(job_id: str) -> None:
     with session_scope() as session:
         row = session.get(RemoteJob, job_id)
@@ -219,6 +236,7 @@ def execute_job(job_id: str) -> None:
         if row.cancel_requested:
             row.status, row.progress = JobStatus.cancelled, 1.0
             row.completed_at = datetime.now(UTC)
+            release_job_inputs(row)
             return
         row.status, row.progress = JobStatus.running, 0.05
         row.started_at = row.started_at or datetime.now(UTC)
@@ -237,6 +255,7 @@ def execute_job(job_id: str) -> None:
                 row.artifacts = artifacts
                 row.status, row.progress = JobStatus.succeeded, 1.0
             row.completed_at = datetime.now(UTC)
+            release_job_inputs(row)
     except Exception as exc:  # noqa: BLE001 - persisted structured worker failure
         with session_scope() as session:
             row = session.get(RemoteJob, job_id)
@@ -249,6 +268,7 @@ def execute_job(job_id: str) -> None:
                 ),
             ).model_dump(mode="json")
             row.completed_at = datetime.now(UTC)
+            release_job_inputs(row)
 
 
 def resume_pending_jobs() -> None:
@@ -308,6 +328,7 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
             existing.cancel_requested = False
             existing.started_at = None
             existing.completed_at = None
+            existing.input_manifest = request.model_dump(mode="json")
             response = _response(existing)
             job_id = existing.id
             background.add_task(execute_job, job_id)
@@ -358,6 +379,8 @@ def cancel_job(job_id: str):
             row.cancel_requested = True
             if row.status == JobStatus.queued:
                 row.status, row.progress = JobStatus.cancelled, 1.0
+                row.completed_at = datetime.now(UTC)
+                release_job_inputs(row)
         return CancelResponse(job_id=row.id, status=row.status)
 
 

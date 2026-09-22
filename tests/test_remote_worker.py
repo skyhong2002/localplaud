@@ -232,6 +232,68 @@ def test_protocol_rejects_credentials_recursively():
         JobSubmitRequest.model_validate(payload)
 
 
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_terminal_jobs_release_uploads_and_retry_restores_inputs(monkeypatch, tmp_path, fail_first):
+    import base64
+
+    from localplaud.db.models import RemoteJob
+    from localplaud.db.session import session_scope
+    from localplaud.remote import server
+
+    client = _client(monkeypatch, tmp_path)
+    headers = {"authorization": "Bearer worker-secret"}
+    payload = b"owned audio payload" * 1024
+    checksum = hashlib.sha256(payload).hexdigest()
+    request = _request("release-inputs")
+    request["inputs"].append({
+        "name": "audio", "media_type": "audio/wav", "kind": "inline_base64",
+        "value": base64.b64encode(payload).decode(), "sha256": checksum,
+    })
+    calls = []
+
+    def execute(req):
+        assert base64.b64decode(req.inputs[1].value) == payload
+        calls.append(req)
+        if fail_first and len(calls) == 1:
+            raise OSError("temporary GPU failure")
+        return [server._artifact("result.json", "application/json", b'{"ok":true}')]
+
+    monkeypatch.setattr(server, "_execute", execute)
+    first = client.post("/api/worker/v1/jobs", headers=headers, json=request).json()
+    with session_scope() as session:
+        row = session.get(RemoteJob, first["job_id"])
+        assert row.input_manifest["input_payloads_released"] is True
+        assert all("value" not in item for item in row.input_manifest["inputs"])
+        assert row.input_manifest["inputs"][1]["sha256"] == checksum
+        assert row.status == ("failed" if fail_first else "succeeded")
+    second = client.post("/api/worker/v1/jobs", headers=headers, json=request).json()
+    assert second["job_id"] == first["job_id"]
+    status = client.get(f"/api/worker/v1/jobs/{first['job_id']}", headers=headers).json()
+    assert status["status"] == "succeeded"
+    assert len(calls) == (2 if fail_first else 1)
+    assert client.get(status["artifacts"][0]["download_url"], headers=headers).content == b'{"ok":true}'
+
+
+def test_queued_upload_retained_until_cancelled(monkeypatch, tmp_path):
+    from localplaud.db.models import RemoteJob
+    from localplaud.db.session import session_scope
+    from localplaud.remote import server
+
+    client = _client(monkeypatch, tmp_path)
+    headers = {"authorization": "Bearer worker-secret"}
+    monkeypatch.setattr(server, "execute_job", lambda _: None)
+    request = _request("cancel-release-inputs")
+    job = client.post("/api/worker/v1/jobs", headers=headers, json=request).json()
+    with session_scope() as session:
+        assert session.get(RemoteJob, job["job_id"]).input_manifest["inputs"][0]["value"] == {"segments": []}
+    client.post(f"/api/worker/v1/jobs/{job['job_id']}/cancel", headers=headers)
+    with session_scope() as session:
+        row = session.get(RemoteJob, job["job_id"])
+        assert row.status == "cancelled"
+        assert row.completed_at is not None
+        assert "value" not in row.input_manifest["inputs"][0]
+
+
 def test_remote_diarization_artifact_reports_its_model(monkeypatch):
     import base64
 
