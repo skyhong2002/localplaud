@@ -162,7 +162,7 @@
       <div class="transcript-toolbar">
         {% if f.has_corrected %}
         <div class="transcript-view-notice" aria-label="{{ t('Transcript view') }}">
-          {% if f.transcript.kind == 'raw ASR' %}<span>{{ t('Viewing the raw transcript.') }}</span><a href="/file/{{ f.id }}?view=corrected&amp;return_to={{ return_to_param }}">{{ t('Back to polished view') }}</a><span class="visually-hidden">{{ t('raw ASR') }}</span>{% else %}<span>{{ t('Transcript polished.') }}</span><a href="/file/{{ f.id }}?view=raw&amp;return_to={{ return_to_param }}">{{ t('View raw transcript') }}</a><span class="visually-hidden">{{ t('Corrected') }} (rev {{ f.corrected_revision }})</span>{% endif %}
+          {% if f.transcript.kind == 'raw ASR' %}<span>{{ t('Viewing the raw transcript.') }}</span><a href="/file/{{ f.id }}?view=corrected&amp;tab=transcript&amp;return_to={{ return_to_param }}">{{ t('Back to polished view') }}</a><span class="visually-hidden">{{ t('raw ASR') }}</span>{% else %}<span>{{ t('Transcript rechecked against audio.') if f.speech_cleanup else t('Transcript polished.') }}</span><a href="/file/{{ f.id }}?view=raw&amp;tab=transcript&amp;return_to={{ return_to_param }}">{{ t('View raw transcript') }}</a><span class="visually-hidden">{{ t('Corrected') }} (rev {{ f.corrected_revision }})</span>{% endif %}
         </div>
         {% else %}<span class="visually-hidden">{{ t('raw ASR') }}</span>
         {% endif %}

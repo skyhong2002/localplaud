@@ -268,6 +268,11 @@ pipeline of VAD, turbo ASR, word-level alignment, diarization (pyannote or a
 benchmarked equivalent), and speaker assignment. A provider returning only text is
 therefore not considered the complete default experience.
 
+Enable `[asr.vad] enabled = true` on every host performing ASR, including remote
+workers. Shared Silero limits decoding to speech and empty results never generate
+AI notes or titles. See [speech quality and safe recovery](docs/speech-quality.md)
+for installation, degraded paths, and repairing old hallucinated transcripts.
+
 The open-source diarization default is
 `pyannote/speaker-diarization-community-1`. Before first use, accept that gated
 model's Hugging Face terms and set `LOCALPLAUD_DIARIZE__HF_TOKEN`;

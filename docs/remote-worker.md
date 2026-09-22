@@ -83,6 +83,11 @@ authenticated worker API without starting a second autonomous poller on WSL.
 The production-only Compose override pins that command and is intentionally
 kept beside the worker's local secrets rather than committed.
 
+Speech detection must also be enabled in the worker's own `[asr.vad]` settings.
+The CUDA image includes shared Silero VAD; verify the installed dependency and
+effective worker configuration after deployment. Controller-only configuration
+does not activate remote VAD. See [speech-quality.md](speech-quality.md).
+
 Operational caveats learned the hard way:
 
 - A running WSL container is not proof that CUDA works. If host

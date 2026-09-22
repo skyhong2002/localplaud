@@ -7,6 +7,12 @@ from collections.abc import Callable
 SUPPORTED_LOCALES = {"en": "English", "zh-Hant-TW": "繁體中文（台灣）"}
 
 _ZH_HANT_TW = {
+    "No recognizable speech": "未辨識到可用語音",
+    "No transcript text is available. The original audio is unchanged and can still be played.": "目前沒有可用的逐字稿。原始音訊仍完整保留，可以照常播放。",
+    "Text outside detected speech was removed.": "已移除語音區段以外的錯誤文字。",
+    "Removed text outside detected speech": "移除語音區段以外的錯誤文字",
+    "Transcript rechecked against audio": "依原始音訊重新檢查逐字稿",
+    "Transcript rechecked against audio.": "已依原始音訊重新檢查逐字稿。",
     "Add audio": "新增音訊",
     "Import audio": "匯入音訊",
     "From this device": "從這部裝置",

@@ -990,3 +990,89 @@ def test_migration_mode_can_explicitly_reuse_cloud_transcript(monkeypatch, tmp_p
     assert counters == {"asr": 0, "sum": 1, "mm": 1, "emb": 1}
     with session_scope() as s:
         assert [t.source for t in s.get(PlaudFile, "migration").transcripts] == ["cloud"]
+
+
+def test_silent_audio_completes_without_generating_invented_artifacts(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.asr.base import Transcript
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker import pipeline
+
+    init_db()
+    audio = tmp_path / 'silent.wav'
+    audio.write_bytes(b'fixture')
+    with session_scope() as session:
+        session.add(PlaudFile(id='silent', filename='Original date', audio_path=str(audio),
+                             status=FileStatus.downloaded, origin='local'))
+    calls = []
+
+    def no_speech(*args, **kwargs):
+        calls.append('asr')
+        return Transcript(segments=[], provider='faster-whisper', model='large-v3-turbo')
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Empty speech must never invoke a downstream model')
+
+    monkeypatch.setattr(pipeline.transcribe, 'run_asr', no_speech)
+    monkeypatch.setattr(pipeline.summarize, 'generate_recording_title', forbidden)
+    monkeypatch.setattr(pipeline.summarize, 'summarize', forbidden)
+    monkeypatch.setattr(pipeline.mindmap, 'generate_mind_map', forbidden)
+    monkeypatch.setattr(pipeline, 'diarize', forbidden)
+    pipeline.process_file('silent')
+    pipeline.process_file('silent')
+    pipeline.process_derived_artifacts('silent')
+    assert calls == ['asr']
+    with session_scope() as session:
+        row = session.get(PlaudFile, 'silent')
+        assert row.status == FileStatus.done
+        assert row.local_transcript.text == ''
+        assert row.local_transcript.source == 'local'
+        assert row.generated_title is None
+        assert row.display_title == 'Original date'
+        assert not row.summaries and not row.chunks
+        assert row.pipeline_retry_count == 0
+        stages = {run.stage: run for run in row.stage_runs}
+        assert stages[StageName.transcribe].status == StageStatus.completed
+        for stage in (StageName.align, StageName.diarize, StageName.correct,
+                      StageName.summarize, StageName.mind_map, StageName.index):
+            assert stages[stage].status == StageStatus.skipped
+
+
+@pytest.mark.parametrize('kind,preserved', [('ai_polish', False), ('user_edit', True)])
+def test_empty_reasr_does_not_revive_machine_text_but_preserves_human_text(
+    monkeypatch, tmp_path, kind, preserved
+):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.asr.base import Transcript as AsrTranscript
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile, Transcript, TranscriptRevision
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker import pipeline
+    init_db()
+    audio = tmp_path / 'empty.wav'
+    audio.write_bytes(b'fixture')
+    with session_scope() as session:
+        row = PlaudFile(id='re-asr', filename='Original', origin='local',
+                        audio_path=str(audio), status=FileStatus.downloaded)
+        raw = Transcript(file_id='re-asr', source='local', provider='fake', text='old text',
+                         segments=[{'text': 'old text', 'start': 0, 'end': 1}])
+        session.add(row)
+        session.add(raw)
+        session.flush()
+        session.add(TranscriptRevision(file_id='re-asr', base_transcript_id=raw.id,
+                    revision=1, source='local', kind=kind, text='old text',
+                    segments=[{'text': 'old text', 'start': 0, 'end': 1}]))
+    settings = get_settings().model_copy(deep=True)
+    for stage in ('align', 'diarize', 'polish', 'summarize', 'mind_map', 'index'):
+        setattr(settings.pipeline, stage, False)
+    monkeypatch.setattr(pipeline.transcribe, 'run_asr',
+                        lambda *a: AsrTranscript(segments=[], provider='fake', model='turbo'))
+    monkeypatch.setattr(pipeline, '_ensure_generated_title', lambda *a: False)
+    pipeline.process_file('re-asr', settings, force=True)
+    with session_scope() as session:
+        row = session.get(PlaudFile, 're-asr')
+        assert row.local_transcript.text == ''
+        assert row.corrected_transcript.text == ('old text' if preserved else '')
+        assert row.transcript_revisions[0].text == 'old text'
+        assert len(row.transcript_revisions) == (1 if preserved else 2)

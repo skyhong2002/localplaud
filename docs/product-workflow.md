@@ -443,6 +443,12 @@ The baseline speech stack is Whisper large-v3-turbo plus word alignment and
 production-quality speaker diarization. Speaker labels are derived by the
 diarization/alignment stages, not by Whisper itself.
 
+Successful speech detection with no speech is a valid empty transcript. It must
+not fall back to decoding silence or generate titles, notes, or maps from empty
+text. Acoustic cleanup and re-transcription preserve raw audio, prior transcript
+revisions, and human edits; no person's name is blacklisted. See
+[`speech-quality.md`](speech-quality.md) for worker configuration and recovery.
+
 ## Editing and provenance
 
 - Original audio is immutable.
@@ -563,12 +569,13 @@ reclaims only the replaced daemon's live-looking work plus globally expired leas
 while unrelated CLI/backfill work remains fenced. Download publication is token- and
 lease-conditional, so a displaced late response cannot overwrite newer raw audio.
 MLX large-v3-turbo is smoke-tested on SkyLabMac, and
-the code targets pyannote Community-1. Optional VAD groundwork now exists behind a
-default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-timestamp
-region offsetting; faster-whisper's native bundled VAD filter), and degrades honestly
-to whole-file transcription with a visible health note when the optional `vad` extra
-is absent — but it still needs real Taiwan Mandarin / code-switch validation before
-being enabled by default. The durable align stage validates Whisper word timing
+the code targets pyannote Community-1. VAD remains configurable with a default-off
+`asr.vad.enabled` flag; production enables it on both hosts. Shared Silero supplies
+MLX regions and FasterWhisper clips on the original timeline. Successful no-speech
+results stay empty; missing dependencies explicitly degrade to whole-file MLX or
+FasterWhisper's native VAD. Real affected recordings validate the silence repair,
+while broader Taiwan Mandarin / code-switch accuracy benchmarks remain open before
+changing the installation default. The durable align stage validates Whisper word timing
 without calling it forced alignment. An explicit local `align:whisperx` provider now
 dispatches language-specific wav2vec2 forced alignment on CUDA or CPU, persists
 provider/model/version/coverage evidence, updates timing without replacing the raw

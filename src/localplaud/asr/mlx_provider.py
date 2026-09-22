@@ -107,10 +107,16 @@ class MlxWhisperProvider:
                 )
                 if merged:
                     return self._transcribe_regions(mlx_whisper, audio_path, merged, language)
-                log.warning(
-                    "VAD found no speech regions in %s; falling back to whole-file "
-                    "transcription",
-                    audio_path,
+                log.info(
+                    "VAD found no speech regions in %s; returning empty transcript", audio_path
+                )
+                return Transcript(
+                    segments=[],
+                    language=None if language == "auto" else language,
+                    duration=None,
+                    provider=self.name,
+                    model=self.cfg.model,
+                    has_speakers=False,
                 )
 
         log.info("Transcribing with mlx-whisper model %s", self.cfg.model)
@@ -131,6 +137,8 @@ class MlxWhisperProvider:
                 str(path),
                 path_or_hf_repo=self.cfg.model,
                 word_timestamps=True,
+                condition_on_previous_text=False,
+                hallucination_silence_threshold=2.0,
                 language=None if language == "auto" else language,
             )
         except Exception as exc:
@@ -155,6 +163,8 @@ class MlxWhisperProvider:
                         str(clip),
                         path_or_hf_repo=self.cfg.model,
                         word_timestamps=True,
+                        condition_on_previous_text=False,
+                        hallucination_silence_threshold=2.0,
                         language=None if language == "auto" else language,
                     )
                 except Exception as exc:

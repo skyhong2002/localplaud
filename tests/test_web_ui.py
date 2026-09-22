@@ -1833,3 +1833,43 @@ def test_search_results_are_title_first_with_quiet_kind_labels(monkeypatch, tmp_
         assert f'href="{href}"' in empty.text and label in empty.text
     missing = c.get("/search?q=zzznotfoundzzz")
     assert "No matches for" in missing.text and "Ask the library" in missing.text
+
+
+def test_empty_local_transcript_has_honest_speech_notice(monkeypatch, tmp_path):
+    monkeypatch.setenv('LOCALPLAUD_API__LOGIN_PASSWORD', '')
+    monkeypatch.setenv('LOCALPLAUD_API__AUTH_TOKEN', '')
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, Transcript
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(PlaudFile(id='silence', filename='Original recording', status=FileStatus.done))
+        session.add(Transcript(file_id='silence', provider='faster-whisper', source='local',
+                               text='', segments=[]))
+    response = c.get('/file/silence/transcript-page')
+    assert response.status_code == 200
+    assert 'No recognizable speech' in response.text
+    assert 'original audio is unchanged' in response.text
+    assert 'role="status"' in response.text
+
+
+def test_acoustic_revision_notice_describes_shown_history_and_preserves_tab(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile, Transcript, TranscriptRevision
+    from localplaud.db.session import session_scope
+    with session_scope() as session:
+        session.add(PlaudFile(id='history', filename='History'))
+        raw = Transcript(file_id='history', source='local', provider='fake', text='raw',
+                         segments=[{'text': 'raw', 'start': 0, 'end': 1}])
+        session.add(raw)
+        session.flush()
+        for number, kind in [(1, 'ai_polish'), (2, 'speech_cleanup')]:
+            session.add(TranscriptRevision(file_id='history', base_transcript_id=raw.id,
+                revision=number, source='local', kind=kind, text=kind,
+                segments=[{'text': kind, 'start': 0, 'end': 1}]))
+    preview = c.get('/file/history?tab=transcript&view=corrected&revision=1')
+    assert preview.status_code == 200
+    assert 'Transcript rechecked against audio.' not in preview.text
+    current = c.get('/file/history?tab=transcript')
+    assert 'Transcript rechecked against audio.' in current.text
+    assert '?view=raw&amp;tab=transcript&amp;return_to=' in current.text

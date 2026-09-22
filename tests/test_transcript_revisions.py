@@ -1292,8 +1292,8 @@ def test_detail_view_toggle_raw_vs_corrected(monkeypatch, tmp_path):
     assert "hello, team!" in corrected_transcript
     assert "Corrected (rev 1)" in page.text  # labelled current view
     assert (
-        'href="/file/r1?view=raw&amp;return_to=%2F"' in page.text
-    )  # toggle preserves the library return context
+        'href="/file/r1?view=raw&amp;tab=transcript&amp;return_to=%2F"' in page.text
+    )  # toggle preserves both transcript tab and library return context
     assert 'class="editbtn"' in corrected_transcript
 
     # explicit raw view shows the untouched ASR output, read-only

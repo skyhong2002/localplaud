@@ -42,7 +42,7 @@ RUN printf '# localplaud\n' > README.md \
     && touch src/localplaud/__init__.py \
     && pip install torch==2.8.0 torchaudio==2.8.0 \
         --index-url https://download.pytorch.org/whl/cu128 \
-    && pip install ".[faster-whisper,forced-align,diarize,cloud,local-llm]" \
+    && pip install ".[faster-whisper,forced-align,diarize,vad,cloud,local-llm]" \
     && pip install torchcodec==0.7 \
     && rm -rf src
 

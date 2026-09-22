@@ -2986,12 +2986,21 @@ def file_detail(
             "speaker_names": speaker_names,
             # Whether both raw and corrected views exist (drives the toggle).
             "has_corrected": corrected is not None,
+            "speech_cleanup": (
+                show_corrected and shown_revision is not None
+                and shown_revision.kind in {"speech_cleanup", "speech_retranscribe"}
+            ),
             "corrected_revision": corrected.revision if corrected is not None else None,
             "preview_revision": preview_revision.revision if preview_revision else None,
             "revisions": [
                 {
                     "revision": row.revision,
-                    "note": row.note or "Transcript correction",
+                    "note": (
+                        "Removed text outside detected speech"
+                        if row.kind == "speech_cleanup" else
+                        "Transcript rechecked against audio" if row.kind == "speech_retranscribe"
+                        else row.note or "Transcript correction"
+                    ),
                     "reason": _transcript_revision_reason(row.note),
                     "kind": row.kind,
                     "provider": row.provider,

@@ -1488,6 +1488,42 @@ def _process_file_claimed(
         else:
             _skip_stage(file_id, StageName.transcribe, "disabled")
 
+        # Silence is a valid ASR result, not evidence for a title or a note.
+        # A preserved human revision may still contain meaningful text after
+        # re-ASR, so resolve the canonical lane before taking the empty path.
+        if transcript is not None and not transcript.text.strip():
+            canonical = _load_transcript(file_id, settings)
+            preserve_human = False
+            with session_scope() as session:
+                current_row = _assert_processing_claim_in_session(session, file_id)
+                raw = _select_raw_transcript(current_row, settings)
+                revision = current_row.corrected_transcript_for_source("local")
+                preserve_human = revision is not None and (
+                    revision.kind in {"user_edit", "restore", "speaker_edit"}
+                    or (revision.kind == "vocabulary"
+                        and (revision.note or "").startswith("vocabulary:manual"))
+                )
+                if (canonical is not None and canonical[0].text.strip()
+                        and not preserve_human and raw is not None):
+                    session.add(TranscriptRevision(
+                        file_id=file_id, base_transcript_id=raw.id,
+                        revision=max((r.revision for r in current_row.transcript_revisions),
+                                     default=0) + 1,
+                        source="local", segments=[], text="", has_speakers=False,
+                        kind="speech_cleanup", provider=transcript.provider,
+                        model=transcript.model, prompt_version="no-speech/v1",
+                        note="No recognizable speech",
+                        resolved_profile_snapshot=snapshot,
+                    ))
+            if canonical is not None and preserve_human:
+                transcript, transcript_source = canonical
+            if not transcript.text.strip():
+                for stage in (StageName.align, StageName.diarize, StageName.correct):
+                    _skip_stage(file_id, stage, "no recognizable speech")
+                _skip_empty_derivatives(file_id)
+                _finish_processing_cycle(file_id, settings, [])
+                return
+
         # A transcript is already useful before the slower alignment,
         # diarization, and correction stages finish. Give it a durable AI title
         # immediately so a downstream failure never leaves an unnamed item in
@@ -1767,8 +1803,12 @@ def _process_file_claimed(
             _skip_stage(file_id, StageName.correct, "disabled")
         elif transcript_source != "local":
             _skip_stage(file_id, StageName.correct, "imported migration artifact")
-        elif current_kind in {"user_edit", "restore"}:
-            _skip_stage(file_id, StageName.correct, "preserved user correction")
+        elif current_kind in {"user_edit", "restore", "speech_cleanup", "speech_retranscribe"}:
+            _skip_stage(
+                file_id, StageName.correct,
+                "preserved acoustic correction" if current_kind.startswith("speech_")
+                else "preserved user correction",
+            )
         elif current_kind == "ai_polish" and current_provenance_complete and not force:
             _finish_stage(
                 file_id,
@@ -2162,6 +2202,27 @@ def _mind_map_operation(
     return run_mind_map
 
 
+def _skip_empty_derivatives(file_id: str) -> None:
+    """Keep historical artifacts, but never publish guesses from empty text."""
+    from ..vocabulary import _mark_derived_stale
+
+    with session_scope() as session:
+        row = _assert_processing_claim_in_session(session, file_id)
+        from .knowledge_index import reject_active_ask_evidence_mutation
+
+        reject_active_ask_evidence_mutation(session, file_id)
+        _mark_derived_stale(session, file_id, reason="no recognizable speech")
+        row.generated_title = None
+        row.generated_title_provider = None
+        row.generated_title_model = None
+        row.generated_title_at = None
+        for stage in (StageName.summarize, StageName.mind_map, StageName.index):
+            _set_stage_in_session(
+                session, file_id, stage, StageStatus.skipped,
+                detail={"reason": "no recognizable speech", "no_speech": True, "stale": True},
+            )
+
+
 def _run_derived_stages(
     file_id: str,
     settings: Settings,
@@ -2173,6 +2234,9 @@ def _run_derived_stages(
     explicit_profile_id: int | None = None,
 ) -> list[str]:
     """Run transcript-derived stages through the normal durable stage machinery."""
+    if transcript is not None and not transcript.text.strip():
+        _skip_empty_derivatives(file_id)
+        return []
     pcfg = settings.pipeline
     partial_errors: list[str] = []
     transcript_lineage = _transcript_lineage(file_id, settings)
@@ -2952,6 +3016,8 @@ def _ensure_generated_title(
     snapshot: dict,
 ) -> bool:
     """Best-effort title generation at the transcript durability boundary."""
+    if not transcript.text.strip():
+        return False
     if _has_generated_title(file_id):
         return True
     title_settings = _settings_for_stage(settings, snapshot, "summarize")

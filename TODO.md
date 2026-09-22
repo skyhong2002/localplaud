@@ -63,7 +63,9 @@ Full pre-audit engineering detail lives in this file's git history.
   accuracy, timestamp, speed, and memory benchmarking is still required before
   considering this quality validation complete.
 - **VAD validation.** `asr.vad.enabled` remains default-off (implementation
-  is complete for both mlx and faster-whisper paths). Benchmark on real
+  is complete for both mlx and faster-whisper paths; production enables shared
+  Silero on both hosts, with no-speech gating and versioned acoustic recovery
+  verified on affected recordings). Benchmark on real
   Taiwan Mandarin / code-switch recordings before enabling by default. No
   benchmark harness exists anywhere in the repo — building one is part of
   this item (it also unblocks the two items above).

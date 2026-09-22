@@ -9,9 +9,9 @@ globally correct.
 This module is optional and degrades honestly. It uses the ``silero-vad``
 package (torch backend) when it is importable, and otherwise raises
 :class:`VadUnavailable` with an actionable message naming the missing package and
-the ``vad`` pyproject extra. Callers (the ASR providers) must catch that, log a
-warning, fall back to whole-file transcription, and surface the degraded state in
-their ``health()`` — never pretend VAD ran.
+the ``vad`` pyproject extra. Callers (the ASR providers) must catch that, log the
+explicit provider-specific degraded path, and surface it in their ``health()`` —
+never pretend the shared VAD ran.
 
 The pure geometry helper :func:`merge_speech_regions` has no optional
 dependency and is always available for chunk planning and testing.
@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import wave
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -37,9 +38,25 @@ class VadError(RuntimeError):
 class VadUnavailable(VadError):
     """VAD cannot run here (the optional ``silero-vad`` dependency is missing).
 
-    Callers should catch this and fall back to whole-file transcription rather
-    than treating it as a hard failure.
+    Callers should catch this and use their explicit degraded path rather than
+    treating a missing optional dependency as a hard failure.
     """
+
+
+def audio_duration_seconds(wav_path) -> float | None:
+    """Return the duration of a PCM WAV, or ``None`` when it cannot be probed.
+
+    The worker normally gives ASR providers a canonical PCM WAV.  Keeping this
+    probe dependency-free lets providers clamp padded VAD regions to the real
+    audio boundary without making an otherwise usable non-WAV input fail.
+    """
+    try:
+        with wave.open(str(wav_path), "rb") as wav:
+            frame_rate = wav.getframerate()
+            return wav.getnframes() / frame_rate if frame_rate else None
+    except (OSError, EOFError, wave.Error):
+        log.debug("Could not probe WAV duration for %s", wav_path, exc_info=True)
+        return None
 
 
 def detect_speech(wav_path, cfg) -> list[tuple[float, float]]:

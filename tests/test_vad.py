@@ -7,11 +7,13 @@ absence of the optional 'vad' extra.
 
 import logging
 import sys
+import wave
 from types import SimpleNamespace
 
 import pytest
 
 from localplaud.asr import vad
+from localplaud.asr.faster_whisper_provider import FasterWhisperProvider
 from localplaud.asr.mlx_provider import MlxWhisperProvider
 from localplaud.config import AsrConfig, VadConfig
 
@@ -104,6 +106,17 @@ def test_detect_speech_raises_unavailable_without_package(monkeypatch, tmp_path)
     assert "silero-vad" in str(exc.value)
 
 
+def test_audio_duration_seconds_reads_canonical_pcm_wav(tmp_path):
+    path = tmp_path / "two-seconds.wav"
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(vad.SAMPLE_RATE)
+        wav_file.writeframes(b"\0\0" * vad.SAMPLE_RATE * 2)
+
+    assert vad.audio_duration_seconds(path) == 2.0
+
+
 # --------------------------------------------------------------------------- #
 # mlx region-offset transcription (no real audio / model)
 # --------------------------------------------------------------------------- #
@@ -137,8 +150,8 @@ def test_mlx_offsets_regions_into_global_timeline(monkeypatch):
     calls = []
 
     def fake_transcribe(path, **kwargs):
-        calls.append(path)
-        return _region_local_result("你好")
+        calls.append((path, kwargs))
+        return _region_local_result("李宗盛")
 
     monkeypatch.setitem(sys.modules, "mlx_whisper", SimpleNamespace(transcribe=fake_transcribe))
 
@@ -157,9 +170,14 @@ def test_mlx_offsets_regions_into_global_timeline(monkeypatch):
     # Words offset too.
     assert transcript.segments[1].words[0].start == 10.0
     assert transcript.segments[1].words[0].end == 11.0
+    assert transcript.text == "李宗盛\n李宗盛"
     assert transcript.language == "zh"
     assert transcript.provider == "mlx-whisper"
     assert len(calls) == 2
+    for _path, kwargs in calls:
+        assert kwargs["word_timestamps"] is True
+        assert kwargs["condition_on_previous_text"] is False
+        assert kwargs["hallucination_silence_threshold"] == 2.0
 
 
 def test_mlx_vad_enabled_end_to_end_uses_regions(monkeypatch):
@@ -210,25 +228,55 @@ def test_mlx_vad_enabled_but_unavailable_falls_back_and_logs(monkeypatch, caplog
     assert any("unavailable" in r.message.lower() for r in caplog.records)
 
 
-def test_mlx_vad_no_speech_falls_back_to_whole_file(monkeypatch, caplog):
+def test_mlx_vad_no_speech_returns_empty_without_calling_asr(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(vad, "detect_speech", lambda path, cfg: [])  # no speech found
+
+    def unexpected_transcribe(*args, **kwargs):
+        raise AssertionError("Whisper must not run after VAD successfully finds no speech")
+
     monkeypatch.setitem(
         sys.modules,
         "mlx_whisper",
-        SimpleNamespace(
-            transcribe=lambda path, **kw: {
-                "language": "en",
-                "segments": [{"text": "whole", "start": 0.0, "end": 1.0, "words": []}],
-            }
-        ),
+        SimpleNamespace(transcribe=unexpected_transcribe),
     )
 
     provider = MlxWhisperProvider(_mlx_cfg())
-    with caplog.at_level(logging.WARNING):
-        transcript = provider.transcribe("audio.wav", language="auto")
-    assert transcript.text == "whole"
-    assert any("no speech" in r.message.lower() for r in caplog.records)
+    transcript = provider.transcribe("audio.wav", language="auto")
+
+    assert transcript.segments == []
+    assert transcript.text == ""
+    assert transcript.language is None
+    assert transcript.duration is None
+    assert transcript.provider == "mlx-whisper"
+    assert transcript.model == provider.cfg.model
+
+
+def test_mlx_whole_file_passes_hallucination_decoder_kwargs(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/ffmpeg")
+    calls = []
+
+    def fake_transcribe(path, **kwargs):
+        calls.append((path, kwargs))
+        return _region_local_result("李宗盛")
+
+    monkeypatch.setitem(sys.modules, "mlx_whisper", SimpleNamespace(transcribe=fake_transcribe))
+
+    transcript = MlxWhisperProvider(AsrConfig()).transcribe("audio.wav", language="zh")
+
+    assert transcript.text == "李宗盛"
+    assert calls == [
+        (
+            "audio.wav",
+            {
+                "path_or_hf_repo": MlxWhisperProvider(AsrConfig()).cfg.model,
+                "word_timestamps": True,
+                "condition_on_previous_text": False,
+                "hallucination_silence_threshold": 2.0,
+                "language": "zh",
+            },
+        )
+    ]
 
 
 def test_mlx_vad_disabled_is_unchanged(monkeypatch):
@@ -282,3 +330,127 @@ def test_mlx_health_no_vad_mention_when_disabled(monkeypatch):
     ok, detail = provider.health()
     assert ok is True
     assert "VAD" not in detail
+
+
+# --------------------------------------------------------------------------- #
+# faster-whisper shared acoustic pre-gate and native VAD fallback
+# --------------------------------------------------------------------------- #
+
+
+def test_faster_whisper_shared_vad_empty_returns_without_loading_model(monkeypatch):
+    monkeypatch.setattr(vad, "detect_speech", lambda path, cfg: [])
+    monkeypatch.setattr(vad, "audio_duration_seconds", lambda path: 76.0)
+
+    class UnexpectedModel:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Whisper model must not load when shared VAD finds no speech")
+
+    monkeypatch.setitem(
+        sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=UnexpectedModel)
+    )
+
+    transcript = FasterWhisperProvider(_mlx_cfg()).transcribe("audio.wav", language="auto")
+
+    assert transcript.segments == []
+    assert transcript.text == ""
+    assert transcript.language is None
+    assert transcript.duration == 76.0
+    assert transcript.provider == "faster-whisper"
+    assert transcript.model == FasterWhisperProvider(_mlx_cfg()).cfg.model
+
+
+def test_faster_whisper_shared_vad_passes_global_clips_and_preserves_output(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        vad, "detect_speech", lambda path, cfg: [(15.7, 16.5), (17.3, 17.9), (75.8, 75.95)]
+    )
+    monkeypatch.setattr(vad, "audio_duration_seconds", lambda path: 76.0)
+
+    class FakeModel:
+        def __init__(self, model, *, device, compute_type):
+            calls.append(("init", model, device, compute_type))
+
+        def transcribe(self, path, **kwargs):
+            calls.append(("transcribe", path, kwargs))
+            word = SimpleNamespace(word=" 李宗盛", start=15.7, end=16.5, probability=0.98)
+            segment = SimpleNamespace(text=" 李宗盛", start=15.7, end=16.5, words=[word])
+            return iter([segment]), SimpleNamespace(language="zh", duration=76.0)
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    cfg = AsrConfig(
+        vad=VadConfig(
+            enabled=True,
+            threshold=0.61,
+            min_speech_ms=321,
+            min_silence_ms=654,
+            speech_pad_ms=87,
+            region_pad_s=0.2,
+            merge_gap_s=0.0,
+            max_region_s=45.0,
+        ),
+        faster_whisper={"device": "cpu", "compute_type": "int8"},
+    )
+
+    transcript = FasterWhisperProvider(cfg).transcribe("audio.wav", language="auto")
+
+    assert transcript.text == "李宗盛"
+    assert transcript.segments[0].start == 15.7
+    assert transcript.segments[0].words[0].start == 15.7
+    assert transcript.duration == 76.0
+    _, path, kwargs = calls[1]
+    assert path == "audio.wav"
+    assert kwargs == {
+        "language": None,
+        "word_timestamps": True,
+        "condition_on_previous_text": False,
+        "hallucination_silence_threshold": 2.0,
+        "clip_timestamps": pytest.approx([15.5, 16.7, 17.1, 18.1, 75.6, 76.0]),
+    }
+
+
+def test_faster_whisper_missing_shared_vad_uses_native_vad_fallback(monkeypatch, caplog):
+    calls = []
+
+    def unavailable(path, cfg):
+        raise vad.VadUnavailable("silero-vad is not installed")
+
+    monkeypatch.setattr(vad, "detect_speech", unavailable)
+    monkeypatch.setattr(vad, "audio_duration_seconds", lambda path: 76.0)
+
+    class FakeModel:
+        def __init__(self, model, *, device, compute_type):
+            calls.append(("init", model, device, compute_type))
+
+        def transcribe(self, path, **kwargs):
+            calls.append(("transcribe", path, kwargs))
+            return iter([]), SimpleNamespace(language="zh", duration=76.0)
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeModel))
+    cfg = AsrConfig(
+        vad=VadConfig(
+            enabled=True,
+            threshold=0.61,
+            min_speech_ms=321,
+            min_silence_ms=654,
+            speech_pad_ms=87,
+            max_region_s=45.0,
+        ),
+        faster_whisper={"device": "cpu", "compute_type": "int8"},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        transcript = FasterWhisperProvider(cfg).transcribe("audio.wav", language="auto")
+
+    assert transcript.duration == 76.0
+    _, _, kwargs = calls[1]
+    assert "clip_timestamps" not in kwargs
+    assert kwargs["vad_filter"] is True
+    assert kwargs["vad_parameters"] == {
+        "threshold": 0.61,
+        "min_speech_duration_ms": 321,
+        "min_silence_duration_ms": 654,
+        "speech_pad_ms": 87,
+        "max_speech_duration_s": 45.0,
+    }
+    assert any("native VAD filter" in record.message for record in caplog.records)
