@@ -32,6 +32,42 @@ before retrying; successful idempotent requests continue to return cached result
 Released SQLite pages can be reused by later jobs; the database file does not
 automatically shrink on disk.
 
+## Offline storage reclamation
+
+Status polling and artifact downloads do not load the uploaded input manifest.
+For a legacy worker DB containing retained audio, stop dispatch and wait for all
+queued/running work to finish, then stop the worker before maintenance. Keep the
+original recording files and all user edits.
+
+Create a separate verified candidate rather than running a full in-place VACUUM
+when host space cannot accommodate another copy of the original database:
+
+```bash
+python3 scripts/maintenance/compact_worker_db.py \
+  --source data/localplaud.db \
+  --output data/localplaud.compact.db \
+  --acknowledge-offline \
+  --space-guard-path /mnt/c
+```
+
+On WSL, `/mnt/c` checks the physical Windows volume; elsewhere select the actual
+backing filesystem. The default free-space floor is 10 GiB. The tool refuses
+active jobs, output collisions and unsupported schemas, preserves all tables and
+result artifacts, and removes only terminal job input values. It checks schema,
+row counts, streaming hashes, foreign keys and SQLite integrity before reporting
+success. Source rows remain unchanged, although SQLite may checkpoint WAL
+sidecars on close. The tool never installs the candidate. Individual SQLite
+values above 512 MiB are rejected to bound memory use; unusually large legacy
+records require a separate maintenance plan.
+
+Checkpoint and close every connection before an offline swap. Retain the old
+file until the replacement passes worker health, cached-artifact download and a
+new job check. Do not copy or swap a live SQLite main file without its committed
+WAL. Long-running read transactions can prevent WAL truncation. Incremental
+vacuum is enabled on newly compacted candidates, but releasing SQLite pages
+alone does not return space from a WSL virtual disk to Windows: that also requires
+filesystem trim and offline VHD compaction. Never unregister WSL or delete its VHD.
+
 ## Authentication
 
 Set the same high-entropy value on the worker and controller:

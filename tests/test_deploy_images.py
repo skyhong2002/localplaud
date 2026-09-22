@@ -17,7 +17,7 @@ def test_cuda_image_pins_pyannote_compatible_torch_stack():
 def test_cuda_image_caches_dependencies_before_copying_application_source():
     dockerfile = Path("Dockerfile.cuda").read_text()
     dependency_install = dockerfile.index(
-        'pip install ".[faster-whisper,forced-align,diarize,cloud,local-llm]"'
+        'pip install ".[faster-whisper,forced-align,diarize,vad,cloud,local-llm]"'
     )
     source_copy = dockerfile.index("COPY src ./src")
     application_install = dockerfile.index("pip install --no-deps --force-reinstall .")

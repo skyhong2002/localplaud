@@ -19,6 +19,7 @@ from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import defer
 
 from ..asr.base import Segment, Transcript, Word
 from ..config import get_settings
@@ -363,7 +364,11 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
 @router.get("/jobs/{job_id}", response_model=JobResponse, dependencies=[Depends(_authorize)])
 def job_status(job_id: str):
     with session_scope() as session:
-        row = session.get(RemoteJob, job_id)
+        # Progress polling must not read/parse the uploaded audio on every
+        # request. Inputs stay durable for recovery, but are not response data.
+        row = session.get(
+            RemoteJob, job_id, options=[defer(RemoteJob.input_manifest, raiseload=True)]
+        )
         if row is None:
             raise HTTPException(status_code=404, detail="job not found")
         return _response(row)
@@ -387,7 +392,9 @@ def cancel_job(job_id: str):
 @router.get("/jobs/{job_id}/artifacts/{name}", dependencies=[Depends(_authorize)])
 def download_artifact(job_id: str, name: str):
     with session_scope() as session:
-        row = session.get(RemoteJob, job_id)
+        row = session.get(
+            RemoteJob, job_id, options=[defer(RemoteJob.input_manifest, raiseload=True)]
+        )
         artifact = next((item for item in (row.artifacts if row else []) if item["name"] == name), None)
         if artifact is None:
             raise HTTPException(status_code=404, detail="artifact not found")

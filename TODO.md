@@ -109,8 +109,9 @@ Full pre-audit engineering detail lives in this file's git history.
 - **Cloud/remote starting profiles.** Only the three local hardware
   recommendations (apple-mlx, nvidia-cuda, cpu) ship; no OpenAI Cloud /
   OpenAI-compatible / Remote GPU starting profile flow.
-- **Storage use + retention settings.** Backup, auth, and privacy surfaces
-  exist; storage-use display and retention policy do not.
+- **Storage use + retention settings.** Terminal worker inputs are released and
+  an offline verified DB compaction tool is available. Backup, auth, and privacy
+  surfaces exist; storage-use display and user-configurable retention policy do not.
 - **Quality-floor fallback policy.** Capability, no-egress, and cost-ceiling
   constraints are enforced; the quality floor from the policy spec is
   unimplemented.

@@ -59,6 +59,50 @@ def _request(key="same-job"):
     }
 
 
+@pytest.mark.parametrize("artifact_download", [False, True])
+def test_worker_reads_do_not_load_uploaded_audio(monkeypatch, tmp_path, artifact_download):
+    from sqlalchemy import event
+
+    from localplaud.db.models import RemoteJob
+    from localplaud.db.session import get_engine, session_scope
+    from localplaud.remote.server import _artifact
+
+    client = _client(monkeypatch, tmp_path)
+    result = b"verified-result"
+    with session_scope() as session:
+        session.add(RemoteJob(
+            id="large-input", idempotency_key="large-input", stage="transcribe",
+            status="succeeded" if artifact_download else "running",
+            input_manifest={"inputs": [{"name": "audio", "value": "A" * 1_000_000}]},
+            artifacts=[_artifact("result.bin", "application/octet-stream", result)],
+        ))
+
+    queries = []
+
+    def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "FROM remote_jobs" in statement:
+            queries.append(statement)
+
+    engine = get_engine()
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        suffix = "/artifacts/result.bin" if artifact_download else ""
+        response = client.get(
+            "/api/worker/v1/jobs/large-input" + suffix,
+            headers={"authorization": "Bearer worker-secret"},
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert response.status_code == 200
+    if artifact_download:
+        assert response.content == result
+    else:
+        assert response.json()["status"] == "running"
+        assert response.json()["artifacts"][0]["sha256"] == hashlib.sha256(result).hexdigest()
+    assert queries
+    assert all("input_manifest" not in statement for statement in queries)
+
+
 def test_title_only_worker_returns_provenance_without_generating_notes(monkeypatch):
     import base64
 
