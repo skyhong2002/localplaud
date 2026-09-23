@@ -49,6 +49,24 @@ as a replacement. Prompt changes alone do not establish Plaud-equivalent quality
 review representative real outputs with the selected provider before bulk repairs.
 No model or recording-profile change is implicit in this implementation.
 
+The policy was deployed to the controller and GPU worker on 2026-09-23. Following
+explicit user authorization, a reviewed Codex pilot was used to regenerate the
+20 selected recordings' primary Autopilot notes with the configured
+`codex-local` / `gpt-5.6-sol` connection. Recording-scoped profiles select Codex
+for summarization, retain other stage selections and disable summary fallback;
+the library's default local-model profile was not changed. Generation used local
+canonical transcripts, never the Plaud reference notes.
+
+Verification checked completed stage provenance, policy snapshots, unchanged
+transcript lineage and content, retained manual titles/audio paths, and exact
+preservation of each displaced note in revision history. Representative note
+pages rendered the new content. Review of a long recording checked concrete
+amounts, timing and proposed versus agreed actions against the transcript.
+This is a bounded repair, not a claim of Plaud-equivalent accuracy across the
+library. Inadequate transcripts produce explicit limitations; they still require
+acoustic recovery. Other note templates were retained, and existing mind maps
+were marked stale rather than silently treated as current.
+
 Existing completed notes are not silently invalidated by a policy upgrade. Resume
 can reuse them; explicit regeneration selects the new policy and preserves the
 displaced output in history. Review and select affected recordings before a bulk

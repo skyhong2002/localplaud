@@ -54,10 +54,12 @@ Full pre-audit engineering detail lives in this file's git history.
 - **Recording-note fidelity (2026-09-23).** Same-recording comparisons found
   missing substantive topics, repeated filler, incorrect decisions and invented
   actions. Versioned execution instructions, retained Autopilot detail sections,
-  explicit Ollama context and truncation rejection are implemented in the summary
-  quality branch. Local-model drafts have not passed fidelity review; deployment
-  and bulk replacement remain pending. Preserve current notes/history and obtain
-  explicit provider selection before any cloud-model comparison. See
+  explicit Ollama context and truncation rejection are deployed. With explicit
+  user authorization, the selected 20 primary Autopilot notes were regenerated
+  using the configured Codex model, retaining old notes and recording-scoped
+  provenance. The library default remains local. Local-model drafts have not
+  passed fidelity review; broader quality evaluation and recovery of inadequate
+  transcripts remain open. See
   [note quality](docs/note-quality.md).
 
 - **WhisperX forced-alignment validation.** `align:whisperx` /
