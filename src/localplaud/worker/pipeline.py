@@ -353,9 +353,9 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
 
     family_config = getattr(resolved, family)
     provider = selected.get("provider_type") or str(selected["connection"]).split(":", 1)[-1]
-    if provider == "codex-local" and stage not in {"correct", "summarize", "mind_map"}:
+    if provider == "codex-local" and stage not in {"correct", "summarize", "mind_map", "ask"}:
         raise ValueError(
-            "codex-local supports only correction, summaries, and mind maps; "
+            "codex-local supports only correction, summaries, mind maps, and Ask; "
             f"it cannot run stage {stage}"
         )
     family_config.provider = provider

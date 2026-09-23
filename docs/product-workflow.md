@@ -622,10 +622,11 @@ their source text, and recursive splitting is reserved for malformed JSON,
 duplicate/unknown IDs, or explicit provider context limits. Durable stage details
 report every preserved source segment and the last structural split reason.
 The trusted-single-user Codex CLI boundary now also advertises generated-note and
-mind-map capabilities, uses GPT-5.6-sol at high reasoning effort when explicitly
+mind-map and grounded Ask capabilities, uses GPT-6 Sol at high reasoning effort when explicitly
 selected, and reads the ChatGPT subscription window before every model turn. A 5%
 reserve plus 2% call headroom fails closed before the user's 3% floor can be reached;
-API-key auth remains rejected by default and Ask remains outside this boundary.
+API-key auth remains rejected by default. Ask uses the same isolated, no-tools
+provider call and retains retrieval scope, citations, and durable cost reservations.
 Saved Ask answers are editable note bodies with durable follow-up threads. Library
 and recording Ask surfaces expose exact-scope conversation history through a
 searchable, paginated desktop/mobile drawer. Threads can be renamed or deleted;

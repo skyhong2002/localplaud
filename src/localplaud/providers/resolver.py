@@ -97,10 +97,11 @@ def resolve_profile(
             ProviderStage.correct,
             ProviderStage.summarize,
             ProviderStage.mind_map,
+            ProviderStage.ask,
         }
         if details and details.get("provider_type") == "codex-local" and stage not in codex_stages:
             raise ResolutionError(
-                "codex-local supports only correction, summaries, and mind maps; "
+                "codex-local supports only correction, summaries, mind maps, and Ask; "
                 f"it cannot run stage {stage.value}"
             )
         if (

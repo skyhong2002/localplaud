@@ -317,7 +317,7 @@ class CodexLocalLlmConfig(BaseModel):
     """Trusted single-user Codex CLI boundary; Codex owns its credentials."""
 
     executable: str = "codex"
-    model: str = "gpt-5.6-sol"
+    model: str = "gpt-6-sol"
     codex_home: str = "~/.localplaud/codex"
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] = "high"
     timeout_seconds: int = Field(default=900, ge=30, le=1800)
@@ -325,7 +325,7 @@ class CodexLocalLlmConfig(BaseModel):
     # failures are bisected by the correction stage, while transport failures
     # fail immediately instead of multiplying calls.
     polish_chunk_chars: int = Field(default=48_000, ge=1_000, le=60_000)
-    # GPT-5.6-sol has a large context window. Larger full-coverage map chunks
+    # GPT-6 Sol has a large context window. Larger full-coverage map chunks
     # preserve more discourse structure while spending far fewer subscription
     # turns than the 6k local-model default.
     summary_chunk_chars: int = Field(default=240_000, ge=6_000, le=240_000)

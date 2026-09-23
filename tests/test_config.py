@@ -61,7 +61,7 @@ def test_defaults_without_env(monkeypatch, tmp_path):
     assert s.llm.ollama.polish_chunk_chars == 2_000
     assert s.llm.codex_local.polish_chunk_chars == 48_000
     assert s.llm.codex_local.summary_chunk_chars == 240_000
-    assert s.llm.codex_local.model == "gpt-5.6-sol"
+    assert s.llm.codex_local.model == "gpt-6-sol"
     assert s.llm.codex_local.reasoning_effort == "high"
     assert s.llm.codex_local.quota_reserve_percent == 5
     assert s.llm.codex_local.quota_check_timeout_seconds == 20

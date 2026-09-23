@@ -184,7 +184,7 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
 
   [llm.codex_local]              # trusted local ChatGPT subscription adapter
   executable = "codex"
-  model = "gpt-5.6-sol"
+  model = "gpt-6-sol"
   codex_home = "~/.localplaud/codex" # dedicated login; localplaud never reads its tokens
   reasoning_effort = "high"
   timeout_seconds = 900

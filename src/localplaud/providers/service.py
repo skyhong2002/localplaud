@@ -360,6 +360,10 @@ def _ensure_codex_entry(
                         stage=ProviderStage.mind_map,
                         hardware_requirement="local Codex CLI; cloud inference",
                     ),
+                    StageCapabilities(
+                        stage=ProviderStage.ask,
+                        hardware_requirement="local Codex CLI; cloud inference",
+                    ),
                 ),
                 metadata={
                     "experimental": True,
@@ -374,7 +378,7 @@ def _ensure_codex_entry(
     else:
         model.capabilities = _with_required_capabilities(
             model.capabilities,
-            [ProviderStage.correct, ProviderStage.summarize, ProviderStage.mind_map],
+            [ProviderStage.correct, ProviderStage.summarize, ProviderStage.mind_map, ProviderStage.ask],
             cloud=True,
         )
     return connection, model
@@ -1216,13 +1220,14 @@ def save_model(session: Session, data: dict, model_id: int | None = None) -> dic
             ProviderStage.correct,
             ProviderStage.summarize,
             ProviderStage.mind_map,
+            ProviderStage.ask,
         }
         invalid_stages = [
             item.stage.value for item in codex_capability.stages if item.stage not in supported
         ]
         if invalid_stages:
             raise ValueError(
-                "codex-local supports only correction, summaries, and mind maps; "
+                "codex-local supports only correction, summaries, mind maps, and Ask; "
                 "unsupported stages: " + ", ".join(invalid_stages)
             )
     if row is None:

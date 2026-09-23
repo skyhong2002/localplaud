@@ -135,12 +135,13 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
             for model in list_models(session)
             if model["connection_key"] == "correct:codex-local"
         )
-        assert codex["model_key"] == "gpt-5.6-sol"
+        assert codex["model_key"] == "gpt-6-sol"
         assert codex["capabilities"]["metadata"]["trusted_single_user_only"] is True
         assert [stage["stage"] for stage in codex["capabilities"]["stages"]] == [
             "correct",
             "summarize",
             "mind_map",
+            "ask",
         ]
         profiles = list_profiles(session)
         assert len(profiles) == 1
@@ -299,7 +300,7 @@ def test_provider_mutation_rejects_active_dispatch_but_recovers_expired_lease(
 def test_codex_local_is_rejected_outside_supported_text_stages(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'codex-profile-scope.db'}")
     Base.metadata.create_all(engine)
-    broad_capability = _cap(ProviderStage.correct, ProviderStage.ask, egress=True).model_dump(
+    broad_capability = _cap(ProviderStage.correct, ProviderStage.embed, egress=True).model_dump(
         mode="json"
     )
     with Session(engine) as session:
@@ -324,7 +325,7 @@ def test_codex_local_is_rejected_outside_supported_text_stages(tmp_path):
         )
         session.add(connection)
         session.flush()
-        with pytest.raises(ValueError, match="supports only.*ask"):
+        with pytest.raises(ValueError, match="supports only.*embed"):
             save_model(
                 session,
                 {
@@ -350,7 +351,7 @@ def test_codex_local_is_rejected_outside_supported_text_stages(tmp_path):
 
     capability_catalog = {
         ("custom:codex", "gpt-test"): broad_capability,
-        ("local", "summary"): _cap(ProviderStage.ask),
+        ("local", "summary"): _cap(ProviderStage.embed),
     }
     connections = {
         "custom:codex": {
@@ -364,25 +365,26 @@ def test_codex_local_is_rejected_outside_supported_text_stages(tmp_path):
             "data_egress": False,
         },
     }
-    primary = {"stages": {"ask": {"connection": "custom:codex", "model": "gpt-test"}}}
-    with pytest.raises(ResolutionError, match="supports only.*ask"):
+    primary = {"stages": {"embed": {"connection": "custom:codex", "model": "gpt-test"}}}
+    with pytest.raises(ResolutionError, match="supports only.*embed"):
         resolve_profile([primary], capability_catalog, connections)
 
     fallback = {
-        "stages": {"ask": {"connection": "local", "model": "summary"}},
+        "stages": {"embed": {"connection": "local", "model": "summary"}},
         "policy": {
             "fallback_policy": {
-                "stages": {"ask": [{"connection": "custom:codex", "model": "gpt-test"}]}
+                "stages": {"embed": [{"connection": "custom:codex", "model": "gpt-test"}]}
             }
         },
     }
-    with pytest.raises(ResolutionError, match="supports only.*ask"):
+    with pytest.raises(ResolutionError, match="supports only.*embed"):
         resolve_profile([fallback], capability_catalog, connections)
 
     supported_capability = _cap(
         ProviderStage.correct,
         ProviderStage.summarize,
         ProviderStage.mind_map,
+        ProviderStage.ask,
         egress=True,
     ).model_dump(mode="json")
     supported = resolve_profile(
@@ -390,6 +392,10 @@ def test_codex_local_is_rejected_outside_supported_text_stages(tmp_path):
             {
                 "stages": {
                     "summarize": {
+                        "connection": "custom:codex",
+                        "model": "gpt-supported",
+                    },
+                    "ask": {
                         "connection": "custom:codex",
                         "model": "gpt-supported",
                     },
@@ -407,6 +413,11 @@ def test_codex_local_is_rejected_outside_supported_text_stages(tmp_path):
     assert supported_snapshot["stages"]["summarize"]["provider_type"] == "codex-local"
     assert supported_snapshot["stages"]["mind_map"]["model"] == "gpt-supported"
 
+    assert supported_snapshot["stages"]["ask"]["provider_type"] == "codex-local"
+    ask_settings = _settings_for_stage(Settings(), supported_snapshot, "ask")
+    assert ask_settings.llm.codex_local.model == "gpt-supported"
+    assert ask_settings.llm.provider == "codex-local"
+
     lied_capability = _cap(ProviderStage.correct).model_dump(mode="json")
     correction = {
         "policy": {"no_egress": True},
@@ -420,18 +431,18 @@ def test_codex_local_is_rejected_outside_supported_text_stages(tmp_path):
         )
 
 
-def test_runtime_projection_rejects_legacy_codex_non_correction_snapshot():
+def test_runtime_projection_rejects_codex_non_text_snapshot():
     snapshot = {
         "stages": {
-            "ask": {
+            "embed": {
                 "connection": "custom:codex",
                 "provider_type": "codex-local",
                 "model": "gpt-test",
             }
         }
     }
-    with pytest.raises(ValueError, match="supports only.*ask"):
-        _settings_for_stage(Settings(), snapshot, "ask")
+    with pytest.raises(ValueError, match="supports only.*embed"):
+        _settings_for_stage(Settings(), snapshot, "embed")
 
 
 @pytest.mark.parametrize("invalid_budget", [0, 1_000_000, "bad"])
@@ -1155,7 +1166,7 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
         )
         assert codex_model.status_code == 201
         invalid_codex_capability = _cap(
-            ProviderStage.correct, ProviderStage.ask, egress=True
+            ProviderStage.correct, ProviderStage.embed, egress=True
         ).model_dump(mode="json")
         rejected_codex_create = client.post(
             "/api/providers/models",

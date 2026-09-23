@@ -1543,3 +1543,54 @@ def test_detail_page_has_ask_tab_and_deeplink(monkeypatch, tmp_path):
     # Delegated seek handler + ?t= deep-link support.
     assert "data-seek" in r.text
     assert "URLSearchParams" in r.text
+
+
+@pytest.mark.parametrize('file_id', ['r1', None])
+@pytest.mark.parametrize('quota_blocked', [False, True])
+def test_codex_ask_keeps_scope_provenance_and_quota_guard(
+    monkeypatch, tmp_path, file_id, quota_blocked
+):
+    from localplaud.db.models import ProviderCostReservation
+    from localplaud.db.session import session_scope
+    from localplaud.llm.base import LLMQuotaExhausted
+    from localplaud.llm.codex_local import CodexLocalLLM
+    from localplaud.providers.service import create_profile_version, list_profiles
+    from localplaud.worker.qa import answer
+
+    _fresh_db(monkeypatch, tmp_path)
+    with session_scope() as session:
+        old = list_profiles(session)[0]
+        stages = old['stages']
+        stages['ask'] = {'connection': 'correct:codex-local', 'model': 'gpt-6-sol'}
+        create_profile_version(session, {
+            'key': 'codex-ask', 'name': 'Codex Ask', 'is_system_default': True,
+            'privacy_policy': 'allow-egress', 'no_egress': False, 'stages': stages,
+        })
+    _seed_two_files()
+    monkeypatch.setattr('localplaud.worker.qa.build_embedder', lambda cfg: _FakeEmbedder())
+    calls = []
+
+    def complete(provider, prompt, **kwargs):
+        assert provider.model == 'gpt-6-sol'
+        assert 'r1 relevant' in prompt
+        if file_id is not None:
+            assert 'r2 relevant' not in prompt
+        calls.append(prompt)
+        if quota_blocked:
+            raise LLMQuotaExhausted('Codex subscription reserve protected')
+        return 'Grounded answer at [Recording One @ 12s].'
+
+    monkeypatch.setattr(CodexLocalLLM, 'complete', complete)
+    if quota_blocked:
+        with pytest.raises(LLMQuotaExhausted, match='reserve protected'):
+            answer('relevant', file_id=file_id)
+        assert len(calls) == 1  # No implicit local/other-provider fallback.
+        with session_scope() as session:
+            assert all(r.status != 'active' for r in session.query(ProviderCostReservation))
+    else:
+        result = answer('relevant', file_id=file_id)
+        assert result['provenance']['model'] == 'gpt-6-sol'
+        assert result['provenance']['provider'] == 'codex-local'
+        assert any(s['file_id'] == 'r1' and s['start'] == 12.0 for s in result['sources'])
+        if file_id:
+            assert {s['file_id'] for s in result['sources']} == {'r1'}

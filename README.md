@@ -220,7 +220,7 @@ explicit context limit can bisect a batch. Transport and quota failures are neve
 converted into additional split calls.
 
 The `codex-local` adapter is an explicit trusted-single-user option for transcript
-correction, generated notes, and mind maps. It invokes `codex exec` through stdin in an ephemeral, read-only,
+correction, generated notes, mind maps, and grounded Ask. It invokes `codex exec` through stdin in an ephemeral, read-only,
 temporary workspace with strict, fail-closed flags that disable the supported shell,
 browser, computer-use, app, plugin, multi-agent, and workspace tools. localplaud never
 reads or copies Codex credentials. Its
@@ -244,13 +244,14 @@ CODEX_HOME=~/.localplaud/codex codex login status
 The health check confirms ChatGPT authentication and reports the current remaining
 Codex window without spending a model turn. Create a new immutable execution-profile
 version and select `correct:codex-local` only for the explicitly approved `correct`,
-`summarize`, and/or `mind_map` stages. `codex-local` remains rejected as the global
-`[llm]` provider and for Ask, so unrelated text workloads cannot cross this
-experimental boundary accidentally. The shipped local profile protects 5% and
+`summarize`, `mind_map`, and/or `ask` stages. Both single-recording and library Ask
+retain retrieval scope, playable citations, provenance, and the same per-call
+subscription reserve. `codex-local` remains rejected as the global `[llm]` provider;
+select it through an execution profile with explicit cloud egress. The shipped local profile protects 5% and
 requires another 2% of pre-call headroom, keeping the user's requested 3% floor
 outside the callable range.
 
-For GPT-5.6-sol, summary and mind-map calls use up to 240,000 transcript characters
+For GPT-6 Sol, summary and mind-map calls use up to 240,000 transcript characters
 per request. This keeps ordinary long recordings in one full-transcript turn instead
 of spending many quota-consuming lossy map calls; recordings beyond that bound still
 use the durable full-coverage hierarchy.

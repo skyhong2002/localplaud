@@ -439,7 +439,7 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
         stages = dict(current["stages"])
         stages["correct"] = {
             "connection": "correct:codex-local",
-            "model": "gpt-5.6-sol",
+            "model": "gpt-6-sol",
             "options": {},
         }
         codex_profile = create_profile_version(
@@ -463,7 +463,7 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
         assert row.corrected_transcript is not None
         assert row.corrected_transcript.revision == 1
         assert row.corrected_transcript.provider == "codex-local"
-        assert row.corrected_transcript.model == "gpt-5.6-sol"
+        assert row.corrected_transcript.model == "gpt-6-sol"
         assert (
             row.corrected_transcript.resolved_profile_snapshot["stages"]["correct"]["connection"]
             == "correct:codex-local"
