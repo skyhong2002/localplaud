@@ -838,3 +838,22 @@ def test_degraded_stage_keeps_preflight_cost_reservation(monkeypatch, tmp_path):
             select(StageAttempt).where(StageAttempt.file_id == "degraded-cost")
         )
         assert attempt.estimated_cost_usd == pytest.approx(0.06)
+
+
+def test_summary_cost_projection_accounts_for_bounded_ollama_sections(monkeypatch):
+    from localplaud.asr.base import Segment, Transcript
+    from localplaud.config import Settings
+    from localplaud.worker.pipeline import _llm_projected_usage
+    from localplaud.worker.summary_templates import get_template
+
+    monkeypatch.setattr('localplaud.worker.summary_templates.get_effective_template', get_template)
+    transcript = Transcript(segments=[Segment(text='x' * 5000, start=0, end=1)])
+    settings = Settings()
+    autopilot = _llm_projected_usage(transcript, settings)
+    settings.pipeline.summary_template = 'plaud-meeting-minutes'
+    specialist = _llm_projected_usage(transcript, settings)
+    mind_map = _llm_projected_usage(transcript, settings, stage='mind_map')
+    assert specialist['output_tokens'] - mind_map['output_tokens'] == 1500
+    assert autopilot['requests'] == 4  # Two 3k chunks, one reduction, one overview.
+    assert autopilot['output_tokens'] >= 2 * 2400 + 800
+    assert specialist['output_tokens'] >= 2 * 1200 + 3000

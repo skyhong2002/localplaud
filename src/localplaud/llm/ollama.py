@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from .base import LLMError, LLMTransientError, LLMUnavailable
+from .base import LLMError, LLMInputTooLarge, LLMOutputInvalid, LLMTransientError, LLMUnavailable
 
 if TYPE_CHECKING:
     from ..config import OllamaConfig
@@ -28,6 +28,10 @@ class OllamaProvider:
     @property
     def polish_chunk_chars(self) -> int:
         return self.cfg.polish_chunk_chars
+
+    @property
+    def summary_max_chunk_chars(self) -> int:
+        return self.cfg.summary_chunk_chars
 
     def available(self) -> bool:
         return self.health()[0]
@@ -56,6 +60,7 @@ class OllamaProvider:
             "model": self.cfg.model,
             "messages": messages,
             "stream": False,
+            "truncate": False,
             # Keep the token budget for visible output. Thinking-capable
             # local models can otherwise spend the whole response on a
             # hidden reasoning field and return empty content.
@@ -63,6 +68,7 @@ class OllamaProvider:
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
+                "num_ctx": self.cfg.context_tokens,
             },
         }
         if json_schema is not None:
@@ -83,6 +89,11 @@ class OllamaProvider:
                 f"(model {self.cfg.model!r})"
             ) from exc
         if resp.status_code != 200:
+            if resp.status_code == 400 and "context" in resp.text.lower():
+                raise LLMInputTooLarge(
+                    "Ollama input exceeds its context window; reduce the stage chunk size "
+                    "or increase llm.ollama.context_tokens"
+                )
             if resp.status_code == 404:
                 from ..ollama import response_error
 
@@ -95,7 +106,12 @@ class OllamaProvider:
             raise LLMError(
                 f"Ollama returned HTTP {resp.status_code}: {resp.text[:500]}"
             )
-        content = resp.json().get("message", {}).get("content", "")
+        result = resp.json()
+        if result.get("done_reason") == "length":
+            raise LLMOutputInvalid(
+                "Ollama output reached its token limit; the incomplete result was rejected"
+            )
+        content = result.get("message", {}).get("content", "")
         if not content.strip():
             raise LLMError("Ollama LLM returned an empty completion")
         return content

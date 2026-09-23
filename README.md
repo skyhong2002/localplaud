@@ -255,6 +255,11 @@ per request. This keeps ordinary long recordings in one full-transcript turn ins
 of spending many quota-consuming lossy map calls; recordings beyond that bound still
 use the durable full-coverage hierarchy.
 
+Recording notes retain a versioned execution policy separately from captured
+Plaud template descriptions. Long Autopilot notes preserve detailed sections from
+every transcript chunk and reduce only the overview evidence. See
+[note quality and evaluation limits](docs/note-quality.md).
+
 ## ASR providers
 
 ASR remains pluggable, but the subscription-independent quality baseline is local

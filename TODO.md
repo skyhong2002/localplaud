@@ -51,6 +51,15 @@ Full pre-audit engineering detail lives in this file's git history.
 
 ### P0 — validation debt (quality gates before changing defaults)
 
+- **Recording-note fidelity (2026-09-23).** Same-recording comparisons found
+  missing substantive topics, repeated filler, incorrect decisions and invented
+  actions. Versioned execution instructions, retained Autopilot detail sections,
+  explicit Ollama context and truncation rejection are implemented in the summary
+  quality branch. Local-model drafts have not passed fidelity review; deployment
+  and bulk replacement remain pending. Preserve current notes/history and obtain
+  explicit provider selection before any cloud-model comparison. See
+  [note quality](docs/note-quality.md).
+
 - **WhisperX forced-alignment validation.** `align:whisperx` /
   `wav2vec2-auto` are now the production default. A real 43-second Mandarin
   recording passed all 12 independence checks on 2026-08-19. Two previously

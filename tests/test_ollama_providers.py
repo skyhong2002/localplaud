@@ -101,6 +101,9 @@ def test_ollama_llm_disables_thinking_and_honors_visible_token_budget():
     payload = json.loads(route.calls[0].request.content)
     assert payload["think"] is False
     assert payload["options"]["num_predict"] == 321
+    assert payload["options"]["num_ctx"] == 8192
+    assert payload["truncate"] is False
+    assert provider.summary_max_chunk_chars == 3000
     assert payload["format"] == schema
 
 
@@ -119,3 +122,29 @@ def test_ollama_llm_rejects_empty_visible_completion():
     provider = OllamaProvider(OllamaConfig(host=HOST, model="qwen3.5:9b"))
     with pytest.raises(LLMError, match="empty completion"):
         provider.complete("make an outline")
+
+
+@respx.mock
+def test_ollama_rejects_cut_off_note_even_when_content_is_nonempty():
+    from localplaud.config import OllamaConfig
+    from localplaud.llm.base import LLMError
+    from localplaud.llm.ollama import OllamaProvider
+
+    respx.post(f"{HOST}/api/chat").mock(return_value=httpx.Response(
+        200, json={"message": {"content": "## Decision\nWe agreed to"}, "done_reason": "length"},
+    ))
+    with pytest.raises(LLMError, match="incomplete result was rejected"):
+        OllamaProvider(OllamaConfig(host=HOST)).complete("summarize")
+
+
+@respx.mock
+def test_ollama_context_overflow_is_an_input_error_for_safe_rechunking():
+    from localplaud.config import OllamaConfig
+    from localplaud.llm.base import LLMInputTooLarge
+    from localplaud.llm.ollama import OllamaProvider
+
+    respx.post(f"{HOST}/api/chat").mock(return_value=httpx.Response(
+        400, json={"error": "input exceeds context length"},
+    ))
+    with pytest.raises(LLMInputTooLarge, match="reduce the stage chunk size"):
+        OllamaProvider(OllamaConfig(host=HOST)).complete("too long")

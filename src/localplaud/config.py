@@ -257,6 +257,10 @@ class DiarizeConfig(BaseModel):
 class OllamaConfig(BaseModel):
     host: str = "http://localhost:11434"
     model: str = "llama3.1:8b"
+    # Pin the actual runtime window; the model's advertised capacity is not
+    # Ollama's loaded context size. Keep Mandarin summary chunks bounded too.
+    context_tokens: int = Field(default=8192, ge=8192, le=262144)
+    summary_chunk_chars: int = Field(default=3000, ge=1000, le=60000)
     # Per-request ceiling. Small models on constrained GPUs (the WSL worker's
     # 8 GB card) can legitimately need far longer than the old hard-coded 600s
     # for long map-reduce prompts.

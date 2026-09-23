@@ -1,7 +1,7 @@
-"""Turn a complete transcript into titled notes using an exact stored template.
+"""Generate notes using stored templates and a versioned local execution policy.
 
-The built-in prompt catalog is captured from the user's Plaud Recent surface;
-localplaud supplies only the durable full-coverage and typed-output contracts.
+Plaud's visible template descriptions are retained as provenance, not mistaken
+for its hidden generation prompts. Long Autopilot notes retain detailed sections.
 """
 
 from __future__ import annotations
@@ -12,7 +12,13 @@ from collections import Counter
 
 from ..asr.base import Transcript as AsrTranscript
 from ..config import Settings
-from ..llm.base import build_llm
+from ..llm.base import LLMOutputInvalid, build_llm
+from .note_policy import (
+    AUTOPILOT_INSTRUCTIONS,
+    NOTE_INSTRUCTIONS,
+    NOTE_PROMPT_VERSION,
+    SECTION_INSTRUCTIONS,
+)
 from .title_policy import TITLE_INSTRUCTIONS, TITLE_PROMPT_VERSION, has_template_title_leak
 
 log = logging.getLogger(__name__)
@@ -87,6 +93,9 @@ def _reduction_max_tokens(chunk_chars: int) -> int:
 
 def _summary_chunk_chars(settings: Settings, llm) -> int:
     """Use a provider's safe large-context budget when it advertises one."""
+    provider_limit = getattr(llm, "summary_max_chunk_chars", None)
+    if isinstance(provider_limit, int) and provider_limit > 0:
+        return min(settings.pipeline.summary_chunk_chars, provider_limit)
     provider_budget = getattr(llm, "summary_chunk_chars", None)
     if isinstance(provider_budget, int) and provider_budget > 0:
         return max(settings.pipeline.summary_chunk_chars, provider_budget)
@@ -111,6 +120,19 @@ notes. Preserve every distinct decision, fact, name, number, question, and actio
 item. Do not invent information and do not produce the final formatted summary.
 
 Coverage notes:
+---
+{text}
+---
+"""
+
+_OVERVIEW_REDUCE_PROMPT = """\
+Extract brief evidence for an overview of this recording. The complete detailed
+sections are retained separately and will be included unchanged in the final note.
+Return at most 100 words (or 200 Chinese characters): the concrete main subjects,
+key decisions and unresolved issues. Do not attempt to reproduce all details here.
+Use only the evidence; distinguish proposals from decisions. No title or headings.
+
+Detailed sections:
 ---
 {text}
 ---
@@ -251,13 +273,15 @@ def _summary_output(raw: str) -> tuple[str | None, str, dict[str, list[str]] | N
     try:
         parsed = json.loads(raw)
     except (TypeError, json.JSONDecodeError):
+        if raw.lstrip().startswith("{"):
+            raise LLMOutputInvalid("Summary returned incomplete or invalid structured output") from None
         return _extract_title(raw), raw, None
     if not isinstance(parsed, dict):
         return _extract_title(raw), raw, None
     content = parsed.get("content_md")
     title = parsed.get("title")
     if not isinstance(content, str) or not content.strip():
-        return _extract_title(raw), raw, None
+        raise LLMOutputInvalid("Summary returned no usable note content")
     from .tagging import normalize_tag_payload
 
     embedded_tags = (
@@ -271,7 +295,8 @@ def _summary_output(raw: str) -> tuple[str | None, str, dict[str, list[str]] | N
 
 
 def _prepare_source(
-    transcript: AsrTranscript, settings: Settings, llm, *, title_only: bool = False
+    transcript: AsrTranscript, settings: Settings, llm, *, title_only: bool = False,
+    detail_sections: list[str] | None = None,
 ) -> tuple[str, dict]:
     """Share full-transcript coverage between notes and title-only repair."""
     transcript_text = _render_transcript(transcript)
@@ -311,20 +336,33 @@ def _prepare_source(
                     f"part {idx} of {len(chunks)}. Be concise; omit greetings and filler. "
                     f"Do not propose a title yet.\nTranscript part:\n---\n{chunk}\n---\n"
                 )
+            if detail_sections is not None:
+                prompt = (
+                    f"{SECTION_INSTRUCTIONS}\nTranscript portion {idx} of {len(chunks)}:\n"
+                    f"---\n{chunk}\n---\n"
+                )
             notes.append(
                 llm.complete(
                     prompt,
                     system=(
+                        NOTE_INSTRUCTIONS if detail_sections is not None else
                         "You create loss-minimizing intermediate notes from one part of a "
                         "long transcript. Never invent facts. Reply in the source language."
                     ),
                     temperature=0.1,
-                    max_tokens=240 if title_only else 1200,
+                    max_tokens=240 if title_only else (2400 if detail_sections is not None else 1200),
                 )
             )
             map_calls += 1
+        if detail_sections is not None:
+            # Keep these sections verbatim. Only the overview/title evidence is
+            # reduced; late details cannot disappear in a final compression pass.
+            detail_sections.extend(notes)
         reduction_rounds = 0
-        reduction_max_tokens = _reduction_max_tokens(chunk_chars)
+        reduction_max_tokens = (
+            max(1, min(600, chunk_chars // 8))
+            if detail_sections is not None else _reduction_max_tokens(chunk_chars)
+        )
         while len("\n\n".join(notes)) > chunk_chars:
             reduction_rounds += 1
             if reduction_rounds > 8:
@@ -334,7 +372,7 @@ def _prepare_source(
             groups = _group_notes(notes, chunk_chars)
             notes = [
                 llm.complete(
-                    _REDUCE_PROMPT.format(text=group),
+                    (_OVERVIEW_REDUCE_PROMPT if detail_sections is not None else _REDUCE_PROMPT).format(text=group),
                     system="Preserve coverage while consolidating notes. Never invent facts.",
                     temperature=0.1,
                     max_tokens=reduction_max_tokens,
@@ -379,17 +417,51 @@ def summarize(
         )
     else:
         resolved_template = get_effective_template(settings.pipeline.summary_template)
-    source_text, coverage = _prepare_source(transcript, settings, llm)
+    # A captured Autopilot description is not Plaud's hidden execution prompt.
+    # Apply our explicit, versioned execution policy without changing that snapshot
+    # or imposing this layout on a user-authored/specialist template.
+    autopilot = (
+        resolved_template.name == "plaud-autopilot"
+        and resolved_template.provenance == "plaud-web-readonly"
+        and resolved_template.prompt_mode == "direct"
+    )
+    sections: list[str] = []
+    source_text, coverage = _prepare_source(
+        transcript, settings, llm, detail_sections=sections if autopilot else None,
+    )
     system, prompt = render_resolved_prompt(resolved_template, source_text)
-    system = "\n\n".join(filter(None, [system, TITLE_INSTRUCTIONS]))
+    body_policy = NOTE_INSTRUCTIONS + ("\n" + AUTOPILOT_INSTRUCTIONS if autopilot else "")
+    if sections:
+        body_policy += (
+            "\nThe detailed topic sections have already been written and will be attached "
+            "unchanged. For content_md return ONLY a short substantive overview (one or "
+            "two paragraphs) of the whole recording. Do not repeat the detailed sections "
+            "or add a list of topics, action items or headings. Generate title and tags "
+            "from the whole recording's evidence."
+        )
+    system = "\n\n".join(filter(None, [system, body_policy, TITLE_INSTRUCTIONS]))
+    output_tokens = 800 if sections else 3000
     raw_content = llm.complete(
         prompt,
         system=system,
         temperature=0.2,
-        max_tokens=1500,
+        max_tokens=output_tokens,
         json_schema=_SUMMARY_OUTPUT_SCHEMA,
     )
     title, content, embedded_tags = _summary_output(raw_content)
+    if sections:
+        content = "\n\n".join([content, *sections])
+        coverage["strategy"] = "sectioned"
+        coverage["detail_sections"] = len(sections)
+    execution = {
+        "version": NOTE_PROMPT_VERSION,
+        "instructions": body_policy,
+        "section_instructions": SECTION_INSTRUCTIONS if sections else None,
+        "output_tokens": output_tokens,
+        "section_output_tokens": 2400 if sections else None,
+        "chunk_chars": _summary_chunk_chars(settings, llm),
+        "context_tokens": getattr(getattr(llm, "cfg", None), "context_tokens", None),
+    }
     # Also enforce this on remote workers, before the result reaches the controller.
     # Do not hide an invalid explicit title by promoting an arbitrary note section.
     if has_template_title_leak(title):
@@ -427,8 +499,9 @@ def summarize(
         "tags": tags,
         "template": resolved_template.name,
         "template_version": resolved_template.version,
-        "template_snapshot": template_snapshot(resolved_template),
-        "coverage": {**coverage, "title_prompt_version": TITLE_PROMPT_VERSION},
+        "template_snapshot": {**template_snapshot(resolved_template), "execution": execution},
+        "coverage": {**coverage, "title_prompt_version": TITLE_PROMPT_VERSION,
+                     "note_prompt_version": NOTE_PROMPT_VERSION},
     }
 
 

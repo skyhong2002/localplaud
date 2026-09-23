@@ -25,7 +25,7 @@ from ..asr.base import Segment, Transcript, Word
 from ..config import get_settings
 from ..db.models import RemoteJob
 from ..db.session import session_scope
-from ..llm.base import LLMTransientError
+from ..llm.base import LLMOutputInvalid, LLMTransientError
 from ..plaud.common import _assert_safe_fetch_url
 from .protocol import (
     ArtifactDescriptor,
@@ -265,7 +265,7 @@ def execute_job(job_id: str) -> None:
                 code="stage_execution_failed",
                 message=str(exc),
                 retryable=isinstance(
-                    exc, (httpx.TimeoutException, LLMTransientError, OSError)
+                    exc, (httpx.TimeoutException, LLMTransientError, LLMOutputInvalid, OSError)
                 ),
             ).model_dump(mode="json")
             row.completed_at = datetime.now(UTC)
@@ -300,9 +300,15 @@ def capabilities():
 
 @router.post("/jobs", response_model=JobResponse, dependencies=[Depends(_authorize)])
 def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
+    from ..worker.note_policy import NOTE_PROMPT_VERSION
     from ..worker.title_policy import TITLE_PROMPT_VERSION
 
     title_only = request.stage == JobStage.summarize and request.options.get("title_only")
+    if (
+        request.stage == JobStage.summarize and not title_only
+        and request.options.get("note_prompt_version", NOTE_PROMPT_VERSION) != NOTE_PROMPT_VERSION
+    ):
+        raise HTTPException(status_code=409, detail="note prompt version is unsupported")
     if title_only and request.options.get("title_prompt_version", TITLE_PROMPT_VERSION) != TITLE_PROMPT_VERSION:
         raise HTTPException(status_code=409, detail="title prompt version is unsupported")
     with session_scope() as session:
@@ -311,6 +317,7 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
         )
         if existing is not None:
             outdated_title = False
+            outdated_note = False
             if title_only and existing.status == JobStatus.succeeded:
                 try:
                     artifact = next(a for a in existing.artifacts if a["name"] == "result.json")
@@ -318,7 +325,14 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
                     outdated_title = payload.get("title_prompt_version") != TITLE_PROMPT_VERSION
                 except (KeyError, StopIteration, ValueError):
                     outdated_title = True
-            if existing.status != JobStatus.failed and not outdated_title:
+            if request.stage == JobStage.summarize and not title_only and existing.status == JobStatus.succeeded:
+                try:
+                    artifact = next(a for a in existing.artifacts if a["name"] == "result.json")
+                    payload = json.loads(base64.b64decode(artifact["data_base64"]))
+                    outdated_note = (payload.get("coverage") or {}).get("note_prompt_version") != NOTE_PROMPT_VERSION
+                except (KeyError, StopIteration, ValueError, AttributeError, TypeError):
+                    outdated_note = True
+            if existing.status != JobStatus.failed and not outdated_title and not outdated_note:
                 return _response(existing)
             # A failure is not a durable result. Re-run the job on resubmit so
             # one transient error (an LLM timeout, an OOM) can't poison the

@@ -945,13 +945,33 @@ def _run_fallback_stage(
     raise RuntimeError(f"no candidate executed for {profile_stage}")
 
 
-def _llm_projected_usage(transcript: Transcript, settings: Settings) -> dict:
-    chars = len(transcript.text)
-    chunks = max(1, math.ceil(chars / settings.pipeline.summary_chunk_chars))
+def _llm_projected_usage(
+    transcript: Transcript, settings: Settings, *, stage: str = "summarize",
+) -> dict:
+    rendered = summarize._render_transcript(transcript)
+    chars = len(rendered)
+    chunk_chars = settings.pipeline.summary_chunk_chars
+    if settings.llm.provider in {"ollama", "localplaud-worker"}:
+        chunk_chars = min(chunk_chars, settings.llm.ollama.summary_chunk_chars)
+    chunks = len(summarize._chunk_text(rendered, chunk_chars))
     reduce_calls = math.ceil(chunks / 8) if chunks > 1 else 0
     requests = chunks + reduce_calls + 1 if chunks > 1 else 1
-    reduce_tokens = summarize._reduction_max_tokens(settings.pipeline.summary_chunk_chars)
-    max_output_tokens = chunks * 1200 + reduce_calls * reduce_tokens + 1500 if chunks > 1 else 1500
+    selected_template = summary_templates.get_effective_template(settings.pipeline.summary_template)
+    sectioned = (
+        stage == "summarize"
+        and selected_template.name == "plaud-autopilot"
+        and selected_template.provenance == "plaud-web-readonly"
+        and selected_template.prompt_mode == "direct"
+    )
+    map_tokens = 2400 if sectioned else 1200
+    reduce_tokens = 600 if sectioned else summarize._reduction_max_tokens(chunk_chars)
+    final_tokens = 800 if sectioned and chunks > 1 else 3000
+    if stage == "mind_map":
+        final_tokens = 1500
+    max_output_tokens = (
+        chunks * map_tokens + reduce_calls * reduce_tokens + final_tokens
+        if chunks > 1 else final_tokens
+    )
     return {
         "input_chars": math.ceil(chars * (1.5 if chunks > 1 else 1.0)),
         "output_tokens": max_output_tokens,
@@ -2141,7 +2161,7 @@ def _mind_map_operation(
     def run_mind_map(candidate):
         candidate_settings = _settings_for_stage(settings, candidate, "mind_map")
         candidate_settings.pipeline.summary_template = template_key
-        projected_usage = _llm_projected_usage(transcript, candidate_settings)
+        projected_usage = _llm_projected_usage(transcript, candidate_settings, stage="mind_map")
         cost_budget = _cost_guard(file_id, "mind_map", candidate, projected_usage)
         summary_md, source_note = (
             source_input
@@ -2289,11 +2309,14 @@ def _run_derived_stages(
                                 "summarize",
                                 [_remote_json_input("transcript", _transcript_payload(transcript))],
                                 options={
+                                    "note_prompt_version": summarize.NOTE_PROMPT_VERSION,
                                     "template": summary_templates.template_snapshot(
                                         summary_templates.get_effective_template(template_key)
                                     )
                                 },
                             )
+                            if (result.get("coverage") or {}).get("note_prompt_version") != summarize.NOTE_PROMPT_VERSION:
+                                raise RuntimeError("Remote note contract version mismatch")
                             result.setdefault("provider", "remote-worker")
                         else:
                             result = summarize.summarize(transcript, candidate_settings)

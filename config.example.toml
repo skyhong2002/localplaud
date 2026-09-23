@@ -160,6 +160,8 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   [llm.ollama]                   # local, no API key
   host = "http://localhost:11434"
   model = "llama3.1:8b"
+  context_tokens = 8192         # explicit Ollama runtime window; truncation is rejected
+  summary_chunk_chars = 3000    # reserve room for instructions and detailed Chinese notes
   polish_chunk_chars = 2000      # fits prompt + structured output in a 4k context
 
   [llm.openai]
