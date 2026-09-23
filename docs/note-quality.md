@@ -54,7 +54,9 @@ explicit user authorization, a reviewed Codex pilot was used to regenerate the
 20 selected recordings' primary Autopilot notes with the configured
 `codex-local` / `gpt-5.6-sol` connection. Recording-scoped profiles select Codex
 for summarization, retain other stage selections and disable summary fallback;
-the library's default local-model profile was not changed. Generation used local
+the library's default local-model profile was not changed by that repair. A later
+explicit request migrated active text settings to [GPT-6](gpt6-settings.md),
+without relabelling these existing notes. Generation used local
 canonical transcripts, never the Plaud reference notes.
 
 Verification checked completed stage provenance, policy snapshots, unchanged

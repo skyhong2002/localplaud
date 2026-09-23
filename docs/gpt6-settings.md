@@ -33,3 +33,18 @@ version and give a new cloud-enabled version a name that describes its behavior.
 Changing settings does not itself authorize regenerating existing artifacts.
 
 Official model guidance: <https://developers.openai.com/api/docs/guides/latest-model>.
+
+## Deployment verification (2026-09-23)
+
+After explicit authorization, the configured Codex login passed synthetic GPT-6
+Sol inference and grounded Ask checks. Ask retained a playable timestamp and
+correctly distinguished a settled amount from an undecided date. The affected
+configuration/provider/Ask/fallback/subscription-independence suite passed 98 tests.
+
+The production migration created seven immutable profile versions, updated all
+20 recording overrides and verified all 943 recording resolutions: correction,
+summary, mind map and Ask select `gpt-6-sol` with no text-stage fallback to an older
+model. Non-text stage selections, existing transcript/summary content, model
+provenance, manual titles and audio references were preserved. The earlier batch
+of regenerated notes keeps its original GPT-5.6 model attribution; switching the
+configuration does not rewrite that history or regenerate the library.

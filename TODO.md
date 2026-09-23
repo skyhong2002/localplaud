@@ -57,7 +57,9 @@ Full pre-audit engineering detail lives in this file's git history.
   explicit Ollama context and truncation rejection are deployed. With explicit
   user authorization, the selected 20 primary Autopilot notes were regenerated
   using the configured Codex model, retaining old notes and recording-scoped
-  provenance. The library default remains local. Local-model drafts have not
+  provenance. A subsequent explicit request migrated all active text-stage settings
+  to GPT-6 Sol, including grounded Ask; see [GPT-6 settings](docs/gpt6-settings.md).
+  Local-model drafts have not
   passed fidelity review; broader quality evaluation and recovery of inadequate
   transcripts remain open. See
   [note quality](docs/note-quality.md).
