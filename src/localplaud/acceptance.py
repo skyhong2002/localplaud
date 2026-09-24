@@ -27,7 +27,7 @@ def subscription_independence_report(file_id: str) -> dict:
             (
                 row
                 for row in reversed(file.transcript_revisions)
-                if row.kind == "ai_polish" and row.source == "local"
+                if row.kind in {"ai_polish", "ai_polish_after_speech"} and row.source == "local"
             ),
             None,
         )

@@ -84,3 +84,25 @@ acoustic structure instead of restoring removed hallucinations. Human edits and
 restored revisions remain protected. Explicit corrections likewise start from the
 canonical revision and invalidate dependent notes and indexes. A new prompt does
 not automatically enqueue the whole library for rewriting.
+
+## Automatic correction and edit review
+
+`transcript-polish/v3` runs before notes for both normal ingestion and notes-only
+resume/regeneration. It proposes contextual edits, then makes a separate model
+call to review every changed segment against the original dialogue and nearby
+speaker context. Approved edits become canonical; rejected edits retain their
+original text, with reasons recorded in the correction stage. There is no manual
+approval step and no library-wide homophone replacement list.
+
+Malformed, incomplete, or unavailable review fails the correction stage before a
+new revision or dependent notes are saved. Durable retry runs correction again
+without rerunning ASR, including notes-only jobs without retained audio. Existing human edits and restored revisions are protected;
+matching model/profile/prompt revisions are reused. Older machine corrections
+upgrade when the recording is next processed, using the original ASR or a compatible
+acoustic revision rather than an older model rewrite. Raw replacement invalidates
+old automatic correction inputs; manual vocabulary revisions remain protected. Every proposal/review dispatch uses
+the selected correction profile and its cost boundary, without a hidden provider
+fallback. The usage ledger includes review calls.
+
+A separate model review can still share the proposing model's mistakes; this is
+not an audio-verified transcript or a guarantee of zero missed corrections.

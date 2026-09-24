@@ -12,7 +12,7 @@ from localplaud.llm.base import (
     LLMInputTooLarge,
     LLMTransientError,
 )
-from localplaud.worker.polish import polish_transcript
+from localplaud.worker.polish import _propose_corrections as polish_transcript
 
 
 class FakePolisher:
@@ -78,7 +78,7 @@ def test_polish_preserves_ids_timestamps_speakers_and_words(monkeypatch):
     assert result["detail"]["changed_segment_ids"] == [0]
     assert result["provider"] == "opencode-go"
     assert result["model"] == "qwen3.7-plus"
-    assert result["prompt_version"] == "transcript-polish/v2"
+    assert result["prompt_version"] == "transcript-polish/v3"
 
 
 def test_polish_reports_chunk_and_segment_progress(monkeypatch):

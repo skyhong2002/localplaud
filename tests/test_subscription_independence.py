@@ -93,11 +93,11 @@ def _providers(monkeypatch):
     )
     monkeypatch.setattr(
         "localplaud.worker.pipeline.polish.polish_transcript",
-        lambda transcript, settings, progress=None: {
+        lambda transcript, settings, progress=None, dispatch_guard=None: {
             "transcript": transcript,
             "provider": settings.llm.provider,
             "model": getattr(settings.llm, settings.llm.provider.replace("-", "_")).model,
-            "prompt_version": "transcript-polish/v1",
+            "prompt_version": "transcript-polish/v3",
             "detail": {
                 "chunks": 1,
                 "attempts": 3,
@@ -168,7 +168,7 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         assert polished.kind == "ai_polish"
         assert polished.provider == "ollama"
         assert polished.model == polished.resolved_profile_snapshot["stages"]["correct"]["model"]
-        assert polished.prompt_version == "transcript-polish/v1"
+        assert polished.prompt_version == "transcript-polish/v3"
         assert polished.resolved_profile_snapshot["stages"]["correct"]["provider_type"] == "ollama"
         assert all(summary.input_transcript_revision == 1 for summary in row.summaries)
         alignment = next(stage for stage in row.stage_runs if stage.stage == StageName.align)
@@ -402,28 +402,13 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
         assert row.status == FileStatus.partial
         assert row.local_transcript is not None
         assert row.corrected_transcript is None
-        assert {summary.template for summary in row.summaries} == {
-            "plaud-autopilot",
-            "mind_map",
-        }
-        assert row.chunks
-        assert all(summary.input_transcript_revision == 0 for summary in row.summaries)
-        assert all(summary.input_transcript_source == "local" for summary in row.summaries)
+        assert not row.summaries
+        assert not row.chunks
         correct = next(stage for stage in row.stage_runs if stage.stage == StageName.correct)
         assert correct.status == StageStatus.failed
         assert "provider down" in correct.error
-        assert (
-            next(stage for stage in row.stage_runs if stage.stage == StageName.summarize).status
-            == StageStatus.completed
-        )
-        assert (
-            next(stage for stage in row.stage_runs if stage.stage == StageName.mind_map).status
-            == StageStatus.completed
-        )
-        assert (
-            next(stage for stage in row.stage_runs if stage.stage == StageName.index).status
-            == StageStatus.completed
-        )
+        assert not any(stage.stage in {StageName.summarize, StageName.mind_map, StageName.index}
+                       and stage.status == StageStatus.completed for stage in row.stage_runs)
 
     report = subscription_independence_report("polish-failure")
     polish_check = next(item for item in report["checks"] if item["name"] == "transcript_polish")
@@ -457,7 +442,8 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
         select_recording_override(session, "polish-failure", codex_profile["id"])
 
     _providers(monkeypatch)
-    process_file("polish-failure")
+    from localplaud.worker.pipeline import process_derived_artifacts
+    process_derived_artifacts("polish-failure")
     with session_scope() as session:
         row = session.get(PlaudFile, "polish-failure")
         assert row.status == FileStatus.done

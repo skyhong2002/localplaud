@@ -12,7 +12,7 @@ from ..asr.base import Segment, Transcript, Word
 from ..config import Settings
 from ..llm.base import LLMError, LLMOutputInvalid, build_llm
 
-PROMPT_VERSION = "transcript-polish/v2"
+PROMPT_VERSION = "transcript-polish/v3"
 SYSTEM_PROMPT = """You polish ASR transcript segments for downstream notes.
 Actively correct recognition errors using dialogue context and speaker continuity.
 ASR spelling is not authoritative: preserving a name means preserving its intended
@@ -89,17 +89,18 @@ def _json_completion(value: str) -> dict:
     return result
 
 
-def polish_transcript(
+def _propose_corrections(
     transcript: Transcript,
     settings: Settings,
     *,
     progress: Callable[[dict], None] | None = None,
+    provider=None,
 ) -> dict:
     """Return a corrected copy with identical segment/timestamp/speaker structure."""
     from .transcript_quality import require_usable_transcript
 
     quality = require_usable_transcript(transcript)
-    provider = build_llm(settings.llm)
+    provider = provider or build_llm(settings.llm)
     if not provider.available():
         raise LLMError(f"transcript polish provider unavailable: {provider.name}")
     source = [asdict(segment) for segment in transcript.segments]
@@ -336,3 +337,54 @@ def polish_transcript(
             "response_output_chars": response_output_chars,
         },
     }
+
+
+def polish_transcript(
+    transcript: Transcript, settings: Settings, *, progress=None, dispatch_guard=None
+) -> dict:
+    """Generate, independently review, and publish only approved contextual edits."""
+    from .correction_review import review_corrections
+
+    provider = build_llm(settings.llm)
+    if dispatch_guard is not None:
+
+        class BudgetedProvider:
+            def __getattr__(self, name):
+                return getattr(self.inner, name)
+
+            def complete(self, prompt, **kwargs):
+                dispatch_guard(
+                    {
+                        "input_chars": len(prompt) + len(kwargs.get("system") or ""),
+                        "output_tokens": kwargs.get("max_tokens", 2048),
+                        "projection": True,
+                    }
+                )
+                return self.inner.complete(prompt, **kwargs)
+
+        guarded = BudgetedProvider()
+        guarded.inner = provider
+        provider = guarded
+    result = _propose_corrections(transcript, settings, progress=progress, provider=provider)
+    review = review_corrections(
+        transcript,
+        result["transcript"],
+        provider,
+        budget=result["detail"]["chunk_chars"],
+        progress=progress,
+    )
+    detail = result["detail"]
+    detail["review"] = review
+    detail["strategy"] = "contextual-propose-review"
+    detail["attempts"] += review["calls"]
+    detail["request_input_chars"] += review["input_chars"]
+    detail["response_output_chars"] += review["output_chars"]
+    detail["changed_segment_ids"] = [
+        i
+        for i, (before, after) in enumerate(
+            zip(transcript.segments, result["transcript"].segments, strict=True)
+        )
+        if before.text != after.text
+    ]
+    detail["output_chars"] = len(result["transcript"].text)
+    return result

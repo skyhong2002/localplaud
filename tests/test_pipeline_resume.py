@@ -1239,7 +1239,9 @@ def test_empty_reasr_does_not_revive_machine_text_but_preserves_human_text(
         assert len(row.transcript_revisions) == (1 if preserved else 2)
 
 
-@pytest.mark.parametrize("kind", ["speech_cleanup", "speech_retranscribe", "user_edit", "restore"])
+@pytest.mark.parametrize(
+    "kind", ["speech_cleanup", "speech_retranscribe", "user_edit", "restore", "vocabulary"]
+)
 def test_context_polish_follows_acoustic_revision_without_reviving_raw(monkeypatch, tmp_path, kind):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.asr.base import Segment
@@ -1274,6 +1276,7 @@ def test_context_polish_follows_acoustic_revision_without_reviving_raw(monkeypat
                 revision=1,
                 source="local",
                 kind=kind,
+                note="vocabulary:manual rules=1" if kind == "vocabulary" else None,
                 segments=[kept],
                 text=kept["text"],
             )
@@ -1295,7 +1298,7 @@ def test_context_polish_follows_acoustic_revision_without_reviving_raw(monkeypat
             ),
             "provider": "fake",
             "model": "test-model",
-            "prompt_version": "transcript-polish/v2",
+            "prompt_version": "transcript-polish/v3",
             "detail": {},
         }
 
@@ -1322,3 +1325,126 @@ def test_context_polish_follows_acoustic_revision_without_reviving_raw(monkeypat
             assert current.kind == kind
             assert current.text == kept["text"]
             assert len(row.transcript_revisions) == 1
+
+    if expected_calls:
+        # Simulate raw replacement, including its detached historical pointers.
+        kept["text"] = "課程銀心派對"
+        with session_scope() as session:
+            row = session.get(PlaudFile, "context")
+            for previous in row.transcript_revisions:
+                previous.base_transcript_id = None
+            row.local_transcript.text = kept["text"]
+            row.local_transcript.segments = [dict(kept)]
+        pipeline.process_derived_artifacts("context", settings)
+        assert calls == ["口琴社要辦銀心派對", "課程銀心派對"]
+        with session_scope() as session:
+            row = session.get(PlaudFile, "context")
+            assert row.corrected_transcript.kind == "ai_polish"
+            assert len(row.transcript_revisions) == 3
+
+
+@pytest.mark.parametrize("old_kind", ["ai_polish", "vocabulary", "speech_cleanup"])
+def test_notes_retry_automatically_upgrades_raw_correction_and_preserves_on_review_failure(
+    monkeypatch, tmp_path, old_kind
+):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.asr.base import Segment
+    from localplaud.asr.base import Transcript as AsrTranscript
+    from localplaud.config import get_settings
+    from localplaud.db.models import PlaudFile, StageName, Summary, Transcript, TranscriptRevision
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.llm.base import LLMTransientError
+    from localplaud.worker import pipeline
+
+    init_db()
+    with session_scope() as db:
+        db.add(PlaudFile(id="upgrade", origin="local", filename="fixture"))
+        raw = Transcript(
+            file_id="upgrade",
+            source="local",
+            provider="fake-asr",
+            text="社團銀心派對",
+            segments=[{"text": "社團銀心派對", "start": 0, "end": 1, "speaker": "a"}],
+        )
+        db.add(raw)
+        db.flush()
+        db.add(
+            TranscriptRevision(
+                file_id="upgrade",
+                base_transcript_id=raw.id if old_kind == "ai_polish" else None,
+                revision=1,
+                source="local",
+                kind=old_kind,
+                provider="old",
+                model="old",
+                prompt_version="transcript-polish/v2",
+                text="AI invented a deadline",
+                segments=[{"text": "AI invented a deadline", "start": 0, "end": 1, "speaker": "a"}],
+            )
+        )
+        db.add(
+            Summary(
+                file_id="upgrade",
+                source="local",
+                template="plaud-autopilot",
+                content_md="existing notes",
+            )
+        )
+    settings = get_settings().model_copy(deep=True)
+    settings.pipeline.polish = True
+    counts = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
+    _install_fakes(monkeypatch, counts)
+    failed = True
+    inputs = []
+
+    def correct(transcript, _settings, **kwargs):
+        inputs.append(transcript.text)
+        assert transcript.text == "社團銀心派對"
+        if failed:
+            raise LLMTransientError("review unavailable")
+        return {
+            "transcript": AsrTranscript(
+                segments=[Segment(text="社團迎新派對", start=0, end=1, speaker="a")]
+            ),
+            "provider": "fake",
+            "model": "test",
+            "prompt_version": "transcript-polish/v3",
+            "detail": {},
+        }
+
+    monkeypatch.setattr(pipeline.polish, "polish_transcript", correct)
+    pipeline.process_derived_artifacts("upgrade", settings)
+    with session_scope() as db:
+        r = db.get(PlaudFile, "upgrade")
+        assert len(r.transcript_revisions) == 1
+        assert r.summaries[0].content_md == "existing notes"
+        assert r.status.value == "partial"
+        assert r.audio_path is None
+        r.pipeline_next_retry_at = None
+    assert counts == {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
+    failed = False
+    generate_notes = pipeline.summarize.summarize
+
+    def notes_unavailable(*args, **kwargs):
+        raise LLMTransientError("notes unavailable")
+
+    monkeypatch.setattr(pipeline.summarize, "summarize", notes_unavailable)
+    assert pipeline.process_pending(settings) == 1
+    with session_scope() as db:
+        r = db.get(PlaudFile, "upgrade")
+        assert r.status.value == "partial"
+        r.pipeline_next_retry_at = None
+        assert r.corrected_transcript.text == "社團迎新派對"
+    monkeypatch.setattr(pipeline.summarize, "summarize", generate_notes)
+    assert pipeline.process_pending(settings) == 1
+    pipeline.process_derived_artifacts("upgrade", settings)
+    assert counts["asr"] == 0
+    assert inputs == ["社團銀心派對"] * 2
+    with session_scope() as db:
+        r = db.get(PlaudFile, "upgrade")
+        assert r.corrected_transcript.text == "社團迎新派對"
+        assert len(r.transcript_revisions) == 2
+        assert all(n.input_transcript_revision == 2 for n in r.summaries)
+        assert all(c.input_transcript_revision == 2 for c in r.chunks)
+        assert next(x for x in r.stage_runs if x.stage == StageName.correct).attempts == 2
+        assert r.status.value == "done"

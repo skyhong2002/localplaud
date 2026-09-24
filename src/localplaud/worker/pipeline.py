@@ -1842,103 +1842,11 @@ def _process_file_claimed(
                 if run is not None:
                     run.detail = dict(run.detail or {}) | {"vocabulary": vocabulary_result}
 
-        # Plaud-style contextual cleanup: raw ASR remains immutable while the
-        # polished text becomes the canonical revision consumed by notes/index.
-        polish_input = _load_transcript(file_id, settings)
-        current_kind = None
-        current_provenance_complete = False
-        if polish_input is not None:
-            transcript, transcript_source = polish_input
-            with session_scope() as session:
-                polish_row = session.get(PlaudFile, file_id)
-                raw = _select_raw_transcript(polish_row, settings) if polish_row else None
-                current = (
-                    polish_row.corrected_transcript_for_source(raw.source)
-                    if polish_row is not None and raw is not None
-                    else None
-                )
-                current_kind = current.kind if current is not None else None
-                current_provenance_complete = bool(
-                    current is not None
-                    and current.provider
-                    and current.model
-                    and current.prompt_version
-                    and raw is not None
-                    and _revision_matches_raw_structure(current, raw)
-                )
-                if current_kind == "ai_polish" and not current_provenance_complete and raw:
-                    transcript = _rehydrate_transcript(raw)
-                    transcript_source = raw.source
-        if transcript is None:
-            _skip_stage(file_id, StageName.correct, "no transcript")
-        elif not pcfg.polish:
-            _skip_stage(file_id, StageName.correct, "disabled")
-        elif transcript_source != "local":
-            _skip_stage(file_id, StageName.correct, "imported migration artifact")
-        elif current_kind in {"user_edit", "restore", "ai_polish_after_speech"}:
-            _skip_stage(
-                file_id,
-                StageName.correct,
-                "preserved acoustic correction"
-                if current_kind == "ai_polish_after_speech"
-                else "preserved user correction",
-            )
-        elif current_kind == "ai_polish" and current_provenance_complete and not force:
-            _finish_stage(
-                file_id,
-                StageName.correct,
-                provider=transcript.provider,
-                model=transcript.model,
-                artifact_source="local",
-                detail={"reused": True, "revision_kind": "ai_polish"},
-            )
-        else:
-            try:
-
-                def run_polish(candidate):
-                    candidate_settings = _settings_for_stage(settings, candidate, "correct")
-                    projected_usage = {
-                        "input_chars": len(transcript.text),
-                        "output_chars": len(transcript.text),
-                        "projection": True,
-                    }
-                    cost_budget = _cost_guard(file_id, "correct", candidate, projected_usage)
-                    result = polish.polish_transcript(
-                        transcript,
-                        candidate_settings,
-                        progress=lambda value: _update_stage_progress(
-                            file_id, StageName.correct, value
-                        ),
-                    )
-                    revision = _persist_polished_revision(file_id, result, settings)
-                    detail = dict(result.get("detail") or {}) | {
-                        "revision": revision,
-                        "prompt_version": result["prompt_version"],
-                        "cost_budget": cost_budget,
-                    }
-                    return {
-                        "value": result["transcript"],
-                        "provider": result["provider"],
-                        "model": result.get("model"),
-                        "detail": detail,
-                        "usage": {
-                            "input_chars": detail.get(
-                                "request_input_chars",
-                                detail.get("input_chars", len(transcript.text)),
-                            ),
-                            "output_chars": detail.get(
-                                "response_output_chars", detail.get("output_chars", 0)
-                            ),
-                            "requests": detail.get("attempts", detail.get("chunks", 1)),
-                        },
-                    }
-
-                transcript, _selected_snapshot = _run_fallback_stage(
-                    file_id, "correct", StageName.correct, snapshot, run_polish
-                )
-            except Exception as exc:  # noqa: BLE001 - raw transcript remains usable
-                log.exception("Transcript polish failed for %s", file_id)
-                partial_errors.append(f"correct: {exc}")
+        correction_errors = _run_correction_stage(file_id, settings, snapshot, force=force)
+        partial_errors.extend(correction_errors)
+        if correction_errors:
+            _finish_processing_cycle(file_id, settings, partial_errors)
+            return
 
         # Reload the configured canonical lane before all derived stages so
         # notes, maps, and search never drift from corrected transcript UI.
@@ -2001,6 +1909,164 @@ def _process_file_claimed(
         _PROFILE_SNAPSHOT.reset(profile_token)
 
 
+def _run_correction_stage(
+    file_id: str, settings: Settings, snapshot: dict, *, force=False
+) -> list[str]:
+    """Shared prerequisite for ingestion, notes regeneration, and durable retry."""
+    transcript = None
+    errors = []
+    # Plaud-style contextual cleanup: raw ASR remains immutable while the
+    # polished text becomes the canonical revision consumed by notes/index.
+    polish_input = _load_transcript(file_id, settings)
+    current_kind = None
+    reusable = False
+    human_owned = False
+    input_revision = None
+    input_kind = None
+    raw_fingerprint = None
+    if polish_input is not None:
+        transcript, transcript_source = polish_input
+        with session_scope() as session:
+            row = session.get(PlaudFile, file_id)
+            raw = _select_raw_transcript(row, settings) if row else None
+            current = row.corrected_transcript_for_source(raw.source) if row and raw else None
+            current_kind = current.kind if current else None
+            human_owned = current_kind in {"user_edit", "restore", "speaker_edit"} or bool(
+                current_kind == "vocabulary"
+                and (current.note or "").startswith("vocabulary:manual")
+            )
+            input_revision = current.revision if current else None
+            input_kind = current_kind
+            if raw is not None:
+                raw_fingerprint = hashlib.sha256(
+                    json.dumps(
+                        {
+                            "id": raw.id,
+                            "text": raw.text,
+                            "segments": raw.segments,
+                            "provider": raw.provider,
+                            "model": raw.model,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ).encode()
+                ).hexdigest()
+            machine = current_kind in {"ai_polish", "ai_polish_after_speech"}
+            reusable = bool(
+                machine
+                and raw
+                and current.base_transcript_id == raw.id
+                and current.provider
+                and current.model
+                and current.prompt_version == polish.PROMPT_VERSION
+                and (current.resolved_profile_snapshot or {})
+                .get("correction_input", {})
+                .get("raw_sha256")
+                == raw_fingerprint
+                and _profile_stage_matches(current.resolved_profile_snapshot, snapshot, "correct")
+            )
+            if raw and machine and (not reusable or force):
+                # Never review an older model's wording as if it were raw speech.
+                # Keep a compatible acoustic/vocabulary base; otherwise use raw ASR.
+                base = next(
+                    (
+                        rev
+                        for rev in sorted(
+                            row.transcript_revisions, key=lambda r: r.revision, reverse=True
+                        )
+                        if rev.revision < current.revision
+                        and rev.source == raw.source
+                        and rev.base_transcript_id == raw.id
+                        and rev.kind in {"speech_cleanup", "speech_retranscribe", "vocabulary"}
+                    ),
+                    None,
+                )
+                transcript = _rehydrate_revision(base, raw) if base else _rehydrate_transcript(raw)
+                transcript_source = raw.source
+                input_revision = base.revision if base else None
+                input_kind = base.kind if base else None
+                human_owned = human_owned or bool(
+                    base
+                    and base.kind == "vocabulary"
+                    and (base.note or "").startswith("vocabulary:manual")
+                )
+            elif (
+                raw
+                and current_kind in {"speech_cleanup", "speech_retranscribe", "vocabulary"}
+                and not human_owned
+                and current.base_transcript_id != raw.id
+            ):
+                transcript, transcript_source = _rehydrate_transcript(raw), raw.source
+                input_revision, input_kind = None, None
+    if transcript is None or not transcript.text.strip():
+        _skip_stage(file_id, StageName.correct, "no transcript")
+    elif not settings.pipeline.polish:
+        _skip_stage(file_id, StageName.correct, "disabled")
+    elif transcript_source != "local":
+        _skip_stage(file_id, StageName.correct, "imported migration artifact")
+    elif human_owned:
+        _skip_stage(
+            file_id,
+            StageName.correct,
+            "preserved user correction",
+        )
+    elif reusable and not force:
+        _finish_stage(
+            file_id,
+            StageName.correct,
+            provider=transcript.provider,
+            model=transcript.model,
+            artifact_source="local",
+            detail={"reused": True, "revision_kind": current_kind},
+        )
+    else:
+        try:
+
+            def run_polish(candidate):
+                candidate_settings = _settings_for_stage(settings, candidate, "correct")
+                result = polish.polish_transcript(
+                    transcript,
+                    candidate_settings,
+                    dispatch_guard=lambda usage: _cost_guard(file_id, "correct", candidate, usage),
+                    progress=lambda value: _update_stage_progress(
+                        file_id, StageName.correct, value
+                    ),
+                )
+                result["input_revision"] = input_revision
+                result["input_kind"] = input_kind
+                result["raw_fingerprint"] = raw_fingerprint
+                revision = _persist_polished_revision(file_id, result, settings)
+                detail = dict(result.get("detail") or {}) | {
+                    "revision": revision,
+                    "prompt_version": result["prompt_version"],
+                }
+                return {
+                    "value": result["transcript"],
+                    "provider": result["provider"],
+                    "model": result.get("model"),
+                    "detail": detail,
+                    "usage": {
+                        "input_chars": detail.get(
+                            "request_input_chars",
+                            detail.get("input_chars", len(transcript.text)),
+                        ),
+                        "output_chars": detail.get(
+                            "response_output_chars", detail.get("output_chars", 0)
+                        ),
+                        "requests": detail.get("attempts", detail.get("chunks", 1)),
+                    },
+                }
+
+            transcript, _selected_snapshot = _run_fallback_stage(
+                file_id, "correct", StageName.correct, snapshot, run_polish
+            )
+        except Exception as exc:  # noqa: BLE001 - raw transcript remains usable
+            log.exception("Transcript polish failed for %s", file_id)
+            errors.append(f"correct: {exc}")
+
+    return errors
+
+
 def _process_derived_artifacts_claimed(
     file_id: str,
     settings: Settings | None = None,
@@ -2025,6 +2091,13 @@ def _process_derived_artifacts_claimed(
 
     profile_token = _PROFILE_SNAPSHOT.set(snapshot)
     try:
+        correction_errors = (
+            _run_correction_stage(file_id, settings, snapshot) if settings.pipeline.polish else []
+        )
+        if correction_errors:
+            _finish_processing_cycle(file_id, settings, correction_errors, derived_only=True)
+            return
+        transcript, _transcript_source = _load_transcript(file_id, settings)
         partial_errors = _run_derived_stages(
             file_id,
             settings,
@@ -2034,7 +2107,7 @@ def _process_derived_artifacts_claimed(
             force=False,
             explicit_profile_id=profile_id,
         )
-        _finish_processing_cycle(file_id, settings, partial_errors)
+        _finish_processing_cycle(file_id, settings, partial_errors, derived_only=True)
         log.info(
             "Derived pipeline %s for %s",
             "partial" if partial_errors else "complete",
@@ -2706,10 +2779,18 @@ def _run_derived_stages(
     return partial_errors
 
 
-def _finish_processing_cycle(file_id: str, settings: Settings, partial_errors: list[str]) -> None:
+def _finish_processing_cycle(
+    file_id: str, settings: Settings, partial_errors: list[str], *, derived_only: bool = False
+) -> None:
     with session_scope() as session:
         row = _assert_processing_claim_in_session(session, file_id)
         if partial_errors:
+            if derived_only:
+                for run in row.stage_runs:
+                    if run.stage in {
+                        StageName.correct, StageName.summarize, StageName.mind_map, StageName.index
+                    } and run.status in {StageStatus.failed, StageStatus.degraded, StageStatus.pending}:
+                        run.detail = dict(run.detail or {}) | {"derived_only": True}
             row.status = FileStatus.partial
             row.error = "; ".join(partial_errors)[:2000]
             _schedule_pipeline_retry(row, settings)
@@ -3064,7 +3145,7 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
         # Text correction may follow acoustic cleanup, but a later resume must
         # never treat its intentionally shorter structure as corrupt and fall
         # back to raw ASR, reviving the removed hallucinated speech.
-        acoustic_base = current is not None and current.kind in {
+        acoustic_base = result.get("input_kind", current.kind if current else None) in {
             "speech_cleanup",
             "speech_retranscribe",
             "ai_polish_after_speech",
@@ -3084,7 +3165,13 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
                 provider=result["provider"],
                 model=result.get("model"),
                 prompt_version=result["prompt_version"],
-                resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
+                resolved_profile_snapshot=dict(_PROFILE_SNAPSHOT.get() or {}) | {
+                    "correction_input": {
+                        "revision": result.get("input_revision"),
+                        "kind": result.get("input_kind"),
+                        "raw_sha256": result.get("raw_fingerprint"),
+                    },
+                },
             )
         )
         _mark_derived_stale(session, file_id, reason="ai_polish")
@@ -3589,7 +3676,7 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
         # transcript exists the remaining stages are allowed to finish.
         return None
 
-    derived_stages = {StageName.summarize, StageName.mind_map, StageName.index}
+    derived_stages = {StageName.correct, StageName.summarize, StageName.mind_map, StageName.index}
     derived_only = any(
         run.stage in derived_stages
         and bool((run.detail or {}).get("derived_only"))
