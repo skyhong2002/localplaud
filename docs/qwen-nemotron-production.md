@@ -40,7 +40,8 @@ into the normal persistent Hugging Face cache before activation:
 | Qwen/Qwen3-ForcedAligner-0.6B-hf | c07281df297b9905d24a508279258cccf987a064 |
 | nvidia/Nemotron-3-Diarization | a435e9867d79e789e90053f9b6d6834053af564a |
 
-Pause automatic processing and let active jobs finish. Back up the controller
+Pause automatic processing, let active jobs finish, and stop the controller
+scheduler during the profile transaction. Back up the controller
 DB and configuration. Deploy the same source on controller and worker, initialize
 the database to apply the additive `process_overlong` migration, then verify a
 real speech clip and an all-silent clip in the new image. No speech fallback is

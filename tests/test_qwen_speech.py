@@ -217,6 +217,7 @@ def test_activation_preserves_completed_audio_and_existing_transcripts(monkeypat
         assert session.get(PlaudFile, "done").status == FileStatus.done
         assert session.get(RecordingProfileOverride, "done") is None
         assert session.get(PlaudFile, "partial").local_transcript.text == "user text"
+        assert session.get(PlaudFile, "partial").status == FileStatus.partial
         assert session.get(PlaudFile, "new").status == FileStatus.discovered
         assert (
             session.get(RecordingProfileOverride, "new").stage_overrides["transcribe"]["model"]

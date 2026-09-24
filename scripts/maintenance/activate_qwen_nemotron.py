@@ -139,7 +139,11 @@ def activate(worker_key: str, *, apply: bool = False):
             override.stage_overrides = patch
             row.process_overlong = True
             reset_pipeline_retry(row)
-            row.status = FileStatus.downloaded if row.audio_path else FileStatus.discovered
+            # Missing speech outranks derived-stage retries in the durable queue.
+            row.status = (
+                FileStatus.partial if row.local_transcript is not None
+                else FileStatus.downloaded if row.audio_path else FileStatus.discovered
+            )
         return counts | {"profile_id": profile["id"], "queued": len(pending)}
 
 
