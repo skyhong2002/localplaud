@@ -54,7 +54,13 @@ def test_polish_preserves_ids_timestamps_speakers_and_words(monkeypatch):
                 speaker="speaker-a",
                 words=[Word(text="我", start=1.25, end=1.4, speaker="speaker-a")],
             ),
-            Segment(text="好的", start=2.6, end=3.0, speaker="speaker-b"),
+            Segment(
+                text="好的",
+                start=2.6,
+                end=3.0,
+                speaker="speaker-b",
+                words=[Word(text="好的", start=2.6, end=3.0, speaker="speaker-b")],
+            ),
         ],
     )
     result = polish_transcript(transcript, Settings())
@@ -66,9 +72,13 @@ def test_polish_preserves_ids_timestamps_speakers_and_words(monkeypatch):
         (2.6, 3.0, "speaker-b"),
     ]
     assert polished.segments[0].words[0].start == 1.25
+    assert polished.segments[1].words == transcript.segments[1].words
+    assert transcript.segments[0].words[0].start == 1.25
+    assert transcript.segments[0].text == "我我今天開會"
+    assert result["detail"]["changed_segment_ids"] == [0]
     assert result["provider"] == "opencode-go"
     assert result["model"] == "qwen3.7-plus"
-    assert result["prompt_version"] == "transcript-polish/v1"
+    assert result["prompt_version"] == "transcript-polish/v2"
 
 
 def test_polish_reports_chunk_and_segment_progress(monkeypatch):
@@ -131,9 +141,7 @@ def test_polish_preserves_source_for_missing_segment_ids(monkeypatch):
         def complete(self, prompt, **_kwargs):
             return '{"segments":[]}'
 
-    monkeypatch.setattr(
-        "localplaud.worker.polish.build_llm", lambda _cfg: BrokenPolisher()
-    )
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: BrokenPolisher())
     transcript = Transcript(segments=[Segment(text="hello", start=0, end=1)])
     result = polish_transcript(transcript, Settings())
 
@@ -148,13 +156,9 @@ def test_polish_applies_valid_subset_and_preserves_only_omitted_segments(monkeyp
         def complete(self, prompt, **_kwargs):
             request = json.loads(prompt)
             first = request["target_segments"][0]
-            return json.dumps(
-                {"segments": [{"id": first["id"], "text": "corrected first"}]}
-            )
+            return json.dumps({"segments": [{"id": first["id"], "text": "corrected first"}]})
 
-    monkeypatch.setattr(
-        "localplaud.worker.polish.build_llm", lambda _cfg: PartialPolisher()
-    )
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: PartialPolisher())
     transcript = Transcript(
         segments=[
             Segment(text="raw first", start=0, end=1),
@@ -241,8 +245,7 @@ def test_polish_keeps_stubbornly_emptied_segments_without_splitting(monkeypatch)
             return json.dumps(
                 {
                     "segments": [
-                        {"id": item["id"], "text": ""}
-                        for item in request["target_segments"]
+                        {"id": item["id"], "text": ""} for item in request["target_segments"]
                     ]
                 }
             )
@@ -322,9 +325,7 @@ def test_polish_allows_shorter_text_and_empty_source_segments(monkeypatch):
                 }
             )
 
-    monkeypatch.setattr(
-        "localplaud.worker.polish.build_llm", lambda _cfg: ShorteningPolisher()
-    )
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: ShorteningPolisher())
     transcript = Transcript(
         segments=[
             Segment(text="very concise", start=0, end=1),
@@ -391,8 +392,7 @@ def test_polish_uses_provider_specific_large_context_batch(monkeypatch):
     settings.pipeline.polish_chunk_chars = 1_000
     transcript = Transcript(
         segments=[
-            Segment(text=f"segment-{index}", start=index, end=index + 1)
-            for index in range(80)
+            Segment(text=f"segment-{index}", start=index, end=index + 1) for index in range(80)
         ]
     )
 

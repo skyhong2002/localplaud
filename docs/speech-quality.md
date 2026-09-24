@@ -66,3 +66,18 @@ recovery, not audio synthesis or a Plaud transcript import.
 Recording playback and waveform requests use an identity-keyed derived WAV cache
 for that validated headerless layout. Ordinary audio stays on its existing path;
 original audio export still returns the unchanged source bytes.
+
+## Contextual spelling correction
+
+`transcript-polish/v2` explicitly resolves homophones and word boundaries when
+pronunciation and the supplied conversation strongly support one interpretation.
+Preserving the intended name does not require preserving an obvious ASR spelling
+error. Ambiguous proper names remain unchanged; no global homophone replacement
+list or Plaud-generated text is used. Each output records changed segment IDs and
+retains raw ASR and earlier revisions. This is text correction; it does not rerun
+acoustic alignment or claim that new spellings were verified against audio.
+
+Acoustic cleanup and human corrections remain protected from automatic re-polish.
+An explicitly requested correction must start from that canonical revision, not
+from raw ASR (which could reintroduce removed hallucinations), and invalidate its
+dependent notes and index. A new prompt does not automatically rewrite the library.

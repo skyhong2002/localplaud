@@ -12,10 +12,27 @@ from ..asr.base import Segment, Transcript, Word
 from ..config import Settings
 from ..llm.base import LLMError, LLMOutputInvalid, build_llm
 
-PROMPT_VERSION = "transcript-polish/v1"
+PROMPT_VERSION = "transcript-polish/v2"
 SYSTEM_PROMPT = """You polish ASR transcript segments for downstream notes.
-Correct recognition errors using dialogue context and speaker continuity. Remove
-stutters, accidental repetitions, and non-semantic filler while preserving meaning,
+Actively correct recognition errors using dialogue context and speaker continuity.
+ASR spelling is not authoritative: preserving a name means preserving its intended
+referent, not copying an obvious misrecognition. Resolve homophones, wrong word
+boundaries, and technical terms when pronunciation and nearby dialogue strongly
+support one reading. In Taiwan campus activity context, for example, a welcome
+party misrecognized as「銀心派對」should be「迎新派對」. In astronomy context,
+「銀心」can be correct and must remain. These are contextual examples, not global
+replacement rules. Apply the same reasoning to other words, not only the examples.
+Use repeated mentions and clear self-corrections in the supplied dialogue to keep
+terminology consistent. Do not substitute a merely plausible person, song, brand,
+or acronym without supporting context. Distinct titles must stay distinct even
+when their spellings are similar. Where multiple readings remain plausible,
+retain the source wording; do not manufacture certainty or explanatory annotations.
+This is lexical correction, not rewriting: preserve the speaker's factual claims
+even if your world knowledge disagrees. Do not replace unclear substantive words
+with ellipses, delete questions, or complete broken utterances across segment or
+speaker boundaries. Never turn a fragment into an acknowledgement or answer.
+Prefer minimal spelling and punctuation edits; remove only obvious within-segment
+stutters or accidental duplicates while preserving meaning,
 uncertainty, tone, names, numbers, dates, decisions, negation, language switching,
 segment IDs, and speaker ownership. Use Traditional Chinese (Taiwan) where Chinese
 is present. Never summarize, invent, merge, split, or add commentary. Return only
@@ -103,9 +120,7 @@ def polish_transcript(
     output_chars = 0
     request_input_chars = 0
     response_output_chars = 0
-    skipped_empty_segments = sum(
-        not str(segment.get("text") or "").strip() for segment in source
-    )
+    skipped_empty_segments = sum(not str(segment.get("text") or "").strip() for segment in source)
     chunk_chars = getattr(provider, "polish_chunk_chars", settings.pipeline.polish_chunk_chars)
     if (
         isinstance(chunk_chars, bool)
@@ -114,9 +129,7 @@ def polish_transcript(
     ):
         raise LLMError("transcript polish chunk budget must be between 1000 and 60000")
     pending = list(_chunks(source, chunk_chars))
-    target_segments_total = sum(
-        bool(str(segment.get("text") or "").strip()) for segment in source
-    )
+    target_segments_total = sum(bool(str(segment.get("text") or "").strip()) for segment in source)
     target_segments_completed = 0
 
     def report_progress() -> None:
@@ -141,9 +154,7 @@ def polish_transcript(
     while pending:
         start, end = pending.pop(0)
         target_indexes = [
-            index
-            for index in range(start, end)
-            if str(source[index].get("text") or "").strip()
+            index for index in range(start, end) if str(source[index].get("text") or "").strip()
         ]
         if not target_indexes:
             continue
@@ -314,6 +325,11 @@ def polish_transcript(
             "last_split_reason": last_split_reason,
             "skipped_empty_segments": skipped_empty_segments,
             "segments": len(source),
+            "changed_segment_ids": [
+                index
+                for index, item in enumerate(polished)
+                if item.get("text") != source[index].get("text")
+            ],
             "input_chars": len(transcript.text),
             "output_chars": output_chars,
             "request_input_chars": request_input_chars,
