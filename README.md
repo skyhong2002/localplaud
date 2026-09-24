@@ -153,6 +153,13 @@ localplaud run
 Automatic processing is a durable workspace preference under **Settings → Workspace**.
 When it is paused, the daemon continues polling and downloading new raw audio, while
 recordings wait for an explicit Resume/Reprocess action before any AI provider is used.
+Discovery/download and processing run as separate, single-flight jobs: a slow speech
+or text provider does not delay the next cloud sync. Downloads wake an idle worker;
+the worker also checks the durable queue at least every 30 seconds while idle.
+Enabled stages run from raw audio through contextual correction and its independent
+review, notes, mind map, and indexing without a per-recording Generate action.
+Failed stages retain completed work and retry with the configured backoff; exhausted
+retries remain visible for Resume. See [automation acceptance](docs/acceptance.md).
 
 ### Commands
 

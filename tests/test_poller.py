@@ -20,6 +20,52 @@ def _reset_db(monkeypatch, tmp_path):
     return get_settings(reload=True)
 
 
+def test_slow_cloud_listing_does_not_block_worker_writes(monkeypatch, tmp_path):
+    from sqlalchemy import text
+
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import sync_file_list
+
+    settings = _reset_db(monkeypatch, tmp_path)
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="working", status=FileStatus.processing))
+    entered, release = threading.Event(), threading.Event()
+    results, errors = [], []
+
+    class SlowClient:
+        def iter_files(self, **kwargs):
+            yield PlaudFileDTO(id="new", filename="New raw recording")
+            entered.set()
+            assert release.wait(3)
+
+    def discover():
+        try:
+            results.append(sync_file_list(SlowClient(), settings))
+        except Exception as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=discover)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        with session_scope() as session:
+            session.execute(text("PRAGMA busy_timeout=200"))
+            row = session.get(PlaudFile, "working")
+            row.status = FileStatus.done
+    finally:
+        release.set()
+        thread.join(3)
+    assert not thread.is_alive()
+    assert not errors
+    assert results == [(1, 0)]
+    with session_scope() as session:
+        assert session.get(PlaudFile, "working").status == FileStatus.done
+        assert session.get(PlaudFile, "new").status == FileStatus.metadata_only
+
+
 def test_mcp_prefixed_ids_reuse_existing_recording_and_user_work(monkeypatch, tmp_path):
     from localplaud.config import PlaudMcpConfig
     from localplaud.db.models import FileStatus, PlaudFile

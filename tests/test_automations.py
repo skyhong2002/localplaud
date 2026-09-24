@@ -49,6 +49,37 @@ def _seed(monkeypatch, tmp_path):
     return client, folder_id, tag_id
 
 
+def test_busy_recording_defers_rule_without_consuming_its_version(monkeypatch, tmp_path):
+    from sqlalchemy import select
+
+    from localplaud.automations import evaluate_recording
+    from localplaud.db.models import AutomationRun, PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import claim_processing_work, release_processing_claim
+
+    client, folder_id, _ = _seed(monkeypatch, tmp_path)
+    response = client.post("/api/automations/rules", json={
+        "name": "Organize before generation",
+        "trigger": {"origin": "plaud"},
+        "actions": {"folder_id": folder_id},
+    })
+    assert response.status_code == 201
+    token = claim_processing_work("match", require_audio=False)
+    try:
+        assert evaluate_recording("match") == []
+        with session_scope() as session:
+            assert session.scalar(select(AutomationRun.id)) is None
+            assert session.get(PlaudFile, "match").folder_id is None
+        result = evaluate_recording("match", processing_owner_token=token)
+        assert result[0]["status"] == "completed"
+        assert evaluate_recording("match", processing_owner_token=token) == []
+        with session_scope() as session:
+            assert session.get(PlaudFile, "match").folder_id == folder_id
+            assert len(list(session.scalars(select(AutomationRun)))) == 1
+    finally:
+        release_processing_claim("match", token)
+
+
 def test_rule_dry_run_execution_history_and_versioning(monkeypatch, tmp_path):
     client, folder_id, tag_id = _seed(monkeypatch, tmp_path)
     body = {

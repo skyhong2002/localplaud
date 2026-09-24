@@ -229,6 +229,10 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
         log.info("Skipping Plaud listing because another poll owns the catalog sync")
         return (0, 0)
     try:
+        # Fetch every page before opening a write transaction. Discovery runs
+        # alongside the worker: a slow cloud response must not hold SQLite's
+        # writer lock and prevent stage results or leases from being saved.
+        files = list(client.iter_files(include_trash=settings.poller.include_trash))
         new_count = changed_count = 0
         with session_scope() as session:
             catalog_initialized = session.get(KeyValue, _CATALOG_BASELINE_KEY) is not None
@@ -250,7 +254,7 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                     )
                 )
             skip_ms = settings.pipeline.auto_skip_threshold_ms()
-            for dto in client.iter_files(include_trash=settings.poller.include_trash):
+            for dto in files:
                 row = session.get(PlaudFile, dto.id)
                 if row is None:
                     overlong = (
@@ -1022,6 +1026,11 @@ def poll_once(settings: Settings | None = None) -> dict:
         reset_download_errors()
     with make_plaud_client(settings.plaud) as client:
         new, changed = sync_file_list(client, settings)
+        # Apply metadata-based profile/template choices before downloads become
+        # eligible for the independently scheduled processing worker.
+        from ..automations import evaluate_library
+
+        automated = evaluate_library()
         downloaded = (
             download_pending(client, settings)
             if settings.poller.auto_download and baseline_complete
@@ -1037,13 +1046,12 @@ def poll_once(settings: Settings | None = None) -> dict:
         "changed": changed,
         "downloaded": downloaded,
         "cloud_artifacts": cloud_artifacts,
+        "automated": automated,
     }
-    try:
-        from ..automations import evaluate_library
-
-        result["automated"] = evaluate_library()
-    except Exception as exc:  # noqa: BLE001
-        log.warning("AutoFlow evaluation failed after poll: %s", exc)
-        result["automated"] = 0
+    if cloud_artifacts:
+        try:
+            result["automated"] += evaluate_library()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("AutoFlow evaluation failed after cloud import: %s", exc)
     log.info("Poll cycle complete: %s", result)
     return result

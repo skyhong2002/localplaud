@@ -379,6 +379,8 @@ def evaluate_recording(
     Lower numeric priority wins because it executes last and may intentionally
     override a broader lower-priority rule.
     """
+    from .providers.service import ProfileMutationBusyError
+
     results: list[dict] = []
     with session_scope() as session:
         rule_ids = list(
@@ -454,6 +456,13 @@ def evaluate_recording(
                 downstream_run_id = run.id
                 notification_requested = rule.notify
                 results.append({"rule_id": rule.id, "status": "completed", "applied": applied})
+            except ProfileMutationBusyError:
+                # A concurrent worker owns this recording. Do not persist a
+                # failed, once-per-version run that would suppress its later
+                # evaluation (including the owning worker's transcript pass).
+                if run is not None:
+                    session.delete(run)
+                continue
             except Exception as exc:  # noqa: BLE001
                 error = sanitize_error(exc)
                 if run is not None:

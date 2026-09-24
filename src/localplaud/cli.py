@@ -244,22 +244,17 @@ def export(
 @app.command()
 def run():
     """Poll on a schedule, process when enabled, and serve the Web App."""
-    import threading
-    from datetime import datetime
-
     from apscheduler.schedulers.background import BackgroundScheduler
 
     from .ask_threads import recover_ask_request_claims
     from .db.session import init_db
     from .poller.poll import (
-        _DAEMON_HEARTBEAT_INTERVAL_SECONDS,
-        refresh_daemon_owner,
         register_daemon_owner,
         release_daemon_owner,
         reset_inflight,
     )
     from .providers.usage import recover_provider_dispatch_reservations
-    from .worker.claims import processing_owner
+    from .worker.daemon import DaemonJobs
 
     # Under launchd the log files otherwise fill with thousands of
     # carriage-returned "Loading weights" progress bars per model load.
@@ -281,53 +276,15 @@ def run():
         release_daemon_owner(daemon_owner)
         raise
 
-    # A non-blocking lock guarantees cycles never overlap even if one runs
-    # longer than the interval (ASR can take minutes) — a second firing simply
-    # skips rather than double-downloading / double-processing.
-    lock = threading.Lock()
-    ownership_lost = threading.Event()
-
-    def heartbeat():
-        if not refresh_daemon_owner(daemon_owner):
-            ownership_lost.set()
-            console.print("[red]✗[/] daemon ownership was lost; automatic work is paused")
-
-    def cycle():
-        if ownership_lost.is_set() or not lock.acquire(blocking=False):
-            return
-        try:
-            with processing_owner(daemon_owner):
-                run_processing_cycle(settings, daemon_owner=daemon_owner)
-        except Exception as exc:  # noqa: BLE001
-            console.print(f"[yellow]cycle error:[/] {exc}")
-        finally:
-            lock.release()
-
     scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        heartbeat,
-        "interval",
-        seconds=_DAEMON_HEARTBEAT_INTERVAL_SECONDS,
-        id="daemon-heartbeat",
-        max_instances=1,
-        coalesce=True,
-    )
-    # next_run_time fires the first cycle immediately, under the same
-    # single-instance governance as the interval (no separate racing thread).
-    scheduler.add_job(
-        cycle,
-        "interval",
-        seconds=settings.poller.interval_seconds,
-        id="cycle",
-        max_instances=1,
-        coalesce=True,
-        next_run_time=datetime.now(),
-    )
+    jobs = DaemonJobs(settings, daemon_owner, scheduler)
+    jobs.install()
     try:
         scheduler.start()
         console.print("[green]✓[/] poller + worker ready; starting web UI…")
         _serve(settings, database_initialized=True, managed_daemon=True)
     finally:
+        jobs.stopped.set()
         try:
             if scheduler.running:
                 scheduler.shutdown(wait=True)

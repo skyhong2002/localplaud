@@ -113,9 +113,12 @@ def _providers(monkeypatch):
 
 def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_path):
     settings = _setup(monkeypatch, tmp_path)
+    from types import SimpleNamespace
+
     from localplaud.acceptance import subscription_independence_report
     from localplaud.cli import app
     from localplaud.db.models import (
+        AutomationRule,
         FileStatus,
         PlaudFile,
         StageAttempt,
@@ -124,10 +127,14 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
     )
     from localplaud.db.session import init_db, session_scope
     from localplaud.plaud.models import PlaudFileDTO
-    from localplaud.poller.poll import poll_once
-    from localplaud.worker.pipeline import process_pending
+    from localplaud.worker.daemon import DaemonJobs
 
     init_db()
+    with session_scope() as session:
+        session.add(AutomationRule(
+            name="Choose notes before processing", enabled=True, priority=10,
+            trigger={"origin": "plaud"}, actions={"note_template_key": "plaud-meeting-minutes"},
+        ))
 
     class FakePlaudClient:
         files = [PlaudFileDTO(id="historical", filename="Historical recording")]
@@ -137,6 +144,8 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
             yield from self.files
 
         def download_audio(self, dto, destination):
+            with session_scope() as session:
+                assert session.get(PlaudFile, dto.id).note_template_key == "plaud-meeting-minutes"
             self.downloads.append(dto.id)
             path = destination / "audio.wav"
             path.write_bytes(b"RIFF-local-user-owned-audio")
@@ -149,17 +158,20 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         yield cloud
 
     monkeypatch.setattr("localplaud.poller.poll.make_plaud_client", fake_client_factory)
-    baseline = poll_once(settings)
+    jobs = DaemonJobs(settings, "acceptance-owner", SimpleNamespace(modify_job=lambda *a, **k: None))
+    monkeypatch.setattr("localplaud.worker.reindex.process_pending_reindexes", lambda *a, **k: 0)
+    monkeypatch.setattr("localplaud.worker.knowledge_index.process_pending_documents", lambda *a, **k: 0)
+    baseline = jobs.sync()
     assert baseline["new"] == 1 and baseline["downloaded"] == 0
     cloud.files.append(
         PlaudFileDTO(id="clean", filename="Clean raw recording", start_time=1_750_000_000_000)
     )
-    incremental = poll_once(settings)
+    incremental = jobs.sync()
     assert incremental["new"] == 1 and incremental["downloaded"] == 1
     assert cloud.downloads == ["clean"]
 
     _providers(monkeypatch)
-    assert process_pending(settings, limit=1) == 1
+    assert jobs.work() == 1
     with session_scope() as session:
         assert session.get(PlaudFile, "historical").status == FileStatus.metadata_only
         row = session.get(PlaudFile, "clean")
