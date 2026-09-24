@@ -333,3 +333,13 @@ def test_integrated_alignment_connection_health_accepts_its_registered_key(monke
     ok, detail = service._probe_connection(row, 'Qwen/Qwen3-ForcedAligner-0.6B-hf')
     assert ok
     assert 'timestamps' in detail
+
+
+def test_runtime_diagnostics_do_not_change_transcript_edit_guard():
+    from localplaud.worker.pipeline import _canonical_digest
+    transcript = Transcript(segments=[Segment('你好', 10, 11)], provider='qwen')
+    persisted = _canonical_digest(transcript)
+    transcript.processing_metadata = {'vad': {'skipped_seconds': 10}, 'cached_regions': 5}
+    assert _canonical_digest(transcript) == persisted
+    transcript.segments[0].text = '人工修改'
+    assert _canonical_digest(transcript) != persisted

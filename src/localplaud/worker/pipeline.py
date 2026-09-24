@@ -3365,10 +3365,13 @@ def _apply_generated_title(
 
 
 def _canonical_digest(transcript: Transcript | None) -> str:
+    payload = asdict(transcript) if transcript else None
+    if payload is not None:
+        # Runtime/VAD diagnostics live on StageRun, not in persisted transcript
+        # content. They must not look like an edit after rehydrating the same ASR.
+        payload.pop("processing_metadata", None)
     return hashlib.sha256(
-        json.dumps(
-            asdict(transcript) if transcript else None, sort_keys=True, ensure_ascii=False
-        ).encode()
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
 
 
