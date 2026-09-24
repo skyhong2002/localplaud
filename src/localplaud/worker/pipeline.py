@@ -1875,12 +1875,12 @@ def _process_file_claimed(
             _skip_stage(file_id, StageName.correct, "disabled")
         elif transcript_source != "local":
             _skip_stage(file_id, StageName.correct, "imported migration artifact")
-        elif current_kind in {"user_edit", "restore", "speech_cleanup", "speech_retranscribe"}:
+        elif current_kind in {"user_edit", "restore", "ai_polish_after_speech"}:
             _skip_stage(
                 file_id,
                 StageName.correct,
                 "preserved acoustic correction"
-                if current_kind.startswith("speech_")
+                if current_kind == "ai_polish_after_speech"
                 else "preserved user correction",
             )
         elif current_kind == "ai_polish" and current_provenance_complete and not force:
@@ -3060,6 +3060,15 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
         raw = _select_raw_transcript(row, settings)
         if raw is None or raw.source != "local":
             raise ValueError("AI polish requires a local raw transcript")
+        current = row.corrected_transcript_for_source("local")
+        # Text correction may follow acoustic cleanup, but a later resume must
+        # never treat its intentionally shorter structure as corrupt and fall
+        # back to raw ASR, reviving the removed hallucinated speech.
+        acoustic_base = current is not None and current.kind in {
+            "speech_cleanup",
+            "speech_retranscribe",
+            "ai_polish_after_speech",
+        }
         next_revision = max((item.revision for item in row.transcript_revisions), default=0) + 1
         session.add(
             TranscriptRevision(
@@ -3071,7 +3080,7 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
                 text=transcript.text,
                 has_speakers=transcript.has_speakers,
                 note=f"AI polished with {result['provider']}/{result.get('model') or 'default'}",
-                kind="ai_polish",
+                kind="ai_polish_after_speech" if acoustic_base else "ai_polish",
                 provider=result["provider"],
                 model=result.get("model"),
                 prompt_version=result["prompt_version"],

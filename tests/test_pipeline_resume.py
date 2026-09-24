@@ -1237,3 +1237,88 @@ def test_empty_reasr_does_not_revive_machine_text_but_preserves_human_text(
         assert row.corrected_transcript.text == ("old text" if preserved else "")
         assert row.transcript_revisions[0].text == "old text"
         assert len(row.transcript_revisions) == (1 if preserved else 2)
+
+
+@pytest.mark.parametrize("kind", ["speech_cleanup", "speech_retranscribe", "user_edit", "restore"])
+def test_context_polish_follows_acoustic_revision_without_reviving_raw(monkeypatch, tmp_path, kind):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.asr.base import Segment
+    from localplaud.asr.base import Transcript as AsrTranscript
+    from localplaud.config import get_settings
+    from localplaud.db.models import PlaudFile, Transcript, TranscriptRevision
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker import pipeline
+
+    init_db()
+    audio = tmp_path / "speech.wav"
+    audio.write_bytes(b"fixture")
+    kept = {"text": "口琴社要辦銀心派對", "start": 1.0, "end": 2.0, "speaker": "SPEAKER_00"}
+    discarded = {"text": "Thank you", "start": 8.0, "end": 9.0, "speaker": "SPEAKER_00"}
+    with session_scope() as session:
+        row = PlaudFile(id="context", origin="local", audio_path=str(audio), filename="fixture")
+        session.add(row)
+        raw = Transcript(
+            file_id="context",
+            source="local",
+            provider="fake",
+            language="zh",
+            segments=[kept, discarded],
+            text=kept["text"] + "\nThank you",
+        )
+        session.add(raw)
+        session.flush()
+        session.add(
+            TranscriptRevision(
+                file_id="context",
+                base_transcript_id=raw.id,
+                revision=1,
+                source="local",
+                kind=kind,
+                segments=[kept],
+                text=kept["text"],
+            )
+        )
+    settings = get_settings().model_copy(deep=True)
+    for stage in ("transcribe", "align", "diarize", "summarize", "mind_map", "index"):
+        setattr(settings.pipeline, stage, False)
+    settings.pipeline.polish = True
+    calls = []
+
+    def correct(transcript, _settings, **kwargs):
+        calls.append(transcript.text)
+        assert transcript.text == kept["text"]
+        assert len(transcript.segments) == 1
+        return {
+            "transcript": AsrTranscript(
+                segments=[Segment(text="口琴社要辦迎新派對", start=1, end=2, speaker="SPEAKER_00")],
+                language="zh",
+            ),
+            "provider": "fake",
+            "model": "test-model",
+            "prompt_version": "transcript-polish/v2",
+            "detail": {},
+        }
+
+    monkeypatch.setattr(pipeline.polish, "polish_transcript", correct)
+    monkeypatch.setattr(pipeline, "_ensure_generated_title", lambda *a: False)
+    pipeline.process_file("context", settings)
+    pipeline.process_file("context", settings)
+    expected_calls = 1 if kind.startswith("speech_") else 0
+    assert len(calls) == expected_calls
+    with session_scope() as session:
+        row = session.get(PlaudFile, "context")
+        assert row.local_transcript.text.endswith("Thank you")
+        assert row.transcript_revisions[0].text == kept["text"]
+        current = row.corrected_transcript_for_source("local")
+        assert len(current.segments) == 1
+        assert current.segments[0]["start"] == 1
+        assert current.segments[0]["end"] == 2
+        if expected_calls:
+            assert current.kind == "ai_polish_after_speech"
+            assert current.text == "口琴社要辦迎新派對"
+            assert current.provider == "fake" and current.model == "test-model"
+            assert len(row.transcript_revisions) == 2
+        else:
+            assert current.kind == kind
+            assert current.text == kept["text"]
+            assert len(row.transcript_revisions) == 1

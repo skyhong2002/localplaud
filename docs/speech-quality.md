@@ -77,7 +77,10 @@ list or Plaud-generated text is used. Each output records changed segment IDs an
 retains raw ASR and earlier revisions. This is text correction; it does not rerun
 acoustic alignment or claim that new spellings were verified against audio.
 
-Acoustic cleanup and human corrections remain protected from automatic re-polish.
-An explicitly requested correction must start from that canonical revision, not
-from raw ASR (which could reintroduce removed hallucinations), and invalidate its
-dependent notes and index. A new prompt does not automatically rewrite the library.
+Automatic text correction can follow acoustic cleanup or reviewed re-transcription.
+It starts from that canonical revision, never from the discarded raw segments, and
+stores an `ai_polish_after_speech` revision. Resuming preserves this corrected
+acoustic structure instead of restoring removed hallucinations. Human edits and
+restored revisions remain protected. Explicit corrections likewise start from the
+canonical revision and invalidate dependent notes and indexes. A new prompt does
+not automatically enqueue the whole library for rewriting.
