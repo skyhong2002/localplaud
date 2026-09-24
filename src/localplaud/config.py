@@ -224,6 +224,7 @@ class VadConfig(BaseModel):
 
 
 class QwenAsrConfig(BaseModel):
+    checkpoint_dir: str = "data/speech-checkpoints"
     model: str = "Qwen/Qwen3-ASR-1.7B-hf"
     revision: str = "bcd2b5b7f32b480ab5790554cfa8347f246a14f3"
     aligner: str = "Qwen/Qwen3-ForcedAligner-0.6B-hf"

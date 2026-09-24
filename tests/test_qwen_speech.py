@@ -298,3 +298,25 @@ def test_irreducible_token_limit_never_returns_partial_success():
 
     with pytest.raises(AsrError, match="transcription is incomplete"):
         transcribe_bounded([(10, 12)], decode)
+
+
+def test_checkpoint_reuses_exact_audio_configuration_and_survives_partial_write(tmp_path):
+    from localplaud.asr.speech_checkpoint import SpeechCheckpoint
+
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"first audio")
+    cfg = AsrConfig(provider="qwen").model_dump(mode="json")
+    cfg["qwen"]["checkpoint_dir"] = str(tmp_path / "checkpoints")
+    cache = SpeechCheckpoint(audio, cfg)
+    cache.write(10, 20, {"transcription": "你好", "language": "Chinese"})
+    cache.write(20, 40, {"token_limited": True})
+    resumed = SpeechCheckpoint(audio, cfg)
+    assert resumed.read(10, 20)["transcription"] == "你好"
+    assert resumed.read(20, 40)["token_limited"] is True
+    resumed._path(10, 20).with_suffix(".tmp").write_text("incomplete")
+    assert resumed.read(10, 20)["transcription"] == "你好"
+    cfg["qwen"]["revision"] = "another revision"
+    assert SpeechCheckpoint(audio, cfg).read(10, 20) is None
+    cfg["qwen"]["revision"] = AsrConfig().qwen.revision
+    audio.write_bytes(b"other audio")
+    assert SpeechCheckpoint(audio, cfg).read(10, 20) is None

@@ -12,7 +12,10 @@ run sequentially in one disposable GPU process; Nemotron runs in another.
 Model revisions, VAD settings, speech/skipped seconds, and original-timeline
 provenance are saved on the transcription stage. Point word timestamps are
 retained. Inputs that hit the generation limit are bisected and retried without
-repeating successful regions; the split history is recorded. Irreducible token
+repeating successful regions; the split history is recorded. Private ASR chunk
+checkpoints in `data/speech-checkpoints` are keyed by audio bytes and configuration,
+so a worker restart can reuse completed decoding. These files contain transcript
+text and must remain private alongside the other local recording artifacts. Irreducible token
 limits or incomplete alignment fail the stage rather than storing partial text.
 Original audio is unchanged; this does not create a shortened playback file.
 

@@ -11,6 +11,7 @@ from collections import deque
 from pathlib import Path
 
 from .base import AsrError
+from .speech_checkpoint import SpeechCheckpoint
 from .vad import audio_duration_seconds, merge_speech_regions, slice_region
 
 
@@ -100,6 +101,7 @@ def qwen(audio, cfg):
     options = cfg["qwen"]
     regions = speech_regions(audio, cfg, duration)
     metadata = {
+        "algorithm_version": "qwen-vad-bisection-v1",
         "vad": {
             "provider": "faster-whisper/silero-onnx",
             "enabled": True,
@@ -127,6 +129,7 @@ def qwen(audio, cfg):
     }
     if not regions:
         return result
+    checkpoint = SpeechCheckpoint(audio, cfg)
     with tempfile.TemporaryDirectory(prefix="qwen-chunks-") as directory:
         processor = AutoProcessor.from_pretrained(options["model"], revision=options["revision"])
         model = (
@@ -140,11 +143,18 @@ def qwen(audio, cfg):
             .eval()
         )
         chunk_index = 0
+        cached_regions = 0
 
         def decode_region(start, end):
-            nonlocal chunk_index
+            nonlocal chunk_index, cached_regions
             path = slice_region(audio, start, end, Path(directory) / f"{chunk_index}.wav")
             chunk_index += 1
+            cached = checkpoint.read(start, end)
+            if cached is not None:
+                if cached.get("token_limited"):
+                    raise TokenLimitError("Cached region requires bisection")
+                cached_regions += 1
+                return path, cached
             inputs = processor.apply_transcription_request(
                 audio=str(path), language=None if cfg["language"] == "auto" else cfg["language"]
             ).to("cuda", torch.bfloat16)
@@ -156,11 +166,14 @@ def qwen(audio, cfg):
             parsed = None if limited else processor.decode(generated, return_format="parsed")[0]
             del inputs, output, generated
             if limited:
+                checkpoint.write(start, end, {"token_limited": True})
                 raise TokenLimitError("Qwen reached its token limit")
+            checkpoint.write(start, end, parsed)
             return path, parsed
 
         decoded, splits = transcribe_bounded(regions, decode_region)
         metadata["token_limit_splits"] = splits
+        metadata["cached_regions"] = cached_regions
         chunks = [(value[0], start, end, value[1]) for start, end, value in decoded]
         del model, processor
         gc.collect()
