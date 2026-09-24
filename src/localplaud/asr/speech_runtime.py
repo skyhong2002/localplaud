@@ -41,6 +41,25 @@ def speech_regions(audio, cfg, duration):
     return [(s, min(e, duration)) for s, e in regions if s < duration]
 
 
+ALIGNER_LANGUAGES = {
+    "chinese",
+    "english",
+    "cantonese",
+    "french",
+    "german",
+    "italian",
+    "japanese",
+    "korean",
+    "portuguese",
+    "russian",
+    "spanish",
+}
+
+
+def alignment_supported(language):
+    return str(language or "").lower() in ALIGNER_LANGUAGES
+
+
 def aligned_words(aligned, offset, duration):
     result = []
     for word in aligned:
@@ -198,6 +217,27 @@ def qwen(audio, cfg):
                 continue
             language = parsed["language"]
             languages.append(language)
+            if not alignment_supported(language):
+                # ASR supports more languages than the forced aligner. Keep the
+                # complete recognized text with honest segment-level timing;
+                # the independent align stage will report degraded coverage.
+                metadata.setdefault("alignment_errors", []).append(
+                    {
+                        "start": start,
+                        "end": end,
+                        "language": language,
+                        "reason": "unsupported_aligner_language",
+                    }
+                )
+                result["segments"].append(
+                    {
+                        "text": text,
+                        "start": start,
+                        "end": end,
+                        "words": [],
+                    }
+                )
+                continue
             inputs, word_lists = processor.prepare_forced_aligner_inputs(
                 audio=str(path), transcript=text, language=language
             )

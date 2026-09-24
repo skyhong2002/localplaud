@@ -562,6 +562,12 @@ def run_alignment(
     detail = inspect_word_alignment(transcript)
     if (transcript.model == "Qwen/Qwen3-ASR-1.7B-hf"
             and model == "Qwen/Qwen3-ForcedAligner-0.6B-hf"):
+        if detail["segment_coverage"] < 1.0:
+            raise AlignmentUnavailable(
+                "Qwen forced alignment is incomplete: some detected languages are not "
+                "supported by the aligner. The complete ASR text and segment timestamps "
+                "are preserved; see transcription-stage alignment_errors."
+            )
         detail["method"] = "qwen-forced-alignment-during-asr"
         detail["forced_alignment"] = True
         return AlignmentResult(transcript, "qwen", model, detail)

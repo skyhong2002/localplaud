@@ -326,20 +326,64 @@ def test_integrated_alignment_connection_health_accepts_its_registered_key(monke
     from localplaud.config import Settings
     from localplaud.db.models import ProviderConnection
     from localplaud.providers import service
-    monkeypatch.setattr(service, 'get_settings', lambda: Settings())
-    row = ProviderConnection(key='builtin:qwen-alignment-validation', name='Qwen alignment',
-        provider_type='provider-word-timestamps', execution_target='local',
-        data_egress=False, config={})
-    ok, detail = service._probe_connection(row, 'Qwen/Qwen3-ForcedAligner-0.6B-hf')
+
+    monkeypatch.setattr(service, "get_settings", lambda: Settings())
+    row = ProviderConnection(
+        key="builtin:qwen-alignment-validation",
+        name="Qwen alignment",
+        provider_type="provider-word-timestamps",
+        execution_target="local",
+        data_egress=False,
+        config={},
+    )
+    ok, detail = service._probe_connection(row, "Qwen/Qwen3-ForcedAligner-0.6B-hf")
     assert ok
-    assert 'timestamps' in detail
+    assert "timestamps" in detail
 
 
 def test_runtime_diagnostics_do_not_change_transcript_edit_guard():
     from localplaud.worker.pipeline import _canonical_digest
-    transcript = Transcript(segments=[Segment('你好', 10, 11)], provider='qwen')
+
+    transcript = Transcript(segments=[Segment("你好", 10, 11)], provider="qwen")
     persisted = _canonical_digest(transcript)
-    transcript.processing_metadata = {'vad': {'skipped_seconds': 10}, 'cached_regions': 5}
+    transcript.processing_metadata = {"vad": {"skipped_seconds": 10}, "cached_regions": 5}
     assert _canonical_digest(transcript) == persisted
-    transcript.segments[0].text = '人工修改'
+    transcript.segments[0].text = "人工修改"
     assert _canonical_digest(transcript) != persisted
+
+
+def test_unsupported_alignment_language_preserves_asr_and_reports_degraded():
+    from localplaud.asr.speech_runtime import alignment_supported
+    from localplaud.worker.align import AlignmentUnavailable, run_alignment
+
+    assert alignment_supported("Chinese")
+    assert not alignment_supported("Hindi")
+    transcript = Transcript(
+        model="Qwen/Qwen3-ASR-1.7B-hf",
+        provider="qwen",
+        segments=[
+            Segment("hello", 0, 1, words=[Word("hello", 0, 1)]),
+            Segment("नमस्ते", 10, 11, words=[]),
+        ],
+    )
+    before = transcript.text
+    with pytest.raises(AlignmentUnavailable, match="complete ASR text"):
+        run_alignment(
+            Path("unused.wav"),
+            transcript,
+            provider="provider-word-timestamps",
+            model="Qwen/Qwen3-ForcedAligner-0.6B-hf",
+        )
+    assert transcript.text == before
+    assert transcript.segments[-1].words == []
+
+
+def test_checkpoint_reuses_empty_speech_output(tmp_path):
+    from localplaud.asr.speech_checkpoint import SpeechCheckpoint
+    audio = tmp_path/'silence.wav'
+    audio.write_bytes(b'silence')
+    cfg = AsrConfig(provider='qwen').model_dump(mode='json')
+    cfg['qwen']['checkpoint_dir'] = str(tmp_path/'cache')
+    checkpoint = SpeechCheckpoint(audio,cfg)
+    checkpoint.write(0,1,{'transcription':'','language':None})
+    assert checkpoint.read(0,1) == {'transcription':'','language':None}

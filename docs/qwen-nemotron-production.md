@@ -23,7 +23,10 @@ Nemotron processes the entire recording with a continuous speaker cache,
 so independently transcribed chunks do not reset speaker identities. It supports
 at most eight speakers. Returned turns are clipped to the recording boundary.
 The align stage validates the forced alignment already computed with Qwen;
-it does not run WhisperX over the new transcript.
+it does not run WhisperX over the new transcript. Qwen ASR supports more languages
+than its forced aligner. Unsupported detected languages retain their complete
+text and segment timestamps; the align stage explicitly becomes degraded,
+while diarization and notes can continue. No language is silently substituted.
 
 ## Deployment
 
