@@ -627,7 +627,10 @@ def generate_evidence_notes(
             if not issues:
                 break
             if attempt == repairs:
-                _fail("擷取覆核", f"第 {i + 1} 批仍有 {len(issues)} 項問題")
+                _fail(
+                    "擷取覆核",
+                    f"第 {i + 1} 批仍有 {len(issues)} 項問題：" + "；".join(issues)[:1200],
+                )
         evidence["chunks"].append(
             {
                 "target_ids": [x["id"] for x in scope["target"]],
@@ -802,7 +805,10 @@ def generate_evidence_notes(
             if not issues:
                 break
             if attempt == repairs:
-                _fail("草稿覆核", f"第 {bi + 1} 批仍有 {len(issues)} 項問題")
+                _fail(
+                    "草稿覆核",
+                    f"第 {bi + 1} 批仍有 {len(issues)} 項問題：" + "；".join(issues)[:1200],
+                )
         coverage["review_warnings"].extend(
             {"phase": "verify", "batch": bi + 1, "message": warning}
             for warning in review["warnings"]

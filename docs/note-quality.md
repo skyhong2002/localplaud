@@ -35,6 +35,9 @@ snapshot is retained separately from our execution policy.
 7. Save accepted notes through normal revision history and invalidate a dependent
    mind map when its source changes. Canonical transcript, speaker and note
    fingerprints reject a save if the user edited the inputs during generation.
+   When evidence-note generation fails, preserve the old dependent mind map in a
+   degraded state; indexing the usable canonical transcript can still complete.
+   Review failures include the remaining material issues for targeted recovery.
 
 The ledger stores source IDs, timestamps, quotations, source digest and the
 provider/model. Coverage and phase usage describe executed checks; they are not

@@ -149,7 +149,7 @@ def test_oversized_utterance_keeps_tail_and_all_part_ids():
 
 def test_verifier_rejects_fabricated_owner_after_bounded_repairs():
     llm = Fake(bad_owner=True)
-    with pytest.raises(LLMOutputInvalid, match="覆核"):
+    with pytest.raises(LLMOutputInvalid, match="覆核.*虛構負責人"):
         note(llm)
     assert len([p for p, _ in llm.calls if p.startswith("從 target")]) == 3
 

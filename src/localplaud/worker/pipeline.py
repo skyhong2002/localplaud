@@ -2316,6 +2316,7 @@ def _run_derived_stages(
         return []
     pcfg = settings.pipeline
     partial_errors: list[str] = []
+    note_generation_failed = False
     if transcript is not None:
         from .transcript_quality import TranscriptQualityError, require_usable_transcript
 
@@ -2538,6 +2539,7 @@ def _run_derived_stages(
                 except Exception as exc:  # noqa: BLE001 - transcript remains usable
                     log.exception("Summarization failed for %s", file_id)
                     partial_errors.append(f"summarize: {exc}")
+                    note_generation_failed = True
             else:
                 _finish_stage(
                     file_id,
@@ -2556,7 +2558,13 @@ def _run_derived_stages(
                 "disabled" if not pcfg.summarize else "no transcript",
             )
 
-        if pcfg.mind_map and transcript is not None:
+        if pcfg.mind_map and note_generation_failed and pcfg.note_quality == "evidence":
+            # A rejected regeneration must not make an older, potentially stale
+            # note look newly verified by rebuilding a dependent map from it.
+            reason = RuntimeError("新版筆記尚未通過產生與核對；保留既有心智圖，待筆記成功後重建。")
+            _fail_stage(file_id, StageName.mind_map, reason, degraded=True)
+            partial_errors.append(f"mind_map: {reason}")
+        elif pcfg.mind_map and transcript is not None:
             if force or not _has_summary(
                 file_id,
                 "mind_map",

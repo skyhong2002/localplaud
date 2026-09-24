@@ -151,6 +151,56 @@ def test_note_guard_rejects_concurrent_edit_without_archiving_it(monkeypatch, tm
         assert row.summaries[0].content_md == "User's new edit"
 
 
+def test_rejected_note_preserves_dependent_map_but_indexes_current_transcript(
+    monkeypatch, tmp_path
+):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus, Summary
+    from localplaud.db.models import Transcript as TranscriptRow
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.llm.base import LLMOutputInvalid
+    from localplaud.worker.pipeline import process_derived_artifacts
+
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="review-failed", filename="r", status=FileStatus.done))
+        session.add(
+            TranscriptRow(
+                file_id="review-failed",
+                source="local",
+                provider="test",
+                text="Current transcript",
+                segments=[{"text": "Current transcript", "start": 0, "end": 3}],
+            )
+        )
+        for template in ("plaud-autopilot", "mind_map"):
+            session.add(
+                Summary(
+                    file_id="review-failed",
+                    template=template,
+                    source="local",
+                    content_md="Previous " + template,
+                )
+            )
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
+    _install_fakes(monkeypatch, counters)
+
+    def reject(*args, **kwargs):
+        raise LLMOutputInvalid("Decision contradicts source")
+
+    monkeypatch.setattr("localplaud.worker.pipeline.summarize.summarize", reject)
+    process_derived_artifacts("review-failed")
+    assert counters["mm"] == 0 and counters["emb"] == 1
+    with session_scope() as session:
+        row = session.get(PlaudFile, "review-failed")
+        assert row.status == FileStatus.partial
+        assert all(n.content_md == "Previous " + n.template for n in row.summaries)
+        stages = {x.stage: x for x in row.stage_runs}
+        assert stages[StageName.summarize].status == StageStatus.failed
+        assert stages[StageName.mind_map].status == StageStatus.degraded
+        assert stages[StageName.index].status == StageStatus.completed
+
+
 def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
