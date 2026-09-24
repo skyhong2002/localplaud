@@ -1568,9 +1568,9 @@ def test_reprocess_missing_audio_restores_plaud_cache(monkeypatch, tmp_path):
 def test_completed_remote_audio_renders_player_and_lazy_audio(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
-    audio = tmp_path / "lazy.opus"
+    audio = tmp_path / "lazy.mp3"
     audio.write_bytes(b"lazy-audio")
-    monkeypatch.setattr("localplaud.imports.ensure_plaud_audio", lambda _file_id: audio)
+    monkeypatch.setattr("localplaud.imports.ensure_plaud_audio", lambda _file_id, *args, **kwargs: audio)
 
     library = c.get("/")
     assert "Audio on demand" in library.text

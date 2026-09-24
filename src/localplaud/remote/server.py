@@ -55,7 +55,9 @@ def _authorize(
     expected = os.environ.get("LOCALPLAUD_WORKER_TOKEN")
     if not expected:
         raise HTTPException(status_code=503, detail="remote worker token is not configured")
-    supplied = credentials.credentials if credentials and credentials.scheme.lower() == "bearer" else ""
+    supplied = (
+        credentials.credentials if credentials and credentials.scheme.lower() == "bearer" else ""
+    )
     if not hmac.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="invalid worker token")
 
@@ -139,9 +141,7 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
             if hasattr(cfg, "model"):
                 cfg.model = request.model
         elif request.stage == JobStage.embed:
-            cfg = getattr(
-                settings.embeddings, settings.embeddings.provider.replace("-", "_")
-            )
+            cfg = getattr(settings.embeddings, settings.embeddings.provider.replace("-", "_"))
             if hasattr(cfg, "model"):
                 cfg.model = request.model
     if request.stage == JobStage.transcribe:
@@ -188,7 +188,26 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
                 "title_prompt_version": TITLE_PROMPT_VERSION,
             }
         else:
-            payload = summarize(transcript, settings, request.options.get("template"))
+            from ..config import PipelineConfig
+
+            note_options = {
+                key: request.options[key]
+                for key in ("note_quality", "note_evidence_chunk_chars", "note_repair_attempts")
+                if key in request.options
+            }
+            settings.pipeline = PipelineConfig.model_validate(
+                settings.pipeline.model_dump() | note_options
+            )
+            checkpoint_key = hashlib.sha256(request.idempotency_key.encode()).hexdigest()
+            payload = summarize(
+                transcript,
+                settings,
+                request.options.get("template"),
+                context=request.options.get("note_context"),
+                checkpoint_dir=Path(settings.poller.download_dir).parent
+                / "note-checkpoints"
+                / checkpoint_key,
+            )
     elif request.stage == JobStage.mind_map:
         from ..worker.mindmap import generate_mind_map
 
@@ -276,7 +295,9 @@ def resume_pending_jobs() -> None:
     with session_scope() as session:
         ids = list(
             session.scalars(
-                select(RemoteJob.id).where(RemoteJob.status.in_([JobStatus.queued, JobStatus.running]))
+                select(RemoteJob.id).where(
+                    RemoteJob.status.in_([JobStatus.queued, JobStatus.running])
+                )
             )
         )
     for job_id in ids:
@@ -289,11 +310,43 @@ def capabilities():
     return HandshakeResponse(
         worker_id=os.environ.get("LOCALPLAUD_WORKER_ID", "local-worker"),
         capabilities=[
-            StageCapability(stage="transcribe", models=[getattr(getattr(settings.asr, settings.asr.provider.replace('-', '_')), "model", settings.asr.provider)]),
+            StageCapability(
+                stage="transcribe",
+                models=[
+                    getattr(
+                        getattr(settings.asr, settings.asr.provider.replace("-", "_")),
+                        "model",
+                        settings.asr.provider,
+                    )
+                ],
+            ),
             StageCapability(stage="diarize", models=[settings.diarize.model]),
-            StageCapability(stage="summarize", models=[getattr(getattr(settings.llm, settings.llm.provider), "model", settings.llm.provider)]),
-            StageCapability(stage="mind_map", models=[getattr(getattr(settings.llm, settings.llm.provider), "model", settings.llm.provider)]),
-            StageCapability(stage="embed", models=[getattr(getattr(settings.embeddings, settings.embeddings.provider), "model", settings.embeddings.provider)]),
+            StageCapability(
+                stage="summarize",
+                models=[
+                    getattr(
+                        getattr(settings.llm, settings.llm.provider), "model", settings.llm.provider
+                    )
+                ],
+            ),
+            StageCapability(
+                stage="mind_map",
+                models=[
+                    getattr(
+                        getattr(settings.llm, settings.llm.provider), "model", settings.llm.provider
+                    )
+                ],
+            ),
+            StageCapability(
+                stage="embed",
+                models=[
+                    getattr(
+                        getattr(settings.embeddings, settings.embeddings.provider),
+                        "model",
+                        settings.embeddings.provider,
+                    )
+                ],
+            ),
         ],
     )
 
@@ -305,11 +358,16 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
 
     title_only = request.stage == JobStage.summarize and request.options.get("title_only")
     if (
-        request.stage == JobStage.summarize and not title_only
+        request.stage == JobStage.summarize
+        and not title_only
         and request.options.get("note_prompt_version", NOTE_PROMPT_VERSION) != NOTE_PROMPT_VERSION
     ):
         raise HTTPException(status_code=409, detail="note prompt version is unsupported")
-    if title_only and request.options.get("title_prompt_version", TITLE_PROMPT_VERSION) != TITLE_PROMPT_VERSION:
+    if (
+        title_only
+        and request.options.get("title_prompt_version", TITLE_PROMPT_VERSION)
+        != TITLE_PROMPT_VERSION
+    ):
         raise HTTPException(status_code=409, detail="title prompt version is unsupported")
     with session_scope() as session:
         existing = session.scalar(
@@ -325,11 +383,17 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
                     outdated_title = payload.get("title_prompt_version") != TITLE_PROMPT_VERSION
                 except (KeyError, StopIteration, ValueError):
                     outdated_title = True
-            if request.stage == JobStage.summarize and not title_only and existing.status == JobStatus.succeeded:
+            if (
+                request.stage == JobStage.summarize
+                and not title_only
+                and existing.status == JobStatus.succeeded
+            ):
                 try:
                     artifact = next(a for a in existing.artifacts if a["name"] == "result.json")
                     payload = json.loads(base64.b64decode(artifact["data_base64"]))
-                    outdated_note = (payload.get("coverage") or {}).get("note_prompt_version") != NOTE_PROMPT_VERSION
+                    outdated_note = (payload.get("coverage") or {}).get(
+                        "note_prompt_version"
+                    ) != NOTE_PROMPT_VERSION
                 except (KeyError, StopIteration, ValueError, AttributeError, TypeError):
                     outdated_note = True
             if existing.status != JobStatus.failed and not outdated_title and not outdated_note:
@@ -362,9 +426,7 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
         except IntegrityError:
             session.rollback()
             existing = session.scalar(
-                select(RemoteJob).where(
-                    RemoteJob.idempotency_key == request.idempotency_key
-                )
+                select(RemoteJob).where(RemoteJob.idempotency_key == request.idempotency_key)
             )
             if existing is None:
                 raise
@@ -388,7 +450,9 @@ def job_status(job_id: str):
         return _response(row)
 
 
-@router.post("/jobs/{job_id}/cancel", response_model=CancelResponse, dependencies=[Depends(_authorize)])
+@router.post(
+    "/jobs/{job_id}/cancel", response_model=CancelResponse, dependencies=[Depends(_authorize)]
+)
 def cancel_job(job_id: str):
     with session_scope() as session:
         row = session.get(RemoteJob, job_id)
@@ -409,7 +473,9 @@ def download_artifact(job_id: str, name: str):
         row = session.get(
             RemoteJob, job_id, options=[defer(RemoteJob.input_manifest, raiseload=True)]
         )
-        artifact = next((item for item in (row.artifacts if row else []) if item["name"] == name), None)
+        artifact = next(
+            (item for item in (row.artifacts if row else []) if item["name"] == name), None
+        )
         if artifact is None:
             raise HTTPException(status_code=404, detail="artifact not found")
         data = base64.b64decode(artifact["data_base64"])

@@ -251,15 +251,12 @@ select it through an execution profile with explicit cloud egress. The shipped l
 requires another 2% of pre-call headroom, keeping the user's requested 3% floor
 outside the callable range.
 
-For GPT-6 Sol, summary and mind-map calls use up to 240,000 transcript characters
-per request. This keeps ordinary long recordings in one full-transcript turn instead
-of spending many quota-consuming lossy map calls; recordings beyond that bound still
-use the durable full-coverage hierarchy.
-
-Recording notes retain a versioned execution policy separately from captured
-Plaud template descriptions. Long Autopilot notes preserve detailed sections from
-every transcript chunk and reduce only the overview evidence. See
-[note quality and evaluation limits](docs/note-quality.md).
+Recording notes default to an evidence workflow: timestamped facts, source-based
+extraction checks, topic planning, section drafting and a separate verification
+pass. Failed checks preserve existing notes; successful regeneration archives them.
+The default complete-request budget is 120,000 characters, capped by the selected
+provider. Mind-map and explicit legacy summary paths retain their own budgets.
+See [note quality, configuration and evaluation limits](docs/note-quality.md).
 
 ## ASR providers
 

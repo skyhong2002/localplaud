@@ -78,6 +78,9 @@ retry_max_attempts = 5           # consecutive failed cycles before manual Resum
 retry_base_seconds = 300         # exponential delay: 5m, 10m, 20m, …
 retry_max_seconds = 21600        # cap automatic retry delay at 6h
 summary_chunk_chars = 12000      # full transcript is hierarchically summarized above this size
+note_quality = "evidence"       # facts -> source review -> outline -> cited notes -> review
+note_evidence_chunk_chars = 120000 # also bounded by the selected provider's context
+note_repair_attempts = 2         # fail visibly after bounded repairs; keep previous notes
 polish_chunk_chars = 12000       # contiguous segment context sent per correction call
 summary_template = "plaud-autopilot" # Plaud Web Autopilot; also: default | meeting | call | lecture | personal
 # "independent" (default) accepts only raw audio + metadata from Plaud and

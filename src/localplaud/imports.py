@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import math
 import threading
 import time
+import wave
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -15,8 +18,11 @@ from .db.models import FileStatus, ImportRun, PlaudFile, Summary, Transcript
 from .db.session import session_scope
 from .plaud import make_plaud_client
 from .poller.poll import _apply_dto, _download_one, refresh_cloud_artifacts_for
+from .worker.convert import ConversionError, _raw_packet_count, to_wav
 
 _start_lock = threading.Lock()
+_playback_locks_lock = threading.Lock()
+_playback_locks: dict[str, threading.Lock] = {}
 _PLAUD_FULL_SYNC_DELAY_SECONDS = 1.0
 _PLAUD_RATE_LIMIT_RETRY_DELAYS = (2.0, 4.0, 8.0, 16.0)
 
@@ -141,22 +147,28 @@ def _run_plaud_metadata_import(
                         row.cloud_artifacts_synced_at = None
                     else:
                         cloud_sources = ("cloud", "plaud")
-                        has_transcript = session.scalar(
-                            select(Transcript.id)
-                            .where(
-                                Transcript.file_id == dto.id,
-                                Transcript.source.in_(cloud_sources),
+                        has_transcript = (
+                            session.scalar(
+                                select(Transcript.id)
+                                .where(
+                                    Transcript.file_id == dto.id,
+                                    Transcript.source.in_(cloud_sources),
+                                )
+                                .limit(1)
                             )
-                            .limit(1)
-                        ) is not None
-                        has_summary = session.scalar(
-                            select(Summary.id)
-                            .where(
-                                Summary.file_id == dto.id,
-                                Summary.source.in_(cloud_sources),
+                            is not None
+                        )
+                        has_summary = (
+                            session.scalar(
+                                select(Summary.id)
+                                .where(
+                                    Summary.file_id == dto.id,
+                                    Summary.source.in_(cloud_sources),
+                                )
+                                .limit(1)
                             )
-                            .limit(1)
-                        ) is not None
+                            is not None
+                        )
 
                 failed = False
                 last_error = None
@@ -343,6 +355,92 @@ def ensure_plaud_audio(
         if time.monotonic() >= deadline:
             raise TimeoutError("timed out waiting for Plaud audio download")
         time.sleep(0.25)
+
+
+def _playback_lock(source: Path) -> threading.Lock:
+    key = str(source.resolve())
+    with _playback_locks_lock:
+        return _playback_locks.setdefault(key, threading.Lock())
+
+
+def _valid_playback_wav(path: Path) -> bool:
+    try:
+        with wave.open(str(path), "rb") as audio:
+            valid_format = (
+                audio.getnchannels() == 1
+                and audio.getsampwidth() == 2
+                and audio.getframerate() == 16000
+                and audio.getnframes() > 0
+            )
+            if not valid_format or len(audio.readframes(1)) != 2:
+                return False
+            audio.setpos(audio.getnframes() - 1)
+            return len(audio.readframes(1)) == 2
+    except (FileNotFoundError, OSError, EOFError, wave.Error):
+        return False
+
+
+def ensure_playable_audio(
+    file_id: str,
+    settings: Settings | None = None,
+    *,
+    timeout_seconds: float = 180.0,
+) -> Path:
+    """Return browser-playable audio without changing the original-audio cache."""
+    source = ensure_plaud_audio(file_id, settings, timeout_seconds=timeout_seconds)
+    if source.suffix.lower() != ".opus":
+        return source
+    with source.open("rb") as stream:
+        if stream.read(4) == b"OggS":
+            return source
+
+    # The database is read and closed before any validation or conversion work.
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            raise LookupError("recording not found")
+        if not row.audio_path or Path(row.audio_path) != source:
+            raise ConversionError("recording audio source changed during playback preparation")
+        duration_ms = row.duration_ms
+    if duration_ms is None or duration_ms <= 0:
+        raise ConversionError("headerless Opus requires recording duration metadata")
+    expected_seconds = duration_ms / 1000
+
+    with _playback_lock(source):
+        before = source.stat()
+        packet_count = _raw_packet_count(source)
+        actual_seconds = packet_count * 0.02
+        if not math.isfinite(expected_seconds) or abs(actual_seconds - expected_seconds) > max(
+            1.0, 0.02 * expected_seconds
+        ):
+            raise ConversionError("headerless Opus duration differs from recording metadata")
+        identity = (
+            str(source.resolve()),
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        digest = hashlib.sha256(repr(identity).encode("utf-8")).hexdigest()[:24]
+        cache_dir = source.parent / f".localplaud-playback-{digest}"
+        playback = cache_dir / "audio.wav"
+        if not _valid_playback_wav(playback):
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            to_wav(source, playback, expected_duration_seconds=expected_seconds)
+            if not _valid_playback_wav(playback):
+                playback.unlink(missing_ok=True)
+                raise ConversionError("converted playback audio is invalid")
+        after = source.stat()
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ConversionError("recording audio source changed during playback preparation")
+        return playback
 
 
 def audio_import_status(file_id: str) -> dict:

@@ -79,6 +79,9 @@ def polish_transcript(
     progress: Callable[[dict], None] | None = None,
 ) -> dict:
     """Return a corrected copy with identical segment/timestamp/speaker structure."""
+    from .transcript_quality import require_usable_transcript
+
+    quality = require_usable_transcript(transcript)
     provider = build_llm(settings.llm)
     if not provider.available():
         raise LLMError(f"transcript polish provider unavailable: {provider.name}")
@@ -298,6 +301,7 @@ def polish_transcript(
         "prompt_version": PROMPT_VERSION,
         "detail": {
             "strategy": "contextual-segment-map",
+            "transcript_quality": quality,
             "chunk_chars": chunk_chars,
             "chunks": calls,
             "attempts": attempts,

@@ -538,7 +538,8 @@ def test_summarize_persists_exact_template_snapshot(monkeypatch, tmp_path):
             return "# Result\n\n## Findings\n- grounded"
 
     monkeypatch.setattr(summarize, "build_llm", lambda settings: FakeLlm())
-    settings = get_settings()
+    settings = get_settings().model_copy(deep=True)
+    settings.pipeline.note_quality = "legacy"
     result = summarize.summarize(
         Transcript(segments=[Segment(start=0, end=1, text="Evidence")]),
         settings,

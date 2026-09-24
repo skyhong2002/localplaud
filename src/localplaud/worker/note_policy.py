@@ -1,6 +1,6 @@
 """Local execution contract, separate from captured Plaud template descriptions."""
 
-NOTE_PROMPT_VERSION = "recording-notes/v1"
+NOTE_PROMPT_VERSION = "evidence-notes/v2"
 
 NOTE_INSTRUCTIONS = """\
 Write useful notes about the recording, not an explanation of a template.

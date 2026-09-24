@@ -185,7 +185,7 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
             has_speakers=True,
         )
 
-    def fake_summary(transcript, candidate_settings):
+    def fake_summary(transcript, candidate_settings, *, context=None, checkpoint_dir=None, progress=None):
         calls["summary"] += 1
         if candidate_settings.llm.provider != "openai":
             raise LLMUnavailable("primary LLM unavailable")
@@ -195,6 +195,7 @@ def test_pipeline_uses_explicit_fallbacks_for_derived_stages(monkeypatch, tmp_pa
             "provider": "openai",
             "model": "gpt-test",
             "template": candidate_settings.pipeline.summary_template,
+            "template_snapshot": {"execution": {"version": "evidence-notes/v2", "note_quality": "evidence"}},
         }
 
     def fake_mind_map(transcript, candidate_settings, summary_md=None):

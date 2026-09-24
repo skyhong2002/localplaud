@@ -8,7 +8,17 @@ database, and the codebase: every open item below was re-verified with
 evidence; completed work moved to the compressed archive at the bottom.
 Full pre-audit engineering detail lives in this file's git history.
 
-## Status snapshot (2026-08-19)
+## Note quality update (2026-09-24)
+
+- Evidence notes v2 adds timestamped facts, extraction/draft verification, bounded
+  repairs, private checkpoints, and input-change protection. Existing notes are
+  archived on successful replacement; failed checks preserve them.
+- Transcript checks block invalid timestamps and long fixed filler loops; warnings
+  are not acoustic verification. Bad sources still require audio recovery.
+- Real-cohort quality metrics and parity with Plaud remain evaluation targets; see
+  [note-quality.md](docs/note-quality.md). No benchmark score is implied by tests.
+
+## Historical status snapshot (2026-08-19)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
   Active development is merged directly to `main` (test count verified per change).

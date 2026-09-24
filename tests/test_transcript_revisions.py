@@ -1386,7 +1386,7 @@ def test_force_rebuild_uses_preserved_corrected_canonical_downstream(monkeypatch
         ),
     )
 
-    def fake_summary(transcript, settings):
+    def fake_summary(transcript, settings, *, context=None, checkpoint_dir=None, progress=None):
         seen["summary"] = transcript.text
         return {
             "title": "T",
@@ -1394,6 +1394,7 @@ def test_force_rebuild_uses_preserved_corrected_canonical_downstream(monkeypatch
             "provider": "fake",
             "model": "m",
             "template": settings.pipeline.summary_template,
+            "template_snapshot": {"execution": {"version": "evidence-notes/v2", "note_quality": "evidence"}},
         }
 
     def fake_mindmap(transcript, settings, summary_md=None):

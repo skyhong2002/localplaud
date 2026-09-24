@@ -21,6 +21,7 @@ from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, or_, select, update
 
@@ -717,11 +718,17 @@ def _skip_stage(file_id: str, stage: StageName, reason: str) -> None:
 
 
 def _fail_stage(file_id: str, stage: StageName, exc: Exception, *, degraded=False) -> None:
+    assessment = getattr(exc, "assessment", None)
     _set_stage(
         file_id,
         stage,
-        StageStatus.degraded if degraded else StageStatus.failed,
+        StageStatus.degraded if degraded or assessment else StageStatus.failed,
         error=str(exc),
+        **(
+            {"detail": {"transcript_quality": assessment, "needs_audio_review": True}}
+            if assessment
+            else {}
+        ),
     )
 
 
@@ -946,10 +953,32 @@ def _run_fallback_stage(
 
 
 def _llm_projected_usage(
-    transcript: Transcript, settings: Settings, *, stage: str = "summarize",
+    transcript: Transcript,
+    settings: Settings,
+    *,
+    stage: str = "summarize",
 ) -> dict:
     rendered = summarize._render_transcript(transcript)
     chars = len(rendered)
+    if stage == "summarize" and settings.pipeline.note_quality == "evidence":
+        # Reserve for extraction/review, outline, section drafting/review and repairs.
+        # Actual usage returned by the evidence engine replaces this projection.
+        chunk_chars = settings.pipeline.note_evidence_chunk_chars
+        if settings.llm.provider in {"ollama", "localplaud-worker"}:
+            chunk_chars = min(chunk_chars, settings.llm.ollama.summary_chunk_chars)
+        from .evidence_notes import _chunks, _parts
+
+        parts, _ = _parts(transcript, chunk_chars)
+        chunks = max(1, len(_chunks(parts, chunk_chars)))
+        rounds = 1 + settings.pipeline.note_repair_attempts
+        sections = max(chunks, math.ceil(chars / 2000))
+        requests = (chunks + sections) * 2 * rounds + chunks
+        return {
+            "input_chars": max(chars, 1) * 12 * rounds,
+            "output_tokens": requests * max(3000, min(24000, chunk_chars // 4)),
+            "requests": requests,
+            "projection": True,
+        }
     chunk_chars = settings.pipeline.summary_chunk_chars
     if settings.llm.provider in {"ollama", "localplaud-worker"}:
         chunk_chars = min(chunk_chars, settings.llm.ollama.summary_chunk_chars)
@@ -970,7 +999,8 @@ def _llm_projected_usage(
         final_tokens = 1500
     max_output_tokens = (
         chunks * map_tokens + reduce_calls * reduce_tokens + final_tokens
-        if chunks > 1 else final_tokens
+        if chunks > 1
+        else final_tokens
     )
     return {
         "input_chars": math.ceil(chars * (1.5 if chunks > 1 else 1.0)),
@@ -1404,7 +1434,13 @@ def _process_file_claimed(
                 )
                 try:
                     staging_wav.unlink(missing_ok=True)
-                    convert.to_wav(audio, staging_wav)
+                    convert.to_wav(
+                        audio,
+                        staging_wav,
+                        expected_duration_seconds=(
+                            row.duration_ms / 1000 if row.duration_ms else None
+                        ),
+                    )
                     with session_scope() as session:
                         claimed = _assert_processing_claim_in_session(
                             session,
@@ -1520,21 +1556,37 @@ def _process_file_claimed(
                 revision = current_row.corrected_transcript_for_source("local")
                 preserve_human = revision is not None and (
                     revision.kind in {"user_edit", "restore", "speaker_edit"}
-                    or (revision.kind == "vocabulary"
-                        and (revision.note or "").startswith("vocabulary:manual"))
+                    or (
+                        revision.kind == "vocabulary"
+                        and (revision.note or "").startswith("vocabulary:manual")
+                    )
                 )
-                if (canonical is not None and canonical[0].text.strip()
-                        and not preserve_human and raw is not None):
-                    session.add(TranscriptRevision(
-                        file_id=file_id, base_transcript_id=raw.id,
-                        revision=max((r.revision for r in current_row.transcript_revisions),
-                                     default=0) + 1,
-                        source="local", segments=[], text="", has_speakers=False,
-                        kind="speech_cleanup", provider=transcript.provider,
-                        model=transcript.model, prompt_version="no-speech/v1",
-                        note="No recognizable speech",
-                        resolved_profile_snapshot=snapshot,
-                    ))
+                if (
+                    canonical is not None
+                    and canonical[0].text.strip()
+                    and not preserve_human
+                    and raw is not None
+                ):
+                    session.add(
+                        TranscriptRevision(
+                            file_id=file_id,
+                            base_transcript_id=raw.id,
+                            revision=max(
+                                (r.revision for r in current_row.transcript_revisions), default=0
+                            )
+                            + 1,
+                            source="local",
+                            segments=[],
+                            text="",
+                            has_speakers=False,
+                            kind="speech_cleanup",
+                            provider=transcript.provider,
+                            model=transcript.model,
+                            prompt_version="no-speech/v1",
+                            note="No recognizable speech",
+                            resolved_profile_snapshot=snapshot,
+                        )
+                    )
             if canonical is not None and preserve_human:
                 transcript, transcript_source = canonical
             if not transcript.text.strip():
@@ -1825,8 +1877,10 @@ def _process_file_claimed(
             _skip_stage(file_id, StageName.correct, "imported migration artifact")
         elif current_kind in {"user_edit", "restore", "speech_cleanup", "speech_retranscribe"}:
             _skip_stage(
-                file_id, StageName.correct,
-                "preserved acoustic correction" if current_kind.startswith("speech_")
+                file_id,
+                StageName.correct,
+                "preserved acoustic correction"
+                if current_kind.startswith("speech_")
                 else "preserved user correction",
             )
         elif current_kind == "ai_polish" and current_provenance_complete and not force:
@@ -2238,7 +2292,10 @@ def _skip_empty_derivatives(file_id: str) -> None:
         row.generated_title_at = None
         for stage in (StageName.summarize, StageName.mind_map, StageName.index):
             _set_stage_in_session(
-                session, file_id, stage, StageStatus.skipped,
+                session,
+                file_id,
+                stage,
+                StageStatus.skipped,
                 detail={"reason": "no recognizable speech", "no_speech": True, "stale": True},
             )
 
@@ -2259,6 +2316,23 @@ def _run_derived_stages(
         return []
     pcfg = settings.pipeline
     partial_errors: list[str] = []
+    if transcript is not None:
+        from .transcript_quality import TranscriptQualityError, require_usable_transcript
+
+        try:
+            require_usable_transcript(transcript)
+        except TranscriptQualityError as exc:
+            # Preserve existing notes and raw/corrected revisions. Known corrupt ASR
+            # cannot become a newly "completed" note, mind map or search index.
+            for stage, enabled in (
+                (StageName.summarize, pcfg.summarize),
+                (StageName.mind_map, pcfg.mind_map),
+                (StageName.index, pcfg.index),
+            ):
+                if enabled:
+                    _fail_stage(file_id, stage, exc, degraded=True)
+                    partial_errors.append(f"{stage.value}: {exc}")
+            return partial_errors
     transcript_lineage = _transcript_lineage(file_id, settings)
     template_key = (
         settings.pipeline.summary_template
@@ -2292,7 +2366,13 @@ def _run_derived_stages(
         if pcfg.summarize and transcript is not None:
             if (
                 force
-                or not _has_summary(file_id, template_key, derived_snapshot, "summarize")
+                or not _has_summary(
+                    file_id,
+                    template_key,
+                    derived_snapshot,
+                    "summarize",
+                    note_quality=settings.pipeline.note_quality,
+                )
                 or not _has_generated_title(file_id)
             ):
                 try:
@@ -2300,6 +2380,30 @@ def _run_derived_stages(
                     def run_summary(candidate):
                         candidate_settings = _settings_for_stage(settings, candidate, "summarize")
                         candidate_settings.pipeline.summary_template = template_key
+                        note_context, note_guard = _note_generation_inputs(
+                            file_id, candidate_settings, template_key
+                        )
+                        note_context["profile_digest"] = hashlib.sha256(
+                            json.dumps(candidate, sort_keys=True, default=str).encode()
+                        ).hexdigest()
+                        if note_guard["transcript_digest"] != _canonical_digest(transcript):
+                            raise RuntimeError("逐字稿或說話者已變更，請從目前版本重新產生筆記。")
+                        if any(
+                            note_guard.get(key) != (transcript_lineage or {}).get(key)
+                            for key in (
+                                "input_transcript_id",
+                                "input_transcript_revision",
+                                "input_transcript_source",
+                            )
+                        ):
+                            raise RuntimeError("逐字稿已變更，請從目前版本重新產生筆記。")
+                        from ..store.files import _safe_id
+
+                        checkpoint_dir = (
+                            Path(candidate_settings.poller.download_dir).parent
+                            / "note-checkpoints"
+                            / _safe_id(file_id)
+                        )
                         projected_usage = _llm_projected_usage(transcript, candidate_settings)
                         cost_budget = _cost_guard(file_id, "summarize", candidate, projected_usage)
                         if _remote_selection(candidate, "summarize"):
@@ -2310,31 +2414,62 @@ def _run_derived_stages(
                                 [_remote_json_input("transcript", _transcript_payload(transcript))],
                                 options={
                                     "note_prompt_version": summarize.NOTE_PROMPT_VERSION,
+                                    "note_context": note_context,
+                                    "note_quality": candidate_settings.pipeline.note_quality,
+                                    "note_evidence_chunk_chars": candidate_settings.pipeline.note_evidence_chunk_chars,
+                                    "note_repair_attempts": candidate_settings.pipeline.note_repair_attempts,
                                     "template": summary_templates.template_snapshot(
                                         summary_templates.get_effective_template(template_key)
-                                    )
+                                    ),
                                 },
                             )
-                            if (result.get("coverage") or {}).get("note_prompt_version") != summarize.NOTE_PROMPT_VERSION:
+                            if (result.get("coverage") or {}).get(
+                                "note_prompt_version"
+                            ) != summarize.NOTE_PROMPT_VERSION:
                                 raise RuntimeError("Remote note contract version mismatch")
                             result.setdefault("provider", "remote-worker")
                         else:
-                            result = summarize.summarize(transcript, candidate_settings)
+                            result = summarize.summarize(
+                                transcript,
+                                candidate_settings,
+                                context=note_context,
+                                checkpoint_dir=checkpoint_dir,
+                                progress=lambda value: _update_stage_progress(
+                                    file_id, StageName.summarize, value
+                                ),
+                            )
                         title_repair_calls = 0
                         if not _generated_title_candidate(
                             result.get("title"), result.get("content_md")
                         ):
                             # Notes are already useful even if the independent
                             # title request fails. Persist them before that request.
-                            _persist_summary(file_id, result, transcript_lineage)
+                            _persist_summary(
+                                file_id,
+                                result,
+                                transcript_lineage,
+                                expected_note_inputs=note_guard,
+                                note_settings=candidate_settings,
+                            )
+                            _, note_guard = _note_generation_inputs(
+                                file_id, candidate_settings, template_key
+                            )
                             if _remote_selection(candidate, "summarize"):
                                 from .title_policy import TITLE_PROMPT_VERSION
 
                                 repaired = _run_remote_stage(
-                                    file_id, candidate, "summarize",
-                                    [_remote_json_input("transcript", _transcript_payload(transcript))],
-                                    options={"title_only": True,
-                                             "title_prompt_version": TITLE_PROMPT_VERSION},
+                                    file_id,
+                                    candidate,
+                                    "summarize",
+                                    [
+                                        _remote_json_input(
+                                            "transcript", _transcript_payload(transcript)
+                                        )
+                                    ],
+                                    options={
+                                        "title_only": True,
+                                        "title_prompt_version": TITLE_PROMPT_VERSION,
+                                    },
                                 )
                                 if repaired.get("title_prompt_version") != TITLE_PROMPT_VERSION:
                                     raise RuntimeError("Remote title contract version mismatch")
@@ -2352,6 +2487,8 @@ def _run_derived_stages(
                             result,
                             transcript_lineage,
                             sets_recording_title=True,
+                            expected_note_inputs=note_guard,
+                            note_settings=candidate_settings,
                         )
                         if not _has_generated_title(file_id):
                             raise RuntimeError("AI summary returned no usable recording title")
@@ -2368,13 +2505,24 @@ def _run_derived_stages(
                                 "cost_budget": cost_budget,
                             },
                             "usage": {
-                                "input_chars": len(transcript.text),
-                                "output_chars": len(result.get("content_md") or ""),
+                                "input_chars": (result.get("coverage") or {}).get(
+                                    "input_chars", len(transcript.text)
+                                ),
+                                "output_chars": (result.get("coverage") or {}).get(
+                                    "output_chars", len(result.get("content_md") or "")
+                                ),
                                 "requests": (
-                                    (result.get("coverage") or {}).get("map_calls", 0)
-                                    + (result.get("coverage") or {}).get("reduce_calls", 0)
-                                    + (result.get("coverage") or {}).get("title_repair_calls", 0)
-                                    + 1
+                                    (result.get("coverage") or {}).get(
+                                        "requests",
+                                        (
+                                            (result.get("coverage") or {}).get("map_calls", 0)
+                                            + (result.get("coverage") or {}).get("reduce_calls", 0)
+                                            + (result.get("coverage") or {}).get(
+                                                "title_repair_calls", 0
+                                            )
+                                            + 1
+                                        ),
+                                    )
                                     + title_repair_calls
                                 ),
                             },
@@ -2705,6 +2853,7 @@ def _has_summary(
     snapshot: dict | None = None,
     profile_stage: str | None = None,
     source_template_key: str | None = None,
+    note_quality: str | None = None,
 ) -> bool:
     expected_version = (
         None
@@ -2726,6 +2875,13 @@ def _has_summary(
             s.template == template
             and s.source == "local"
             and (template == "mind_map" or (s.template_version or 1) == expected_version)
+            and (
+                template == "mind_map"
+                or ((s.template_snapshot or {}).get("execution") or {}).get("version")
+                == summarize.NOTE_PROMPT_VERSION
+                and ((s.template_snapshot or {}).get("execution") or {}).get("note_quality")
+                == (note_quality or get_settings().pipeline.note_quality)
+            )
             and (
                 snapshot is None
                 or profile_stage is None
@@ -3068,9 +3224,7 @@ def _ensure_generated_title(
             str(title_settings.llm.provider).replace("-", "_"),
             None,
         )
-        row.generated_title_model = selected.get("model") or getattr(
-            provider_config, "model", None
-        )
+        row.generated_title_model = selected.get("model") or getattr(provider_config, "model", None)
         row.generated_title_at = datetime.now(UTC)
     return True
 
@@ -3105,12 +3259,79 @@ def _apply_generated_title(
     row.generated_title_at = datetime.now(UTC)
 
 
+def _canonical_digest(transcript: Transcript | None) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            asdict(transcript) if transcript else None, sort_keys=True, ensure_ascii=False
+        ).encode()
+    ).hexdigest()
+
+
+def _note_guard(session, row: PlaudFile, settings: Settings, template: str) -> dict:
+    from ..note_history import fingerprint_digest
+
+    raw = _select_raw_transcript(row, settings)
+    revision = row.corrected_transcript_for_source(raw.source) if raw else None
+    base = (
+        (
+            session.get(TranscriptRow, revision.base_transcript_id)
+            if revision.base_transcript_id
+            else None
+        )
+        if revision
+        else raw
+    )
+    canonical = (
+        (_rehydrate_revision(revision, base) if revision else _rehydrate_transcript(raw))
+        if raw
+        else None
+    )
+    names = {s.key: s.display_name for s in row.speakers if s.display_name}
+    if canonical is not None:
+        canonical = _apply_speaker_display_names(canonical, names)
+    return {
+        "transcript_digest": _canonical_digest(canonical),
+        "template": template,
+        "input_transcript_id": raw.id if raw else None,
+        "input_transcript_revision": revision.revision if revision else 0,
+        "input_transcript_source": raw.source if raw else None,
+        "speaker_names": {s.key: s.display_name for s in row.speakers if s.display_name},
+        "notes": sorted(
+            (s.id, fingerprint_digest(s))
+            for s in row.summaries
+            if s.template == template and s.source == "local"
+        ),
+    }
+
+
+def _note_generation_inputs(file_id: str, settings: Settings, template: str) -> tuple[dict, dict]:
+    from ..preferences import get_workspace_preferences
+
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        tz = get_workspace_preferences(session)["timezone"]
+        guard = _note_guard(session, row, settings, template)
+        recorded_at = (
+            datetime.fromtimestamp(row.start_time_ms / 1000, ZoneInfo(tz)).isoformat()
+            if row.start_time_ms is not None
+            else None
+        )
+        return {
+            "file_id": file_id,
+            "recorded_at": recorded_at,
+            "timezone": tz,
+            **{key: value for key, value in guard.items() if key.startswith("input_transcript_")},
+        }, guard
+
+
 def _persist_summary(
     file_id: str,
     result: dict,
     lineage: dict | None = None,
     *,
     expected_mind_map_inputs: dict | None = None,
+    expected_note_inputs: dict | None = None,
+    note_settings: Settings | None = None,
     sets_recording_title: bool = False,
 ) -> None:
     from ..note_history import (
@@ -3123,6 +3344,16 @@ def _persist_summary(
     with session_scope() as session:
         lock_cost_budget(session, file_id)
         _assert_processing_claim_in_session(session, file_id)
+        if expected_note_inputs is not None:
+            file_row = session.get(PlaudFile, file_id)
+            if (
+                file_row is None
+                or _note_guard(session, file_row, note_settings or get_settings(), template)
+                != expected_note_inputs
+            ):
+                raise RuntimeError(
+                    "逐字稿、說話者或筆記已在生成期間變更；保留現有版本，請重新產生。"
+                )
         if expected_mind_map_inputs is not None:
             file_row = session.get(PlaudFile, file_id)
             transcript_guard = expected_mind_map_inputs.get("transcript") or {}
@@ -3240,6 +3471,9 @@ def _persist_summary(
         from .knowledge_index import sync_summary_document
 
         sync_summary_document(session, replacement, allow_running_stage=True)
+        from ..note_history import _mark_dependent_mind_map_stale
+
+        _mark_dependent_mind_map_stale(session, replacement)
 
 
 def _persist_chunks(

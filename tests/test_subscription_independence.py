@@ -51,12 +51,13 @@ def _providers(monkeypatch):
     )
     monkeypatch.setattr(
         "localplaud.worker.pipeline.summarize.summarize",
-        lambda transcript, settings: {
+        lambda transcript, settings, *, context=None, checkpoint_dir=None, progress=None: {
             "title": "本機筆記",
             "content_md": "# 本機筆記\n\n- 完整涵蓋",
             "provider": "acceptance-fake",
             "model": "local-llm",
             "template": settings.pipeline.summary_template,
+            "template_snapshot": {"execution": {"version": "evidence-notes/v2", "note_quality": "evidence"}},
         },
     )
     monkeypatch.setattr(

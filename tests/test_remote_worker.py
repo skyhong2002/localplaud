@@ -224,7 +224,7 @@ def test_resubmitting_a_failed_job_reruns_it_instead_of_replaying_the_failure(
     monkeypatch.setattr(
         server,
         "_execute",
-        lambda request: [server._artifact("result.json", "application/json", b'{"ok":true,"coverage":{"note_prompt_version":"recording-notes/v1"}}')],
+        lambda request: [server._artifact("result.json", "application/json", b'{"ok":true,"coverage":{"note_prompt_version":"evidence-notes/v2"}}')],
     )
     second = client.post("/api/worker/v1/jobs", headers=headers, json=_request("flaky")).json()
     assert second["job_id"] == first["job_id"]
@@ -300,7 +300,7 @@ def test_terminal_jobs_release_uploads_and_retry_restores_inputs(monkeypatch, tm
         calls.append(req)
         if fail_first and len(calls) == 1:
             raise OSError("temporary GPU failure")
-        return [server._artifact("result.json", "application/json", b'{"ok":true,"coverage":{"note_prompt_version":"recording-notes/v1"}}')]
+        return [server._artifact("result.json", "application/json", b'{"ok":true,"coverage":{"note_prompt_version":"evidence-notes/v2"}}')]
 
     monkeypatch.setattr(server, "_execute", execute)
     first = client.post("/api/worker/v1/jobs", headers=headers, json=request).json()
@@ -315,7 +315,7 @@ def test_terminal_jobs_release_uploads_and_retry_restores_inputs(monkeypatch, tm
     status = client.get(f"/api/worker/v1/jobs/{first['job_id']}", headers=headers).json()
     assert status["status"] == "succeeded"
     assert len(calls) == (2 if fail_first else 1)
-    assert client.get(status["artifacts"][0]["download_url"], headers=headers).content == b'{"ok":true,"coverage":{"note_prompt_version":"recording-notes/v1"}}'
+    assert client.get(status["artifacts"][0]["download_url"], headers=headers).content == b'{"ok":true,"coverage":{"note_prompt_version":"evidence-notes/v2"}}'
 
 
 def test_queued_upload_retained_until_cancelled(monkeypatch, tmp_path):

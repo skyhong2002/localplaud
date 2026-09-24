@@ -849,6 +849,7 @@ def test_summary_cost_projection_accounts_for_bounded_ollama_sections(monkeypatc
     monkeypatch.setattr('localplaud.worker.summary_templates.get_effective_template', get_template)
     transcript = Transcript(segments=[Segment(text='x' * 5000, start=0, end=1)])
     settings = Settings()
+    settings.pipeline.note_quality = 'legacy'
     autopilot = _llm_projected_usage(transcript, settings)
     settings.pipeline.summary_template = 'plaud-meeting-minutes'
     specialist = _llm_projected_usage(transcript, settings)

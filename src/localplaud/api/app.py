@@ -2294,10 +2294,10 @@ _waveform_jobs_lock = Lock()
 
 @app.get("/audio/{file_id}")
 def audio(file_id: str):
-    from ..imports import ensure_plaud_audio
+    from ..imports import ensure_playable_audio
 
     try:
-        path = ensure_plaud_audio(file_id)
+        path = ensure_playable_audio(file_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -2313,11 +2313,11 @@ def audio(file_id: str):
 def audio_waveform(file_id: str, buckets: int = 180):
     import subprocess
 
-    from ..imports import ensure_plaud_audio
+    from ..imports import ensure_playable_audio
     from ..waveform import cached_waveform_peaks, waveform_peaks
 
     try:
-        path = ensure_plaud_audio(file_id)
+        path = ensure_playable_audio(file_id)
     except LookupError as exc:
         # Preserve the waveform endpoint's historical "audio unavailable"
         # contract even when the recording id itself does not exist.

@@ -128,7 +128,9 @@ def test_remote_title_retry_preserves_notes_even_when_it_fails(recording, monkey
                 raise TimeoutError("title unavailable")
             return {"title": "新版發布時程", "title_prompt_version": TITLE_PROMPT_VERSION}
         return {"title": "Key Points", "content_md": "## Summary\n週五發布",
-                "template": "plaud-autopilot", "provider": "ollama", "model": "test-model"}
+                "template": "plaud-autopilot", "provider": "ollama", "model": "test-model",
+                "coverage": {"note_prompt_version": "evidence-notes/v2"},
+                "template_snapshot": {"execution": {"version": "evidence-notes/v2", "note_quality": "evidence"}}}
 
     monkeypatch.setattr(pipeline, "_run_remote_stage", remote)
     monkeypatch.setattr(pipeline, "_settings_for_stage", lambda *_: recording.model_copy(deep=True))

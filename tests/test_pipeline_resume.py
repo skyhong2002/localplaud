@@ -34,11 +34,14 @@ def _install_fakes(monkeypatch, counters):
             has_speakers=True,
         )
 
-    def fake_summary(transcript, settings):
+    def fake_summary(transcript, settings, **kwargs):
         counters["sum"] += 1
         return {
             "title": "T",
             "content_md": "# T\n\nbody",
+            "template_snapshot": {
+                "execution": {"version": "evidence-notes/v2", "note_quality": "evidence"}
+            },
             "provider": "fake",
             "model": "m",
             "template": settings.pipeline.summary_template,
@@ -63,6 +66,89 @@ def _install_fakes(monkeypatch, counters):
     monkeypatch.setattr("localplaud.worker.pipeline.summarize.summarize", fake_summary)
     monkeypatch.setattr("localplaud.worker.pipeline.mindmap.generate_mind_map", fake_mindmap)
     monkeypatch.setattr("localplaud.worker.pipeline.index.embed_chunks", fake_embed)
+
+
+def test_corrupt_transcript_preserves_notes_and_degrades_without_provider_calls(
+    monkeypatch, tmp_path
+):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus, Summary
+    from localplaud.db.models import Transcript as TranscriptRow
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import process_derived_artifacts
+
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="corrupt", filename="corrupt", status=FileStatus.done))
+        session.add(
+            TranscriptRow(
+                file_id="corrupt",
+                source="local",
+                provider="test",
+                text="Thank you. " * 30,
+                segments=[
+                    {"text": "Thank you.", "start": i * 20, "end": i * 20 + 1} for i in range(30)
+                ],
+            )
+        )
+        session.add(
+            Summary(
+                file_id="corrupt",
+                template="plaud-autopilot",
+                source="local",
+                content_md="Existing note preserved",
+            )
+        )
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
+    _install_fakes(monkeypatch, counters)
+    process_derived_artifacts("corrupt")
+    assert not any(counters.values())
+    with session_scope() as session:
+        row = session.get(PlaudFile, "corrupt")
+        assert row.summaries[0].content_md == "Existing note preserved"
+        assert row.status == FileStatus.partial
+        runs = {run.stage: run for run in row.stage_runs}
+        for stage in (StageName.summarize, StageName.mind_map, StageName.index):
+            assert runs[stage].status == StageStatus.degraded
+            assert runs[stage].detail["transcript_quality"]["blocking"] is True
+
+
+def test_note_guard_rejects_concurrent_edit_without_archiving_it(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile, Summary
+    from localplaud.db.models import Transcript as TranscriptRow
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import _note_generation_inputs, _persist_summary
+
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="edited", filename="edited", status=FileStatus.done))
+        session.add(
+            TranscriptRow(
+                file_id="edited", source="local", provider="test", text="Local only", segments=[]
+            )
+        )
+        session.add(
+            Summary(
+                file_id="edited",
+                template="plaud-autopilot",
+                source="local",
+                content_md="Initial note",
+            )
+        )
+    _, guard = _note_generation_inputs("edited", get_settings(), "plaud-autopilot")
+    with session_scope() as session:
+        session.get(PlaudFile, "edited").summaries[0].content_md = "User's new edit"
+    with pytest.raises(RuntimeError, match="變更"):
+        _persist_summary(
+            "edited",
+            {"template": "plaud-autopilot", "content_md": "Generated"},
+            expected_note_inputs=guard,
+        )
+    with session_scope() as session:
+        row = session.get(PlaudFile, "edited")
+        assert row.summaries[0].content_md == "User's new edit"
 
 
 def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
@@ -316,9 +402,7 @@ def test_derived_generation_uses_one_shot_profile_in_run_and_attempt_snapshots(
         assert session.get(RecordingProfileOverride, "one-shot") is None
         for stage in (StageName.summarize, StageName.mind_map, StageName.index):
             run = session.scalar(
-                select(StageRun).where(
-                    StageRun.file_id == "one-shot", StageRun.stage == stage
-                )
+                select(StageRun).where(StageRun.file_id == "one-shot", StageRun.stage == stage)
             )
             attempt = session.scalar(
                 select(StageAttempt).where(
@@ -642,9 +726,7 @@ def test_pending_batch_propagates_daemon_owner_to_worker_threads(monkeypatch, tm
     assert observed == ["daemon-owner", "daemon-owner"]
 
 
-def test_processing_claim_token_carries_daemon_owner_within_column_limit(
-    monkeypatch, tmp_path
-):
+def test_processing_claim_token_carries_daemon_owner_within_column_limit(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, PlaudFile
     from localplaud.db.session import init_db, session_scope
@@ -752,7 +834,7 @@ def test_displaced_conversion_never_publishes_partial_wav(monkeypatch, tmp_path)
     staged = Event()
     release = Event()
 
-    def partial_convert(_source, destination):
+    def partial_convert(_source, destination, **kwargs):
         destination.write_bytes(b"partial-old-owner")
         staged.set()
         assert release.wait(5)
@@ -827,9 +909,7 @@ def test_note_index_handoff_asserts_claim_before_independent_work(monkeypatch, t
     audio = tmp_path / "handoff.wav"
     audio.write_bytes(b"RIFF")
     with session_scope() as session:
-        session.add(
-            PlaudFile(id="handoff", status=FileStatus.downloaded, audio_path=str(audio))
-        )
+        session.add(PlaudFile(id="handoff", status=FileStatus.downloaded, audio_path=str(audio)))
     counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
     _install_fakes(monkeypatch, counters)
     provider_calls = 0
@@ -843,9 +923,7 @@ def test_note_index_handoff_asserts_claim_before_independent_work(monkeypatch, t
         return 0
 
     monkeypatch.setattr("localplaud.worker.pipeline._assert_processing_claim", stale_claim)
-    monkeypatch.setattr(
-        "localplaud.worker.knowledge_index.process_file_documents", note_provider
-    )
+    monkeypatch.setattr("localplaud.worker.knowledge_index.process_file_documents", note_provider)
     with pytest.raises(PipelineAlreadyRunning, match="no longer active"):
         process_file("handoff")
     assert provider_calls == 0
@@ -876,9 +954,7 @@ def test_pending_batch_resumes_audio_less_derived_retry(monkeypatch, tmp_path):
                             source="local",
                             provider="test",
                             text="canonical transcript",
-                            segments=[
-                                {"text": "canonical transcript", "start": 0.0, "end": 1.0}
-                            ],
+                            segments=[{"text": "canonical transcript", "start": 0.0, "end": 1.0}],
                         )
                     ],
                     stage_runs=[
@@ -1000,46 +1076,59 @@ def test_silent_audio_completes_without_generating_invented_artifacts(monkeypatc
     from localplaud.worker import pipeline
 
     init_db()
-    audio = tmp_path / 'silent.wav'
-    audio.write_bytes(b'fixture')
+    audio = tmp_path / "silent.wav"
+    audio.write_bytes(b"fixture")
     with session_scope() as session:
-        session.add(PlaudFile(id='silent', filename='Original date', audio_path=str(audio),
-                             status=FileStatus.downloaded, origin='local'))
+        session.add(
+            PlaudFile(
+                id="silent",
+                filename="Original date",
+                audio_path=str(audio),
+                status=FileStatus.downloaded,
+                origin="local",
+            )
+        )
     calls = []
 
     def no_speech(*args, **kwargs):
-        calls.append('asr')
-        return Transcript(segments=[], provider='faster-whisper', model='large-v3-turbo')
+        calls.append("asr")
+        return Transcript(segments=[], provider="faster-whisper", model="large-v3-turbo")
 
     def forbidden(*args, **kwargs):
-        raise AssertionError('Empty speech must never invoke a downstream model')
+        raise AssertionError("Empty speech must never invoke a downstream model")
 
-    monkeypatch.setattr(pipeline.transcribe, 'run_asr', no_speech)
-    monkeypatch.setattr(pipeline.summarize, 'generate_recording_title', forbidden)
-    monkeypatch.setattr(pipeline.summarize, 'summarize', forbidden)
-    monkeypatch.setattr(pipeline.mindmap, 'generate_mind_map', forbidden)
-    monkeypatch.setattr(pipeline, 'diarize', forbidden)
-    pipeline.process_file('silent')
-    pipeline.process_file('silent')
-    pipeline.process_derived_artifacts('silent')
-    assert calls == ['asr']
+    monkeypatch.setattr(pipeline.transcribe, "run_asr", no_speech)
+    monkeypatch.setattr(pipeline.summarize, "generate_recording_title", forbidden)
+    monkeypatch.setattr(pipeline.summarize, "summarize", forbidden)
+    monkeypatch.setattr(pipeline.mindmap, "generate_mind_map", forbidden)
+    monkeypatch.setattr(pipeline, "diarize", forbidden)
+    pipeline.process_file("silent")
+    pipeline.process_file("silent")
+    pipeline.process_derived_artifacts("silent")
+    assert calls == ["asr"]
     with session_scope() as session:
-        row = session.get(PlaudFile, 'silent')
+        row = session.get(PlaudFile, "silent")
         assert row.status == FileStatus.done
-        assert row.local_transcript.text == ''
-        assert row.local_transcript.source == 'local'
+        assert row.local_transcript.text == ""
+        assert row.local_transcript.source == "local"
         assert row.generated_title is None
-        assert row.display_title == 'Original date'
+        assert row.display_title == "Original date"
         assert not row.summaries and not row.chunks
         assert row.pipeline_retry_count == 0
         stages = {run.stage: run for run in row.stage_runs}
         assert stages[StageName.transcribe].status == StageStatus.completed
-        for stage in (StageName.align, StageName.diarize, StageName.correct,
-                      StageName.summarize, StageName.mind_map, StageName.index):
+        for stage in (
+            StageName.align,
+            StageName.diarize,
+            StageName.correct,
+            StageName.summarize,
+            StageName.mind_map,
+            StageName.index,
+        ):
             assert stages[stage].status == StageStatus.skipped
 
 
-@pytest.mark.parametrize('kind,preserved', [('ai_polish', False), ('user_edit', True)])
+@pytest.mark.parametrize("kind,preserved", [("ai_polish", False), ("user_edit", True)])
 def test_empty_reasr_does_not_revive_machine_text_but_preserves_human_text(
     monkeypatch, tmp_path, kind, preserved
 ):
@@ -1049,30 +1138,52 @@ def test_empty_reasr_does_not_revive_machine_text_but_preserves_human_text(
     from localplaud.db.models import FileStatus, PlaudFile, Transcript, TranscriptRevision
     from localplaud.db.session import init_db, session_scope
     from localplaud.worker import pipeline
+
     init_db()
-    audio = tmp_path / 'empty.wav'
-    audio.write_bytes(b'fixture')
+    audio = tmp_path / "empty.wav"
+    audio.write_bytes(b"fixture")
     with session_scope() as session:
-        row = PlaudFile(id='re-asr', filename='Original', origin='local',
-                        audio_path=str(audio), status=FileStatus.downloaded)
-        raw = Transcript(file_id='re-asr', source='local', provider='fake', text='old text',
-                         segments=[{'text': 'old text', 'start': 0, 'end': 1}])
+        row = PlaudFile(
+            id="re-asr",
+            filename="Original",
+            origin="local",
+            audio_path=str(audio),
+            status=FileStatus.downloaded,
+        )
+        raw = Transcript(
+            file_id="re-asr",
+            source="local",
+            provider="fake",
+            text="old text",
+            segments=[{"text": "old text", "start": 0, "end": 1}],
+        )
         session.add(row)
         session.add(raw)
         session.flush()
-        session.add(TranscriptRevision(file_id='re-asr', base_transcript_id=raw.id,
-                    revision=1, source='local', kind=kind, text='old text',
-                    segments=[{'text': 'old text', 'start': 0, 'end': 1}]))
+        session.add(
+            TranscriptRevision(
+                file_id="re-asr",
+                base_transcript_id=raw.id,
+                revision=1,
+                source="local",
+                kind=kind,
+                text="old text",
+                segments=[{"text": "old text", "start": 0, "end": 1}],
+            )
+        )
     settings = get_settings().model_copy(deep=True)
-    for stage in ('align', 'diarize', 'polish', 'summarize', 'mind_map', 'index'):
+    for stage in ("align", "diarize", "polish", "summarize", "mind_map", "index"):
         setattr(settings.pipeline, stage, False)
-    monkeypatch.setattr(pipeline.transcribe, 'run_asr',
-                        lambda *a: AsrTranscript(segments=[], provider='fake', model='turbo'))
-    monkeypatch.setattr(pipeline, '_ensure_generated_title', lambda *a: False)
-    pipeline.process_file('re-asr', settings, force=True)
+    monkeypatch.setattr(
+        pipeline.transcribe,
+        "run_asr",
+        lambda *a: AsrTranscript(segments=[], provider="fake", model="turbo"),
+    )
+    monkeypatch.setattr(pipeline, "_ensure_generated_title", lambda *a: False)
+    pipeline.process_file("re-asr", settings, force=True)
     with session_scope() as session:
-        row = session.get(PlaudFile, 're-asr')
-        assert row.local_transcript.text == ''
-        assert row.corrected_transcript.text == ('old text' if preserved else '')
-        assert row.transcript_revisions[0].text == 'old text'
+        row = session.get(PlaudFile, "re-asr")
+        assert row.local_transcript.text == ""
+        assert row.corrected_transcript.text == ("old text" if preserved else "")
+        assert row.transcript_revisions[0].text == "old text"
         assert len(row.transcript_revisions) == (1 if preserved else 2)

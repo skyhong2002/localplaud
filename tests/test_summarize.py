@@ -12,6 +12,14 @@ from localplaud.worker.summarize import (
 )
 
 
+def _legacy_settings(**kwargs):
+    """Exercise the explicit legacy compatibility engine; evidence has its own tests."""
+    from localplaud.config import Settings
+
+    kwargs["pipeline"] = {"note_quality": "legacy", **kwargs.get("pipeline", {})}
+    return Settings(**kwargs)
+
+
 def _transcript(*segs: Segment) -> Transcript:
     return Transcript(segments=list(segs))
 
@@ -78,7 +86,6 @@ def test_reduction_budget_forces_hierarchy_to_contract():
 
 
 def test_long_transcript_uses_every_chunk_before_final_summary(monkeypatch):
-    from localplaud.config import Settings
     from localplaud.worker.summarize import summarize
 
     calls: list[tuple[str, dict]] = []
@@ -99,7 +106,7 @@ def test_long_transcript_uses_every_chunk_before_final_summary(monkeypatch):
             for idx in range(4)
         )
     )
-    settings = Settings(pipeline={"summary_chunk_chars": 50, "summary_template": "plaud-meeting-minutes"})
+    settings = _legacy_settings(pipeline={"summary_chunk_chars": 50, "summary_template": "plaud-meeting-minutes"})
     result = summarize(transcript, settings)
 
     map_prompts = [p for p, _ in calls if p.startswith("Extract faithful coverage notes")]
@@ -117,7 +124,6 @@ def test_long_transcript_uses_every_chunk_before_final_summary(monkeypatch):
 
 
 def test_large_context_provider_reduces_map_calls_without_dropping_text(monkeypatch):
-    from localplaud.config import Settings
     from localplaud.worker.summarize import summarize
 
     class LargeContextLlm:
@@ -139,7 +145,7 @@ def test_large_context_provider_reduces_map_calls_without_dropping_text(monkeypa
         Segment(text="B" * 59_000, start=1, end=2),
     )
 
-    result = summarize(transcript, Settings(pipeline={"summary_chunk_chars": 6_000, "summary_template": "plaud-meeting-minutes"}))
+    result = summarize(transcript, _legacy_settings(pipeline={"summary_chunk_chars": 6_000, "summary_template": "plaud-meeting-minutes"}))
 
     assert result["coverage"]["chunks"] == 2
     map_prompts = [p for p in llm.prompts if p.startswith("Extract faithful coverage notes")]
@@ -149,7 +155,6 @@ def test_large_context_provider_reduces_map_calls_without_dropping_text(monkeypa
 
 
 def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
-    from localplaud.config import Settings
     from localplaud.worker.summarize import summarize
 
     class FakeLlm:
@@ -157,7 +162,7 @@ def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
             return "# Result\n\n## Summary\nGrounded."
 
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: FakeLlm())
-    settings = Settings(llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-tested"}})
+    settings = _legacy_settings(llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-tested"}})
 
     result = summarize(_transcript(Segment(text="evidence", start=0, end=1)), settings)
 
@@ -166,7 +171,6 @@ def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
 
 
 def test_reducer_converges_when_model_fills_each_token_budget(monkeypatch):
-    from localplaud.config import Settings
     from localplaud.worker.summarize import summarize
 
     class BudgetFillingLlm:
@@ -180,7 +184,7 @@ def test_reducer_converges_when_model_fills_each_token_budget(monkeypatch):
         *(Segment(text="x" * 5_990, start=idx, end=idx + 1) for idx in range(12))
     )
 
-    result = summarize(transcript, Settings(pipeline={"summary_chunk_chars": 6_000, "summary_template": "plaud-meeting-minutes"}))
+    result = summarize(transcript, _legacy_settings(pipeline={"summary_chunk_chars": 6_000, "summary_template": "plaud-meeting-minutes"}))
 
     assert result["coverage"]["chunks"] >= 12
     assert result["coverage"]["reduce_calls"] > result["coverage"]["chunks"]
@@ -222,7 +226,6 @@ def test_typed_summary_output_keeps_title_separate_from_exact_template_markdown(
 
 
 def test_typed_summary_reuses_embedded_tags_without_a_second_llm_turn(monkeypatch):
-    from localplaud.config import Settings
     from localplaud.worker.summarize import summarize
 
     class OneTurnLlm:
@@ -241,7 +244,7 @@ def test_typed_summary_reuses_embedded_tags_without_a_second_llm_turn(monkeypatc
 
     result = summarize(
         _transcript(Segment(text="討論研究設計", start=0, end=1)),
-        Settings(),
+        _legacy_settings(),
     )
 
     assert len(llm.calls) == 1
@@ -258,7 +261,6 @@ def test_summary_output_falls_back_to_plain_markdown():
 
 
 def test_title_repair_uses_typed_title_only_contract(monkeypatch):
-    from localplaud.config import Settings
     from localplaud.worker.summarize import repair_recording_title
 
     class FakeLlm:
@@ -276,7 +278,7 @@ def test_title_repair_uses_typed_title_only_contract(monkeypatch):
         _transcript(Segment(text="優優獨播劇場；中文字幕志願者", start=0, end=1)),
         "內容主要是重複片頭與字幕署名。",
         "轉錄內容概覽",
-        Settings(),
+        _legacy_settings(),
     )
 
     assert title == "重複片頭、欄目推廣與字幕署名"
@@ -287,7 +289,6 @@ def test_title_repair_uses_typed_title_only_contract(monkeypatch):
 
 
 def test_title_repair_covers_tail_and_excludes_contaminated_note(monkeypatch):
-    from localplaud.config import Settings
     from localplaud.worker.summarize import repair_recording_title
 
     calls = []
@@ -302,7 +303,7 @@ def test_title_repair_covers_tail_and_excludes_contaminated_note(monkeypatch):
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
     title = repair_recording_title(
         _transcript(Segment(text="hello " * 900 + "TAIL_DECISION", start=0, end=90)),
-        "CONTAMINATED_TEMPLATE_DESCRIPTION", "Autopilot 模板總結", Settings(),
+        "CONTAMINATED_TEMPLATE_DESCRIPTION", "Autopilot 模板總結", _legacy_settings(),
     )
     assert title == "Launch rollout decision"
     assert "TAIL_DECISION" in "".join(calls)
@@ -312,7 +313,6 @@ def test_title_repair_covers_tail_and_excludes_contaminated_note(monkeypatch):
 def test_summary_repairs_template_title_without_rewriting_note(monkeypatch):
     import json
 
-    from localplaud.config import Settings
     from localplaud.worker.summarize import summarize
 
     calls = []
@@ -327,7 +327,7 @@ def test_summary_repairs_template_title_without_rewriting_note(monkeypatch):
             return '{"title":"新版部署：週五上線與驗收安排"}'
 
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
-    result = summarize(_transcript(Segment(text="週五部署新版", start=0, end=1)), Settings())
+    result = summarize(_transcript(Segment(text="週五部署新版", start=0, end=1)), _legacy_settings())
     assert result["title"] == "新版部署：週五上線與驗收安排"
     assert result["content_md"] == note
     assert result["coverage"]["title_repair_calls"] == 1
@@ -337,7 +337,6 @@ def test_summary_repairs_template_title_without_rewriting_note(monkeypatch):
 
 
 def test_title_evidence_ignores_short_asr_loops_but_preserves_substantive_tail(monkeypatch):
-    from localplaud.config import Settings
     from localplaud.worker.summarize import generate_recording_title
 
     prompts = []
@@ -353,7 +352,7 @@ def test_title_evidence_ignores_short_asr_loops_but_preserves_substantive_tail(m
         *(Segment(text="字幕署名", start=i, end=i+1) for i in range(1, 100)),
         Segment(text="最後確認下週表演的場地安排", start=100, end=101),
     )
-    assert generate_recording_title(transcript, Settings()) == "晚餐點菜與場地安排"
+    assert generate_recording_title(transcript, _legacy_settings()) == "晚餐點菜與場地安排"
     assert "字幕署名" not in prompts[0]
     assert "牛肉清湯" in prompts[0]
     assert "下週表演" in prompts[0]
@@ -362,7 +361,6 @@ def test_title_evidence_ignores_short_asr_loops_but_preserves_substantive_tail(m
 def test_title_only_failure_returns_usable_note_for_persistence(monkeypatch):
     import json
 
-    from localplaud.config import Settings
     from localplaud.worker.summarize import summarize
 
     class Llm:
@@ -376,7 +374,7 @@ def test_title_only_failure_returns_usable_note_for_persistence(monkeypatch):
                                "tags": {"topics": [], "people": [], "orgs": []}})
 
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
-    result = summarize(_transcript(Segment(text="週五發布", start=0, end=1)), Settings())
+    result = summarize(_transcript(Segment(text="週五發布", start=0, end=1)), _legacy_settings())
     assert result["content_md"] == "## 決策\n週五發布"
     assert result["coverage"]["title_repair_error"] == "TimeoutError"
 
@@ -384,7 +382,6 @@ def test_title_only_failure_returns_usable_note_for_persistence(monkeypatch):
 def test_autopilot_keeps_early_and_late_details_outside_lossy_overview(monkeypatch):
     import json
 
-    from localplaud.config import Settings
     from localplaud.worker.note_policy import NOTE_PROMPT_VERSION, SECTION_INSTRUCTIONS
     from localplaud.worker.summarize import summarize
     from localplaud.worker.summary_templates import TEMPLATES
@@ -409,7 +406,7 @@ def test_autopilot_keeps_early_and_late_details_outside_lossy_overview(monkeypat
         Segment(text='TAIL_ACTION', start=30, end=60),
     )
     before = transcript.text
-    result = summarize(transcript, Settings(pipeline={'summary_chunk_chars': 80}))
+    result = summarize(transcript, _legacy_settings(pipeline={'summary_chunk_chars': 80}))
     assert result['coverage']['strategy'] == 'sectioned'
     assert result['coverage']['detail_sections'] == 2
     assert 'Proposed five trials; no date was agreed.' in result['content_md']
@@ -424,7 +421,6 @@ def test_autopilot_keeps_early_and_late_details_outside_lossy_overview(monkeypat
 def test_custom_template_keeps_its_layout_and_has_execution_provenance(monkeypatch):
     import json
 
-    from localplaud.config import Settings
     from localplaud.worker.summarize import summarize
 
     calls = []
@@ -439,7 +435,7 @@ def test_custom_template_keeps_its_layout_and_has_execution_provenance(monkeypat
     template = {'key': 'my-table', 'version': 3, 'instructions': 'Return only a metrics table.',
                 'prompt_mode': 'direct', 'provenance': 'user'}
     result = summarize(_transcript(Segment(text='Count is five.', start=0, end=5)),
-                       Settings(), template)
+                       _legacy_settings(), template)
     assert result['content_md'].startswith('| Count |')
     assert template['instructions'] in calls[0][0]
     assert 'descriptive ## topic headings' not in calls[0][1]['system']
@@ -465,7 +461,6 @@ def test_markdown_fallback_can_start_with_timestamp_or_link():
 def test_sectioned_overview_contracts_even_when_reducer_fills_budget(monkeypatch):
     import json
 
-    from localplaud.config import Settings
     from localplaud.worker.note_policy import SECTION_INSTRUCTIONS
     from localplaud.worker.summarize import summarize
 
@@ -480,18 +475,17 @@ def test_sectioned_overview_contracts_even_when_reducer_fills_budget(monkeypatch
 
     monkeypatch.setattr('localplaud.worker.summarize.build_llm', lambda _: Llm())
     result = summarize(_transcript(Segment(text='e' * 600, start=0, end=60)),
-                       Settings(pipeline={'summary_chunk_chars': 100}))
+                       _legacy_settings(pipeline={'summary_chunk_chars': 100}))
     assert result['coverage']['detail_sections'] == 6
     assert result['coverage']['reduce_calls'] > 0
     assert result['content_md'].count('x' * 90) == 6
 
 
 def test_ollama_summary_cap_wins_over_global_chunk_budget():
-    from localplaud.config import Settings
     from localplaud.llm.ollama import OllamaProvider
     from localplaud.worker.summarize import _summary_chunk_chars
 
-    settings = Settings(pipeline={'summary_chunk_chars': 6000})
+    settings = _legacy_settings(pipeline={'summary_chunk_chars': 6000})
     assert _summary_chunk_chars(settings, OllamaProvider(settings.llm.ollama)) == 3000
     settings.pipeline.summary_chunk_chars = 1500
     assert _summary_chunk_chars(settings, OllamaProvider(settings.llm.ollama)) == 1500

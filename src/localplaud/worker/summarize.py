@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
+from collections.abc import Callable
+from pathlib import Path
 
 from ..asr.base import Transcript as AsrTranscript
 from ..config import Settings
@@ -274,7 +276,9 @@ def _summary_output(raw: str) -> tuple[str | None, str, dict[str, list[str]] | N
         parsed = json.loads(raw)
     except (TypeError, json.JSONDecodeError):
         if raw.lstrip().startswith("{"):
-            raise LLMOutputInvalid("Summary returned incomplete or invalid structured output") from None
+            raise LLMOutputInvalid(
+                "Summary returned incomplete or invalid structured output"
+            ) from None
         return _extract_title(raw), raw, None
     if not isinstance(parsed, dict):
         return _extract_title(raw), raw, None
@@ -295,7 +299,11 @@ def _summary_output(raw: str) -> tuple[str | None, str, dict[str, list[str]] | N
 
 
 def _prepare_source(
-    transcript: AsrTranscript, settings: Settings, llm, *, title_only: bool = False,
+    transcript: AsrTranscript,
+    settings: Settings,
+    llm,
+    *,
+    title_only: bool = False,
     detail_sections: list[str] | None = None,
 ) -> tuple[str, dict]:
     """Share full-transcript coverage between notes and title-only repair."""
@@ -345,12 +353,15 @@ def _prepare_source(
                 llm.complete(
                     prompt,
                     system=(
-                        NOTE_INSTRUCTIONS if detail_sections is not None else
-                        "You create loss-minimizing intermediate notes from one part of a "
+                        NOTE_INSTRUCTIONS
+                        if detail_sections is not None
+                        else "You create loss-minimizing intermediate notes from one part of a "
                         "long transcript. Never invent facts. Reply in the source language."
                     ),
                     temperature=0.1,
-                    max_tokens=240 if title_only else (2400 if detail_sections is not None else 1200),
+                    max_tokens=240
+                    if title_only
+                    else (2400 if detail_sections is not None else 1200),
                 )
             )
             map_calls += 1
@@ -361,7 +372,8 @@ def _prepare_source(
         reduction_rounds = 0
         reduction_max_tokens = (
             max(1, min(600, chunk_chars // 8))
-            if detail_sections is not None else _reduction_max_tokens(chunk_chars)
+            if detail_sections is not None
+            else _reduction_max_tokens(chunk_chars)
         )
         while len("\n\n".join(notes)) > chunk_chars:
             reduction_rounds += 1
@@ -372,7 +384,9 @@ def _prepare_source(
             groups = _group_notes(notes, chunk_chars)
             notes = [
                 llm.complete(
-                    (_OVERVIEW_REDUCE_PROMPT if detail_sections is not None else _REDUCE_PROMPT).format(text=group),
+                    (
+                        _OVERVIEW_REDUCE_PROMPT if detail_sections is not None else _REDUCE_PROMPT
+                    ).format(text=group),
                     system="Preserve coverage while consolidating notes. Never invent facts.",
                     temperature=0.1,
                     max_tokens=reduction_max_tokens,
@@ -394,7 +408,13 @@ def _prepare_source(
 
 
 def summarize(
-    transcript: AsrTranscript, settings: Settings, template_override: dict | None = None
+    transcript: AsrTranscript,
+    settings: Settings,
+    template_override: dict | None = None,
+    *,
+    context: dict | None = None,
+    checkpoint_dir: Path | None = None,
+    progress: Callable[[dict], None] | None = None,
 ) -> dict:
     """Return titled notes with a separate, template-independent title contract."""
     from .summary_templates import (
@@ -417,6 +437,25 @@ def summarize(
         )
     else:
         resolved_template = get_effective_template(settings.pipeline.summary_template)
+    from .transcript_quality import require_usable_transcript
+
+    quality = require_usable_transcript(transcript)
+    if settings.pipeline.note_quality == "evidence":
+        from .evidence_notes import generate_evidence_notes
+
+        result = generate_evidence_notes(
+            transcript,
+            settings,
+            llm,
+            template_snapshot(resolved_template),
+            context=context,
+            checkpoint_dir=checkpoint_dir,
+            progress=progress,
+        )
+        result.setdefault("coverage", {})["transcript_quality"] = quality
+        result["coverage"]["note_prompt_version"] = NOTE_PROMPT_VERSION
+        result["coverage"]["title_prompt_version"] = TITLE_PROMPT_VERSION
+        return result
     # A captured Autopilot description is not Plaud's hidden execution prompt.
     # Apply our explicit, versioned execution policy without changing that snapshot
     # or imposing this layout on a user-authored/specialist template.
@@ -427,7 +466,10 @@ def summarize(
     )
     sections: list[str] = []
     source_text, coverage = _prepare_source(
-        transcript, settings, llm, detail_sections=sections if autopilot else None,
+        transcript,
+        settings,
+        llm,
+        detail_sections=sections if autopilot else None,
     )
     system, prompt = render_resolved_prompt(resolved_template, source_text)
     body_policy = NOTE_INSTRUCTIONS + ("\n" + AUTOPILOT_INSTRUCTIONS if autopilot else "")
@@ -455,6 +497,7 @@ def summarize(
         coverage["detail_sections"] = len(sections)
     execution = {
         "version": NOTE_PROMPT_VERSION,
+        "note_quality": "legacy",
         "instructions": body_policy,
         "section_instructions": SECTION_INSTRUCTIONS if sections else None,
         "output_tokens": output_tokens,
@@ -500,8 +543,11 @@ def summarize(
         "template": resolved_template.name,
         "template_version": resolved_template.version,
         "template_snapshot": {**template_snapshot(resolved_template), "execution": execution},
-        "coverage": {**coverage, "title_prompt_version": TITLE_PROMPT_VERSION,
-                     "note_prompt_version": NOTE_PROMPT_VERSION},
+        "coverage": {
+            **coverage,
+            "title_prompt_version": TITLE_PROMPT_VERSION,
+            "note_prompt_version": NOTE_PROMPT_VERSION,
+        },
     }
 
 

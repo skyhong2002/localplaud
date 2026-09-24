@@ -15,6 +15,18 @@ The subscription-independent reference profile uses local Whisper large-v3-turbo
 alignment and diarization. A cloud ASR remains possible, but is an explicit cost and
 privacy choice rather than an automatic fallback.
 
+## Evidence-note policy rollout
+
+Deploy controller and remote workers together when changing the note policy:
+`evidence-notes/v2` requests reject mismatched workers. Back up SQLite with its
+online backup API before a scoped regeneration, preserve the original audio and
+existing notes, and qualify real candidates first. Deploying does not enqueue all
+completed recordings. Manual derived-only resume can regenerate an older policy
+without rerunning ASR; source failures require a separate speech recovery.
+Private resumable subcall caches live beside the configured audio directory in
+`note-checkpoints/`; retain them across worker restarts. See
+[note-quality.md](note-quality.md) for configuration and evaluation limits.
+
 ## Before you start (per host)
 
 1. **DNS**: point your domain's A/AAAA record at the machine's public IP.

@@ -50,3 +50,19 @@ through the normal derived-artifact pipeline.
 Original output remains accessible through raw view and revision history. Empty
 corrected text displays “No recognizable speech”; it never silently falls back
 to the old hallucinated raw text.
+
+## Headerless raw Opus
+
+Some original `.opus` uploads have no Ogg container. After ordinary ffmpeg
+conversion fails, the converter supports one verified layout only: at least 50
+complete 80-byte packets, every packet with mono wideband 20 ms TOC `0xb8`. It
+validates the entire file, cross-checks packet duration against recording metadata
+when available, wraps temporary Ogg pages with checksums and 48 kHz granule
+positions, and decodes with strict ffmpeg error handling. Other layouts remain
+explicit conversion errors. Source bytes are never changed; a failed conversion
+preserves an existing WAV and removes temporary outputs. This is container
+recovery, not audio synthesis or a Plaud transcript import.
+
+Recording playback and waveform requests use an identity-keyed derived WAV cache
+for that validated headerless layout. Ordinary audio stays on its existing path;
+original audio export still returns the unchanged source bytes.

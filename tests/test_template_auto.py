@@ -97,7 +97,7 @@ def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tm
     assert preview.json()["template"]["version"] == 1
     assert client.put("/api/files/auto/note-template", json={"key": "auto"}).status_code == 200
 
-    def fake_summary(transcript, resolved):
+    def fake_summary(transcript, resolved, *, context=None, checkpoint_dir=None, progress=None):
         assert resolved.pipeline.summary_template == "plaud-autopilot"
         return {
             "template": "plaud-autopilot",
@@ -105,6 +105,7 @@ def test_auto_selection_api_and_pipeline_persist_actual_template(monkeypatch, tm
             "content_md": "# Product sync",
             "provider": "fake",
             "model": "fake",
+            "template_snapshot": {"execution": {"version": "evidence-notes/v2", "note_quality": "evidence"}},
         }
 
     monkeypatch.setattr("localplaud.worker.pipeline.summarize.summarize", fake_summary)

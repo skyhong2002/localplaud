@@ -176,7 +176,7 @@ def _install_fakes(monkeypatch, counters):
             has_speakers=True,
         )
 
-    def fake_summary(transcript, settings):
+    def fake_summary(transcript, settings, *, context=None, checkpoint_dir=None, progress=None):
         counters["sum"] += 1
         return {
             "title": "T",
@@ -184,6 +184,7 @@ def _install_fakes(monkeypatch, counters):
             "provider": "fake",
             "model": "m",
             "template": settings.pipeline.summary_template,
+            "template_snapshot": {"execution": {"version": "evidence-notes/v2", "note_quality": "evidence"}},
         }
 
     def fake_mindmap(transcript, settings, summary_md=None):

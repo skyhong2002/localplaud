@@ -140,6 +140,11 @@ class PipelineConfig(BaseModel):
     # Character budget per LLM call. Longer transcripts are covered through
     # hierarchical map/reduce notes instead of being truncated.
     summary_chunk_chars: int = 6_000
+    # Evidence extraction, source review and note review use the selected stage provider.
+    # Legacy is an explicit compatibility mode, never an automatic fallback.
+    note_quality: Literal["evidence", "legacy"] = "evidence"
+    note_evidence_chunk_chars: int = Field(default=120_000, ge=2_000, le=120_000)
+    note_repair_attempts: int = Field(default=2, ge=0, le=2)
     polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
     # Which summary template to use. The Plaud Web Autopilot snapshot is the
     # default; legacy or unknown keys fall back to this captured Plaud prompt.
