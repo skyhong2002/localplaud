@@ -71,6 +71,11 @@ A later stage retry continues that repair instead of replaying the same rejected
 answer. Already reviewed chunks and drafts remain reusable. Each invocation still
 has the configured repair limit and the normal stage retry/cost policy applies;
 source, model or review-prompt changes invalidate the continuation.
+Fact repairs specify indexed replacements, additions, removals and exclusion
+updates. Unmentioned facts stay byte-for-byte equivalent instead of being
+regenerated; the merged ledger must still pass quotation/coverage validation and
+source review. Repair checkpoints are compatible with previously reviewed facts
+because the source-review criteria are unchanged.
 
 The request budget includes serialized source metadata and schemas, not just
 transcript characters. Small local-model contexts may require substantially more

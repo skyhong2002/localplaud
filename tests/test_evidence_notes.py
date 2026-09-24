@@ -53,6 +53,23 @@ class Fake:
         self.calls.append((prompt, kwargs))
         if self.fail_at == len(self.calls):
             raise RuntimeError("transport outage")
+        if prompt.startswith("修補上一版擷取"):
+            payload = json.loads(prompt.split("\n", 1)[1])
+            return json.dumps(
+                {
+                    "replace": [
+                        {
+                            "index": i,
+                            "fact": {**fact, "owner": "虛構負責人" if self.bad_owner else None},
+                        }
+                        for i, fact in enumerate(payload["previous"]["facts"])
+                    ],
+                    "append": [],
+                    "remove": [],
+                    "skip": [],
+                },
+                ensure_ascii=False,
+            )
         if prompt.startswith("從 target"):
             scope = json.loads(prompt.split("\n", 1)[1].split("\n請修正", 1)[0])
             facts = []
@@ -151,7 +168,7 @@ def test_verifier_rejects_fabricated_owner_after_bounded_repairs():
     llm = Fake(bad_owner=True)
     with pytest.raises(LLMOutputInvalid, match="覆核.*虛構負責人"):
         note(llm)
-    assert len([p for p, _ in llm.calls if p.startswith("從 target")]) == 3
+    assert len([p for p, _ in llm.calls if p.startswith(("從 target", "修補上一版擷取"))]) == 3
 
 
 def test_unknown_or_missing_citation_rejected():
@@ -330,7 +347,7 @@ def test_retry_continues_rejected_extraction_and_retains_reviewed_progress(tmp_p
     resumed = Fake()
     result = note(resumed, checkpoint_dir=tmp_path)
     first_prompt = resumed.calls[0][0]
-    assert "上一版擷取結果" in first_prompt and "虛構負責人" in first_prompt
+    assert "修補上一版擷取" in first_prompt and "虛構負責人" in first_prompt
     assert all(f["owner"] is None for f in result["template_snapshot"]["evidence"]["facts"])
     cached = note(Fake(fail_at=1), checkpoint_dir=tmp_path)
     assert cached["coverage"]["requests"] == 0
@@ -363,10 +380,10 @@ def test_rejected_feedback_does_not_cross_model_or_source_boundaries(tmp_path):
         note(Fake(bad_owner=True), checkpoint_dir=tmp_path)
     changed = Fake(model="different")
     note(changed, checkpoint_dir=tmp_path)
-    assert "上一版擷取結果" not in changed.calls[0][0]
+    assert "修補上一版擷取" not in changed.calls[0][0]
     changed = Fake()
     note(changed, Transcript(segments=[Segment("新來源", 0, 1)]), checkpoint_dir=tmp_path)
-    assert "上一版擷取結果" not in changed.calls[0][0]
+    assert "修補上一版擷取" not in changed.calls[0][0]
 
 
 def test_changed_review_prompt_requires_fresh_review(monkeypatch, tmp_path):
@@ -386,4 +403,77 @@ def test_each_explicit_retry_keeps_its_own_bounded_generation_budget(tmp_path):
         llm = Fake(bad_owner=True)
         with pytest.raises(LLMOutputInvalid):
             note(llm, checkpoint_dir=tmp_path)
-        assert len([prompt for prompt, _ in llm.calls if prompt.startswith("從 target")]) == 3
+        assert (
+            len(
+                [
+                    prompt
+                    for prompt, _ in llm.calls
+                    if prompt.startswith(("從 target", "修補上一版擷取"))
+                ]
+            )
+            == 3
+        )
+
+
+def test_targeted_fact_patch_keeps_unmentioned_facts_and_input_immutable():
+    from localplaud.worker.evidence_notes import _fact_patch_validator
+
+    scope = {"target": [{"id": f"s{i}p0", "text": f"來源 {i}"} for i in range(3)], "context": []}
+
+    def fact(i):
+        return {
+            "topic": "議題",
+            "text": f"來源 {i}",
+            "kind": "fact",
+            "status": "reported",
+            "owner": None,
+            "deadline": None,
+            "sources": [{"id": f"s{i}p0", "quote": f"來源 {i}"}],
+        }
+
+    previous = {"facts": [fact(0), fact(1)], "skipped": [{"id": "s2p0", "reason": "原先略過"}]}
+    before = json.dumps(previous)
+    patched = _fact_patch_validator(scope, previous)(
+        {
+            "replace": [{"index": 0, "fact": {**fact(0), "topic": "修正議題"}}],
+            "append": [fact(2)],
+            "remove": [],
+            "skip": [],
+        }
+    )
+    assert patched["facts"][1] == previous["facts"][1]
+    assert patched["facts"][0]["topic"] == "修正議題"
+    assert len(patched["facts"]) == 3 and patched["skipped"] == []
+    assert json.dumps(previous) == before
+    for patch in (
+        {"replace": [{"index": 9, "fact": fact(0)}], "append": [], "remove": [], "skip": []},
+        {"replace": [], "append": [], "remove": [0], "skip": []},
+        {
+            "replace": [],
+            "append": [{**fact(2), "sources": [{"id": "s2p0", "quote": "杜撰"}]}],
+            "remove": [],
+            "skip": [],
+        },
+    ):
+        with pytest.raises(LLMOutputInvalid):
+            _fact_patch_validator(scope, previous)(patch)
+
+
+def test_patch_cache_survives_transport_failure_before_review(tmp_path):
+    class CorrectPatch(Fake):
+        def complete(self, prompt, **kwargs):
+            result = super().complete(prompt, **kwargs)
+            if prompt.startswith("修補上一版擷取"):
+                patch = json.loads(result)
+                for item in patch["replace"]:
+                    item["fact"]["owner"] = None
+                return json.dumps(patch)
+            return result
+
+    with pytest.raises(RuntimeError, match="transport"):
+        note(CorrectPatch(bad_owner=True, fail_at=4), checkpoint_dir=tmp_path)
+    resumed = Fake()
+    result = note(resumed, checkpoint_dir=tmp_path)
+    assert not any(p.startswith(("從 target", "修補上一版擷取")) for p, _ in resumed.calls)
+    facts = result["template_snapshot"]["evidence"]["facts"]
+    assert len(facts) == 1 and facts[0]["owner"] is None

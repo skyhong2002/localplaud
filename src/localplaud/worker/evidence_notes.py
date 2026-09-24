@@ -65,6 +65,28 @@ SOURCE_SCHEMA["properties"]["skipped"] = {
         "required": ["id", "reason"],
     },
 }
+FACT_PATCH_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "replace": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "index": {"type": "integer", "minimum": 0},
+                    "fact": SOURCE_SCHEMA["properties"]["facts"]["items"],
+                },
+                "required": ["index", "fact"],
+            },
+        },
+        "append": SOURCE_SCHEMA["properties"]["facts"],
+        "remove": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "skip": SOURCE_SCHEMA["properties"]["skipped"],
+    },
+    "required": ["replace", "append", "remove", "skip"],
+}
 ISSUES_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -176,6 +198,14 @@ def _save_checkpoint(path, value):
 
 
 _EXTRACT_TASK = "從 target 擷取符合實質資訊準則的原子事實，完整保留可用資訊，不收無關碎語。context 僅供理解，須標示非 target；無實質內容可回傳空 facts。引文必須是來源原句子字串。每個 fact 必須有來源。逐一檢視所有 target：每個 ID 必須出現在 facts.sources，或在 skipped 寫出不採用的原因。每項独立的理由、條件、配器、數值、請求都要保留，不能只抽議題標籤或結論。\n"
+
+_EXTRACT_REPAIR_TASK = (
+    "修補上一版擷取的指定問題，回傳增刪替換指令。replace 使用 previous.facts 的零起算 index，"
+    "只替換需修正的事實；append 補遺漏；remove 移除無依據的事實；skip 為未被事實引用的來源補充或修正略過理由。"
+    "未指定的事實與略過理由會原樣保留，已重新引用的來源會自動移出 skipped。不要重寫未受問題影響的項目。"
+    "owner 僅填原文明確接受或自我承諾的執行者；建議對象與示範操作者保留在 text，不填成已承諾的 owner。"
+    "deadline 僅填該行動的明確期限，不以活動或課程日期充當期限。仍須保留其他正確內容、精確引文和未定語氣。\n"
+)
 
 _AUDIT_TASK = "逐項完整掃描原始 target、facts 與 skipped；context 不是本批目標。一次列出所有實質缺漏，勿每輪只列少數。skipped 若包含有用的理由、請求或數值，應報出。只報會改變理解或漏掉獨立實質資訊的問題；不要為口頭附和、填充語或同義改寫要求修補。找遺漏、否定/條件翻轉、事件數字錯配、虛構負責人/期限、示範與真實決定混淆。回 issues 與 warnings。\n"
 
@@ -305,7 +335,9 @@ class _Calls:
         except (TypeError, json.JSONDecodeError):
             _fail(phase, "回覆不是 JSON")
         value = validate(parsed)
-        _save_checkpoint(path, value)
+        # Validators may apply a source-preserving patch. Cache the raw response
+        # so replay validates/applies it once against the same prompt's input.
+        _save_checkpoint(path, parsed)
         return value
 
 
@@ -451,6 +483,63 @@ def _issues(data):
     return data
 
 
+def _fact_patch_validator(scope, previous):
+    def validate(patch):
+        keys = {"replace", "append", "remove", "skip"}
+        if (
+            not isinstance(patch, dict)
+            or set(patch) != keys
+            or any(not isinstance(patch[k], list) for k in keys)
+        ):
+            _fail("事實修補", "增刪替換欄位無效")
+        count = len(previous["facts"])
+
+        def index_valid(index):
+            return isinstance(index, int) and not isinstance(index, bool) and 0 <= index < count
+
+        removed = patch["remove"]
+        replacements = {}
+        if any(not index_valid(i) for i in removed) or len(set(removed)) != len(removed):
+            _fail("事實修補", "移除索引無效或重複")
+        for item in patch["replace"]:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"index", "fact"}
+                or not index_valid(item["index"])
+                or item["index"] in replacements
+                or item["index"] in removed
+            ):
+                _fail("事實修補", "替換索引無效、重複或同時被移除")
+            replacements[item["index"]] = item["fact"]
+        facts = [
+            replacements.get(i, fact)
+            for i, fact in enumerate(previous["facts"])
+            if i not in removed
+        ] + patch["append"]
+        skipped = {item["id"]: item for item in previous["skipped"]}
+        target_ids = {item["id"] for item in scope["target"]}
+        for item in patch["skip"]:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"id", "reason"}
+                or not isinstance(item["id"], str)
+                or item["id"] not in target_ids
+                or not isinstance(item["reason"], str)
+                or not item["reason"].strip()
+            ):
+                _fail("事實修補", "略過來源或理由無效")
+            skipped[item["id"]] = item
+        # Validate all facts before traversing references; malformed patches
+        # must raise the same actionable validation error as initial extraction.
+        candidate = {"facts": facts, "skipped": list(skipped.values())}
+        _facts_validator(scope)(candidate)
+        referenced = {ref["id"] for fact in facts for ref in fact["sources"]}
+        candidate["skipped"] = [item for item in skipped.values() if item["id"] not in referenced]
+        return candidate
+
+    return validate
+
+
 def _plan_validator(ids):
     def validate(data):
         if (
@@ -584,6 +673,7 @@ def generate_evidence_notes(
             "version": VERSION,
             "strategy": "chunk-extract-audit-plan-draft-verify",
             "chunk_chars": budget,
+            "repair_strategy": "targeted-fact-patches",
         },
     }
     evidence["sources"] = [
@@ -668,20 +758,25 @@ def generate_evidence_notes(
             calls.reuse_reviewed(("extract", "audit"), i + 1, len(chunks))
         for attempt in range(0 if accepted else repairs + 1):
             prompt = _EXTRACT_TASK + _json(scope)
-            if issues:
+            schema, validator = SOURCE_SCHEMA, _facts_validator(scope)
+            if issues and previous is not None:
+                prompt = _EXTRACT_REPAIR_TASK + _json(
+                    {
+                        "source": scope,
+                        "previous": previous,
+                        "issues": issues,
+                    }
+                )
+                schema, validator = FACT_PATCH_SCHEMA, _fact_patch_validator(scope, previous)
+            elif issues:
                 prompt += "\n請修正以下覆核問題：" + _json(issues)
-                if previous is not None:
-                    prompt += (
-                        "\n上一版擷取結果（只修正問題，保留其他事實及 skipped 分類）："
-                        + _json(previous)
-                    )
             try:
                 extracted = calls.call(
                     "extract",
                     prompt,
                     system,
-                    SOURCE_SCHEMA,
-                    _facts_validator(scope),
+                    schema,
+                    validator,
                     current=i + 1,
                     total=len(chunks),
                     max_tokens=max(3000, min(24000, budget // 4)),
