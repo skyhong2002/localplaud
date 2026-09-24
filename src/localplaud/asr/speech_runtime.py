@@ -7,6 +7,7 @@ import json
 import math
 import sys
 import tempfile
+from collections import deque
 from pathlib import Path
 
 from .base import AsrError
@@ -54,6 +55,33 @@ def aligned_words(aligned, offset, duration):
             }
         )
     return result
+
+
+class TokenLimitError(AsrError):
+    """A bounded input needs a smaller decoding window, not truncated output."""
+
+
+def transcribe_bounded(regions, decode, *, minimum_seconds=3.0):
+    pending = deque(regions)
+    completed = []
+    splits = []
+    while pending:
+        start, end = pending.popleft()
+        try:
+            value = decode(start, end)
+        except TokenLimitError as exc:
+            if end - start <= minimum_seconds:
+                raise AsrError(
+                    f"Qwen still reaches its token limit at {start:.2f}–{end:.2f}s; "
+                    "transcription is incomplete"
+                ) from exc
+            midpoint = (start + end) / 2
+            pending.appendleft((midpoint, end))
+            pending.appendleft((start, midpoint))
+            splits.append((start, end))
+            continue
+        completed.append((start, end, value))
+    return completed, splits
 
 
 def qwen(audio, cfg):
@@ -111,20 +139,29 @@ def qwen(audio, cfg):
             .to("cuda")
             .eval()
         )
-        chunks = []
-        for index, (start, end) in enumerate(regions):
-            path = slice_region(audio, start, end, Path(directory) / f"{index}.wav")
+        chunk_index = 0
+
+        def decode_region(start, end):
+            nonlocal chunk_index
+            path = slice_region(audio, start, end, Path(directory) / f"{chunk_index}.wav")
+            chunk_index += 1
             inputs = processor.apply_transcription_request(
                 audio=str(path), language=None if cfg["language"] == "auto" else cfg["language"]
             ).to("cuda", torch.bfloat16)
+            token_budget = max(512, min(4096, math.ceil((end - start) * 64)))
             with torch.inference_mode():
-                output = model.generate(**inputs, max_new_tokens=4096, do_sample=False)
+                output = model.generate(**inputs, max_new_tokens=token_budget, do_sample=False)
             generated = output[:, inputs["input_ids"].shape[1] :]
-            if generated.shape[1] >= 4096:
-                raise AsrError("Qwen reached its token limit; transcription is incomplete")
-            parsed = processor.decode(generated, return_format="parsed")[0]
-            chunks.append((path, start, end, parsed))
+            limited = generated.shape[1] >= token_budget
+            parsed = None if limited else processor.decode(generated, return_format="parsed")[0]
             del inputs, output, generated
+            if limited:
+                raise TokenLimitError("Qwen reached its token limit")
+            return path, parsed
+
+        decoded, splits = transcribe_bounded(regions, decode_region)
+        metadata["token_limit_splits"] = splits
+        chunks = [(value[0], start, end, value[1]) for start, end, value in decoded]
         del model, processor
         gc.collect()
         torch.cuda.empty_cache()

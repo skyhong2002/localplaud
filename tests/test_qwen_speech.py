@@ -228,8 +228,9 @@ def test_activation_preserves_completed_audio_and_existing_transcripts(monkeypat
         assert default["stages"]["transcribe"]["model"] == rollout.ASR
 
 
-@pytest.mark.parametrize("model,expected", [("Qwen/Qwen3-ASR-1.7B-hf", "qwen"),
-                                            ("large-v3-turbo", "faster-whisper")])
+@pytest.mark.parametrize(
+    "model,expected", [("Qwen/Qwen3-ASR-1.7B-hf", "qwen"), ("large-v3-turbo", "faster-whisper")]
+)
 def test_remote_speech_dispatch_preserves_queued_model_and_metadata(monkeypatch, model, expected):
     import base64
     import json
@@ -238,18 +239,62 @@ def test_remote_speech_dispatch_preserves_queued_model_and_metadata(monkeypatch,
     from localplaud.remote import server
     from localplaud.remote.protocol import JobSubmitRequest
     from localplaud.worker import transcribe
+
     settings = Settings()
     settings.asr.provider = "qwen"
     monkeypatch.setattr(server, "get_settings", lambda: settings)
+
     def run(path, selected):
         assert selected.asr.provider == expected
-        return Transcript(segments=[],provider=expected,model=model,
-                          processing_metadata={"vad":{"skipped_seconds":30}})
+        return Transcript(
+            segments=[],
+            provider=expected,
+            model=model,
+            processing_metadata={"vad": {"skipped_seconds": 30}},
+        )
+
     monkeypatch.setattr(transcribe, "run_asr", run)
-    request = JobSubmitRequest(idempotency_key="speech-dispatch",stage="transcribe",model=model,
-        inputs=[{"name":"audio","media_type":"audio/wav","kind":"inline_base64",
-                 "value":base64.b64encode(b"RIFF").decode()}])
+    request = JobSubmitRequest(
+        idempotency_key="speech-dispatch",
+        stage="transcribe",
+        model=model,
+        inputs=[
+            {
+                "name": "audio",
+                "media_type": "audio/wav",
+                "kind": "inline_base64",
+                "value": base64.b64encode(b"RIFF").decode(),
+            }
+        ],
+    )
     artifacts = server._execute(request)
     payload = json.loads(base64.b64decode(artifacts[0]["data_base64"]))
     assert payload["model"] == model
     assert payload["processing_metadata"]["vad"]["skipped_seconds"] == 30
+
+
+def test_token_limit_splits_only_affected_region_and_keeps_full_timeline():
+    from localplaud.asr.speech_runtime import TokenLimitError, transcribe_bounded
+
+    calls = []
+
+    def decode(start, end):
+        calls.append((start, end))
+        if start == 100 and end == 120:
+            raise TokenLimitError("limit")
+        return f"{start}-{end}"
+
+    result, splits = transcribe_bounded([(10, 20), (100, 120), (200, 210)], decode)
+    assert [(s, e) for s, e, _ in result] == [(10, 20), (100, 110), (110, 120), (200, 210)]
+    assert calls.count((10, 20)) == 1
+    assert splits == [(100, 120)]
+
+
+def test_irreducible_token_limit_never_returns_partial_success():
+    from localplaud.asr.speech_runtime import TokenLimitError, transcribe_bounded
+
+    def decode(start, end):
+        raise TokenLimitError("limit")
+
+    with pytest.raises(AsrError, match="transcription is incomplete"):
+        transcribe_bounded([(10, 12)], decode)

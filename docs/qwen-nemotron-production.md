@@ -11,7 +11,9 @@ most 120-second inputs (configurable, maximum 240). ASR and forced alignment
 run sequentially in one disposable GPU process; Nemotron runs in another.
 Model revisions, VAD settings, speech/skipped seconds, and original-timeline
 provenance are saved on the transcription stage. Point word timestamps are
-retained. Truncated model output or incomplete alignment fails the stage.
+retained. Inputs that hit the generation limit are bisected and retried without
+repeating successful regions; the split history is recorded. Irreducible token
+limits or incomplete alignment fail the stage rather than storing partial text.
 Original audio is unchanged; this does not create a shortened playback file.
 
 Nemotron processes the entire recording with a continuous speaker cache,
