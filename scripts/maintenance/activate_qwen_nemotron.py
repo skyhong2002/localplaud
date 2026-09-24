@@ -57,9 +57,9 @@ def activate(worker_key: str, *, apply: bool = False):
         if worker is None:
             raise ValueError("Register the worker before activation")
         status = check_worker(session, worker.id)
-        if status.get("health", {}).get("status") != "healthy":
+        if status.get("status") != "healthy":
             raise RuntimeError("Worker health check failed")
-        caps = status.get("capabilities", worker.capabilities)
+        caps = worker.capabilities
         offered = {(c["stage"], m) for c in caps for m in c.get("models", [])}
         if not {("transcribe", ASR), ("diarize", DIARIZE)} <= offered:
             raise RuntimeError("The worker does not advertise Qwen and Nemotron")

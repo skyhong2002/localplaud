@@ -155,7 +155,7 @@ def test_activation_preserves_completed_audio_and_existing_transcripts(monkeypat
         {"stage": "transcribe", "models": [rollout.ASR]},
         {"stage": "diarize", "models": [rollout.DIARIZE]},
     ]
-    monkeypatch.setattr(rollout, "check_worker", lambda *a: {"capabilities": caps, "health": {"status": "healthy"}})
+    monkeypatch.setattr(rollout, "check_worker", lambda *a: {"status": "healthy"})
     with db.session_scope() as session:
         from sqlalchemy import select
 
