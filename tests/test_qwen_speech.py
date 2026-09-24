@@ -320,3 +320,16 @@ def test_checkpoint_reuses_exact_audio_configuration_and_survives_partial_write(
     cfg["qwen"]["revision"] = AsrConfig().qwen.revision
     audio.write_bytes(b"other audio")
     assert SpeechCheckpoint(audio, cfg).read(10, 20) is None
+
+
+def test_integrated_alignment_connection_health_accepts_its_registered_key(monkeypatch):
+    from localplaud.config import Settings
+    from localplaud.db.models import ProviderConnection
+    from localplaud.providers import service
+    monkeypatch.setattr(service, 'get_settings', lambda: Settings())
+    row = ProviderConnection(key='builtin:qwen-alignment-validation', name='Qwen alignment',
+        provider_type='provider-word-timestamps', execution_target='local',
+        data_egress=False, config={})
+    ok, detail = service._probe_connection(row, 'Qwen/Qwen3-ForcedAligner-0.6B-hf')
+    assert ok
+    assert 'timestamps' in detail

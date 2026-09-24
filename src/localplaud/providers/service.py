@@ -1085,7 +1085,7 @@ def _probe_connection(row: ProviderConnection, model_key: str | None = None) -> 
     settings = get_settings().model_copy(deep=True)
     secret = _secret_value(row.secret_ref)
 
-    if family == "align":
+    if family == "align" or row.provider_type == "provider-word-timestamps":
         from ..worker.align import health
 
         options = dict(row.config or {})
