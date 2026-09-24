@@ -322,3 +322,68 @@ def test_nonblocking_review_warnings_are_preserved_in_provenance():
     result = note(Warnings())
     warnings = result["coverage"]["review_warnings"]
     assert {item["phase"] for item in warnings} == {"audit", "verify"}
+
+
+def test_retry_continues_rejected_extraction_and_retains_reviewed_progress(tmp_path):
+    with pytest.raises(LLMOutputInvalid):
+        note(Fake(bad_owner=True), checkpoint_dir=tmp_path)
+    resumed = Fake()
+    result = note(resumed, checkpoint_dir=tmp_path)
+    first_prompt = resumed.calls[0][0]
+    assert "上一版擷取結果" in first_prompt and "虛構負責人" in first_prompt
+    assert all(f["owner"] is None for f in result["template_snapshot"]["evidence"]["facts"])
+    cached = note(Fake(fail_at=1), checkpoint_dir=tmp_path)
+    assert cached["coverage"]["requests"] == 0
+    assert cached["content_md"] == result["content_md"]
+
+
+def test_retry_continues_rejected_draft_without_reextracting(tmp_path):
+    with pytest.raises(LLMOutputInvalid):
+        note(Fake(review_issues=True), checkpoint_dir=tmp_path)
+
+    class RepairDraft(Fake):
+        def complete(self, prompt, **kwargs):
+            result = super().complete(prompt, **kwargs)
+            if prompt.startswith("撰寫"):
+                assert "上一版草稿" in prompt
+                value = json.loads(result)
+                value["content_md"] += " 覆核修正。"
+                return json.dumps(value)
+            return result
+
+    resumed = RepairDraft()
+    result = note(resumed, checkpoint_dir=tmp_path)
+    assert resumed.calls[0][0].startswith("撰寫")
+    assert result["coverage"]["cache_hits"] >= 3
+    assert result["coverage"]["requests"] == 2
+
+
+def test_rejected_feedback_does_not_cross_model_or_source_boundaries(tmp_path):
+    with pytest.raises(LLMOutputInvalid):
+        note(Fake(bad_owner=True), checkpoint_dir=tmp_path)
+    changed = Fake(model="different")
+    note(changed, checkpoint_dir=tmp_path)
+    assert "上一版擷取結果" not in changed.calls[0][0]
+    changed = Fake()
+    note(changed, Transcript(segments=[Segment("新來源", 0, 1)]), checkpoint_dir=tmp_path)
+    assert "上一版擷取結果" not in changed.calls[0][0]
+
+
+def test_changed_review_prompt_requires_fresh_review(monkeypatch, tmp_path):
+    from localplaud.worker import evidence_notes
+
+    note(Fake(), checkpoint_dir=tmp_path)
+    monkeypatch.setattr(evidence_notes, "_VERIFY_TASK", evidence_notes._VERIFY_TASK + "加強核對。")
+    changed = Fake()
+    note(changed, checkpoint_dir=tmp_path)
+    assert any("比對草稿" in prompt for prompt, _ in changed.calls)
+
+
+def test_each_explicit_retry_keeps_its_own_bounded_generation_budget(tmp_path):
+    # Pipeline retry limits govern whether a later invocation is allowed. A
+    # manual retry can continue feedback, but cannot loop forever in this call.
+    for _ in range(2):
+        llm = Fake(bad_owner=True)
+        with pytest.raises(LLMOutputInvalid):
+            note(llm, checkpoint_dir=tmp_path)
+        assert len([prompt for prompt, _ in llm.calls if prompt.startswith("從 target")]) == 3

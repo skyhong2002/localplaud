@@ -66,6 +66,11 @@ prompt, schema and policy version. Retry reuses matching subcalls; a changed
 source/model/prompt cannot replay an incompatible answer. Checkpoints contain
 private recording content: back them up as private data, never commit them.
 A failed stage retains its reservation under the existing cost accounting policy.
+Rejected candidates keep their last review feedback in a separate checkpoint.
+A later stage retry continues that repair instead of replaying the same rejected
+answer. Already reviewed chunks and drafts remain reusable. Each invocation still
+has the configured repair limit and the normal stage retry/cost policy applies;
+source, model or review-prompt changes invalidate the continuation.
 
 The request budget includes serialized source metadata and schemas, not just
 transcript characters. Small local-model contexts may require substantially more

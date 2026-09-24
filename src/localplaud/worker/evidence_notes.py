@@ -159,6 +159,31 @@ def _provider_model(settings, llm):
     return str(provider), model
 
 
+def _save_checkpoint(path, value):
+    if path is None:
+        return
+    fd, tmp = tempfile.mkstemp(prefix=".evidence-", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(_json(value))
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+_EXTRACT_TASK = "從 target 擷取符合實質資訊準則的原子事實，完整保留可用資訊，不收無關碎語。context 僅供理解，須標示非 target；無實質內容可回傳空 facts。引文必須是來源原句子字串。每個 fact 必須有來源。逐一檢視所有 target：每個 ID 必須出現在 facts.sources，或在 skipped 寫出不採用的原因。每項独立的理由、條件、配器、數值、請求都要保留，不能只抽議題標籤或結論。\n"
+
+_AUDIT_TASK = "逐項完整掃描原始 target、facts 與 skipped；context 不是本批目標。一次列出所有實質缺漏，勿每輪只列少數。skipped 若包含有用的理由、請求或數值，應報出。只報會改變理解或漏掉獨立實質資訊的問題；不要為口頭附和、填充語或同義改寫要求修補。找遺漏、否定/條件翻轉、事件數字錯配、虛構負責人/期限、示範與真實決定混淆。回 issues 與 warnings。\n"
+
+_DRAFT_TASK = "撰寫各 heading 對應的筆記段落；本批所有事實必須出現並有引用，不重複解釋同一資訊。\n"
+
+_VERIFY_TASK = "比對草稿與原始支持來源及事實，不只比對引用。檢查遺漏、否定/條件翻轉、事件數字錯配、虛構負責人/期限、示範與真正決議、錯誤引用。回 issues 與 warnings，沒有問題時兩者為空。\n"
+
+
 class _Calls:
     def __init__(self, settings, llm, context, directory, progress):
         self.llm, self.directory, self.progress = llm, directory, progress
@@ -168,9 +193,62 @@ class _Calls:
         self.context = context or {}
         self.requests = self.input_chars = self.output_chars = self.cache_hits = 0
         self.phases = {}
+        self.last_paths = {}
         if directory is not None:
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(directory, 0o700)
+
+    def repair_path(self, phase, inputs):
+        if self.directory is None:
+            return None
+        key = _hash(
+            [
+                VERSION,
+                self.provider,
+                self.model,
+                self.identity,
+                self.context,
+                self.budget,
+                phase,
+                inputs,
+            ]
+        )
+        return self.directory / ("repair-" + key + ".json")
+
+    def load_repair(self, path, validate):
+        if path is None or not path.is_file():
+            return None
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            validate(state["previous"])
+            _issues(state["review"])
+            return state
+        except (OSError, ValueError, TypeError, KeyError, LLMOutputInvalid):
+            return None
+
+    def review_checkpoint(self, path, phase, value, review):
+        _save_checkpoint(path, {"previous": value, "review": review})
+        if review["issues"] and (candidate := self.last_paths.get(phase)) is not None:
+            # A structurally valid but rejected candidate is not a reusable
+            # success. Preserve its feedback separately for the next attempt.
+            candidate.unlink(missing_ok=True)
+
+    def reuse_reviewed(self, phases, current, total):
+        for phase in phases:
+            usage = self.phases.setdefault(
+                phase,
+                {
+                    "provider": self.provider,
+                    "model": self.model,
+                    "requests": 0,
+                    "cache_hits": 0,
+                    "latency_ms": 0,
+                },
+            )
+            usage["cache_hits"] += 1
+            self.cache_hits += 1
+            if self.progress:
+                self.progress({"phase": phase, "current": current, "total": total})
 
     def call(self, phase, prompt, system, schema, validate, *, current=1, total=1, max_tokens=3000):
         started = time.monotonic()
@@ -205,6 +283,7 @@ class _Calls:
             ]
         )
         path = self.directory / (key + ".json") if self.directory else None
+        self.last_paths[phase] = path
         if path and path.is_file():
             try:
                 value = validate(json.loads(path.read_text(encoding="utf-8")))
@@ -226,18 +305,7 @@ class _Calls:
         except (TypeError, json.JSONDecodeError):
             _fail(phase, "回覆不是 JSON")
         value = validate(parsed)
-        if path:
-            fd, tmp = tempfile.mkstemp(prefix=".evidence-", dir=path.parent)
-            try:
-                os.fchmod(fd, 0o600)
-                with os.fdopen(fd, "w", encoding="utf-8") as out:
-                    out.write(_json(value))
-                    out.flush()
-                    os.fsync(out.fileno())
-                os.replace(tmp, path)
-            finally:
-                if os.path.exists(tmp):
-                    os.unlink(tmp)
+        _save_checkpoint(path, value)
         return value
 
 
@@ -579,13 +647,27 @@ def generate_evidence_notes(
     coverage["review_warnings"] = []
     ledger = []
     for i, scope in enumerate(chunks):
-        issues = []
-        previous = None
-        for attempt in range(repairs + 1):
-            prompt = (
-                "從 target 擷取符合實質資訊準則的原子事實，完整保留可用資訊，不收無關碎語。context 僅供理解，須標示非 target；無實質內容可回傳空 facts。引文必須是來源原句子字串。每個 fact 必須有來源。逐一檢視所有 target：每個 ID 必須出現在 facts.sources，或在 skipped 寫出不採用的原因。每項独立的理由、條件、配器、數值、請求都要保留，不能只抽議題標籤或結論。\n"
-                + _json(scope)
-            )
+        repair_path = calls.repair_path(
+            "extract",
+            [
+                scope,
+                system,
+                review_policy,
+                _EXTRACT_TASK,
+                _AUDIT_TASK,
+                SOURCE_SCHEMA,
+                ISSUES_SCHEMA,
+            ],
+        )
+        state = calls.load_repair(repair_path, _facts_validator(scope))
+        previous = state["previous"] if state else None
+        issues = state["review"]["issues"] if state else []
+        accepted = state is not None and not issues
+        if accepted:
+            extracted, audit = previous, state["review"]
+            calls.reuse_reviewed(("extract", "audit"), i + 1, len(chunks))
+        for attempt in range(0 if accepted else repairs + 1):
+            prompt = _EXTRACT_TASK + _json(scope)
             if issues:
                 prompt += "\n請修正以下覆核問題：" + _json(issues)
                 if previous is not None:
@@ -610,8 +692,7 @@ def generate_evidence_notes(
                     raise
                 continue
             audit_prompt = review_policy + (
-                "逐項完整掃描原始 target、facts 與 skipped；context 不是本批目標。一次列出所有實質缺漏，勿每輪只列少數。skipped 若包含有用的理由、請求或數值，應報出。只報會改變理解或漏掉獨立實質資訊的問題；不要為口頭附和、填充語或同義改寫要求修補。找遺漏、否定/條件翻轉、事件數字錯配、虛構負責人/期限、示範與真實決定混淆。回 issues 與 warnings。\n"
-                + _json({"source": scope, "extraction": extracted})
+                _AUDIT_TASK + _json({"source": scope, "extraction": extracted})
             )
             audit = calls.call(
                 "audit",
@@ -624,6 +705,7 @@ def generate_evidence_notes(
             )
             previous = extracted
             issues = audit["issues"]
+            calls.review_checkpoint(repair_path, "extract", extracted, audit)
             if not issues:
                 break
             if attempt == repairs:
@@ -759,14 +841,29 @@ def generate_evidence_notes(
     coverage["draft_batches"] = len(batches)
     coverage["planned_sections"] = len(sections)
     for bi, batch in enumerate(batches):
-        previous_draft = None
         ids = {item["fact"]["id"] for item in batch}
-        issues = []
-        for attempt in range(repairs + 1):
-            prompt = (
-                "撰寫各 heading 對應的筆記段落；本批所有事實必須出現並有引用，不重複解釋同一資訊。\n"
-                + _json(batch)
-            )
+        repair_path = calls.repair_path(
+            "draft",
+            [
+                batch,
+                draft_system,
+                system,
+                review_policy,
+                _DRAFT_TASK,
+                _VERIFY_TASK,
+                DRAFT_SCHEMA,
+                ISSUES_SCHEMA,
+            ],
+        )
+        state = calls.load_repair(repair_path, _draft_validator(ids))
+        previous_draft = state["previous"]["content_md"] if state else None
+        issues = state["review"]["issues"] if state else []
+        accepted = state is not None and not issues
+        if accepted:
+            draft, review = state["previous"], state["review"]
+            calls.reuse_reviewed(("draft", "verify"), bi + 1, len(batches))
+        for attempt in range(0 if accepted else repairs + 1):
+            prompt = _DRAFT_TASK + _json(batch)
             if issues:
                 prompt += "\n修正覆核問題：" + _json(issues)
                 if previous_draft is not None:
@@ -788,8 +885,7 @@ def generate_evidence_notes(
                     raise
                 continue
             review_prompt = review_policy + (
-                "比對草稿與原始支持來源及事實，不只比對引用。檢查遺漏、否定/條件翻轉、事件數字錯配、虛構負責人/期限、示範與真正決議、錯誤引用。回 issues 與 warnings，沒有問題時兩者為空。\n"
-                + _json({"source_and_facts": batch, "draft": draft["content_md"]})
+                _VERIFY_TASK + _json({"source_and_facts": batch, "draft": draft["content_md"]})
             )
             review = calls.call(
                 "verify",
@@ -802,6 +898,7 @@ def generate_evidence_notes(
             )
             previous_draft = draft["content_md"]
             issues = review["issues"]
+            calls.review_checkpoint(repair_path, "draft", draft, review)
             if not issues:
                 break
             if attempt == repairs:
