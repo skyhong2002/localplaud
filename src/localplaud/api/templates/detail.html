@@ -856,7 +856,7 @@
   (function(){ const t=new URLSearchParams(location.search).get('t');
     if(t!==null && player){ const s=parseFloat(t); if(Number.isFinite(s)&&s>=0){
       const seek=()=>{ player.currentTime=s; }; if(player.readyState>=1) seek();
-      else player.addEventListener('loadedmetadata', seek, {once:true}); player.load(); }}})();
+      else { player.addEventListener('loadedmetadata', seek, {once:true,signal:cleanupController.signal}); player.load(); } }}})();
   // Reloading mid-listen: persist the position per recording in sessionStorage
   // (a pagehide replaceState is too late for the reload request itself) and
   // restore it on load when the URL carries no explicit t= deep-link.
