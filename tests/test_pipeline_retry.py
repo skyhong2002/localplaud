@@ -344,11 +344,13 @@ def test_retry_migration_is_idempotent(tmp_path):
         "plaud_files.pipeline_retry_count",
         "plaud_files.pipeline_next_retry_at",
         "plaud_files.pipeline_last_failure_at",
+        "plaud_files.process_overlong",
     }
     assert {column["name"] for column in inspect(engine).get_columns("plaud_files")} >= {
         "pipeline_retry_count",
         "pipeline_next_retry_at",
         "pipeline_last_failure_at",
+        "process_overlong",
     }
     assert migrate_pipeline_retry_schema(engine) == []
 

@@ -36,6 +36,7 @@ def _load_builtin_factories() -> None:
 
     for mod in (
         "faster_whisper_provider",
+        "qwen_provider",
         "whispercpp_provider",
         "mlx_provider",
         "openai_provider",

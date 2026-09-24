@@ -1513,6 +1513,7 @@ def _process_file_claimed(
                             provider="remote-worker",
                             model=payload.get("model"),
                             has_speakers=payload.get("has_speakers", False),
+                            processing_metadata=payload.get("processing_metadata", {}),
                         )
                     else:
                         result = transcribe.run_asr(wav, candidate_settings)
@@ -1520,7 +1521,7 @@ def _process_file_claimed(
                     if result.has_speakers:
                         result, speaker_grouping = group_speaker_segments(result)
                     _persist_transcript(file_id, result)
-                    detail = {"cost_budget": cost_budget}
+                    detail = {"cost_budget": cost_budget, **result.processing_metadata}
                     if speaker_grouping is not None:
                         detail["speaker_grouping"] = speaker_grouping
                     return {
@@ -3663,6 +3664,7 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
     threshold_ms = settings.pipeline.auto_skip_threshold_ms()
     if (
         threshold_ms is not None
+        and not row.process_overlong
         and row.duration_ms is not None
         and row.duration_ms >= threshold_ms
         and not any(

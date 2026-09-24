@@ -223,8 +223,18 @@ class VadConfig(BaseModel):
     max_region_s: float = 30.0  # split longer regions to bound each ASR call
 
 
+class QwenAsrConfig(BaseModel):
+    model: str = "Qwen/Qwen3-ASR-1.7B-hf"
+    revision: str = "bcd2b5b7f32b480ab5790554cfa8347f246a14f3"
+    aligner: str = "Qwen/Qwen3-ForcedAligner-0.6B-hf"
+    aligner_revision: str = "c07281df297b9905d24a508279258cccf987a064"
+    python: str = ""  # isolated runtime; empty uses the current interpreter
+    max_chunk_seconds: float = Field(default=120, ge=5, le=240)
+    timeout_seconds: int = Field(default=14400, ge=60)
+
+
 AsrProviderName = Literal[
-    "faster-whisper", "whispercpp", "mlx-whisper", "openai", "deepgram", "assemblyai"
+    "faster-whisper", "whispercpp", "mlx-whisper", "openai", "deepgram", "assemblyai", "qwen"
 ]
 
 
@@ -238,6 +248,7 @@ class AsrConfig(BaseModel):
     language: str = "auto"  # ISO code (e.g. "en", "zh") or "auto"
     fallback: list[AsrProviderName] = Field(default_factory=list)
 
+    qwen: QwenAsrConfig = Field(default_factory=QwenAsrConfig)
     vad: VadConfig = Field(default_factory=VadConfig)
     faster_whisper: FasterWhisperConfig = Field(default_factory=FasterWhisperConfig)
     whispercpp: WhisperCppConfig = Field(default_factory=WhisperCppConfig)
@@ -248,7 +259,10 @@ class AsrConfig(BaseModel):
 
 
 class DiarizeConfig(BaseModel):
-    provider: Literal["pyannote", "none"] = "pyannote"
+    python: str = ""
+    revision: str = "a435e9867d79e789e90053f9b6d6834053af564a"
+    timeout_seconds: int = Field(default=14400, ge=60)
+    provider: Literal["pyannote", "nemotron", "none"] = "pyannote"
     model: str = "pyannote/speaker-diarization-community-1"
     device: Literal["auto", "cpu", "cuda"] = "auto"
     hf_token: str | None = None

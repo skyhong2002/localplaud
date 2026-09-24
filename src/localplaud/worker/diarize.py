@@ -300,6 +300,12 @@ def _resolve_device(cfg: DiarizeConfig) -> tuple[object, str]:
 def health(cfg: DiarizeConfig) -> tuple[bool, str]:
     if cfg.provider == "none":
         return False, "disabled; speaker labels will not be generated"
+    if cfg.provider == "nemotron":
+        import shutil
+        import sys
+
+        available = bool(shutil.which(cfg.python or sys.executable))
+        return available, "Nemotron isolated CUDA runtime configured; maximum eight speakers"
     try:
         import pyannote.audio  # noqa: F401
     except Exception as exc:  # noqa: BLE001 - binary dependency imports can fail broadly
@@ -352,22 +358,29 @@ def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig) -> Transcript:
     if transcript.has_speakers:
         return transcript
 
-    pipeline = _load_pipeline(cfg)
-    kwargs = {}
-    if cfg.num_speakers:
-        kwargs["num_speakers"] = cfg.num_speakers
-    log.info("Running pyannote diarization on %s", wav_path)
-    output = pipeline(str(wav_path), **kwargs)
-    annotation = getattr(output, "speaker_diarization", output)
+    if cfg.provider == "nemotron":
+        from ..asr.qwen_provider import run_speech_process
 
-    # Build (start, end, speaker) turns.
-    if hasattr(annotation, "itertracks"):
-        turns = [
-            (turn.start, turn.end, spk)
-            for turn, _, spk in annotation.itertracks(yield_label=True)
-        ]
+        turns = run_speech_process(
+            "nemotron", Path(wav_path), cfg.model_dump(), cfg.python, cfg.timeout_seconds
+        )["turns"]
     else:
-        turns = [(turn.start, turn.end, spk) for turn, spk in annotation]
+        pipeline = _load_pipeline(cfg)
+        kwargs = {}
+        if cfg.num_speakers:
+            kwargs["num_speakers"] = cfg.num_speakers
+        log.info("Running pyannote diarization on %s", wav_path)
+        output = pipeline(str(wav_path), **kwargs)
+        annotation = getattr(output, "speaker_diarization", output)
+
+        # Build (start, end, speaker) turns.
+        if hasattr(annotation, "itertracks"):
+            turns = [
+                (turn.start, turn.end, spk)
+                for turn, _, spk in annotation.itertracks(yield_label=True)
+            ]
+        else:
+            turns = [(turn.start, turn.end, spk) for turn, spk in annotation]
 
     if not turns:
         # Diarization found nothing (e.g. near-silent audio) — don't claim we

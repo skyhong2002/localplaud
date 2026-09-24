@@ -1,0 +1,10 @@
+# Extend the deployed CUDA base without replacing its Whisper/pyannote stack.
+ARG BASE_IMAGE=localplaud-localplaud-gpu
+FROM ${BASE_IMAGE}
+USER root
+COPY requirements/speech-cuda.txt /tmp/speech-cuda.txt
+RUN /opt/venv/bin/python -m venv /opt/speech \
+    && printf '/opt/venv/lib/python3.12/site-packages\n' > /opt/speech/lib/python3.12/site-packages/base_runtime.pth \
+    && /opt/speech/bin/pip install --no-deps -r /tmp/speech-cuda.txt \
+    && /opt/speech/bin/python -c 'from transformers import AutoModelForMultimodalLM; from nemo.collections.asr.models import SortformerEncLabelModel; from faster_whisper.vad import get_speech_timestamps'
+USER localplaud

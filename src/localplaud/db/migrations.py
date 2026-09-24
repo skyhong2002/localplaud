@@ -798,6 +798,7 @@ def migrate_pipeline_retry_schema(engine: Engine) -> list[str]:
     migrated: list[str] = []
     with engine.begin() as connection:
         for column, ddl in (
+            ("process_overlong", "BOOLEAN NOT NULL DEFAULT 0"),
             ("pipeline_retry_count", "INTEGER NOT NULL DEFAULT 0"),
             ("pipeline_next_retry_at", "DATETIME"),
             ("pipeline_last_failure_at", "DATETIME"),

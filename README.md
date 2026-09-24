@@ -358,3 +358,6 @@ variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
 
 > localplaud is an independent, unofficial project and is not affiliated with,
 > endorsed by, or connected to Plaud. It only accesses your own account's data.
+
+For the evaluated CUDA speech alternative and safe unfinished-recording rollout,
+see [Qwen + Nemotron production profile](docs/qwen-nemotron-production.md).

@@ -44,6 +44,7 @@ class Transcript:
     # True if the segments already carry speaker labels (cloud diarization or
     # WhisperX) and the local diarization stage can be skipped.
     has_speakers: bool = False
+    processing_metadata: dict = field(default_factory=dict)
 
     @property
     def text(self) -> str:

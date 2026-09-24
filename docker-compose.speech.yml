@@ -1,0 +1,15 @@
+# Apply after the normal GPU compose files. The base CUDA image must already exist.
+services:
+  localplaud-gpu:
+    image: localplaud-qwen-nemotron:20260924
+    build:
+      context: .
+      dockerfile: Dockerfile.speech
+    environment:
+      LOCALPLAUD_ASR__PROVIDER: qwen
+      LOCALPLAUD_ASR__QWEN__PYTHON: /opt/speech/bin/python
+      LOCALPLAUD_ASR__VAD__ENABLED: "true"
+      LOCALPLAUD_DIARIZE__PROVIDER: nemotron
+      LOCALPLAUD_DIARIZE__MODEL: nvidia/Nemotron-3-Diarization
+      LOCALPLAUD_DIARIZE__PYTHON: /opt/speech/bin/python
+      HF_HUB_DISABLE_TELEMETRY: "1"

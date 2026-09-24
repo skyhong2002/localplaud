@@ -26,6 +26,8 @@ _TIMESTAMP_PROVIDERS = {
     "mlx-whisper",
     "openai",
     "remote-worker",
+    "localplaud-worker",
+    "qwen",
 }
 
 
@@ -558,6 +560,11 @@ def run_alignment(
     if provider not in _TIMESTAMP_PROVIDERS:
         raise AlignmentUnavailable(f"unsupported alignment provider: {provider}")
     detail = inspect_word_alignment(transcript)
+    if (transcript.model == "Qwen/Qwen3-ASR-1.7B-hf"
+            and model == "Qwen/Qwen3-ForcedAligner-0.6B-hf"):
+        detail["method"] = "qwen-forced-alignment-during-asr"
+        detail["forced_alignment"] = True
+        return AlignmentResult(transcript, "qwen", model, detail)
     return AlignmentResult(transcript, transcript.provider or provider, transcript.model, detail)
 
 

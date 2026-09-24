@@ -131,10 +131,19 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
     settings = get_settings().model_copy(deep=True)
     if request.model:
         if request.stage == JobStage.transcribe:
+            # Existing queued jobs retain their explicitly selected model.
+            if request.model == settings.asr.qwen.model:
+                settings.asr.provider = "qwen"
+            elif request.model == settings.asr.faster_whisper.model:
+                settings.asr.provider = "faster-whisper"
             cfg = getattr(settings.asr, settings.asr.provider.replace("-", "_"))
             if hasattr(cfg, "model"):
                 cfg.model = request.model
         elif request.stage == JobStage.diarize:
+            if request.model == "nvidia/Nemotron-3-Diarization":
+                settings.diarize.provider = "nemotron"
+            elif request.model.startswith("pyannote/"):
+                settings.diarize.provider = "pyannote"
             settings.diarize.model = request.model
         elif request.stage in {JobStage.summarize, JobStage.mind_map}:
             cfg = getattr(settings.llm, settings.llm.provider.replace("-", "_"))
@@ -159,6 +168,7 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
             "provider": transcript.provider,
             "model": transcript.model,
             "has_speakers": transcript.has_speakers,
+            "processing_metadata": transcript.processing_metadata,
         }
         return [_artifact("transcript.json", "application/json", json.dumps(payload).encode())]
     transcript = _transcript(inputs["transcript"])

@@ -216,6 +216,8 @@ class PlaudFile(Base):
     wav_path: Mapped[str | None] = mapped_column(String(1024), default=None)  # converted
     downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    # Explicit user backfill can include recordings above the automatic length cap.
+    process_overlong: Mapped[bool] = mapped_column(default=False)
     pipeline_retry_count: Mapped[int] = mapped_column(Integer, default=0)
     pipeline_next_retry_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, index=True
