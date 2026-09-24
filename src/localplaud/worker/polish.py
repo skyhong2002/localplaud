@@ -12,7 +12,7 @@ from ..asr.base import Segment, Transcript, Word
 from ..config import Settings
 from ..llm.base import LLMError, LLMOutputInvalid, build_llm
 
-PROMPT_VERSION = "transcript-polish/v3"
+PROMPT_VERSION = "transcript-polish/v4"
 SYSTEM_PROMPT = """You polish ASR transcript segments for downstream notes.
 Actively correct recognition errors using dialogue context and speaker continuity.
 ASR spelling is not authoritative: preserving a name means preserving its intended

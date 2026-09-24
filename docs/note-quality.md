@@ -111,7 +111,7 @@ candidates before bulk regeneration and record failures instead of claiming that
 all recordings reached completion.
 
 Automatic transcript correction is a prerequisite of both ingestion and notes-only
-reprocessing when `pipeline.polish` is enabled. `transcript-polish/v3` reviews
+reprocessing when `pipeline.polish` is enabled. `transcript-polish/v4` reviews
 proposed edits automatically; no operator approval is required. A correction or
 review failure preserves existing artifacts and defers new notes until a retry
 succeeds. Successful corrections invalidate dependent notes/maps/indexes and the

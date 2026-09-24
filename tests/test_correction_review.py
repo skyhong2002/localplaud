@@ -39,7 +39,7 @@ class Reviewer:
             )
         if self.error:
             raise self.error
-        assert body["proposals"][0]["before"] == "社團銀心派對"
+        assert body["original_segments"][0]["text"] == "社團銀心派對"
         return json.dumps(
             {
                 "decisions": self.decisions
@@ -120,3 +120,67 @@ def test_unchanged_text_needs_no_edit_review(monkeypatch):
     )
     assert result["detail"]["review"]["calls"] == 0
     assert len(provider.calls) == 1
+
+
+def test_one_rejected_change_cannot_erase_supported_terms_in_same_long_turn(monkeypatch):
+    before = "社團銀心派對討論一年的TalkGP Pro，這只是提案，沒有決定。"
+    proposed = "社團迎新派對討論一年的ChatGPT Pro，這只是提案，已經決定。"
+
+    class MixedEdits(Reviewer):
+        def complete(self, prompt, **kwargs):
+            body = json.loads(prompt)
+            if "target_segments" in body:
+                return json.dumps({"segments": [{"id": 0, "text": proposed}]})
+            assert body["original_segments"][0]["text"] == before
+            # Each complete product word is one reviewable edit, not letters.
+            product = next(p for p in body["proposals"] if p["after"] == "ChatGPT")
+            assert product["before"] == "TalkGP"
+            return json.dumps(
+                {
+                    "decisions": [
+                        {
+                            "id": p["id"],
+                            "approve": p["after"] in {"迎新", "ChatGPT"},
+                            "reason": "spelling supported"
+                            if p["after"] in {"迎新", "ChatGPT"}
+                            else "must preserve negation",
+                        }
+                        for p in body["proposals"]
+                    ]
+                }
+            )
+
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _: MixedEdits())
+    transcript = Transcript(segments=[Segment(text=before, start=0, end=95, speaker="speaker_a")])
+    result = polish_transcript(transcript, Settings())
+    assert result["transcript"].segments[0].text == (
+        "社團迎新派對討論一年的ChatGPT Pro，這只是提案，沒有決定。"
+    )
+    assert result["detail"]["review"]["rejected_segment_ids"] == [0]
+    assert result["detail"]["changed_segment_ids"] == [0]
+    assert transcript.segments[0].text == before
+
+
+def test_review_offsets_handle_insertion_deletion_and_repeated_words():
+    from copy import deepcopy
+
+    from localplaud.worker.correction_review import review_corrections
+
+    original = Transcript(segments=[Segment(text="嗯嗯社團銀心，銀心是天文名詞", start=0, end=4)])
+    candidate = deepcopy(original)
+    candidate.segments[0].text = "嗯社團迎新，銀心是天文名詞。"
+
+    class ApproveAll:
+        def complete(self, prompt, **kwargs):
+            return json.dumps(
+                {
+                    "decisions": [
+                        {"id": p["id"], "approve": True, "reason": "supported"}
+                        for p in json.loads(prompt)["proposals"]
+                    ]
+                }
+            )
+
+    review_corrections(original, candidate, ApproveAll(), budget=1000)
+    assert candidate.segments[0].text == "嗯社團迎新，銀心是天文名詞。"
+    assert original.segments[0].text == "嗯嗯社團銀心，銀心是天文名詞"

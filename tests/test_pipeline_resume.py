@@ -1298,7 +1298,7 @@ def test_context_polish_follows_acoustic_revision_without_reviving_raw(monkeypat
             ),
             "provider": "fake",
             "model": "test-model",
-            "prompt_version": "transcript-polish/v3",
+            "prompt_version": "transcript-polish/v4",
             "detail": {},
         }
 
@@ -1408,7 +1408,7 @@ def test_notes_retry_automatically_upgrades_raw_correction_and_preserves_on_revi
             ),
             "provider": "fake",
             "model": "test",
-            "prompt_version": "transcript-polish/v3",
+            "prompt_version": "transcript-polish/v4",
             "detail": {},
         }
 

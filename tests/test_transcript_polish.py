@@ -78,7 +78,7 @@ def test_polish_preserves_ids_timestamps_speakers_and_words(monkeypatch):
     assert result["detail"]["changed_segment_ids"] == [0]
     assert result["provider"] == "opencode-go"
     assert result["model"] == "qwen3.7-plus"
-    assert result["prompt_version"] == "transcript-polish/v3"
+    assert result["prompt_version"] == "transcript-polish/v4"
 
 
 def test_polish_reports_chunk_and_segment_progress(monkeypatch):

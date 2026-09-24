@@ -87,12 +87,16 @@ not automatically enqueue the whole library for rewriting.
 
 ## Automatic correction and edit review
 
-`transcript-polish/v3` runs before notes for both normal ingestion and notes-only
+`transcript-polish/v4` runs before notes for both normal ingestion and notes-only
 resume/regeneration. It proposes contextual edits, then makes a separate model
-call to review every changed segment against the original dialogue and nearby
-speaker context. Approved edits become canonical; rejected edits retain their
-original text, with reasons recorded in the correction stage. There is no manual
-approval step and no library-wide homophone replacement list.
+call to review individual edits against the original dialogue and nearby speaker
+context. Latin words and numbers stay atomic during edit extraction. Accepted
+nonoverlapping edits are applied to the original text only after every review
+batch validates. Rejecting one uncertain edit in a long segment does not discard
+unrelated supported corrections. Each edit, decision and reason is recorded in
+the correction stage. Adjacent replacements without an unchanged boundary remain
+one review unit; accepting an edit requires support for the complete span.
+There is no manual approval step and no library-wide homophone replacement list.
 
 Malformed, incomplete, or unavailable review fails the correction stage before a
 new revision or dependent notes are saved. Durable retry runs correction again

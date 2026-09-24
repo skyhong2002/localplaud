@@ -97,7 +97,7 @@ def _providers(monkeypatch):
             "transcript": transcript,
             "provider": settings.llm.provider,
             "model": getattr(settings.llm, settings.llm.provider.replace("-", "_")).model,
-            "prompt_version": "transcript-polish/v3",
+            "prompt_version": "transcript-polish/v4",
             "detail": {
                 "chunks": 1,
                 "attempts": 3,
@@ -168,7 +168,7 @@ def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_
         assert polished.kind == "ai_polish"
         assert polished.provider == "ollama"
         assert polished.model == polished.resolved_profile_snapshot["stages"]["correct"]["model"]
-        assert polished.prompt_version == "transcript-polish/v3"
+        assert polished.prompt_version == "transcript-polish/v4"
         assert polished.resolved_profile_snapshot["stages"]["correct"]["provider_type"] == "ollama"
         assert all(summary.input_transcript_revision == 1 for summary in row.summaries)
         alignment = next(stage for stage in row.stage_runs if stage.stage == StageName.align)
