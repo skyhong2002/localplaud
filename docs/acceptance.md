@@ -59,6 +59,9 @@ blocked by an active processing claim remains eligible for later evaluation, rat
 than being recorded as a permanent failure for that rule version. Cloud listing
 pages are fetched outside the database write transaction so network delays do not
 block worker progress.
+The managed worker drains persisted note-index jobs without repeating a full
+library write transaction each tick. Startup, artifact edits, and profile changes
+still reconcile the affected documents; standalone `work` retains full discovery.
 
 Regression tests hold processing open while discovery completes, reject overlapping
 worker calls, exercise independent failures and subsequent recovery, and verify

@@ -320,7 +320,9 @@ def process_automatic_pending(settings=None, *, daemon_owner: str | None = None)
     with processing_owner(daemon_owner):
         count = process_pending(settings, limit=settings.pipeline.files_per_cycle)
         process_pending_reindexes(settings, limit=settings.pipeline.files_per_cycle)
-        process_pending_documents(settings, limit=settings.pipeline.files_per_cycle * 4)
+        process_pending_documents(
+            settings, limit=settings.pipeline.files_per_cycle * 4, reconcile=False
+        )
     return count
 
 

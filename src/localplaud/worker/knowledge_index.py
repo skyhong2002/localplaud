@@ -1156,13 +1156,23 @@ def index_document(document_id: int, settings: Settings | None = None) -> bool:
             return False
 
 
-def process_pending_documents(settings: Settings | None = None, *, limit: int = 20) -> int:
+def process_pending_documents(
+    settings: Settings | None = None, *, limit: int = 20, reconcile: bool = True
+) -> int:
+    """Drain durable note work, optionally reconciling legacy/out-of-band artifacts.
+
+    The managed daemon reconciles at startup and artifact/profile mutations keep
+    the queue current. Repeating a library-wide write transaction every idle tick
+    blocks downloads, stage publication, and daemon heartbeats on large libraries.
+    Standalone callers retain reconciliation by default.
+    """
     settings = settings or get_settings()
     if not settings.pipeline.index:
         return 0
     now = datetime.now(UTC)
     with session_scope() as session:
-        sync_knowledge_documents(session, settings)
+        if reconcile:
+            sync_knowledge_documents(session, settings)
         session.flush()
         ids = list(
             session.scalars(

@@ -103,7 +103,7 @@ def test_daemon_processing_respects_workspace_preference(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     calls: list[int] = []
     reindex_calls: list[int] = []
-    note_calls: list[int] = []
+    note_calls: list[tuple[int, bool]] = []
 
     def fake_process_pending(_settings, *, limit):
         calls.append(limit)
@@ -116,7 +116,7 @@ def test_daemon_processing_respects_workspace_preference(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "localplaud.worker.knowledge_index.process_pending_documents",
-        lambda _settings, *, limit: note_calls.append(limit) or 0,
+        lambda _settings, *, limit, reconcile: note_calls.append((limit, reconcile)) or 0,
     )
     from localplaud.cli import process_automatic_pending
     from localplaud.config import get_settings
@@ -132,7 +132,7 @@ def test_daemon_processing_respects_workspace_preference(monkeypatch, tmp_path):
         assert process_automatic_pending(get_settings()) == 0
     assert calls == [get_settings().pipeline.files_per_cycle]
     assert reindex_calls == [get_settings().pipeline.files_per_cycle]
-    assert note_calls == [get_settings().pipeline.files_per_cycle * 4]
+    assert note_calls == [(get_settings().pipeline.files_per_cycle * 4, False)]
 
 
 @pytest.mark.parametrize(("enabled", "expected_calls"), [(False, 0), (True, 1)])

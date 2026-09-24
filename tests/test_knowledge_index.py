@@ -260,7 +260,11 @@ def test_note_edit_invalidates_old_chunks_and_failed_index_is_resumable(monkeypa
         "_embed_note_chunks",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")),
     )
-    assert service.index_document(document_id, settings) is False
+    monkeypatch.setattr(
+        service, "sync_knowledge_documents",
+        lambda *_args: pytest.fail("daemon queue draining must not rescan the library"),
+    )
+    assert service.process_pending_documents(settings, reconcile=False) == 0
     with session_scope() as session:
         document = session.get(KnowledgeDocument, document_id)
         assert document.status == "failed" and "offline" in document.error
@@ -280,7 +284,7 @@ def test_note_edit_invalidates_old_chunks_and_failed_index_is_resumable(monkeypa
             {},
         ),
     )
-    assert service.index_document(document_id, settings) is True
+    assert service.process_pending_documents(settings, reconcile=False) == 1
     with session_scope() as session:
         note = session.get(UserNote, note_id)
         note.content_md = "Version two"
