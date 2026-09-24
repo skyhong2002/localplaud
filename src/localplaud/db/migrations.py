@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from sqlalchemy import JSON, DateTime, Integer, String, delete, inspect, select, text
@@ -9,7 +10,7 @@ from sqlalchemy.engine import Dialect, Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.types import TypeEngine
 
-from ..error_redaction import sanitize_error
+from ..error_redaction import sanitize_error, sanitize_error_value
 from .models import (
     Chunk,
     FileStatus,
@@ -36,12 +37,12 @@ def redact_legacy_error_text(engine: Engine) -> int:
     with engine.begin() as connection:
         quote = engine.dialect.identifier_preparer.quote
         for table in tables:
-            columns = {column["name"] for column in inspector.get_columns(table)}
+            columns = {column["name"]: column["type"] for column in inspector.get_columns(table)}
             if "id" not in columns:
                 continue
-            diagnostic_columns = {"error", "health", "response_excerpt"} & columns
+            diagnostic_columns = {"error", "health", "response_excerpt"} & columns.keys()
             if table in {"stage_runs", "automation_runs", "notifications"}:
-                diagnostic_columns |= {"detail"} & columns
+                diagnostic_columns |= {"detail"} & columns.keys()
             for column in diagnostic_columns:
                 rows = connection.execute(
                     text(
@@ -50,7 +51,20 @@ def redact_legacy_error_text(engine: Engine) -> int:
                     )
                 ).all()
                 for row_id, value in rows:
-                    sanitized = sanitize_error(value)
+                    if isinstance(columns[column], JSON):
+                        # Redact values after decoding, never truncate serialized JSON.
+                        # Leave already malformed historical rows untouched for explicit
+                        # recovery from their backups; do not silently invent metadata.
+                        try:
+                            decoded = json.loads(value)
+                        except (ValueError, TypeError):
+                            continue
+                        cleaned = sanitize_error_value(decoded, max_length=max(2000, len(value)))
+                        if cleaned == decoded:
+                            continue
+                        sanitized = json.dumps(cleaned, ensure_ascii=False)
+                    else:
+                        sanitized = sanitize_error(value)
                     if sanitized == value:
                         continue
                     connection.execute(

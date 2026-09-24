@@ -184,3 +184,30 @@ def test_legacy_core_error_redaction_is_idempotent(tmp_path):
         "legacy-health-secret",
     ):
         assert fragment not in persisted
+
+
+def test_legacy_redaction_preserves_large_structured_diagnostics():
+    import json
+
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine("sqlite://")
+    original = {
+        "coverage": {"facts": [{"quote": "語境證據" * 1200, "id": n} for n in range(3)]},
+        "error": "password=private-fixture",
+        "stale": True,
+        "derived_only": True,
+    }
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE stage_runs (id INTEGER PRIMARY KEY, detail JSON)"))
+        connection.execute(
+            text("INSERT INTO stage_runs (id, detail) VALUES (1, :detail)"),
+            {"detail": json.dumps(original)},
+        )
+    assert redact_legacy_error_text(engine) == 1
+    assert redact_legacy_error_text(engine) == 0
+    with engine.connect() as connection:
+        restored = json.loads(connection.execute(text("SELECT detail FROM stage_runs")).scalar_one())
+    assert restored["coverage"] == original["coverage"]
+    assert restored["stale"] and restored["derived_only"]
+    assert "private-fixture" not in restored["error"]
