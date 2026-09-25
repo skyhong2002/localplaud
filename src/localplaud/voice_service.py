@@ -23,10 +23,10 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from .config import get_settings
-from .db.models import PlaudFile
+from .db.models import PlaudFile, Transcript
 from .db.session import get_engine, session_scope
 from .voice_identity import VoiceSample, apply_match, create_schema, inventory, references
 from .voice_matching import MODEL, REVISION, VoiceMatcher, cosine
@@ -175,7 +175,15 @@ def scan(profile, worker, report_path, *, limit=None):
             session.scalars(
                 select(PlaudFile.id)
                 .where(PlaudFile.is_trash.is_(False))
-                .order_by(PlaudFile.created_at.desc())
+                .order_by(
+                    (PlaudFile.wav_path.is_not(None) | PlaudFile.audio_path.is_not(None)).desc(),
+                    exists(
+                        select(Transcript.id).where(
+                            Transcript.file_id == PlaudFile.id, Transcript.source == "cloud"
+                        )
+                    ).desc(),
+                    PlaudFile.created_at.desc(),
+                )
             )
         )
     active_ids = []
@@ -206,8 +214,8 @@ def scan(profile, worker, report_path, *, limit=None):
         try:
             with audio_for(row, settings, profile, client_holder) as wav:
                 # The runtime caps requests at 256 windows and 30 minutes.
-                for offset in range(0, len(pending), 32):
-                    batch = pending[offset : offset + 32]
+                for offset in range(0, len(pending), 24):
+                    batch = pending[offset : offset + 24]
                     data, windows, owners = pack_windows(wav, batch)
                     vectors = worker.embed(data, windows) if windows else []
                     by_id = {s.id: [] for s in batch}
