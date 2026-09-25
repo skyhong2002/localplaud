@@ -18,6 +18,7 @@ import shlex
 import subprocess
 import tempfile
 import time
+import uuid
 import wave
 from collections import Counter
 from datetime import UTC, datetime
@@ -38,7 +39,7 @@ class VoiceWorker:
         self.process = None
         self.log = open(log_path, "a")
 
-    def close(self):
+    def reset(self):
         if self.process:
             self.process.terminate()
             try:
@@ -46,6 +47,9 @@ class VoiceWorker:
             except subprocess.TimeoutExpired:
                 self.process.kill()
             self.process = None
+
+    def close(self):
+        self.reset()
         self.log.close()
 
     def read(self, timeout=180):
@@ -89,25 +93,40 @@ class VoiceWorker:
             raise RuntimeError("voice worker model capability mismatch")
 
     def embed(self, wav, windows):
-        self.start()
-        self.process.stdin.write(
-            json.dumps({"wav": base64.b64encode(wav).decode(), "windows": windows}) + "\n"
-        )
-        self.process.stdin.flush()
-        result = self.read()
-        if result.get("error"):
-            raise RuntimeError("voice embedding failed: " + result["error"])
-        if result.get("model") != MODEL or result.get("revision") != REVISION:
-            raise RuntimeError("voice model provenance mismatch")
-        vectors = result.get("vectors", [])
-        if len(vectors) != len(windows):
-            raise RuntimeError("incomplete voice embeddings")
-        for vector in vectors:
-            if vector is not None:
-                if len(vector) != 192:
-                    raise ValueError("unexpected voice embedding dimension")
-                cosine(vector, vector)
-        return vectors
+        request_id = uuid.uuid4().hex
+        try:
+            self.start()
+            self.process.stdin.write(
+                json.dumps(
+                    {
+                        "request_id": request_id,
+                        "wav": base64.b64encode(wav).decode(),
+                        "windows": windows,
+                    }
+                )
+                + "\n"
+            )
+            self.process.stdin.flush()
+            result = self.read()
+            if result.get("request_id") != request_id:
+                raise RuntimeError("voice response request mismatch")
+            if result.get("error"):
+                raise RuntimeError("voice embedding failed: " + result["error"])
+            if result.get("model") != MODEL or result.get("revision") != REVISION:
+                raise RuntimeError("voice model provenance mismatch")
+            vectors = result.get("vectors", [])
+            if len(vectors) != len(windows):
+                raise RuntimeError("incomplete voice embeddings")
+            for vector in vectors:
+                if vector is not None:
+                    if len(vector) != 192:
+                        raise ValueError("unexpected voice embedding dimension")
+                    cosine(vector, vector)
+            return vectors
+        except Exception:
+            # Never consume a delayed response as the next recording's vectors.
+            self.reset()
+            raise
 
 
 def pack_windows(path, samples):
@@ -272,6 +291,11 @@ def scan(profile, worker, report_path, *, limit=None):
         active = [session.get(VoiceSample, sid) for sid in active_ids]
         refs = references(active)
         targets = [s for s in active if s.source == "local" and s.status == "ready"]
+    stats["library_samples_pending"] = sum(s.status == "pending" for s in active)
+    stats["library_samples_failed"] = sum(s.status == "failed" for s in active)
+    stats["library_samples_ready"] = sum(s.status == "ready" for s in active)
+    stats["library_samples_insufficient"] = sum(s.status == "insufficient" for s in active)
+    stats["library_recordings_enrolled"] = len({s.file_id for s in active if s.status == "ready"})
     stats["reference_speakers"] = len(refs)
     stats["reference_names"] = len({r["name"] for r in refs})
     stats["query_speakers"] = len(targets)

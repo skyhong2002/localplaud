@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.localplaud.voice-identity</string>
+  <key>WorkingDirectory</key><string>/ABSOLUTE/PATH/TO/localplaud</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/ABSOLUTE/PATH/TO/localplaud/.venv/bin/python</string>
+    <string>-u</string><string>-m</string><string>localplaud.voice_service</string>
+    <string>--profile</string><string>data/voice-identity/profile.json</string>
+    <string>--watch</string>
+    <string>--limit</string><string>25</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LOCALPLAUD_CONFIG</key><string>/ABSOLUTE/PATH/TO/localplaud/config.toml</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>OPENBLAS_NUM_THREADS</key><string>1</string>
+    <key>OMP_NUM_THREADS</key><string>2</string>
+  </dict>
+  <key>StandardOutPath</key><string>/ABSOLUTE/PATH/TO/localplaud/data/voice-identity/service.log</string>
+  <key>StandardErrorPath</key><string>/ABSOLUTE/PATH/TO/localplaud/data/voice-identity/service.err.log</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>Umask</key><integer>63</integer>
+</dict>
+</plist>

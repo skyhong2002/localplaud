@@ -33,10 +33,12 @@ def main():
         json.dumps({"ready": True, "model": MODEL, "revision": REVISION}), file=output, flush=True
     )
     for line in sys.stdin:
+        request_id = None
         try:
             if len(line) > 80_000_000:
                 raise ValueError("voice request too large")
             request = json.loads(line)
+            request_id = request.get("request_id")
             samples, rate = sf.read(
                 io.BytesIO(base64.b64decode(request["wav"], validate=True)), dtype="float32"
             )
@@ -69,6 +71,7 @@ def main():
             result = {"vectors": vectors, "model": MODEL, "revision": REVISION}
         except Exception as exc:
             result = {"error": type(exc).__name__}
+        result["request_id"] = request_id
         print(json.dumps(result), file=output, flush=True)
 
 

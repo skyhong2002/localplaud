@@ -215,3 +215,56 @@ def test_import_is_opt_in_and_excludes_combined_labels(database):
     assert [(s.reference_name, s.source) for s in samples if s.source != "local"] == [
         ("Sky", "plaud-reference")
     ]
+
+
+def test_changed_timeline_cannot_apply_stale_voice_match(database):
+    session, row, speaker = database
+    sample = inventory(session, row)[0]
+    session.commit()
+    row.local_transcript.segments = [
+        {"text": "changed", "speaker": "s", "start": 40.0, "end": 80.0, "words": []}
+    ]
+    session.commit()
+    assert apply_match(session, sample, decision()) == "stale"
+    assert speaker.display_name is None
+
+
+def test_packed_audio_contains_only_selected_windows(tmp_path):
+    import io
+    import struct
+    import wave
+    from types import SimpleNamespace
+
+    from localplaud.voice_service import pack_windows
+
+    original = tmp_path / "original.wav"
+    with wave.open(str(original), "wb") as out:
+        out.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+        out.writeframes(struct.pack("<h", 1000) * 16000 * 10)
+    before = original.read_bytes()
+    data, windows, owners = pack_windows(
+        original, [SimpleNamespace(id="a", windows=[[1, 4], [6, 9], [11, 15]])]
+    )
+    with wave.open(io.BytesIO(data)) as output:
+        assert output.getnframes() == 16000 * 6
+    assert windows == [[0, 3], [3, 6]]
+    assert owners == ["a", "a"]
+    assert original.read_bytes() == before
+
+
+def test_voice_worker_rejects_wrong_response_and_resets_transport(monkeypatch, tmp_path):
+    from io import StringIO
+    from types import SimpleNamespace
+
+    from localplaud.voice_service import VoiceWorker
+
+    worker = VoiceWorker({}, tmp_path / "runtime.log")
+    monkeypatch.setattr(worker, "start", lambda: None)
+    worker.process = SimpleNamespace(stdin=StringIO())
+    monkeypatch.setattr(worker, "read", lambda: {"request_id": "previous-recording"})
+    reset = []
+    monkeypatch.setattr(worker, "reset", lambda: reset.append(True))
+    with pytest.raises(RuntimeError, match="request mismatch"):
+        worker.embed(b"audio", [[0, 4]])
+    assert reset == [True]
+    worker.log.close()

@@ -61,6 +61,9 @@ service supervisor, using the deployment's normal config and PATH. The profile i
 reread each cycle; `enabled: false` pauses future cycles. A process lock prevents
 duplicate watchers. Start with `apply_names: false` and optionally `--limit 25`
 for a bounded enrollment smoke test, inspect `receipt.json`, then enable application.
+With `--watch --limit 25`, each cycle extracts up to 25 additional recordings and
+applies matches before continuing in the next cycle; cached samples are skipped,
+so this eventually covers the whole library and continues with newly arriving files.
 The receipt contains aggregate counts and a leave-recording-out comparison with
 imported labels (a proxy, **not human-verified accuracy**). The full scan is resumable
 at speaker sample granularity. Private `runtime.log` contains runtime diagnostics.
