@@ -10,7 +10,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text, select
+from sqlalchemy import JSON, DateTime, Integer, String, Text, select, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db.models import Base, Chunk, PlaudFile, Speaker
@@ -64,6 +64,30 @@ def create_schema(engine):
     Base.metadata.create_all(
         engine, tables=[VoiceSample.__table__, VoiceAssignment.__table__, VoiceEvent.__table__]
     )
+
+    # Triggers cover permanent deletions by already-running older web processes.
+    if engine.dialect.name == "sqlite":
+        with engine.begin() as connection:
+            connection.execute(
+                text("""
+                CREATE TRIGGER IF NOT EXISTS voice_identity_delete_speaker
+                AFTER DELETE ON speakers BEGIN
+                    DELETE FROM voice_identity_events WHERE speaker_id = OLD.id;
+                    DELETE FROM voice_assignments WHERE speaker_id = OLD.id;
+                END
+            """)
+            )
+            connection.execute(
+                text("""
+                CREATE TRIGGER IF NOT EXISTS voice_identity_delete_recording
+                AFTER DELETE ON plaud_files BEGIN
+                    DELETE FROM voice_identity_events WHERE speaker_id IN
+                        (SELECT speaker_id FROM voice_assignments WHERE file_id = OLD.id);
+                    DELETE FROM voice_assignments WHERE file_id = OLD.id;
+                    DELETE FROM voice_samples WHERE file_id = OLD.id;
+                END
+            """)
+            )
 
 
 def digest(value):
@@ -182,7 +206,9 @@ def apply_match(session, sample, decision, *, threshold=0.75, margin=0.12):
 
     _serialize_transcript_mutation(session, sample.file_id)
     row = session.get(PlaudFile, sample.file_id, populate_existing=True)
-    if row is None or processing_claim_active(row):
+    if row is None or row.is_trash:
+        return "removed"
+    if processing_claim_active(row):
         return "busy"
     # Refuse stale results following a diarization or segment ownership edit.
     active = inventory(session, row)

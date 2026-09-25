@@ -268,3 +268,28 @@ def test_voice_worker_rejects_wrong_response_and_resets_transport(monkeypatch, t
         worker.embed(b"audio", [[0, 4]])
     assert reset == [True]
     worker.log.close()
+
+
+def test_permanent_recording_deletion_removes_voice_data(database):
+    from sqlalchemy import delete
+
+    from localplaud.voice_identity import VoiceSample
+
+    session, row, speaker = database
+    sample = inventory(session, row)[0]
+    apply_match(session, sample, decision())
+    session.commit()
+    session.execute(delete(PlaudFile).where(PlaudFile.id == row.id))
+    session.commit()
+    assert list(session.scalars(select(VoiceSample))) == []
+    assert list(session.scalars(select(VoiceAssignment))) == []
+    assert list(session.scalars(select(VoiceEvent))) == []
+
+
+def test_trash_during_extraction_is_not_renamed(database):
+    session, row, speaker = database
+    sample = inventory(session, row)[0]
+    row.is_trash = True
+    session.commit()
+    assert apply_match(session, sample, decision()) == "removed"
+    assert speaker.display_name is None

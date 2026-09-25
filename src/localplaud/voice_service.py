@@ -210,6 +210,9 @@ def scan(profile, worker, report_path, *, limit=None):
     for number, fid in enumerate(ids):
         with session_scope() as session:
             row = session.get(PlaudFile, fid)
+            if row is None or row.is_trash:
+                stats["removed_recordings"] += 1
+                continue
             if processing_claim_active(row):
                 stats["busy_recordings"] += 1
                 continue
@@ -244,6 +247,8 @@ def scan(profile, worker, report_path, *, limit=None):
                     with session_scope() as session:
                         for original in batch:
                             sample = session.get(VoiceSample, original.id)
+                            if sample is None:
+                                continue
                             sample.vectors = by_id[sample.id]
                             # Mixed/poor diarization must not seed global identities.
                             similarities = [
@@ -269,7 +274,7 @@ def scan(profile, worker, report_path, *, limit=None):
             with session_scope() as session:
                 for original in pending:
                     sample = session.get(VoiceSample, original.id)
-                    if sample.status == "pending" or sample.status == "failed":
+                    if sample is not None and sample.status in {"pending", "failed"}:
                         sample.status, sample.error = "failed", type(exc).__name__
                         sample.updated_at = datetime.now(UTC)
             stats["recordings_failed"] += 1
@@ -288,7 +293,9 @@ def scan(profile, worker, report_path, *, limit=None):
         if number % 10 == 0:
             print(json.dumps({"event": "progress", "counts": dict(stats)}), flush=True)
     with session_scope() as session:
-        active = [session.get(VoiceSample, sid) for sid in active_ids]
+        active = [
+            sample for sid in active_ids if (sample := session.get(VoiceSample, sid)) is not None
+        ]
         refs = references(active)
         targets = [s for s in active if s.source == "local" and s.status == "ready"]
     stats["library_samples_pending"] = sum(s.status == "pending" for s in active)
