@@ -35,6 +35,7 @@ from .voice_identity import (
     create_schema,
     inventory,
     references,
+    validate_name_aliases,
     validate_plaud_enrollment,
 )
 from .voice_matching import MODEL, REVISION, VoiceMatcher, cosine
@@ -195,6 +196,8 @@ def scan(profile, worker, report_path, *, limit=None):
 
     enrollment = profile.get("plaud_enrollment")
     validate_plaud_enrollment(enrollment)
+    name_aliases = profile.get("speaker_name_aliases", {})
+    validate_name_aliases(name_aliases)
     settings = get_settings()
     stats = Counter()
     started = datetime.now(UTC).isoformat()
@@ -310,7 +313,7 @@ def scan(profile, worker, report_path, *, limit=None):
         active = [
             sample for sid in active_ids if (sample := session.get(VoiceSample, sid)) is not None
         ]
-        refs = references(active, plaud_enrollment=enrollment)
+        refs = references(active, plaud_enrollment=enrollment, name_aliases=name_aliases)
         targets = [s for s in active if s.source == "local" and s.status == "ready"]
     stats["library_samples_pending"] = sum(s.status == "pending" for s in active)
     stats["library_samples_failed"] = sum(s.status == "failed" for s in active)
@@ -330,6 +333,8 @@ def scan(profile, worker, report_path, *, limit=None):
         )
         if enrollment is not None:
             decision["plaud_enrollment"] = {"id": enrollment["id"], "confirmed_manual": True}
+        if name_aliases:
+            decision["speaker_name_aliases"] = name_aliases
         stats["match_" + decision["status"]] += 1
         if profile.get("apply_names", False):
             with session_scope() as session:
@@ -363,6 +368,9 @@ def scan(profile, worker, report_path, *, limit=None):
                 "id": enrollment["id"],
                 "confirmed_manual": True,
                 "names": len(enrollment["names"]),
+                "canonical_names": len(
+                    {name_aliases.get(name, name) for name in enrollment["names"]}
+                ),
                 "samples": len(enrollment["samples"]),
             }
             if enrollment is not None

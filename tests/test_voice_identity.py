@@ -384,3 +384,53 @@ def test_invalid_frozen_enrollment_fails_closed(database):
                 "samples": {},
             }
         )
+
+
+def test_explicit_alias_pools_references_without_changing_snapshot_or_vectors():
+    from types import SimpleNamespace
+
+    from localplaud.voice_matching import VoiceMatcher
+
+    samples = [
+        SimpleNamespace(
+            id=sid,
+            file_id=fid,
+            speaker_key=name,
+            source="plaud-reference",
+            reference_name=name,
+            status="ready",
+            vectors=[[1.0, 0.0]] * 2,
+        )
+        for sid, fid, name in [("a" * 64, "f1", "Alice"), ("b" * 64, "f2", "alice")]
+    ]
+    snapshot = {
+        "version": 1,
+        "id": "confirmed",
+        "confirmed_manual": True,
+        "min_recordings": 5,
+        "names": {"Alice": 5, "alice": 5},
+        "samples": {s.id: s.reference_name for s in samples},
+    }
+    before = copy.deepcopy(snapshot)
+    assert {r["name"] for r in references(samples, plaud_enrollment=snapshot)} == {"Alice", "alice"}
+    refs = references(samples, plaud_enrollment=snapshot, name_aliases={"alice": "Alice"})
+    assert {r["name"] for r in refs} == {"Alice"}
+    assert {r["source_name"] for r in refs} == {"Alice", "alice"}
+    assert len({r["sample_id"] for r in refs}) == 2
+    assert snapshot == before
+    match = VoiceMatcher(refs).match([[1.0, 0.0]] * 2, query_file_id="new")
+    assert (match["status"], match["name"]) == ("matched", "Alice")
+    # Two labels in the SAME recording still only supply one recording vote.
+    samples[1].file_id = "f1"
+    refs = references(samples, plaud_enrollment=snapshot, name_aliases={"alice": "Alice"})
+    assert VoiceMatcher(refs).match([[1.0, 0.0]] * 2, query_file_id="new")["status"] == "ambiguous"
+
+
+@pytest.mark.parametrize(
+    "aliases", [{"a": "b", "b": "a"}, {"a": "a"}, {"a": "b", "b": "c"}, {"a": ""}, []]
+)
+def test_alias_validation_rejects_cycles_chains_and_invalid_names(aliases):
+    from localplaud.voice_identity import validate_name_aliases
+
+    with pytest.raises(ValueError):
+        validate_name_aliases(aliases)

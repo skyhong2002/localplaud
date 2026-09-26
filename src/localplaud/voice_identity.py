@@ -221,11 +221,30 @@ def inventory(session, row, *, import_plaud=False, plaud_enrollment=None):
     return active
 
 
-def references(samples, *, plaud_enrollment=None):
+def validate_name_aliases(aliases):
+    """Accept only explicit, one-hop identity merges; never infer aliases from case."""
+    if aliases is None:
+        return
+    if not isinstance(aliases, dict) or any(
+        not isinstance(source, str)
+        or not isinstance(target, str)
+        or not usable_name(source)
+        or not usable_name(target)
+        or source == target
+        or target in aliases
+        for source, target in aliases.items()
+    ):
+        raise ValueError("speaker name aliases must map explicit names directly to canonical names")
+
+
+def references(samples, *, plaud_enrollment=None, name_aliases=None):
     validate_plaud_enrollment(plaud_enrollment)
+    validate_name_aliases(name_aliases)
+    name_aliases = name_aliases or {}
     return [
         {
-            "name": s.reference_name,
+            "name": name_aliases.get(s.reference_name, s.reference_name),
+            "source_name": s.reference_name,
             "file_id": s.file_id,
             "speaker_key": s.speaker_key,
             "vectors": s.vectors,

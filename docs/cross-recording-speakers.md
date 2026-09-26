@@ -98,3 +98,12 @@ retaining `plaud-reference` source. New assignment evidence and cycle receipts
 record the confirmation ID. Keep the actual name list and snapshot in private
 operator data, never source control. Existing assignments and historical samples
 are retained; the snapshot controls subsequent matching references.
+
+Explicit user-approved identity merges can be configured with the private profile's
+`speaker_name_aliases` map (old spelling → canonical name). The service pools both
+sets of reference embeddings under the canonical name and emits that name for new
+matches. Source labels, sample IDs, original enrollment counts and manual-label
+provenance remain intact. Multiple labels in one recording still count as one
+independent recording. Alias chains and cycles are rejected; case folding never
+implicitly merges other names. Existing local display names, if present, require
+an explicit rename through the normal guarded mutation and reindex flow.
