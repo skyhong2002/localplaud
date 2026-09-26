@@ -79,3 +79,22 @@ an unchanged automated assignment. This preserves later human edits, records the
 undo, suppresses reapplication, and queues reindexing. Voiceprints are private
 biometric-derived data kept in the local database; include them in the same backup
 and access controls as recordings. No voiceprints are committed to the repository.
+
+## One-time confirmed enrollment
+
+A private profile may contain `plaud_enrollment`, version 1, with an immutable
+`id`, `created_at`, `confirmed_manual: true`, `min_recordings`, `names` (exact name
+→ distinct recording count at selection time), and `samples` (sample fingerprint
+ID → approved name). This freezes a user-approved migration enrollment. Only the
+selected existing Plaud sample IDs may serve as references or enter extraction;
+new Plaud labels, new recordings of a selected name, and changed sample timelines
+do not silently expand the snapshot. Existing embeddings are reused. Malformed
+snapshots fail closed. Omission retains the original broad opt-in import behavior;
+an explicit empty snapshot permits no Plaud references.
+
+Local manual names continue to enroll independently. Automated assignments never
+enroll. Reference records carry `user-confirmed-manual` label provenance while
+retaining `plaud-reference` source. New assignment evidence and cycle receipts
+record the confirmation ID. Keep the actual name list and snapshot in private
+operator data, never source control. Existing assignments and historical samples
+are retained; the snapshot controls subsequent matching references.

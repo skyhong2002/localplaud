@@ -29,7 +29,14 @@ from sqlalchemy import exists, select
 from .config import get_settings
 from .db.models import PlaudFile, Transcript
 from .db.session import get_engine, session_scope
-from .voice_identity import VoiceSample, apply_match, create_schema, inventory, references
+from .voice_identity import (
+    VoiceSample,
+    apply_match,
+    create_schema,
+    inventory,
+    references,
+    validate_plaud_enrollment,
+)
 from .voice_matching import MODEL, REVISION, VoiceMatcher, cosine
 
 
@@ -186,6 +193,8 @@ def report(path, value):
 def scan(profile, worker, report_path, *, limit=None):
     from .worker.pipeline import processing_claim_active
 
+    enrollment = profile.get("plaud_enrollment")
+    validate_plaud_enrollment(enrollment)
     settings = get_settings()
     stats = Counter()
     started = datetime.now(UTC).isoformat()
@@ -216,7 +225,12 @@ def scan(profile, worker, report_path, *, limit=None):
             if processing_claim_active(row):
                 stats["busy_recordings"] += 1
                 continue
-            samples = inventory(session, row, import_plaud=profile.get("import_plaud_names", False))
+            samples = inventory(
+                session,
+                row,
+                import_plaud=profile.get("import_plaud_names", False),
+                plaud_enrollment=enrollment,
+            )
             active_ids.extend(s.id for s in samples)
             pending = [
                 s
@@ -296,7 +310,7 @@ def scan(profile, worker, report_path, *, limit=None):
         active = [
             sample for sid in active_ids if (sample := session.get(VoiceSample, sid)) is not None
         ]
-        refs = references(active)
+        refs = references(active, plaud_enrollment=enrollment)
         targets = [s for s in active if s.source == "local" and s.status == "ready"]
     stats["library_samples_pending"] = sum(s.status == "pending" for s in active)
     stats["library_samples_failed"] = sum(s.status == "failed" for s in active)
@@ -314,6 +328,8 @@ def scan(profile, worker, report_path, *, limit=None):
         decision = matcher.match(
             sample.vectors, threshold=threshold, margin=margin, query_file_id=sample.file_id
         )
+        if enrollment is not None:
+            decision["plaud_enrollment"] = {"id": enrollment["id"], "confirmed_manual": True}
         stats["match_" + decision["status"]] += 1
         if profile.get("apply_names", False):
             with session_scope() as session:
@@ -342,6 +358,16 @@ def scan(profile, worker, report_path, *, limit=None):
         "counts": dict(stats),
         "plaud_proxy_evaluation": dict(evaluation),
         "auto_apply": profile.get("apply_names", False),
+        "plaud_enrollment": (
+            {
+                "id": enrollment["id"],
+                "confirmed_manual": True,
+                "names": len(enrollment["names"]),
+                "samples": len(enrollment["samples"]),
+            }
+            if enrollment is not None
+            else None
+        ),
         "threshold": threshold,
         "margin": margin,
     }

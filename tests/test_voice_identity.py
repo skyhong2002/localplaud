@@ -293,3 +293,94 @@ def test_trash_during_extraction_is_not_renamed(database):
     session.commit()
     assert apply_match(session, sample, decision()) == "removed"
     assert speaker.display_name is None
+
+
+def test_frozen_manual_plaud_enrollment_reuses_only_selected_samples(database):
+    session, row, _ = database
+    cloud = Transcript(
+        file_id=row.id,
+        source="cloud",
+        provider="plaud",
+        model="unknown",
+        text="import",
+        segments=[
+            {"speaker": "Alice", "start": 0, "end": 15},
+            {"speaker": "Bob", "start": 16, "end": 30},
+        ],
+    )
+    row.transcripts.append(cloud)
+    session.commit()
+    samples = inventory(session, row, import_plaud=True)
+    selected = next(s for s in samples if s.reference_name == "Alice")
+    selected.vectors, selected.status = [[1.0, 0.0]] * 2, "ready"
+    session.commit()
+    snapshot = {
+        "version": 1,
+        "id": "test-confirmation",
+        "confirmed_manual": True,
+        "min_recordings": 5,
+        "names": {"Alice": 5},
+        "samples": {selected.id: "Alice"},
+    }
+    active = inventory(session, row, import_plaud=True, plaud_enrollment=snapshot)
+    assert [s.id for s in active if s.source == "plaud-reference"] == [selected.id]
+    refs = references(active, plaud_enrollment=snapshot)
+    assert refs[0]["label_provenance"] == "user-confirmed-manual"
+    assert refs[0]["enrollment_id"] == "test-confirmation"
+    assert refs[0]["vectors"] == [[1.0, 0.0]] * 2
+    # New labels/timelines aren't silently added to this one-time snapshot.
+    cloud.segments = [{"speaker": "Alice", "start": 40, "end": 60}]
+    session.commit()
+    assert not [
+        s
+        for s in inventory(session, row, import_plaud=True, plaud_enrollment=snapshot)
+        if s.source == "plaud-reference"
+    ]
+    # A matching name in a new recording is also excluded, even if a caller
+    # mistakenly supplies all cached sample rows directly to references().
+    from types import SimpleNamespace
+
+    other = SimpleNamespace(
+        id="b" * 64,
+        source="plaud-reference",
+        status="ready",
+        reference_name="Alice",
+        vectors=[[1.0, 0.0]] * 2,
+    )
+    assert references([other], plaud_enrollment=snapshot) == []
+
+
+def test_frozen_plaud_enrollment_keeps_future_local_manual_names(database):
+    session, row, speaker = database
+    speaker.display_name = "New manual name"
+    sample = inventory(session, row)[0]
+    sample.vectors, sample.status = [[1.0, 0.0]] * 2, "ready"
+    snapshot = {
+        "version": 1,
+        "id": "empty",
+        "confirmed_manual": True,
+        "min_recordings": 5,
+        "names": {},
+        "samples": {},
+    }
+    refs = references(inventory(session, row, plaud_enrollment=snapshot), plaud_enrollment=snapshot)
+    assert refs[0]["name"] == "New manual name"
+    assert refs[0]["label_provenance"] == "local-manual"
+
+
+def test_invalid_frozen_enrollment_fails_closed(database):
+    from localplaud.voice_identity import validate_plaud_enrollment
+
+    with pytest.raises(ValueError):
+        validate_plaud_enrollment({})
+    with pytest.raises(ValueError):
+        validate_plaud_enrollment(
+            {
+                "version": 1,
+                "id": "invalid",
+                "confirmed_manual": True,
+                "min_recordings": 5,
+                "names": {"Alice": 4},
+                "samples": {},
+            }
+        )

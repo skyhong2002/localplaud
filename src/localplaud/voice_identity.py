@@ -104,8 +104,45 @@ def canonical(row):
     return raw, revision.segments if revision is not None else raw.segments
 
 
-def inventory(session, row, *, import_plaud=False):
+def validate_plaud_enrollment(enrollment):
+    """Validate an explicit one-time enrollment snapshot; malformed data fails closed."""
+    if enrollment is None:
+        return
+    if not isinstance(enrollment, dict) or enrollment.get("version") != 1:
+        raise ValueError("invalid Plaud voice enrollment snapshot")
+    names, samples = enrollment.get("names"), enrollment.get("samples")
+    if (
+        not isinstance(enrollment.get("id"), str)
+        or not enrollment["id"]
+        or enrollment.get("confirmed_manual") is not True
+        or not isinstance(names, dict)
+        or not isinstance(samples, dict)
+    ):
+        raise ValueError("Plaud enrollment requires confirmed names and frozen samples")
+    minimum = enrollment.get("min_recordings")
+    if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 1:
+        raise ValueError("invalid enrollment recording minimum")
+    if any(
+        not usable_name(name)
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count < minimum
+        for name, count in names.items()
+    ):
+        raise ValueError("ineligible name in Plaud enrollment")
+    if any(
+        not isinstance(sid, str)
+        or len(sid) != 64
+        or any(c not in "0123456789abcdef" for c in sid)
+        or name not in names
+        for sid, name in samples.items()
+    ):
+        raise ValueError("invalid sample in Plaud enrollment")
+
+
+def inventory(session, row, *, import_plaud=False, plaud_enrollment=None):
     """Refresh active descriptors; obsolete samples remain audit data, not references."""
+    validate_plaud_enrollment(plaud_enrollment)
     raw, segments = canonical(row)
     sources = []
     if raw is not None:
@@ -158,6 +195,12 @@ def inventory(session, row, *, import_plaud=False):
             if source != "local" and key not in names:
                 continue
             sid = digest([row.id, key, source, fingerprint])
+            if (
+                source == "plaud-reference"
+                and plaud_enrollment is not None
+                and plaud_enrollment["samples"].get(sid) != names.get(key)
+            ):
+                continue
             sample = session.get(VoiceSample, sid)
             if sample is None:
                 sample = VoiceSample(
@@ -178,7 +221,8 @@ def inventory(session, row, *, import_plaud=False):
     return active
 
 
-def references(samples):
+def references(samples, *, plaud_enrollment=None):
+    validate_plaud_enrollment(plaud_enrollment)
     return [
         {
             "name": s.reference_name,
@@ -187,9 +231,26 @@ def references(samples):
             "vectors": s.vectors,
             "source": s.source,
             "sample_id": s.id,
+            "label_provenance": (
+                "user-confirmed-manual"
+                if s.source == "plaud-reference" and plaud_enrollment is not None
+                else "plaud-import"
+                if s.source == "plaud-reference"
+                else "local-manual"
+            ),
+            "enrollment_id": plaud_enrollment["id"]
+            if s.source == "plaud-reference" and plaud_enrollment is not None
+            else None,
         }
         for s in samples
-        if s.status == "ready" and s.reference_name and len(s.vectors) >= 2
+        if s.status == "ready"
+        and s.reference_name
+        and len(s.vectors) >= 2
+        and (
+            s.source != "plaud-reference"
+            or plaud_enrollment is None
+            or plaud_enrollment["samples"].get(s.id) == s.reference_name
+        )
     ]
 
 
