@@ -1,6 +1,6 @@
 # GPT-6 text-stage configuration
 
-The Codex subscription adapter defaults to `gpt-6-sol` with high reasoning effort.
+The Codex subscription adapter defaults to `gpt-6.1-sol` with high reasoning effort.
 It can be explicitly selected for `correct`, `summarize`, `mind_map`, and `ask`.
 Ask keeps the existing single-recording/library retrieval boundary, playable
 citations, profile provenance, and durable provider-cost reservations. All four
@@ -48,3 +48,14 @@ model. Non-text stage selections, existing transcript/summary content, model
 provenance, manual titles and audio references were preserved. The earlier batch
 of regenerated notes keeps its original GPT-5.6 model attribution; switching the
 configuration does not rewrite that history or regenerate the library.
+
+## GPT-6.1 Sol migration (2026-10-01)
+
+The default Codex model moved from `gpt-6-sol` to `gpt-6.1-sol`. After a synthetic
+Codex inference and the provider health probe passed, nine profile versions
+(44–52) were created with the same selections except the text-stage model; the
+374 recording overrides on `qwen-nemotron` v1 moved to its v3 counterpart, and
+`qwen-nemotron` v4 is the system default. All 959 recordings resolve correction,
+summary, mind map and Ask to `gpt-6.1-sol`. The earlier profile versions, the
+`gpt-6-sol` catalog entry and all historical model attribution are unchanged.
+Pre-migration backup: `data/backups/localplaud-pre-gpt61-20261001.db`.

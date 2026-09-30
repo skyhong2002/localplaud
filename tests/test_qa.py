@@ -1561,7 +1561,7 @@ def test_codex_ask_keeps_scope_provenance_and_quota_guard(
     with session_scope() as session:
         old = list_profiles(session)[0]
         stages = old['stages']
-        stages['ask'] = {'connection': 'correct:codex-local', 'model': 'gpt-6-sol'}
+        stages['ask'] = {'connection': 'correct:codex-local', 'model': 'gpt-6.1-sol'}
         create_profile_version(session, {
             'key': 'codex-ask', 'name': 'Codex Ask', 'is_system_default': True,
             'privacy_policy': 'allow-egress', 'no_egress': False, 'stages': stages,
@@ -1571,7 +1571,7 @@ def test_codex_ask_keeps_scope_provenance_and_quota_guard(
     calls = []
 
     def complete(provider, prompt, **kwargs):
-        assert provider.model == 'gpt-6-sol'
+        assert provider.model == 'gpt-6.1-sol'
         assert 'r1 relevant' in prompt
         if file_id is not None:
             assert 'r2 relevant' not in prompt
@@ -1589,7 +1589,7 @@ def test_codex_ask_keeps_scope_provenance_and_quota_guard(
             assert all(r.status != 'active' for r in session.query(ProviderCostReservation))
     else:
         result = answer('relevant', file_id=file_id)
-        assert result['provenance']['model'] == 'gpt-6-sol'
+        assert result['provenance']['model'] == 'gpt-6.1-sol'
         assert result['provenance']['provider'] == 'codex-local'
         assert any(s['file_id'] == 'r1' and s['start'] == 12.0 for s in result['sources'])
         if file_id:

@@ -135,7 +135,7 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
             for model in list_models(session)
             if model["connection_key"] == "correct:codex-local"
         )
-        assert codex["model_key"] == "gpt-6-sol"
+        assert codex["model_key"] == "gpt-6.1-sol"
         assert codex["capabilities"]["metadata"]["trusted_single_user_only"] is True
         assert [stage["stage"] for stage in codex["capabilities"]["stages"]] == [
             "correct",

@@ -337,7 +337,7 @@ class CodexLocalLlmConfig(BaseModel):
     """Trusted single-user Codex CLI boundary; Codex owns its credentials."""
 
     executable: str = "codex"
-    model: str = "gpt-6-sol"
+    model: str = "gpt-6.1-sol"
     codex_home: str = "~/.localplaud/codex"
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] = "high"
     timeout_seconds: int = Field(default=900, ge=30, le=1800)
