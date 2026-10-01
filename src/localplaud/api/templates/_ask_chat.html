@@ -3,7 +3,7 @@
   {% set scope = thread.retrieval_scope or {} %}
   {% if scope.folder_id or scope.tag_id or scope.origin or scope.speaker_name or scope.file_ids or scope.date_from or scope.date_to %}
   <div class="sf-chat-scope" data-sf-chat-scope>
-    <span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg')"></span>
+    {{ icon('filter') }}
     {% if scope.folder_id %}<span class="sf-chip">{{ t('Folder') }} · {% for item in organization.folders if item.id == scope.folder_id %}{{ item.name }}{% else %}#{{ scope.folder_id }}{% endfor %}</span>{% endif %}
     {% if scope.tag_id %}<span class="sf-chip">{{ t('Tag') }} · {% for item in organization.tags if item.id == scope.tag_id %}{{ item.name }}{% else %}#{{ scope.tag_id }}{% endfor %}</span>{% endif %}
     {% if scope.origin %}<span class="sf-chip">{{ t('Source') }} · {{ scope.origin }}</span>{% endif %}
@@ -19,7 +19,7 @@
     {% elif message.unavailable %}
     <article class="sf-msg-ai sf-msg-error" data-sf-unavailable>
       <div class="sf-error-card" role="alert">
-        <span class="nav-icon" style="--nav-icon:url('/static/lucide/circle-alert.svg')"></span>
+        {{ icon('alert-circle') }}
         <div><strong>{{ t('Ask is unavailable right now') }}</strong><p>{{ t(message.content) }}</p>
         <div class="sf-error-actions"><button type="button" class="btn sec" data-sf-retry="{{ thread.messages[loop.index0 - 1].content if loop.index0 > 0 else '' }}">{{ t('Retry') }}</button><a class="btn sec" href="/settings#connections">{{ t('Open provider settings') }}</a></div></div>
       </div>
@@ -29,9 +29,9 @@
     <article class="sf-msg-ai" data-message-id="{{ message.id or '' }}">
       {% if message.sources %}
       <button type="button" class="sf-trail" data-sf-open-sources aria-label="{{ t('Show sources') }}">
-        <span class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></span>
+        {{ icon('check') }}
         <span>{{ t('Searched the library') }} · {{ summary.recordings }} {{ t('recording' if summary.recordings == 1 else 'recordings') }} · {{ summary.passages }} {{ t('passage' if summary.passages == 1 else 'passages') }}</span>
-        <span class="nav-icon sf-chev" style="--nav-icon:url('/static/icons-sf/chevron-right.svg')"></span>
+        {{ icon('chevron-right', cls='sf-chev') }}
       </button>
       {% endif %}
       <div class="md sf-answer" data-sf-answer>{{ (message.content | markdown) | ask_cite(message.sources|length) }}</div>
@@ -47,20 +47,20 @@
             <div class="sf-source-meta">{% if source.target in ('generated_note', 'saved_note') %}{{ t(source.label or 'Note') }}{% else %}{% if source.start is not none %}{{ source.start | mmss }}{% endif %}{% if source.speaker %} · {{ source.speaker }}{% endif %}{% endif %}</div>
             <p class="sf-source-text">{{ source.text | truncate(320) }}</p>
             {% if source.target in ('generated_note', 'saved_note') %}
-            <a class="sf-source-link" href="{{ source.url or ('/file/' ~ source.file_id) }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span>{{ t('Open note') }}</a>
+            <a class="sf-source-link" href="{{ source.url or ('/file/' ~ source.file_id) }}">{{ icon('note') }}{{ t('Open note') }}</a>
             {% else %}
-            <a class="sf-source-link" href="{{ source.url or ('/file/' ~ source.file_id ~ ('?t=' ~ source.start if source.start is not none else '')) }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/play.svg')"></span>{% if source.start is not none %}{{ t('Play from') }} {{ source.start | mmss }}{% else %}{{ t('Open recording') }}{% endif %}</a>
+            <a class="sf-source-link" href="{{ source.url or ('/file/' ~ source.file_id ~ ('?t=' ~ source.start if source.start is not none else '')) }}">{{ icon('play') }}{% if source.start is not none %}{{ t('Play from') }} {{ source.start | mmss }}{% else %}{{ t('Open recording') }}{% endif %}</a>
             {% endif %}
           </div>
         </div>
         {% endfor %}
       </template>
       <div class="sf-answer-actions">
-        <button type="button" class="sf-icon-btn" data-sf-copy aria-label="{{ t('Copy answer') }}" title="{{ t('Copy answer') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/copy.svg')"></span></button>
-        {% if message.sources %}<button type="button" class="sf-icon-btn" data-sf-open-sources aria-label="{{ t('Show sources') }}" title="{{ t('Show sources') }}"><span class="nav-icon" style="--nav-icon:url('/static/icons-sf/file-text.svg')"></span></button>{% endif %}
-        {% if message.provider or message.model %}<details class="sf-details"><summary class="sf-icon-btn" aria-label="{{ t('Response details') }}" title="{{ t('Response details') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></summary><div class="sf-details-pop">{{ message.provider or t('unknown provider') }}{% if message.model %} · {{ message.model }}{% endif %}{% if message.fallback %} · {{ t('fallback') }} {{ message.fallback.index }}{% endif %}{% if message.estimated_cost_usd %} · {{ t('estimated') }} ${{ '%.4f' | format(message.estimated_cost_usd) }}{% endif %}</div></details>{% endif %}
+        <button type="button" class="sf-icon-btn" data-sf-copy aria-label="{{ t('Copy answer') }}" title="{{ t('Copy answer') }}">{{ icon('copy') }}</button>
+        {% if message.sources %}<button type="button" class="sf-icon-btn" data-sf-open-sources aria-label="{{ t('Show sources') }}" title="{{ t('Show sources') }}">{{ icon('file-text') }}</button>{% endif %}
+        {% if message.provider or message.model %}<details class="sf-details"><summary class="sf-icon-btn" aria-label="{{ t('Response details') }}" title="{{ t('Response details') }}">{{ icon('more') }}</summary><div class="sf-details-pop">{{ message.provider or t('unknown provider') }}{% if message.model %} · {{ message.model }}{% endif %}{% if message.fallback %} · {{ t('fallback') }} {{ message.fallback.index }}{% endif %}{% if message.estimated_cost_usd %} · {{ t('estimated') }} ${{ '%.4f' | format(message.estimated_cost_usd) }}{% endif %}</div></details>{% endif %}
         <span class="sf-spacer"></span>
-        {% if message.id %}<button type="button" class="sf-save-note" data-sf-save-note="{{ message.id }}"><span class="nav-icon" style="--nav-icon:url('/static/icons-sf/bookmark-plus.svg')"></span><span data-sf-save-label>{{ t('Save as note') }}</span></button>{% endif %}
+        {% if message.id %}<button type="button" class="sf-save-note" data-sf-save-note="{{ message.id }}">{{ sf_icon('bookmark-plus') }}<span data-sf-save-label>{{ t('Save as note') }}</span></button>{% endif %}
       </div>
       <div class="sf-save-status" data-sf-save-status role="status" aria-live="polite"></div>
     </article>

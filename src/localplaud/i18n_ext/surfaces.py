@@ -1,10 +1,10 @@
 """Traditional Chinese (Taiwan) strings for the library surfaces.
 
-Merged into the main catalog by ``localplaud.i18n``; entries that already exist
+Merged into the main catalog by ``localplaud.i18n_ext``; entries that already exist
 there take precedence.
 """
 
-SURFACES_ZH_HANT_TW: dict[str, str] = {
+ZH_HANT_TW: dict[str, str] = {
     # --- Ask ---
     "Ask is running in a limited state": "詢問目前功能受限",
     "Answer copied": "已複製回答",

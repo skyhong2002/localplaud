@@ -1118,14 +1118,15 @@ _ZH_HANT_TW = {
     "Transcript position": "逐字稿位置",
 }
 
-# Library surfaces (Ask, Search, Templates, Discover, Settings) keep their strings
-# in a separate module; existing entries above always win.
-from .i18n_surfaces import SURFACES_ZH_HANT_TW  # noqa: E402
+def _with_extensions(locale: str, core: dict[str, str]) -> dict[str, str]:
+    # Area catalogs (localplaud/i18n_ext/*.py) extend the core dictionary; the
+    # core entries win so a stray duplicate cannot silently change copy.
+    from .i18n_ext import extra_catalog
 
-for _key, _value in SURFACES_ZH_HANT_TW.items():
-    _ZH_HANT_TW.setdefault(_key, _value)
+    return extra_catalog(locale) | core
 
-CATALOGS = {"zh-Hant-TW": _ZH_HANT_TW}
+
+CATALOGS = {"zh-Hant-TW": _with_extensions("zh-Hant-TW", _ZH_HANT_TW)}
 
 
 def catalog(locale: str) -> dict[str, str]:

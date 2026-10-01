@@ -6,15 +6,15 @@
   <aside class="sf-ask-rail" id="sf-ask-rail" aria-label="{{ t('Conversations') }}" data-sf-drawer>
     <div class="sf-rail-head">
       <strong>{{ t('Conversations') }}</strong>
-      <button class="sf-icon-btn sf-only-mobile" type="button" data-sf-drawer-close aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
+      <button class="sf-icon-btn sf-only-mobile" type="button" data-sf-drawer-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button>
     </div>
-    <a class="sf-new-chat" href="/ask"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span>{{ t('New conversation') }}</a>
-    <label class="sf-rail-search"><span class="visually-hidden">{{ t('Search conversations…') }}</span><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span><input type="search" data-sf-thread-search placeholder="{{ t('Search conversations…') }}" autocomplete="off"></label>
+    <a class="sf-new-chat" href="/ask">{{ icon('plus') }}{{ t('New conversation') }}</a>
+    <label class="sf-rail-search"><span class="visually-hidden">{{ t('Search conversations…') }}</span>{{ icon('search') }}<input type="search" data-sf-thread-search placeholder="{{ t('Search conversations…') }}" autocomplete="off"></label>
     <nav class="sf-thread-list" data-sf-thread-list aria-label="{{ t('Ask history') }}">
       {% for item in history.threads %}
       <div class="sf-thread-item{% if thread and thread.thread_id == item.thread_id %} on{% endif %}" data-thread-id="{{ item.thread_id }}">
         <a href="/ask?thread={{ item.thread_id }}" {% if thread and thread.thread_id == item.thread_id %}aria-current="page"{% endif %}><span class="sf-thread-title">{{ item.title }}</span><span class="sf-thread-meta">{{ item.question_count }} {{ t('question' if item.question_count == 1 else 'questions') }}{% if item.saved_note_count %} · {{ item.saved_note_count }} {{ t('saved note' if item.saved_note_count == 1 else 'saved notes') }}{% endif %}</span></a>
-        <button class="sf-icon-btn sf-thread-more" type="button" data-sf-thread-menu aria-haspopup="menu" aria-label="{{ t('Conversation actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></button>
+        <button class="sf-icon-btn sf-thread-more" type="button" data-sf-thread-menu aria-haspopup="menu" aria-label="{{ t('Conversation actions') }}">{{ icon('more') }}</button>
       </div>
       {% else %}
       <p class="sf-rail-empty">{{ t('No conversations yet.') }}</p>
@@ -25,15 +25,15 @@
 
   <section class="sf-ask-main" aria-labelledby="sf-ask-title">
     <header class="sf-ask-top">
-      <button class="sf-icon-btn sf-only-mobile" type="button" data-sf-drawer-open aria-controls="sf-ask-rail" aria-expanded="false" aria-label="{{ t('Ask history') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span></button>
+      <button class="sf-icon-btn sf-only-mobile" type="button" data-sf-drawer-open aria-controls="sf-ask-rail" aria-expanded="false" aria-label="{{ t('Ask history') }}">{{ icon('history') }}</button>
       <h1 id="sf-ask-title" class="sf-ask-title">{{ t('Ask localplaud') }}</h1>
       <button class="sf-scope-chip" type="button" data-sf-scope-open aria-haspopup="dialog" {% if thread %}aria-describedby="sf-scope-locked"{% endif %}>
-        <span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg')"></span>
+        {{ icon('filter') }}
         <span data-sf-scope-label>{% if thread and thread.retrieval_scope and (thread.retrieval_scope.folder_id or thread.retrieval_scope.tag_id or thread.retrieval_scope.origin or thread.retrieval_scope.speaker_name or thread.retrieval_scope.file_ids or thread.retrieval_scope.date_from or thread.retrieval_scope.date_to) %}{{ t('Custom scope') }}{% else %}{{ t('All files') }}{% endif %}</span>
-        <span class="nav-icon sf-chev" style="--nav-icon:url('/static/lucide/chevron-down.svg')"></span>
+        {{ icon('chevron-down', cls='sf-chev') }}
       </button>
       {% if thread %}<span id="sf-scope-locked" class="visually-hidden">{{ t('Follow-ups keep this scope.') }}</span>{% endif %}
-      <a class="sf-icon-btn" href="/ask" aria-label="{{ t('New conversation') }}" title="{{ t('New conversation') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></a>
+      <a class="sf-icon-btn" href="/ask" aria-label="{{ t('New conversation') }}" title="{{ t('New conversation') }}">{{ icon('pencil') }}</a>
     </header>
 
     <div class="sf-ask-banner" data-sf-readiness role="status" aria-live="polite" hidden></div>
@@ -57,7 +57,7 @@
         </div>
       </div>
     </div>
-    <button class="sf-scroll-bottom" type="button" data-sf-scroll-bottom aria-label="{{ t('Scroll to latest') }}" hidden><span class="nav-icon" style="--nav-icon:url('/static/lucide/chevron-down.svg')"></span></button>
+    <button class="sf-scroll-bottom" type="button" data-sf-scroll-bottom aria-label="{{ t('Scroll to latest') }}" hidden>{{ icon('chevron-down') }}</button>
 
     <div class="sf-composer-wrap">
       <div class="sf-quick" role="group" aria-label="{{ t('Quick actions') }}">
@@ -69,7 +69,7 @@
         <input type="hidden" name="thread_id" value="{{ thread.thread_id if thread else '' }}" data-sf-thread-field>
         <label class="visually-hidden" for="sf-ask-input">{{ t('Ask anything about your recordings…') }}</label>
         <textarea id="sf-ask-input" name="q" rows="1" maxlength="2000" enterkeyhint="send" placeholder="{{ t('Ask a follow-up…') if thread else t('Ask anything about your recordings…') }}" required>{{ prefill }}</textarea>
-        <button class="sf-send" type="submit" aria-label="{{ t('Ask') }}"><span class="nav-icon" style="--nav-icon:url('/static/icons-sf/arrow-up.svg')"></span></button>
+        <button class="sf-send" type="submit" aria-label="{{ t('Ask') }}">{{ icon('arrow-up') }}</button>
       </form>
       <div class="sf-composer-status" data-sf-status role="status" aria-live="polite"></div>
     </div>
@@ -77,14 +77,14 @@
 
   <aside class="sf-sources" data-sf-sources role="dialog" aria-modal="false" aria-labelledby="sf-sources-title" hidden>
     <div class="sf-sheet-grab" aria-hidden="true"></div>
-    <div class="sf-sources-head"><h2 id="sf-sources-title">{{ t('Sources') }}</h2><button class="sf-icon-btn" type="button" data-sf-sources-close aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="sf-sources-head"><h2 id="sf-sources-title">{{ t('Sources') }}</h2><button class="sf-icon-btn" type="button" data-sf-sources-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
     <div class="sf-sources-body" data-sf-sources-body></div>
   </aside>
   <button class="sf-sheet-scrim" type="button" data-sf-sources-close aria-label="{{ t('Close') }}" hidden></button>
 
   <dialog class="sf-dialog sf-scope-dialog" data-sf-scope-dialog aria-labelledby="sf-scope-title">
     <div class="sf-sheet-grab" aria-hidden="true"></div>
-    <div class="sf-dialog-head"><h2 id="sf-scope-title">{{ t('Scope') }}</h2><button class="sf-icon-btn" type="button" data-sf-dialog-close aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="sf-dialog-head"><h2 id="sf-scope-title">{{ t('Scope') }}</h2><button class="sf-icon-btn" type="button" data-sf-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
     {% if thread %}
     <div class="sf-dialog-body">
       <p class="sf-muted">{{ t('Follow-ups keep this scope.') }} {{ t('Start a new conversation to ask with a different scope.') }}</p>
@@ -136,8 +136,8 @@
   </dialog>
 
   <div class="sf-menu" data-sf-thread-popover role="menu" hidden>
-    <button type="button" role="menuitem" data-sf-thread-rename><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span>{{ t('Rename') }}</button>
-    <button type="button" role="menuitem" class="sf-danger" data-sf-thread-delete><span class="nav-icon" style="--nav-icon:url('/static/lucide/trash-2.svg')"></span>{{ t('Delete') }}</button>
+    <button type="button" role="menuitem" data-sf-thread-rename>{{ icon('pencil') }}{{ t('Rename') }}</button>
+    <button type="button" role="menuitem" class="sf-danger" data-sf-thread-delete>{{ icon('trash') }}{{ t('Delete') }}</button>
   </div>
 </div>
 <script src="/static/js/surfaces.js"></script>

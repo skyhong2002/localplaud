@@ -117,7 +117,53 @@ def source_summary(sources: list[dict] | None) -> dict:
     return {"passages": len(sources), "recordings": len(recordings)}
 
 
+# Sprite icon name -> static SVG used when the shared sprite helper (``icon``,
+# registered by the shell's ``ui.register``) is not installed. The shell's helper
+# always wins: ``install`` only fills a missing global.
+_FALLBACK_ICONS = {
+    "search": "lucide/search", "x": "lucide/x", "plus": "lucide/plus",
+    "pencil": "lucide/pencil", "trash": "lucide/trash-2", "more": "lucide/ellipsis",
+    "history": "lucide/history", "filter": "lucide/list-filter", "sliders": "icons-sf/sliders",
+    "chevron-down": "lucide/chevron-down", "chevron-left": "icons-sf/chevron-left",
+    "chevron-right": "icons-sf/chevron-right", "arrow-up": "icons-sf/arrow-up",
+    "sparkles": "lucide/sparkles", "check": "lucide/check", "copy": "lucide/copy",
+    "file-text": "icons-sf/file-text", "play": "lucide/play", "note": "lucide/sticky-note",
+    "alert-circle": "lucide/circle-alert", "alert": "lucide/triangle-alert",
+    "waveform": "lucide/audio-lines", "mic": "icons-sf/mic", "user": "icons-sf/user",
+    "template": "lucide/layout-template", "compass": "lucide/compass", "bell": "lucide/bell",
+    "settings": "lucide/settings", "activity": "lucide/activity", "cloud": "lucide/cloud",
+    "folder": "lucide/folder", "tag": "icons-sf/tag", "clock": "icons-sf/clock",
+    "external-link": "icons-sf/external-link", "link": "lucide/link", "zap": "lucide/sparkles",
+    "download": "lucide/download", "upload": "lucide/upload", "files": "lucide/files",
+    "drive": "lucide/hard-drive", "refresh": "lucide/rotate-cw", "star": "lucide/sparkles",
+    "info": "lucide/circle-alert", "users": "icons-sf/user", "eye": "icons-sf/eye-off",
+    "monitor": "icons-sf/cpu", "keyboard": "icons-sf/sliders", "send": "icons-sf/arrow-up",
+}
+
+
+def fallback_icon(name: str, size: str | None = None, label: str | None = None, cls: str = "") -> Markup:
+    path = _FALLBACK_ICONS.get(name, "lucide/sparkles")
+    size_class = {"xs": "i-xs", "sm": "i-sm", "lg": "i-lg"}.get(size or "", "")
+    a11y = f'role="img" aria-label="{escape(label)}"' if label else 'aria-hidden="true"'
+    return Markup(
+        f'<span class="nav-icon i {size_class} {escape(cls)}" {a11y} '
+        f"style=\"--nav-icon:url('/static/{path}.svg')\"></span>"
+    )
+
+
+def sf_icon(name: str, size: str | None = None) -> Markup:
+    """Icons not in the shared sprite (lock, shield, plug, ...), from static/icons-sf."""
+    size_class = {"xs": "i-xs", "sm": "i-sm", "lg": "i-lg"}.get(size or "", "")
+    safe = re.sub(r"[^a-z0-9-]", "", name)
+    return Markup(
+        f'<span class="nav-icon i {size_class}" aria-hidden="true" '
+        f"style=\"--nav-icon:url('/static/icons-sf/{safe}.svg')\"></span>"
+    )
+
+
 def install(templates) -> None:
+    templates.env.globals.setdefault("icon", fallback_icon)
+    templates.env.globals["sf_icon"] = sf_icon
     templates.env.filters["ask_cite"] = ask_cite
     templates.env.filters["highlight"] = highlight
     templates.env.filters["source_summary"] = source_summary

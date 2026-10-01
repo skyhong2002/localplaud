@@ -15,7 +15,33 @@
   const initialisers = {};
   let pageController = null;
 
-  function toast(message, { link = null, timeout = 4200 } = {}) {
+  /* Icons: the shell's inline sprite (<symbol id="i-NAME">) when present, else static SVG masks. */
+  const ICON_FALLBACK = {
+    'alert-circle': 'lucide/circle-alert', alert: 'lucide/triangle-alert', more: 'lucide/ellipsis',
+    search: 'lucide/search', x: 'lucide/x', trash: 'lucide/trash-2', waveform: 'lucide/audio-lines',
+    sparkles: 'lucide/sparkles', play: 'lucide/play', 'file-text': 'icons-sf/file-text',
+    'chevron-right': 'icons-sf/chevron-right', check: 'lucide/check',
+  };
+  function iconNode(name) {
+    if (document.getElementById(`i-${name}`)) {
+      const ns = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(ns, 'svg');
+      svg.setAttribute('class', 'i'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+      const use = document.createElementNS(ns, 'use'); use.setAttribute('href', `#i-${name}`);
+      svg.append(use);
+      return svg;
+    }
+    const span = document.createElement('span');
+    span.className = 'nav-icon i'; span.setAttribute('aria-hidden', 'true');
+    span.style.setProperty('--nav-icon', `url('/static/${ICON_FALLBACK[name] || 'lucide/sparkles'}.svg')`);
+    return span;
+  }
+  const iconHtml = (name) => iconNode(name).outerHTML;
+
+  function toast(message, { link = null, timeout = 4200, type = 'info' } = {}) {
+    if (window.lp?.toast) {
+      return window.lp.toast(message, { type, timeout, action: link ? { label: link.label, onClick: () => { location.href = link.href; } } : undefined });
+    }
     document.querySelector('.sf-toast')?.remove();
     const node = document.createElement('div');
     node.className = 'sf-toast';
@@ -183,9 +209,7 @@
       const card = document.createElement('div');
       card.className = 'sf-error-card';
       card.setAttribute('role', 'alert');
-      const icon = document.createElement('span');
-      icon.className = 'nav-icon';
-      icon.style.setProperty('--nav-icon', "url('/static/lucide/circle-alert.svg')");
+      const icon = iconNode('alert-circle');
       const body = document.createElement('div');
       const title = document.createElement('strong');
       title.textContent = tr('Could not get an answer');
@@ -442,7 +466,7 @@
       const more = document.createElement('button');
       more.type = 'button'; more.className = 'sf-icon-btn sf-thread-more'; more.dataset.sfThreadMenu = '';
       more.setAttribute('aria-haspopup', 'menu'); more.setAttribute('aria-label', tr('Conversation actions'));
-      const glyph = document.createElement('span'); glyph.className = 'nav-icon'; glyph.style.setProperty('--nav-icon', "url('/static/lucide/ellipsis.svg')");
+      const glyph = iconNode('more');
       more.append(glyph);
       row.append(link, more);
       if (item.thread_id === root.dataset.threadId) { row.classList.add('on'); link.setAttribute('aria-current', 'page'); }
@@ -587,7 +611,7 @@
         if (!data.llm.ok) messages.push(`${tr('No language model is reachable for Ask')}${data.llm.provider ? ` (${data.llm.provider})` : ''}${data.llm.detail ? ` — ${data.llm.detail}` : ''}. ${tr('Answers will show as unavailable until a provider is configured.')}`);
         if (!data.indexed_recordings) messages.push(tr('No recordings are indexed yet. Ask can answer once processing has built the search index.'));
         if (!messages.length) return;
-        const icon = document.createElement('span'); icon.className = 'nav-icon'; icon.style.setProperty('--nav-icon', "url('/static/lucide/triangle-alert.svg')");
+        const icon = iconNode('alert');
         const text = document.createElement('div');
         const title = document.createElement('strong'); title.textContent = tr('Ask is running in a limited state');
         const detail = document.createElement('div'); detail.className = 'sf-banner-detail'; detail.textContent = messages.join(' ');
@@ -720,7 +744,7 @@
     dialog.setAttribute('aria-label', tr('Search'));
     dialog.innerHTML = `
       <div class="sf-palette-top">
-        <label class="sf-search-field"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>
+        <label class="sf-search-field">${iconHtml('search')}
           <input type="search" autocomplete="off" enterkeyhint="search" role="combobox" aria-expanded="true" aria-controls="sf-palette-list" aria-autocomplete="list"></label>
         <button class="sf-icon-btn" type="button" data-sf-palette-close></button>
       </div>
@@ -731,7 +755,7 @@
     input.setAttribute('aria-label', tr('Search'));
     const close = $(dialog, '[data-sf-palette-close]');
     close.setAttribute('aria-label', tr('Close'));
-    close.innerHTML = '<span class="nav-icon" style="--nav-icon:url(\'/static/lucide/x.svg\')"></span>';
+    close.innerHTML = iconHtml('x');
     const hints = $$(dialog, '.sf-palette-foot em');
     hints[0].textContent = tr('to move'); hints[1].textContent = tr('to open'); hints[2].textContent = tr('to close');
     const advanced = $(dialog, '.sf-palette-foot a');
@@ -742,7 +766,7 @@
     const row = ({ href, icon, title, snippet, meta = [], query = '' }) => {
       const link = document.createElement('a');
       link.className = 'sf-palette-row'; link.href = href; link.setAttribute('role', 'option');
-      link.innerHTML = `<span class="nav-icon" style="--nav-icon:url('${icon}')"></span><span class="sf-row-main"><span class="sf-row-title">${highlightText(title, query)}</span>${snippet ? `<span class="sf-row-snippet">${highlightText(snippet, query)}</span>` : ''}</span><span class="sf-row-meta">${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</span>`;
+      link.innerHTML = `${iconHtml(icon)}<span class="sf-row-main"><span class="sf-row-title">${highlightText(title, query)}</span>${snippet ? `<span class="sf-row-snippet">${highlightText(snippet, query)}</span>` : ''}</span><span class="sf-row-meta">${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</span>`;
       link.addEventListener('click', () => { rememberSearch(query); dialog.close(); });
       return link;
     };
@@ -755,7 +779,7 @@
         const head = caption(tr('Search history'));
         const clearButton = document.createElement('button');
         clearButton.type = 'button'; clearButton.className = 'sf-icon-btn'; clearButton.setAttribute('aria-label', tr('Clear search history'));
-        clearButton.innerHTML = '<span class="nav-icon" style="--nav-icon:url(\'/static/lucide/trash-2.svg\')"></span>';
+        clearButton.innerHTML = iconHtml('trash');
         clearButton.addEventListener('click', () => { writeRecent([]); renderEmpty(); input.focus(); });
         head.append(clearButton);
         const chips = document.createElement('div'); chips.className = 'sf-palette-chips';
@@ -766,7 +790,7 @@
         const data = await requestJson('/api/files/picker?limit=6', {}, 'Could not load recordings');
         if (input.value.trim() || !data.recordings.length) return;
         body.append(caption(tr('Recent recordings')));
-        data.recordings.forEach((item) => body.append(row({ href: `/file/${encodeURIComponent(item.id)}`, icon: '/static/lucide/audio-lines.svg', title: item.title, meta: [item.recorded_at ? formatWhen(Date.parse(item.recorded_at)) : ''] })));
+        data.recordings.forEach((item) => body.append(row({ href: `/file/${encodeURIComponent(item.id)}`, icon: 'waveform', title: item.title, meta: [item.recorded_at ? formatWhen(Date.parse(item.recorded_at)) : ''] })));
       } catch (_error) { /* recent list is optional */ }
     }
 
@@ -781,14 +805,14 @@
         try {
           const data = await requestJson(`/api/search?limit=8&q=${encodeURIComponent(value)}`, { signal: controller.signal }, 'Search failed');
           body.replaceChildren(caption(tr('Ask localplaud')));
-          body.append(row({ href: `/ask?q=${encodeURIComponent(value)}&send=1`, icon: '/static/lucide/sparkles.svg', title: `${tr('Search all sources for')} “${value}” ${tr('with Ask')}`, query: '' }));
+          body.append(row({ href: `/ask?q=${encodeURIComponent(value)}&send=1`, icon: 'sparkles', title: `${tr('Search all sources for')} “${value}” ${tr('with Ask')}`, query: '' }));
           body.append(caption(tr('Best matches')));
           if (!data.results.length) {
             const empty = document.createElement('div'); empty.className = 'sf-palette-empty'; empty.textContent = `${tr('No matches for')} “${value}”`; body.append(empty);
           }
           data.results.forEach((item) => {
             const stamp = item.start != null ? `${Math.floor(item.start / 60)}:${String(Math.floor(item.start % 60)).padStart(2, '0')} · ` : '';
-            body.append(row({ href: item.href, icon: item.start != null ? '/static/lucide/play.svg' : '/static/icons-sf/file-text.svg', title: item.title, snippet: item.snippet ? `${stamp}${item.speaker ? `${item.speaker}: ` : ''}${item.snippet}` : '', meta: [formatWhen(item.start_time_ms), item.kind], query: value }));
+            body.append(row({ href: item.href, icon: item.start != null ? 'play' : 'file-text', title: item.title, snippet: item.snippet ? `${stamp}${item.speaker ? `${item.speaker}: ` : ''}${item.snippet}` : '', meta: [formatWhen(item.start_time_ms), item.kind], query: value }));
           });
           const first = $(body, '.sf-palette-row'); first?.classList.add('sf-active');
         } catch (error) {

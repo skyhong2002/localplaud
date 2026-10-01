@@ -8,14 +8,14 @@
 <form method="get" action="/search" class="sf-search-form" role="search" data-sf-search-form
       hx-get="/search" hx-trigger="input changed delay:300ms from:#sf-search-q, change, submit" hx-target="#sf-search-results" hx-select="#sf-search-results" hx-swap="outerHTML" hx-push-url="true" hx-sync="this:replace">
   <div class="sf-search-bar">
-    <a class="sf-icon-btn sf-only-mobile" href="/home" data-sf-back aria-label="{{ t('Back') }}"><span class="nav-icon" style="--nav-icon:url('/static/icons-sf/chevron-left.svg')"></span></a>
+    <a class="sf-icon-btn sf-only-mobile" href="/home" data-sf-back aria-label="{{ t('Back') }}">{{ icon('chevron-left') }}</a>
     <label class="sf-search-field">
-      <span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>
+      {{ icon('search') }}
       <span class="visually-hidden">{{ t('Search titles, transcripts, and notes…') }}</span>
       <input id="sf-search-q" class="search-input" type="search" name="q" value="{{ q }}" autofocus enterkeyhint="search" autocomplete="off" placeholder="{{ t('Search titles, transcripts, and notes…') }}" data-sf-search-input>
-      <button class="sf-search-clear" type="button" data-sf-search-clear aria-label="{{ t('Clear search') }}" {% if not q %}hidden{% endif %}><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
+      <button class="sf-search-clear" type="button" data-sf-search-clear aria-label="{{ t('Clear search') }}" {% if not q %}hidden{% endif %}>{{ icon('x') }}</button>
     </label>
-    <button class="sf-filter-toggle{% if filter_count %} on{% endif %}" type="button" data-sf-filter-toggle aria-expanded="{{ 'true' if filter_count or search_filters.invalid_date_filter or search_filters.invalid_date_range else 'false' }}" aria-controls="sf-search-filters" aria-label="{{ t('Filters') }}"><span class="nav-icon" style="--nav-icon:url('/static/icons-sf/sliders.svg')"></span><span class="sf-filter-label">{{ t('Filters') }}</span>{% if filter_count %}<span class="sf-filter-count">{{ filter_count }}</span>{% endif %}</button>
+    <button class="sf-filter-toggle{% if filter_count %} on{% endif %}" type="button" data-sf-filter-toggle aria-expanded="{{ 'true' if filter_count or search_filters.invalid_date_filter or search_filters.invalid_date_range else 'false' }}" aria-controls="sf-search-filters" aria-label="{{ t('Filters') }}">{{ icon('sliders') }}<span class="sf-filter-label">{{ t('Filters') }}</span>{% if filter_count %}<span class="sf-filter-count">{{ filter_count }}</span>{% endif %}</button>
     <button class="btn sf-search-submit" type="submit">{{ t('Search') }}</button>
   </div>
   <div class="sf-search-filters" id="sf-search-filters" {% if not (filter_count or search_filters.invalid_date_filter or search_filters.invalid_date_range) %}hidden{% endif %}>
@@ -32,14 +32,14 @@
 {% if search_filters.invalid_date_filter %}<div class="range-error" role="alert">{{ t('Enter a valid recorded date in the supported range.') }}</div>{% elif search_filters.invalid_date_range %}<div class="range-error" role="alert">{{ t('Start date must not follow end date.') }}</div>{% endif %}
 {% if q %}
 <a class="sf-search-ask" href="/ask?q={{ q|urlencode }}&amp;send=1" data-sf-result>
-  <span class="sf-search-ask-icon" aria-hidden="true"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span></span>
+  <span class="sf-search-ask-icon" aria-hidden="true">{{ icon('sparkles') }}</span>
   <span class="sf-search-ask-text">{{ t('Ask the library') }}: “{{ q }}”<small>{{ t('Get a grounded answer with cited moments') }}</small></span>
-  <span class="nav-icon sf-chev" style="--nav-icon:url('/static/icons-sf/arrow-right.svg')"></span>
+  {{ icon('chevron-right', cls='sf-chev') }}
 </a>
 {% endif %}
 {% if q and not groups %}
 <div class="empty generate-empty">
-  <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>
+  {{ icon('search', cls='empty-icon') }}
   <strong class="empty-title">{{ t('No matches for') }} “{{ q }}”</strong>
   <span class="sub empty-sub">{{ t('No title, transcript, or note matches within these filters.') }}</span>
   <div class="search-empty-actions">
@@ -72,7 +72,7 @@
     </a>
     {% else %}
     <a class="search-hit" data-hit-kind="content" href="/file/{{ g.file_id }}{% if h.target == 'generated_note' %}?tab=notes&amp;note=sum-{{ h.artifact_id }}{% elif h.target == 'saved_note' %}?tab=notes&amp;note_id={{ h.artifact_id }}{% elif h.target == 'mind_map' %}?tab=mindmap{% elif h.start is not none %}?t={{ h.start }}{% endif %}" data-sf-result>
-      <span class="search-hit-ts">{% if h.start is not none %}<span class="sf-ts-pill"><span class="nav-icon" style="--nav-icon:url('/static/lucide/play.svg')"></span>{{ h.start | mmss }}</span>{% else %}<span class="search-kind">{{ t('Related' if h.kind == 'semantic' else {'generated_note':'Note','saved_note':'Saved note','mind_map':'Mind map','transcript':'Transcript'}.get(h.target, 'Note')) }}</span>{% endif %}</span>
+      <span class="search-hit-ts">{% if h.start is not none %}<span class="sf-ts-pill">{{ icon('play') }}{{ h.start | mmss }}</span>{% else %}<span class="search-kind">{{ t('Related' if h.kind == 'semantic' else {'generated_note':'Note','saved_note':'Saved note','mind_map':'Mind map','transcript':'Transcript'}.get(h.target, 'Note')) }}</span>{% endif %}</span>
       <span class="search-hit-text">{% if h.speaker %}<span class="search-hit-speaker">{{ h.speaker }}</span> {% endif %}{{ h.text | highlight(q, 220) }}{% if h.start is not none and h.kind == 'semantic' %} <span class="search-kind">{{ t('Related') }}</span>{% endif %}</span>
     </a>
     {% endif %}
@@ -84,11 +84,11 @@
 <p class="sf-search-keys sub" aria-hidden="true"><kbd>↑</kbd><kbd>↓</kbd> {{ t('to move') }} · <kbd>Enter</kbd> {{ t('to open') }} · <kbd>/</kbd> {{ t('to search') }}</p>
 {% else %}
 <section class="sf-recent" data-sf-recent hidden aria-labelledby="sf-recent-title">
-  <div class="sf-recent-head"><h2 id="sf-recent-title">{{ t('Search history') }}</h2><button class="sf-icon-btn" type="button" data-sf-recent-clear aria-label="{{ t('Clear search history') }}" title="{{ t('Clear search history') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/trash-2.svg')"></span></button></div>
+  <div class="sf-recent-head"><h2 id="sf-recent-title">{{ t('Search history') }}</h2><button class="sf-icon-btn" type="button" data-sf-recent-clear aria-label="{{ t('Clear search history') }}" title="{{ t('Clear search history') }}">{{ icon('trash') }}</button></div>
   <div class="sf-recent-list" data-sf-recent-list></div>
 </section>
 <div class="empty generate-empty">
-  <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>
+  {{ icon('search', cls='empty-icon') }}
   <strong class="empty-title">{{ t('Search your whole library') }}</strong>
   <span class="sub empty-sub">{{ t('Titles, the corrected transcript, generated notes, and saved notes — all searched on this workspace.') }}</span>
   <div class="search-empty-actions">
