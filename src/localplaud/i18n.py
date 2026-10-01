@@ -1118,6 +1118,13 @@ _ZH_HANT_TW = {
     "Transcript position": "逐字稿位置",
 }
 
+# Library surfaces (Ask, Search, Templates, Discover, Settings) keep their strings
+# in a separate module; existing entries above always win.
+from .i18n_surfaces import SURFACES_ZH_HANT_TW  # noqa: E402
+
+for _key, _value in SURFACES_ZH_HANT_TW.items():
+    _ZH_HANT_TW.setdefault(_key, _value)
+
 CATALOGS = {"zh-Hant-TW": _ZH_HANT_TW}
 
 

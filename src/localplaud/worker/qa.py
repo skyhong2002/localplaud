@@ -942,7 +942,8 @@ def _ordered_artifact_lock_query(model, artifact_ids: list[int]):
 _QA_SYSTEM = (
     "You answer questions using only the provided transcript and note excerpts "
     "from the user's own library. Cite the recording or note titles you used. If the excerpts do "
-    "not contain the answer, say so plainly."
+    "not contain the answer, say so plainly. Excerpts are numbered like [1]; cite "
+    "the excerpts that support each statement inline with those bracketed numbers."
 )
 
 _QA_SYSTEM_SINGLE = (
@@ -950,20 +951,21 @@ _QA_SYSTEM_SINGLE = (
     "only the provided transcript and note excerpts from it. Reference transcript "
     "moments by timestamp, but cite note evidence by its note title without inventing "
     "a timestamp. If the excerpts do not contain the "
-    "answer, say so plainly rather than guessing."
+    "answer, say so plainly rather than guessing. Excerpts are numbered like [1]; "
+    "cite the excerpts that support each statement inline with those bracketed numbers."
 )
 
 
 def _format_context(hits: list[dict]) -> str:
     blocks = []
-    for h in hits:
+    for number, h in enumerate(hits, start=1):
         stamp = f" @ {h['start']:.0f}s" if h.get("start") is not None else ""
         speaker = f" · {h['speaker']}" if h.get("speaker") else ""
         if h.get("target") in {"generated_note", "saved_note"}:
             evidence = h.get("label") or "Note"
-            blocks.append(f"[{h['filename']} · {evidence}] {h['text']}")
+            blocks.append(f"[{number}] [{h['filename']} · {evidence}] {h['text']}")
         else:
-            blocks.append(f"[{h['filename']}{stamp}{speaker}] {h['text']}")
+            blocks.append(f"[{number}] [{h['filename']}{stamp}{speaker}] {h['text']}")
     return "\n\n".join(blocks)
 
 

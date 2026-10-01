@@ -3744,6 +3744,21 @@ def _ask_fragment_context(request: Request, thread: dict, file_id: str | None, t
     return context | {"thread": thread, "file_id": file_id, "target": target}
 
 
+def _library_ask_response(request: Request, thread: dict, ui: str | None):
+    """Render a library Ask thread for the legacy panel or the chat page (ui=chat)."""
+    if ui == "chat":
+        return templates.TemplateResponse(
+            request=request,
+            name="_ask_chat.html",
+            context=_ask_fragment_context(request, thread, None, "sf-thread"),
+        )
+    return templates.TemplateResponse(
+        request=request,
+        name="_ask_thread.html",
+        context=_ask_fragment_context(request, thread, None, "answer"),
+    )
+
+
 @app.post("/ask", response_class=HTMLResponse)
 def ask(
     request: Request,
@@ -3756,6 +3771,7 @@ def ask(
     ask_date_from: str | None = Form(None),
     ask_date_to: str | None = Form(None),
     ask_file_ids: Annotated[list[str] | None, Form()] = None,
+    ui: str | None = Form(None),
 ):
     from ..ask_threads import ask_in_thread, get_thread
 
@@ -3794,11 +3810,7 @@ def ask(
             thread_id,
             retrieval_scope=fallback_scope,
         )
-    return templates.TemplateResponse(
-        request=request,
-        name="_ask_thread.html",
-        context=_ask_fragment_context(request, thread, None, "answer"),
-    )
+    return _library_ask_response(request, thread, ui)
 
 
 @app.post("/file/{file_id}/ask", response_class=HTMLResponse)
@@ -3849,6 +3861,7 @@ def library_ask_skill(
     ask_date_from: str | None = Form(None),
     ask_date_to: str | None = Form(None),
     ask_file_ids: Annotated[list[str] | None, Form()] = None,
+    ui: str | None = Form(None),
 ):
     """Run a read-only skill through whole-library grounded Ask."""
     try:
@@ -3886,11 +3899,7 @@ def library_ask_skill(
             None,
             retrieval_scope=normalize_library_scope(retrieval_scope),
         )
-    return templates.TemplateResponse(
-        request=request,
-        name="_ask_thread.html",
-        context=_ask_fragment_context(request, thread, None, "answer"),
-    )
+    return _library_ask_response(request, thread, ui)
 
 
 @app.post("/file/{file_id}/ask/skill", response_class=HTMLResponse)
@@ -3942,6 +3951,7 @@ def _unavailable_ask_thread(
                 "content": "Ask is unavailable right now — the embeddings or language "
                 "model provider could not be reached. Check Settings and try again.",
                 "sources": [],
+                "unavailable": True,
             },
         ],
     }
@@ -4919,3 +4929,12 @@ def restore_summary_version_route(
     # Land back on the note output that was just restored, not the first one.
     note_param = f"&note=sum-{summary_id}" if safe_tab == "notes" else ""
     return RedirectResponse(f"/file/{file_id}?tab={safe_tab}{note_param}", status_code=303)
+
+
+# Library surfaces (whole-library Ask page, search helpers). Included last so
+# their routes never shadow the established pages above.
+from .surfaces import install as _install_surface_helpers  # noqa: E402
+from .surfaces import router as surfaces_router  # noqa: E402
+
+_install_surface_helpers(templates)
+app.include_router(surfaces_router)
