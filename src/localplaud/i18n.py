@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from .i18n_workspace import WORKSPACE_ZH_HANT_TW
+
 SUPPORTED_LOCALES = {"en": "English", "zh-Hant-TW": "繁體中文（台灣）"}
 
 _ZH_HANT_TW = {
@@ -1117,6 +1119,8 @@ _ZH_HANT_TW = {
     "Plaud imports": "Plaud 匯入內容",
     "Transcript position": "逐字稿位置",
 }
+
+_ZH_HANT_TW.update(WORKSPACE_ZH_HANT_TW)
 
 CATALOGS = {"zh-Hant-TW": _ZH_HANT_TW}
 
