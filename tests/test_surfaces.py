@@ -200,3 +200,77 @@ def test_surfaces_script_strings_are_translated():
     ))
     missing = sorted(keys - catalog("zh-Hant-TW").keys())
     assert missing == []
+
+
+# --------------------------------------------------------------------------- #
+# Search
+# --------------------------------------------------------------------------- #
+
+
+def _seed_transcript():
+    from localplaud.db.models import FileStatus, PlaudFile, Transcript
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="r3",
+                filename="Roadmap review",
+                status=FileStatus.done,
+                start_time_ms=1_790_000_000_000,
+                duration_ms=60_000,
+            )
+        )
+        session.flush()
+        session.add(
+            Transcript(
+                file_id="r3",
+                provider="test",
+                source="local",
+                text="We will ship the <roadmap> in Q4",
+                segments=[
+                    {"text": "We will ship the <roadmap> in Q4", "start": 7.5, "end": 9.0}
+                ],
+            )
+        )
+
+
+def test_search_page_highlights_hits_and_hands_query_to_ask(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_transcript()
+    monkeypatch.setattr("localplaud.worker.qa.retrieve", lambda *args, **kwargs: [])
+    page = client.get("/search", params={"q": "roadmap"})
+    assert page.status_code == 200
+    html = page.text
+    assert 'data-surface="search"' in html
+    assert 'hx-get="/search"' in html and 'hx-select="#sf-search-results"' in html
+    assert 'href="/ask?q=roadmap&amp;send=1"' in html
+    assert "<mark>Roadmap</mark> review" in html
+    # Transcript text is escaped before highlighting.
+    assert "&lt;<mark>roadmap</mark>&gt;" in html
+    assert 'href="/file/r3?t=7.5"' in html
+    for kind in ("all", "files", "content"):
+        assert f'name="sf_kind" value="{kind}"' in html
+    empty = client.get("/search")
+    assert "data-sf-recent" in empty.text and 'href="/ask"' in empty.text
+
+
+def test_search_api_returns_flat_best_matches_without_semantic_by_default(
+    monkeypatch, tmp_path
+):
+    client = _client(monkeypatch, tmp_path)
+    _seed_transcript()
+    calls = []
+    monkeypatch.setattr(
+        "localplaud.worker.qa.retrieve", lambda *args, **kwargs: calls.append(kwargs) or []
+    )
+    data = client.get("/api/search", params={"q": "roadmap"}).json()
+    assert calls == []
+    first = data["results"][0]
+    assert first["file_id"] == "r3"
+    assert first["href"] == "/file/r3?t=7.5"
+    assert first["kind"] == "Transcript"
+    assert "<roadmap>" in first["snippet"]
+    client.get("/api/search", params={"q": "roadmap", "semantic": "true"})
+    assert len(calls) == 1
+    assert client.get("/api/search").json()["results"] == []

@@ -609,6 +609,242 @@
     if (threadField.value) requestAnimationFrame(scrollToEnd);
   };
 
+  /* ============================ SEARCH ============================ */
+  const RECENT_KEY = 'localplaud:recent-searches';
+  const readRecent = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((item) => typeof item === 'string'); } catch (_error) { return []; } };
+  const writeRecent = (items) => { try { localStorage.setItem(RECENT_KEY, JSON.stringify(items.slice(0, 8))); } catch (_error) { /* storage disabled */ } };
+  function rememberSearch(query) {
+    const value = (query || '').trim();
+    if (!value) return;
+    writeRecent([value, ...readRecent().filter((item) => item.toLowerCase() !== value.toLowerCase())]);
+  }
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  }
+  function highlightText(text, query) {
+    const escaped = escapeHtml(text);
+    const terms = (query || '').trim().split(/\s+/).filter(Boolean).slice(0, 8).map(escapeHtml)
+      .sort((a, b) => b.length - a.length).map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    if (!terms.length) return escaped;
+    return escaped.replace(new RegExp(terms.join('|'), 'gi'), (match) => `<mark>${match}</mark>`);
+  }
+  function formatWhen(ms) {
+    if (!ms) return '';
+    const date = new Date(ms), pad = (value) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+  function moveActive(items, delta) {
+    const visible = items.filter((item) => item.offsetParent !== null);
+    if (!visible.length) return null;
+    const current = visible.findIndex((item) => item.classList.contains('sf-active') || item === document.activeElement);
+    const next = visible[current === -1 ? (delta > 0 ? 0 : visible.length - 1) : Math.max(0, Math.min(visible.length - 1, current + delta))];
+    items.forEach((item) => item.classList.remove('sf-active'));
+    next.classList.add('sf-active');
+    return next;
+  }
+
+  initialisers.search = (root, signal) => {
+    document.documentElement.classList.add('js-sf');
+    const form = $(root, '[data-sf-search-form]');
+    const input = $(root, '[data-sf-search-input]');
+    const clear = $(root, '[data-sf-search-clear]');
+    const toggle = $(root, '[data-sf-filter-toggle]');
+    const filters = $(root, '#sf-search-filters');
+    const preset = $(root, '[data-sf-date-preset]');
+    const range = $(root, '[data-sf-date-range]');
+    const syncRange = () => { range.hidden = preset.value !== 'custom'; };
+    syncRange();
+
+    toggle.addEventListener('click', () => {
+      const open = filters.hidden;
+      filters.hidden = !open; toggle.setAttribute('aria-expanded', String(open));
+      if (open) $(filters, 'select')?.focus();
+    }, { signal });
+    input.addEventListener('input', () => { clear.hidden = !input.value; }, { signal });
+    clear.addEventListener('click', () => { input.value = ''; clear.hidden = true; input.focus(); input.dispatchEvent(new Event('input', { bubbles: true })); }, { signal });
+    preset.addEventListener('change', (event) => {
+      event.stopPropagation();
+      const from = $(range, '[name="date_from"]'), to = $(range, '[name="date_to"]');
+      const day = (offset) => { const date = new Date(); date.setDate(date.getDate() - offset); return date.toISOString().slice(0, 10); };
+      if (preset.value === 'today') { from.value = day(0); to.value = day(0); }
+      else if (preset.value === '7') { from.value = day(6); to.value = day(0); }
+      else if (preset.value === '30') { from.value = day(29); to.value = day(0); }
+      else if (preset.value === '') { from.value = ''; to.value = ''; }
+      syncRange();
+      if (preset.value !== 'custom') from.dispatchEvent(new Event('change', { bubbles: true }));
+    }, { signal });
+    $(root, '[data-sf-back]')?.addEventListener('click', (event) => {
+      if (document.referrer && new URL(document.referrer).origin === location.origin && history.length > 1) { event.preventDefault(); history.back(); }
+    }, { signal });
+
+    const renderRecent = () => {
+      const results = $(root, '[data-sf-search-results]');
+      if (!results) return;
+      if (results.dataset.query) { rememberSearch(results.dataset.query); return; }
+      const section = $(results, '[data-sf-recent]'), list = $(results, '[data-sf-recent-list]');
+      if (!section) return;
+      const items = readRecent();
+      list.replaceChildren(...items.map((item) => {
+        const link = document.createElement('a'); link.href = `/search?q=${encodeURIComponent(item)}`; link.textContent = item; link.dataset.sfResult = ''; return link;
+      }));
+      section.hidden = !items.length;
+    };
+    renderRecent();
+    root.addEventListener('click', (event) => {
+      if (event.target.closest('[data-sf-recent-clear]')) { writeRecent([]); renderRecent(); }
+    }, { signal });
+    root.addEventListener('change', (event) => {
+      const radio = event.target.closest('[data-sf-kind-filter]');
+      if (!radio) return;
+      event.stopPropagation();
+      const list = $(root, '.sf-search-list');
+      if (list) list.dataset.kind = radio.value;
+    }, { signal, capture: true });
+    document.body.addEventListener('htmx:afterSwap', (event) => {
+      if (event.detail?.target?.id === 'sf-search-results' || event.target?.id === 'sf-search-results') renderRecent();
+    }, { signal });
+    root.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      if (event.target.matches('select,input[type="date"],input[type="radio"]')) return;
+      const items = $$(root, '[data-sf-result]');
+      const next = moveActive(items, event.key === 'ArrowDown' ? 1 : -1);
+      if (next) { event.preventDefault(); next.focus(); }
+    }, { signal });
+  };
+
+  /* Command palette: global, opened with Ctrl/Cmd+K or "/" or the Search nav item. */
+  let palette = null;
+  function buildPalette() {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'sf-palette';
+    dialog.setAttribute('aria-label', tr('Search'));
+    dialog.innerHTML = `
+      <div class="sf-palette-top">
+        <label class="sf-search-field"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span>
+          <input type="search" autocomplete="off" enterkeyhint="search" role="combobox" aria-expanded="true" aria-controls="sf-palette-list" aria-autocomplete="list"></label>
+        <button class="sf-icon-btn" type="button" data-sf-palette-close></button>
+      </div>
+      <div class="sf-palette-body" id="sf-palette-list" role="listbox"></div>
+      <div class="sf-palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> <em></em></span><span><kbd>Enter</kbd> <em></em></span><span><kbd>Esc</kbd> <em></em></span><a href="/search"></a></div>`;
+    const input = $(dialog, 'input');
+    input.placeholder = tr('Search files by name or keyword');
+    input.setAttribute('aria-label', tr('Search'));
+    const close = $(dialog, '[data-sf-palette-close]');
+    close.setAttribute('aria-label', tr('Close'));
+    close.innerHTML = '<span class="nav-icon" style="--nav-icon:url(\'/static/lucide/x.svg\')"></span>';
+    const hints = $$(dialog, '.sf-palette-foot em');
+    hints[0].textContent = tr('to move'); hints[1].textContent = tr('to open'); hints[2].textContent = tr('to close');
+    const advanced = $(dialog, '.sf-palette-foot a');
+    advanced.textContent = tr('Advanced search');
+    const body = $(dialog, '.sf-palette-body');
+    let timer = null, controller = null;
+
+    const row = ({ href, icon, title, snippet, meta = [], query = '' }) => {
+      const link = document.createElement('a');
+      link.className = 'sf-palette-row'; link.href = href; link.setAttribute('role', 'option');
+      link.innerHTML = `<span class="nav-icon" style="--nav-icon:url('${icon}')"></span><span class="sf-row-main"><span class="sf-row-title">${highlightText(title, query)}</span>${snippet ? `<span class="sf-row-snippet">${highlightText(snippet, query)}</span>` : ''}</span><span class="sf-row-meta">${meta.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</span>`;
+      link.addEventListener('click', () => { rememberSearch(query); dialog.close(); });
+      return link;
+    };
+    const caption = (text) => { const node = document.createElement('div'); node.className = 'sf-palette-caption'; node.textContent = text; return node; };
+
+    async function renderEmpty() {
+      body.replaceChildren();
+      const recent = readRecent();
+      if (recent.length) {
+        const head = caption(tr('Search history'));
+        const clearButton = document.createElement('button');
+        clearButton.type = 'button'; clearButton.className = 'sf-icon-btn'; clearButton.setAttribute('aria-label', tr('Clear search history'));
+        clearButton.innerHTML = '<span class="nav-icon" style="--nav-icon:url(\'/static/lucide/trash-2.svg\')"></span>';
+        clearButton.addEventListener('click', () => { writeRecent([]); renderEmpty(); input.focus(); });
+        head.append(clearButton);
+        const chips = document.createElement('div'); chips.className = 'sf-palette-chips';
+        recent.forEach((item) => { const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'sf-palette-chip'; chip.textContent = item; chip.addEventListener('click', () => { input.value = item; query(); input.focus(); }); chips.append(chip); });
+        body.append(head, chips);
+      }
+      try {
+        const data = await requestJson('/api/files/picker?limit=6', {}, 'Could not load recordings');
+        if (input.value.trim() || !data.recordings.length) return;
+        body.append(caption(tr('Recent recordings')));
+        data.recordings.forEach((item) => body.append(row({ href: `/file/${encodeURIComponent(item.id)}`, icon: '/static/lucide/audio-lines.svg', title: item.title, meta: [item.recorded_at ? formatWhen(Date.parse(item.recorded_at)) : ''] })));
+      } catch (_error) { /* recent list is optional */ }
+    }
+
+    async function query() {
+      const value = input.value.trim();
+      advanced.href = value ? `/search?q=${encodeURIComponent(value)}` : '/search';
+      clearTimeout(timer); controller?.abort();
+      if (!value) { renderEmpty(); return; }
+      timer = setTimeout(async () => {
+        controller = new AbortController();
+        body.setAttribute('aria-busy', 'true');
+        try {
+          const data = await requestJson(`/api/search?limit=8&q=${encodeURIComponent(value)}`, { signal: controller.signal }, 'Search failed');
+          body.replaceChildren(caption(tr('Ask localplaud')));
+          body.append(row({ href: `/ask?q=${encodeURIComponent(value)}&send=1`, icon: '/static/lucide/sparkles.svg', title: `${tr('Search all sources for')} “${value}” ${tr('with Ask')}`, query: '' }));
+          body.append(caption(tr('Best matches')));
+          if (!data.results.length) {
+            const empty = document.createElement('div'); empty.className = 'sf-palette-empty'; empty.textContent = `${tr('No matches for')} “${value}”`; body.append(empty);
+          }
+          data.results.forEach((item) => {
+            const stamp = item.start != null ? `${Math.floor(item.start / 60)}:${String(Math.floor(item.start % 60)).padStart(2, '0')} · ` : '';
+            body.append(row({ href: item.href, icon: item.start != null ? '/static/lucide/play.svg' : '/static/icons-sf/file-text.svg', title: item.title, snippet: item.snippet ? `${stamp}${item.speaker ? `${item.speaker}: ` : ''}${item.snippet}` : '', meta: [formatWhen(item.start_time_ms), item.kind], query: value }));
+          });
+          const first = $(body, '.sf-palette-row'); first?.classList.add('sf-active');
+        } catch (error) {
+          if (error.name === 'AbortError') return;
+          body.replaceChildren(); const empty = document.createElement('div'); empty.className = 'sf-palette-empty'; empty.textContent = error.message; body.append(empty);
+        } finally { body.removeAttribute('aria-busy'); }
+      }, 250);
+    }
+    input.addEventListener('input', query);
+    dialog.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const next = moveActive($$(body, '.sf-palette-row'), event.key === 'ArrowDown' ? 1 : -1);
+        next?.scrollIntoView({ block: 'nearest' });
+      } else if (event.key === 'Enter' && event.target === input) {
+        event.preventDefault();
+        const active = $(body, '.sf-palette-row.sf-active') || $(body, '.sf-palette-row');
+        const value = input.value.trim();
+        if (!active) { if (value) { rememberSearch(value); location.href = `/search?q=${encodeURIComponent(value)}`; } return; }
+        rememberSearch(value);
+        if (event.ctrlKey || event.metaKey) window.open(active.href, '_blank', 'noopener');
+        else { dialog.close(); location.href = active.href; }
+      }
+    });
+    close.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
+    dialog.addEventListener('close', () => { controller?.abort(); });
+    dialog.openPalette = (initial = '') => {
+      if (!dialog.isConnected) document.body.append(dialog);
+      input.value = initial;
+      dialog.showModal();
+      query();
+      input.focus();
+    };
+    return dialog;
+  }
+  function openSearch(initial = '') {
+    const pageInput = document.querySelector('[data-surface="search"] [data-sf-search-input]');
+    if (pageInput) { pageInput.focus(); pageInput.select(); return; }
+    palette ||= buildPalette();
+    if (!palette.open) palette.openPalette(initial);
+  }
+  const editable = (node) => node && (node.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName));
+  document.addEventListener('keydown', (event) => {
+    if ((event.key === 'k' || event.key === 'K') && (event.ctrlKey || event.metaKey) && !event.altKey) { event.preventDefault(); openSearch(); }
+    else if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !editable(event.target) && !document.querySelector('dialog[open]')) { event.preventDefault(); openSearch(); }
+  });
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest?.('a[href="/search"]');
+    if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (document.querySelector('[data-surface="search"]')) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    document.body.classList.remove('nav-open');
+    openSearch();
+  }, true);
+
   function init() {
     pageController?.abort();
     pageController = new AbortController();
@@ -621,7 +857,7 @@
     }
   }
 
-  window.lpSurfaces = { init, toast, tr, requestJson, openMenu, trapFocus, initialisers };
+  window.lpSurfaces = { init, toast, tr, requestJson, openMenu, trapFocus, initialisers, openSearch, highlightText };
   document.addEventListener('htmx:beforeSwap', (event) => { if (event.detail?.target?.id === 'app-view') pageController?.abort(); });
   init();
 })();

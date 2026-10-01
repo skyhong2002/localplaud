@@ -1829,7 +1829,7 @@ def test_search_results_are_title_first_with_quiet_kind_labels(monkeypatch, tmp_
     empty = c.get("/search")
     assert "Search your whole library" in empty.text
     for href, label in (("/", "All files"), ("/notes", "Saved notes"),
-                        ("/?ask=true#library-ask", "Ask the library")):
+                        ("/ask", "Ask the library")):
         assert f'href="{href}"' in empty.text and label in empty.text
     missing = c.get("/search?q=zzznotfoundzzz")
     assert "No matches for" in missing.text and "Ask the library" in missing.text

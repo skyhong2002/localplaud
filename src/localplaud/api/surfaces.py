@@ -223,3 +223,238 @@ def ask_readiness() -> dict:
         llm = {"provider": None, "ok": False, "detail": "health check timed out"}
     ready = bool(llm["ok"]) and stats["indexed_recordings"] > 0
     return stats | {"llm": llm, "ready": ready}
+
+
+# --------------------------------------------------------------------------- #
+# Search
+# --------------------------------------------------------------------------- #
+
+
+def library_search(
+    q: str | None,
+    folder: str | None = None,
+    tag: str | None = None,
+    origin: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    *,
+    semantic: bool = True,
+) -> dict:
+    """Lexical + (optional) semantic search over titles, canonical transcripts,
+    generated notes, and saved notes, grouped by recording. Shared by the
+    /search page and the command palette's JSON endpoint."""
+    from sqlalchemy import or_, select
+
+    from ..date_filters import normalize_calendar_date, resolve_date_scope
+    from ..db.models import PlaudFile, Tag
+    from ..db.session import session_scope
+    from .app import _workspace_timezone_name
+
+    def optional_int(value: str | None) -> int | None:
+        try:
+            return int(value) if value else None
+        except ValueError:
+            return None
+
+    def optional_date(value: str | None) -> str | None:
+        if value in (None, ""):
+            return None
+        try:
+            return normalize_calendar_date(value)
+        except ValueError:
+            return None
+
+    normalized_from = optional_date(date_from)
+    normalized_to = optional_date(date_to)
+    invalid_date_filter = bool(
+        (date_from not in (None, "") and normalized_from is None)
+        or (date_to not in (None, "") and normalized_to is None)
+    )
+    invalid_date_range = bool(
+        not invalid_date_filter
+        and normalized_from
+        and normalized_to
+        and normalized_from > normalized_to
+    )
+    timezone_name = _workspace_timezone_name()
+    date_scope = (
+        {}
+        if invalid_date_filter or invalid_date_range
+        else resolve_date_scope(
+            normalized_from,
+            normalized_to,
+            timezone_name,
+        )
+    )
+    filters = {
+        "folder_id": optional_int(folder),
+        "tag_id": optional_int(tag),
+        "origin": origin if origin in {"plaud", "local"} else None,
+        "date_from_ms": date_scope.get("date_from_ms"),
+        "date_to_ms": date_scope.get("date_to_ms_exclusive"),
+    }
+    groups: list[dict] = []
+    if q and not invalid_date_filter and not invalid_date_range:
+        from ..library_search import lexical_search
+        from ..worker.qa import retrieve
+
+        hits = lexical_search(q, **filters, limit=100)
+        semantic_scope = {
+            key: value
+            for key, value in {
+                "folder_id": filters["folder_id"],
+                "tag_id": filters["tag_id"],
+                "origin": filters["origin"],
+            }.items()
+            if value is not None
+        } | date_scope
+        try:
+            if not semantic:
+                raise LookupError("semantic search disabled for this request")
+            semantic_hits = retrieve(
+                q,
+                top_k=30,
+                retrieval_scope=semantic_scope or None,
+            )
+        except Exception:  # noqa: BLE001 - embeddings/provider may be unavailable
+            semantic_hits = []
+        with session_scope() as session:
+            stmt = select(PlaudFile.id).where(PlaudFile.is_trash.is_(False))
+            if filters["folder_id"] is not None:
+                stmt = stmt.where(PlaudFile.folder_id == filters["folder_id"])
+            if filters["tag_id"] is not None:
+                stmt = stmt.where(PlaudFile.tags.any(Tag.id == filters["tag_id"]))
+            if filters["origin"] == "plaud":
+                stmt = stmt.where(or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None)))
+            elif filters["origin"] == "local":
+                stmt = stmt.where(PlaudFile.origin == filters["origin"])
+            if filters["date_from_ms"] is not None:
+                stmt = stmt.where(PlaudFile.start_time_ms >= filters["date_from_ms"])
+            if filters["date_to_ms"] is not None:
+                stmt = stmt.where(PlaudFile.start_time_ms < filters["date_to_ms"])
+            allowed_ids = set(session.scalars(stmt))
+        seen = {
+            (hit["file_id"], round(hit.get("start") or -1, 1), hit["text"][:80].casefold())
+            for hit in hits
+        }
+        for hit in semantic_hits:
+            if hit["file_id"] not in allowed_ids:
+                continue
+            hit = hit | {"kind": "semantic"}
+            key = (
+                hit["file_id"],
+                round(hit.get("start") or -1, 1),
+                hit["text"][:80].casefold(),
+            )
+            if key not in seen:
+                hits.append(hit)
+                seen.add(key)
+        by_file: dict[str, dict] = {}
+        for h in sorted(hits, key=lambda item: -item["score"]):
+            g = by_file.setdefault(
+                h["file_id"], {"file_id": h["file_id"], "filename": h["filename"], "hits": []}
+            )
+            g["hits"].append(h)
+        groups = sorted(by_file.values(), key=lambda g: -max(x["score"] for x in g["hits"]))
+        if groups:
+            with session_scope() as session:
+                meta_rows = session.scalars(
+                    select(PlaudFile).where(PlaudFile.id.in_([g["file_id"] for g in groups]))
+                )
+                meta = {
+                    row.id: {
+                        "duration_ms": row.duration_ms,
+                        "start_time_ms": row.start_time_ms,
+                        "folder": row.folder.name if row.folder else None,
+                    }
+                    for row in meta_rows
+                }
+            for g in groups:
+                g.update(meta.get(g["file_id"], {}))
+    return {
+        "groups": groups,
+        "search_filters": {
+            "folder": filters["folder_id"],
+            "tag": filters["tag_id"],
+            "origin": filters["origin"],
+            "date_from": normalized_from or "",
+            "date_to": normalized_to or "",
+            "date_timezone": date_scope.get("date_timezone") or timezone_name,
+            "invalid_date_filter": invalid_date_filter,
+            "invalid_date_range": invalid_date_range,
+        },
+    }
+
+
+def hit_href(file_id: str, hit: dict) -> str:
+    target = hit.get("target")
+    if hit.get("kind") == "title":
+        return f"/file/{file_id}"
+    if target == "generated_note":
+        return f"/file/{file_id}?tab=notes&note=sum-{hit.get('artifact_id')}"
+    if target == "saved_note":
+        return f"/file/{file_id}?tab=notes&note_id={hit.get('artifact_id')}"
+    if target == "mind_map":
+        return f"/file/{file_id}?tab=mindmap"
+    if hit.get("start") is not None:
+        return f"/file/{file_id}?t={hit['start']}"
+    return f"/file/{file_id}"
+
+
+_HIT_KIND_LABELS = {
+    "generated_note": "Note",
+    "saved_note": "Saved note",
+    "mind_map": "Mind map",
+    "transcript": "Transcript",
+}
+
+
+@router.get("/api/search")
+def search_api(
+    q: str = "",
+    folder: str | None = None,
+    tag: str | None = None,
+    origin: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 20,
+    semantic: bool = False,
+) -> dict:
+    """Flat "best matches" for the command palette: one row per recording with
+    its strongest content hit, a plain-text snippet, and a deep link (timestamp,
+    note, or mind map). Clients highlight terms themselves; nothing here is HTML."""
+    from ..db.session import session_scope
+    from ..i18n import translator
+    from ..preferences import get_workspace_preferences
+
+    limit = max(1, min(limit, 50))
+    result = library_search(
+        q[:200], folder, tag, origin, date_from, date_to, semantic=semantic
+    )
+    with session_scope() as session:
+        translate = translator(get_workspace_preferences(session)["locale"])
+    rows = []
+    for group in result["groups"][:limit]:
+        content = next((hit for hit in group["hits"] if hit.get("kind") != "title"), None)
+        hit = content or group["hits"][0]
+        if hit.get("kind") == "title":
+            label = "Title"
+        elif hit.get("kind") == "semantic" and hit.get("start") is None:
+            label = "Related"
+        else:
+            label = _HIT_KIND_LABELS.get(hit.get("target"), "Note")
+        rows.append(
+            {
+                "file_id": group["file_id"],
+                "title": group["filename"],
+                "href": hit_href(group["file_id"], hit),
+                "kind": translate(label),
+                "start": hit.get("start"),
+                "speaker": hit.get("speaker"),
+                "snippet": "" if hit.get("kind") == "title" else (hit.get("text") or "")[:240],
+                "start_time_ms": group.get("start_time_ms"),
+                "duration_ms": group.get("duration_ms"),
+                "match_count": len(group["hits"]),
+            }
+        )
+    return {"q": q, "results": rows, "filters": result["search_filters"]}
