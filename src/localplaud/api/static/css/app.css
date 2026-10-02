@@ -436,7 +436,7 @@ body.app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .ws-avatar { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 6px; background: var(--g-ai); color: #fff; font-size: 11px; font-weight: 600; }
 .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-switch .i { width: 16px; height: 16px; color: var(--c-text-2); }
-.ws-menu { left: 0; right: 0; top: calc(100% + 4px); min-width: 0; width: 260px; }
+.ws-menu { left: 0; right: 0; top: calc(100% + 4px); min-width: 0; width: auto; }
 .ws-menu-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px 10px; }
 .ws-menu-head .ws-avatar { width: 32px; height: 32px; font-size: 13px; border-radius: 8px; }
 .appearance-row { display: flex; align-items: center; gap: 4px; padding: 6px 14px; }
@@ -715,10 +715,10 @@ audio { width: 100%; margin: 4px 0; }
 /* shared dialog shell used by older pages (import, organization, export) */
 .import-backdrop { position: fixed; inset: 0; z-index: 100; background: var(--c-scrim); display: flex; align-items: center; justify-content: center; padding: 20px; }
 .import-modal { width: min(660px, 100%); min-height: 430px; max-height: calc(100dvh - 24px); overflow: hidden; background: var(--c-surface); border-radius: var(--radius-md); box-shadow: var(--shadow-dialog); display: flex; flex-direction: column; }
-.import-head { display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 10px 12px 10px 20px; border-bottom: 1px solid var(--c-border); color: var(--c-text); font-size: 16px; font-weight: 500; }
+.import-head { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 10px 12px 10px 20px; border-bottom: 1px solid var(--c-border); color: var(--c-text); font-size: 16px; font-weight: 500; }
 .import-close { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: var(--radius); background: none; color: var(--c-text-2); cursor: pointer; }
 .import-close:hover { background: var(--c-subtle); color: var(--c-text); }
-.import-body { min-height: 0; flex: 1; padding: 20px; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+.import-body { min-height: 0; flex: 1 1 auto; padding: 20px; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
 .import-tabs { display: flex; gap: 4px; margin-bottom: 16px; padding: 2px; border-radius: var(--radius-md); background: var(--c-subtle); }
 .import-tabs button { flex: 1; min-height: 34px; border: 0; background: transparent; color: var(--c-text-2); padding: 6px 9px; border-radius: 6px; font-weight: 500; cursor: pointer; }
 .import-tabs button.on { color: var(--c-text); background: var(--c-surface); box-shadow: var(--shadow-sm); }

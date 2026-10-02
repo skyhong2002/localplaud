@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-_ASSET = re.compile(r'(?:href|src)="(/static/(?:css|js)/[^"]+\.(?:css|js))"')
+_ASSET = re.compile(r'(?:href|src)="(/static/(?:css|js)/[^"?]+\.(?:css|js))(?:\?[^"]*)?"')
 
 
 def with_assets(client, response) -> str:

@@ -33,7 +33,7 @@
 
 {% block mobile_topbar %}{% if active == 'ask' %}{{ super() }}{% else %}
 <header class="m-topbar">
-  <button class="icon-btn" type="button" data-dialog-open="library-sheet" aria-label="{{ t('Folders and filters') }}">{{ icon('sidebar') }}</button>
+  <button class="icon-btn" type="button" data-nav-open aria-label="{{ t('Open menu') }}" aria-controls="workspace-sidebar" aria-expanded="false">{{ icon('sidebar') }}</button>
   <span class="m-title"></span>
   <a class="icon-btn" href="/search" aria-label="{{ t('Search') }}">{{ icon('search') }}</a>
   <a class="icon-btn" href="/settings" aria-label="{{ t('Settings') }}"><span class="m-avatar" aria-hidden="true">{{ workspace_preferences.workspace_name | initials }}</span></a>

@@ -780,9 +780,9 @@ def test_fresh_audio_precedes_both_derived_and_speech_repairs(monkeypatch, tmp_p
 
 def test_newest_recording_keeps_priority_after_failure(monkeypatch, tmp_path):
     settings = _reset(monkeypatch, tmp_path)
-    from localplaud.worker import pipeline
     from localplaud.db.models import FileStatus, PlaudFile
     from localplaud.db.session import session_scope
+    from localplaud.worker import pipeline
     audio = tmp_path / 'queue.wav'
     audio.write_bytes(b'RIFF')
     now = datetime.now(UTC)
@@ -805,9 +805,16 @@ def test_newest_recording_keeps_priority_after_failure(monkeypatch, tmp_path):
 def test_untranscribed_only_excludes_local_work_but_not_cloud_imports(monkeypatch,tmp_path,source,completed,expected):
     settings=_reset(monkeypatch,tmp_path)
     settings.pipeline.auto_process_untranscribed_only=True
-    from localplaud.worker import pipeline
-    from localplaud.db.models import PlaudFile,FileStatus,Transcript,StageRun,StageName,StageStatus
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        StageName,
+        StageRun,
+        StageStatus,
+        Transcript,
+    )
     from localplaud.db.session import session_scope
+    from localplaud.worker import pipeline
     audio=tmp_path/'audio.wav'
     audio.write_bytes(b'RIFF')
     with session_scope() as s:

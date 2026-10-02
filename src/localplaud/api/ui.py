@@ -87,7 +87,23 @@ def recording_state(item: dict) -> dict | None:
     return {"kind": "queued", "label": status or "Unknown"}
 
 
+def asset_version() -> str:
+    """Short content hash of the shared CSS/JS so browsers refetch after upgrades."""
+    import hashlib
+    from pathlib import Path
+
+    static = Path(__file__).parent / "static"
+    digest = hashlib.sha256()
+    for folder in ("css", "js"):
+        for path in sorted((static / folder).glob("*")):
+            if path.is_file():
+                digest.update(path.name.encode())
+                digest.update(path.read_bytes())
+    return digest.hexdigest()[:10]
+
+
 def register(env) -> None:
+    env.globals["asset_version"] = asset_version()
     env.globals["icon"] = icon
     env.filters["dur_long"] = dur_long
     env.filters["initials"] = initials
