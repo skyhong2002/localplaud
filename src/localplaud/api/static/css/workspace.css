@@ -197,7 +197,8 @@
 .seg .txt { position:relative;min-width:0;overflow-wrap:anywhere; }
 .seg-text { margin:5px 32px 0 0;font-size:14px;line-height:1.72;color:var(--fg); }
 .ask-user-message { align-self:flex-end;max-width:85%;padding:8px 12px;border-radius:14px 14px 4px 14px;background:var(--blue);color:white;overflow-wrap:anywhere; }
-.saved-note-head { display:flex;justify-content:space-between;align-items:flex-start;gap:12px; }
+.saved-note-head { display:flex;justify-content:space-between;align-items:center;gap:12px; }
+.saved-note-actions > [data-note-action-status]:empty { display:none; }
 .saved-note-title { min-width:0;overflow-wrap:anywhere; }
 .saved-note-actions { display:flex;justify-content:flex-end;gap:5px;flex-wrap:wrap; }
 .spk { --c:var(--muted); }
@@ -367,7 +368,7 @@
   .user-note-history-drawer { width:100%;max-height:100dvh;border-radius:0; }
   .manual-note-modal { width:100%;max-height:calc(100dvh - 24px); }
   .manual-note-form textarea { min-height:180px; }
-  .saved-note-head { flex-direction:column; }
+  .saved-note-head { flex-direction:column;align-items:stretch; }
   .saved-note-actions { width:100%;justify-content:flex-start; }
 
   .player-transport { gap:5px; }

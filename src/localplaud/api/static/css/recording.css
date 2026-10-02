@@ -64,6 +64,8 @@
 .recording-shell .tabs > button { flex: none; white-space: nowrap; }
 .recording-shell .tabs .note-tab { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; display: inline-flex; align-items: center; gap: 5px; }
 .recording-shell .tabs .note-tab .chip { font-size: 10.5px; padding: 0 5px; }
+.recording-shell .tabs .note-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.recording-shell .tabs .note-tab .chip { flex: none; }
 .recording-shell .ws-tab-add { position: relative; flex: none; }
 .recording-shell .ws-tab-add > summary { list-style: none; display: grid; place-items: center; width: 32px; height: 24px; border-radius: 5px; background: var(--c-subtle, #EBEBEB); color: var(--fg); cursor: pointer; }
 .recording-shell .ws-tab-add > summary::-webkit-details-marker { display: none; }
