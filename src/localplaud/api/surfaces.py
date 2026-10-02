@@ -136,7 +136,7 @@ _FALLBACK_ICONS = {
     "external-link": "icons-sf/external-link", "link": "lucide/link", "zap": "lucide/sparkles",
     "download": "lucide/download", "upload": "lucide/upload", "files": "lucide/files",
     "drive": "lucide/hard-drive", "refresh": "lucide/rotate-cw", "star": "lucide/sparkles",
-    "info": "lucide/circle-alert", "users": "icons-sf/user", "eye": "icons-sf/eye-off",
+    "info": "lucide/circle-alert", "message": "lucide/sticky-note", "users": "icons-sf/user", "eye": "icons-sf/eye-off",
     "monitor": "icons-sf/cpu", "keyboard": "icons-sf/sliders", "send": "icons-sf/arrow-up",
 }
 
@@ -504,3 +504,121 @@ def search_api(
             }
         )
     return {"q": q, "results": rows, "filters": result["search_filters"]}
+
+
+
+# --------------------------------------------------------------------------- #
+# Templates
+# --------------------------------------------------------------------------- #
+
+# Category -> (sprite icon, accent colour). Unknown categories use the default.
+_TEMPLATE_GLYPHS = {
+    "General": ("sparkles", "#8F53ED"),
+    "Work": ("users", "#2F80ED"),
+    "Meeting": ("users", "#2F80ED"),
+    "Research": ("message", "#0E9F8E"),
+    "Education": ("file-text", "#E07A1F"),
+    "Functional": ("zap", "#C2410C"),
+    "Transcription": ("waveform", "#5B6475"),
+    "Custom": ("pencil", "#3D3D3D"),
+}
+_DEFAULT_GLYPH = ("template", "#5B6475")
+
+
+def template_glyph(category: str | None) -> dict:
+    icon_name, color = _TEMPLATE_GLYPHS.get(category or "", _DEFAULT_GLYPH)
+    return {"icon": icon_name, "color": color}
+
+
+def _provenance_label(item: dict) -> str:
+    if item["is_builtin"]:
+        return "Built-in"
+    if item.get("provenance") == "personal-copy":
+        return "Copied"
+    if item.get("provenance") in {"imported", "plaud-import"}:
+        return "Imported"
+    if item.get("provenance") == "community":
+        return "Community"
+    return "Mine"
+
+
+def template_library_context(tab: str, q: str, category: str | None) -> dict:
+    """Data for the Templates page: My templates (recently used + personal) and
+    Discover (bundled catalog by category), each with local usage counts."""
+    from ..db.models import NoteTemplate, Summary
+    from ..db.session import session_scope
+    from .note_templates import _item
+
+    tab = tab if tab in {"my", "explore"} else "my"
+    with session_scope() as session:
+        rows = list(
+            session.scalars(
+                select(NoteTemplate)
+                .where(NoteTemplate.is_active.is_(True))
+                .order_by(NoteTemplate.is_builtin.desc(), NoteTemplate.name)
+            )
+        )
+        usage_rows = session.execute(
+            select(Summary.template, func.count(), func.max(Summary.created_at))
+            .where(Summary.source == "local")
+            .group_by(Summary.template)
+        ).all()
+    usage = {key: {"count": count, "last": last} for key, count, last in usage_rows}
+    items = []
+    for row in rows:
+        item = _item(row)
+        item["usage_count"] = usage.get(row.key, {}).get("count", 0)
+        last_used = usage.get(row.key, {}).get("last")
+        item["last_used"] = last_used.isoformat() if last_used is not None else None
+        item["glyph"] = template_glyph(item["category"])
+        item["provenance_label"] = _provenance_label(item)
+        items.append(item)
+
+    query = q.strip().casefold()
+
+    def matches(item: dict) -> bool:
+        if not query:
+            return True
+        haystack = " ".join(
+            [item["name"], item["description"], item["category"], item["scenario"], item["author"]]
+        ).casefold()
+        return query in haystack
+
+    personal = [item for item in items if not item["is_builtin"] and matches(item)]
+    recent = sorted(
+        (item for item in items if item["last_used"] is not None and matches(item)),
+        key=lambda item: item["last_used"],
+        reverse=True,
+    )[:8]
+    catalog = [item for item in items if item["is_builtin"] and matches(item)]
+    categories = sorted({item["category"] for item in items if item["is_builtin"]})
+    if category:
+        catalog = [item for item in catalog if item["category"] == category]
+    sections = []
+    if not category and not query:
+        popular = sorted(
+            (item for item in catalog if item["usage_count"]),
+            key=lambda item: -item["usage_count"],
+        )[:8]
+        if popular:
+            sections.append({"title": "Most used in this workspace", "items": popular, "ranked": True})
+        for name in categories:
+            group = [item for item in catalog if item["category"] == name]
+            if group:
+                sections.append({"title": name, "items": group, "category": name})
+    template_items = personal + [item for item in recent if item not in personal]
+    template_items += [item for item in catalog if item not in template_items]
+    return {
+        "tab": tab,
+        "q": q,
+        "category": category,
+        "categories": [
+            {"name": name, "glyph": template_glyph(name)} for name in categories
+        ],
+        "personal_templates": personal,
+        "recent_templates": recent,
+        "catalog_templates": catalog,
+        "catalog_sections": sections,
+        # Everything rendered on the page, keyed for the detail/editor dialogs.
+        "template_items": template_items,
+    }

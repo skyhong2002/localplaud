@@ -1369,7 +1369,8 @@ def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_pat
     assert "Object.assign(window,{editVocabulary" in r.text
     templates = c.get("/templates")
     assert templates.status_code == 200
-    assert "<script>\n(()=>{\nconst tr=window.localplaudT" in templates.text
+    assert 'data-surface="templates"' in templates.text
+    assert 'id="sf-template-data"' in templates.text
     status = c.get("/api/plaud/auth/status").json()
     assert status == {
         "ok": False,

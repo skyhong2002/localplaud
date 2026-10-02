@@ -869,6 +869,166 @@
     openSearch();
   }, true);
 
+  /* =========================== TEMPLATES =========================== */
+  initialisers.templates = (root, signal) => {
+    const dataNode = document.getElementById('sf-template-data');
+    const items = dataNode ? JSON.parse(dataNode.textContent || '[]') : [];
+    const byKey = Object.fromEntries(items.map((item) => [item.key, item]));
+    const detail = document.querySelector('[data-sf-template-detail]');
+    const editor = document.querySelector('[data-sf-template-editor]');
+    const form = $(editor, 'form');
+    const formStatus = $(editor, '#template-form-status');
+    const detailStatus = $(detail, '[data-sf-detail-status]');
+    let current = null, mode = 'create', dirty = false;
+
+    const closeOnBackdrop = (dialog) => dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); }, { signal });
+    closeOnBackdrop(detail);
+    $$(detail, '[data-sf-dialog-close]').forEach((button) => button.addEventListener('click', () => detail.close(), { signal }));
+
+    function openDetail(key, trigger) {
+      const item = byKey[key];
+      if (!item) return;
+      current = item;
+      $(detail, '[data-sf-detail-title]').textContent = item.name;
+      const iconBox = $(detail, '[data-sf-detail-icon]');
+      iconBox.replaceChildren(iconNode(item.glyph?.icon || 'template'));
+      iconBox.style.setProperty('--tc', item.glyph?.color || '');
+      $(detail, '[data-sf-detail-meta]').textContent = [tr(item.category), tr(item.scenario), tr(item.author)].filter(Boolean).join(' • ');
+      $(detail, '[data-sf-detail-description]').textContent = item.description;
+      const facts = $(detail, '[data-sf-detail-facts]');
+      facts.replaceChildren();
+      const fact = (label, value) => { const dt = document.createElement('dt'); dt.textContent = tr(label); const dd = document.createElement('dd'); dd.textContent = value; facts.append(dt, dd); };
+      fact('Source', tr(item.provenance_label));
+      fact('Author', tr(item.author));
+      fact('Version', `v${item.version}`);
+      fact('Key', item.key);
+      fact('Output mode', tr(item.prompt_mode === 'direct' ? 'Direct' : 'Structured'));
+      fact('Used for', `${item.usage_count || 0} ${tr(item.usage_count === 1 ? 'note' : 'notes')}`);
+      $(detail, '[data-sf-detail-prompt]').textContent = item.instructions;
+      const systemWrap = $(detail, '[data-sf-detail-system-wrap]');
+      systemWrap.hidden = !item.system_prompt;
+      $(detail, '[data-sf-detail-system]').textContent = item.system_prompt || '';
+      $(detail, '[data-sf-template-copy]').hidden = !item.is_builtin;
+      $(detail, '[data-sf-template-edit]').hidden = item.is_builtin;
+      $(detail, '[data-sf-template-duplicate]').hidden = item.is_builtin;
+      $(detail, '[data-sf-template-archive]').hidden = item.is_builtin;
+      detailStatus.textContent = ''; detailStatus.classList.remove('error');
+      detail.showModal();
+      $(detail, '[data-sf-dialog-close]').focus();
+      detail.dataset.opener = '';
+      detail.openerNode = trigger || null;
+    }
+    detail.addEventListener('close', () => detail.openerNode?.focus?.(), { signal });
+
+    function slugify(value) {
+      const slug = value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+      return slug || `template-${Date.now().toString(36)}`;
+    }
+    function uniqueKey(base) {
+      let key = base.slice(0, 60), n = 2;
+      while (byKey[key]) key = `${base.slice(0, 56)}-${n++}`;
+      return key;
+    }
+
+    function openEditor(nextMode, item = null) {
+      mode = nextMode; current = item; form.reset(); dirty = false;
+      formStatus.textContent = ''; formStatus.classList.remove('error');
+      const note = $(editor, '[data-sf-version-note]');
+      const title = $(editor, '#template-modal-title');
+      form.elements.key.disabled = nextMode === 'edit';
+      if (item) {
+        form.elements.name.value = nextMode === 'duplicate' ? `${item.name} ${tr('copy')}` : item.name;
+        form.elements.instructions.value = item.instructions;
+        form.elements.system_prompt.value = item.system_prompt || '';
+        form.elements.prompt_mode.value = item.prompt_mode || 'structured';
+        form.elements.key.value = nextMode === 'edit' ? item.key : uniqueKey(`my-${item.key}`);
+      }
+      title.textContent = tr(nextMode === 'edit' ? 'Edit template' : nextMode === 'duplicate' ? 'Duplicate template' : 'Create template');
+      note.hidden = nextMode !== 'edit';
+      if (nextMode === 'edit') note.textContent = `${tr('Saving creates version')} ${item.version + 1}. ${tr('Notes already generated keep the version they used.')}`;
+      if (detail.open) detail.close();
+      editor.showModal();
+      form.elements.name.focus();
+    }
+    form.addEventListener('input', () => { dirty = true; }, { signal });
+    const cancelEditor = () => { if (dirty && !confirm(tr('Discard changes to this template?'))) return; dirty = false; editor.close(); };
+    $$(editor, '[data-sf-editor-cancel]').forEach((button) => button.addEventListener('click', cancelEditor, { signal }));
+    editor.addEventListener('cancel', (event) => { if (dirty) { event.preventDefault(); cancelEditor(); } }, { signal });
+    editor.addEventListener('click', (event) => { if (event.target === editor) cancelEditor(); }, { signal });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const name = form.elements.name.value.trim(), instructions = form.elements.instructions.value.trim();
+      if (!name || !instructions) {
+        formStatus.textContent = tr('Add a name and the note structure.'); formStatus.classList.add('error');
+        (name ? form.elements.instructions : form.elements.name).focus(); return;
+      }
+      const body = { name, instructions, system_prompt: form.elements.system_prompt.value, prompt_mode: form.elements.prompt_mode.value };
+      let url = '/api/note-templates', method = 'POST';
+      if (mode === 'edit') { url = `/api/note-templates/${encodeURIComponent(current.key)}`; method = 'PUT'; }
+      else body.key = (form.elements.key.value.trim() || uniqueKey(slugify(name))).toLowerCase();
+      const save = $(editor, '[data-sf-editor-save]');
+      save.disabled = true; formStatus.classList.remove('error'); formStatus.textContent = tr('Saving…');
+      try {
+        await requestJson(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, 'Could not save template');
+        dirty = false; formStatus.textContent = tr('Saved. Reloading…');
+        location.href = '/templates?tab=my';
+      } catch (error) {
+        formStatus.textContent = error.message; formStatus.classList.add('error'); save.disabled = false;
+      }
+    }, { signal });
+
+    async function copyToMine(button) {
+      button.disabled = true; detailStatus.classList.remove('error'); detailStatus.textContent = tr('Adding…');
+      try {
+        let key = uniqueKey(`my-${current.key}`);
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          try {
+            await requestJson(`/api/note-templates/${encodeURIComponent(current.key)}/copy`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, name: current.name }) }, 'Could not copy template');
+            location.href = '/templates?tab=my'; return;
+          } catch (error) {
+            if (!/already exists/.test(error.message) && error.message !== tr('template key already exists')) throw error;
+            key = `${key.slice(0, 56)}-${attempt + 2}`;
+          }
+        }
+        throw new Error(tr('Could not copy template'));
+      } catch (error) { detailStatus.textContent = error.message; detailStatus.classList.add('error'); button.disabled = false; }
+    }
+    async function archive(button) {
+      if (!confirm(tr('Archive this template? Notes that used it keep their content and provenance.'))) return;
+      button.disabled = true;
+      try {
+        await requestJson(`/api/note-templates/${encodeURIComponent(current.key)}`, { method: 'DELETE' }, 'Could not archive template');
+        location.reload();
+      } catch (error) { detailStatus.textContent = error.message; detailStatus.classList.add('error'); button.disabled = false; }
+    }
+    $(detail, '[data-sf-template-copy]').addEventListener('click', (event) => copyToMine(event.currentTarget), { signal });
+    $(detail, '[data-sf-template-edit]').addEventListener('click', () => openEditor('edit', current), { signal });
+    $(detail, '[data-sf-template-duplicate]').addEventListener('click', () => openEditor('duplicate', current), { signal });
+    $(detail, '[data-sf-template-archive]').addEventListener('click', (event) => archive(event.currentTarget), { signal });
+
+    root.addEventListener('click', (event) => {
+      const open = event.target.closest('[data-sf-template-open]');
+      if (open) { openDetail(open.dataset.sfTemplateOpen, open); return; }
+      if (event.target.closest('[data-sf-template-create]')) openEditor('create');
+    }, { signal });
+
+    /* Instant client-side narrowing while typing; Enter runs the server search. */
+    const filter = $(root, '[data-sf-template-filter]');
+    filter?.addEventListener('input', () => {
+      const needle = filter.value.trim().toLowerCase();
+      $$(root, '.sf-tcard[data-template-key]').forEach((card) => {
+        const item = byKey[card.dataset.templateKey];
+        const hay = item ? [item.name, item.description, item.category, item.scenario, item.author].join(' ').toLowerCase() : '';
+        card.hidden = Boolean(needle) && !hay.includes(needle);
+      });
+    }, { signal });
+
+    const params = new URLSearchParams(location.search);
+    if (params.get('template') && byKey[params.get('template')]) openDetail(params.get('template'));
+    if (params.get('create') === '1') openEditor('create');
+  };
+
   function init() {
     pageController?.abort();
     pageController = new AbortController();

@@ -274,3 +274,48 @@ def test_search_api_returns_flat_best_matches_without_semantic_by_default(
     client.get("/api/search", params={"q": "roadmap", "semantic": "true"})
     assert len(calls) == 1
     assert client.get("/api/search").json()["results"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Templates
+# --------------------------------------------------------------------------- #
+
+
+def test_templates_page_shows_recent_usage_personal_and_catalog(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    created = client.post(
+        "/api/note-templates",
+        json={"key": "my-standup", "name": "Stand-up digest", "system_prompt": "",
+              "instructions": "## Yesterday\n## Today\n## Blockers"},
+    )
+    assert created.status_code == 201
+    from localplaud.db.models import PlaudFile, Summary
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="r9", filename="Cloud copy"))
+        session.flush()
+        session.add_all(
+            [Summary(file_id="r1", template="my-standup", source="local", content_md="a"),
+             Summary(file_id="r2", template="my-standup", source="local", content_md="b"),
+             Summary(file_id="r9", template="my-standup", source="cloud", content_md="c")]
+        )
+    mine = client.get("/templates")
+    assert mine.status_code == 200
+    html = mine.text
+    assert "Recently used" in html and "Stand-up digest" in html
+    assert "Mine · v1" in html
+    # Only local notes count as usage; cloud artifacts are not local provenance.
+    assert 'title="Notes generated with this template">' in html
+    assert re.search(r"Notes generated with this template\">.*?</svg> 2|"
+                     r"Notes generated with this template\">.*?</span> 2", html, re.S)
+    assert 'data-sf-template-create' in html
+    explore = client.get("/templates?tab=explore")
+    assert "Most used in this workspace" not in explore.text  # no built-in usage yet
+    assert "Discover lists the templates bundled with this workspace" in explore.text
+    assert "Add to My templates" in explore.text
+    category = client.get("/templates?tab=explore&category=Work")
+    assert 'aria-current="true"' in category.text
+    searched = client.get("/templates?tab=my&q=stand-up")
+    assert "Stand-up digest" in searched.text

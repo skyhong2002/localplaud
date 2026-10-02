@@ -226,10 +226,12 @@ def test_templates_workspace_search_and_tabs(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     page = client.get("/templates")
     assert page.status_code == 200
-    assert "My Space" in page.text and "Explore" in page.text
-    assert "Copy to My Space" in page.text
-    assert "重構會議為紀要、行動事項與決策" in page.text
+    assert "My templates" in page.text and "Discover" in page.text
+    assert 'data-sf-template-create' in page.text
     assert 'id="template-form"' in page.text
+    explore = client.get("/templates?tab=explore")
+    assert "Add to My templates" in explore.text
+    assert "重構會議為紀要、行動事項與決策" in explore.text
     education = client.get("/templates?tab=explore&category=Education")
     assert "深度詳盡的演講細節、引言與概念" in education.text
     assert "會議紀要" not in education.text

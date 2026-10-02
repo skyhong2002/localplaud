@@ -88,7 +88,6 @@ from .backups import router as backups_router
 from .imports import router as imports_router
 from .integrations import router as integrations_router
 from .media import audio_file_response
-from .note_templates import _item as note_template_item
 from .note_templates import router as note_templates_router
 from .notes import router as notes_router
 from .providers import router as providers_router
@@ -2040,38 +2039,9 @@ def template_library(
     q: str = "",
     category: str | None = None,
 ):
-    tab = tab if tab in {"my", "explore"} else "my"
-    with session_scope() as session:
-        rows = list(
-            session.scalars(
-                select(NoteTemplate)
-                .where(NoteTemplate.is_active.is_(True))
-                .order_by(NoteTemplate.is_builtin.desc(), NoteTemplate.name)
-            )
-        )
-        items = [note_template_item(row) for row in rows]
-    if tab == "explore":
-        items = [item for item in items if item["is_builtin"]]
-    query = q.strip().casefold()
-    if query:
-        items = [
-            item
-            for item in items
-            if query
-            in " ".join(
-                [item["name"], item["description"], item["category"], item["scenario"]]
-            ).casefold()
-        ]
-    categories = sorted({item["category"] for item in items})
-    if category:
-        items = [item for item in items if item["category"] == category]
-    ctx = _base_ctx(request, "templates") | {
-        "tab": tab,
-        "q": q,
-        "category": category,
-        "categories": categories,
-        "template_items": items,
-    }
+    from .surfaces import template_library_context
+
+    ctx = _base_ctx(request, "templates") | template_library_context(tab, q, category)
     return templates.TemplateResponse(request=request, name="templates.html", context=ctx)
 
 
