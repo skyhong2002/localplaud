@@ -529,10 +529,11 @@ a.sf-app-card:hover { border-color:var(--c-border-strong,var(--border2)); }
 .settings-page { overflow-x:clip; }
 .settings-page .sf-settings-head { margin-bottom:6px; }
 .settings-page .settings-layout { grid-template-columns:220px minmax(0,1fr);gap:32px; }
-.settings-page .settings-nav { top:12px;max-height:calc(100vh - 24px);overflow:auto;padding:8px;border-radius:var(--radius,5px);background:var(--c-bg-sidebar,#F9F9F9); }
-.settings-page .settings-nav a { font-weight:400;font-size:14px;color:var(--c-text-body,var(--fg));padding:8px 10px;border-radius:var(--radius,5px); }
+@media (min-width:821px) and (max-width:1100px) { .settings-page .settings-layout { grid-template-columns:180px minmax(0,1fr);gap:20px; } }
+.settings-page .settings-nav { top:12px;gap:1px;max-height:calc(100vh - 24px);overflow:auto;padding:8px;border-radius:var(--radius,5px);background:var(--c-bg-sidebar,#F9F9F9); }
+.settings-page .settings-nav a { font-weight:400;font-size:14px;line-height:20px;color:var(--c-text-body,var(--fg));padding:5px 10px;border-radius:var(--radius,5px); }
 .settings-page .settings-nav a[aria-current] { background:var(--c-hover-ui,rgba(31,35,41,.08));color:var(--c-text,var(--fg));font-weight:600; }
-.sf-nav-caption { margin:12px 10px 4px;font-size:12px;color:var(--c-text-2,var(--muted)); }
+.sf-nav-caption { margin:8px 10px 2px;font-size:12px;color:var(--c-text-2,var(--muted)); }
 .sf-nav-caption:first-child { margin-top:2px; }
 .sf-settings-group { margin-bottom:40px; }
 .sf-settings-group-title { font-size:24px;font-weight:300;line-height:1.5;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--c-border,var(--border)); }
@@ -556,6 +557,9 @@ a.sf-app-card:hover { border-color:var(--c-border-strong,var(--border2)); }
 .settings-panel-head { display:flex;justify-content:space-between;align-items:center;gap:8px 12px;flex-wrap:wrap; }
 .settings-panel-head>.sub { font-size:12px; }
 .settings-panel-top>div:first-child { flex:1 1 160px;min-width:0; }
+/* Keys wrap to their own line as a unit instead of splitting mid-word beside a long name. */
+.settings-row-main code { display:inline-block;max-width:100%;vertical-align:baseline; }
+.settings-path { padding:0;background:none;overflow-wrap:break-word; }
 .settings-session { display:flex;justify-content:space-between;align-items:center;gap:12px;min-width:0; }
 .settings-model { display:flex;flex-direction:column;min-width:0; }
 .settings-model-actions { justify-content:flex-start;margin-top:auto;padding-top:10px; }

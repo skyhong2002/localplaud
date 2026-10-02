@@ -1374,19 +1374,40 @@
     }, { signal }));
     render();
 
-    /* Desktop scroll-spy: highlight the section currently in view. */
-    if ('IntersectionObserver' in window) {
-      const byId = new Map(navLinks.map((link) => [link.dataset.sfNavTarget, link]));
-      const visible = new Set();
-      const observer = new IntersectionObserver((entries) => {
-        entries.forEach((entry) => { if (entry.isIntersecting) visible.add(entry.target.id); else visible.delete(entry.target.id); });
-        const first = [...byId.keys()].find((id) => visible.has(id));
-        navLinks.forEach((link) => link.removeAttribute('aria-current'));
-        if (first) byId.get(first).setAttribute('aria-current', 'location');
-      }, { rootMargin: '-10% 0px -60% 0px' });
-      byId.forEach((_link, id) => { const node = document.getElementById(id); if (node) observer.observe(node); });
-      signal.addEventListener('abort', () => observer.disconnect(), { once: true });
-    }
+    /* Desktop scroll-spy: highlight the section currently in view. The last
+       section wins once the page is scrolled to the bottom, so short trailing
+       sections (System health, Support & about) still get highlighted. */
+    const nav = $(root, '.settings-nav');
+    const targets = navLinks.map((link) => [link, document.getElementById(link.dataset.sfNavTarget)]).filter(([, node]) => node);
+    let spyFrame = 0;
+    const spy = () => {
+      spyFrame = 0;
+      if (!nav || nav.offsetParent === null || !targets.length) return;
+      let scroller = nav.parentElement;
+      while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+      if (!scroller || scroller === document.body) scroller = document.scrollingElement;
+      const view = scroller === document.scrollingElement ? { top: 0, bottom: window.innerHeight } : scroller.getBoundingClientRect();
+      const atBottom = Math.ceil(scroller.scrollTop + scroller.clientHeight) >= scroller.scrollHeight - 2;
+      const line = view.top + (view.bottom - view.top) * 0.3;
+      let current = null;
+      for (const [link, node] of targets) {
+        const rect = node.getBoundingClientRect();
+        if (!rect.height) continue;
+        if (atBottom ? rect.top < view.bottom : rect.top <= line) current = link;
+      }
+      current = current || targets[0][0];
+      navLinks.forEach((link) => { if (link !== current) link.removeAttribute('aria-current'); });
+      if (current.getAttribute('aria-current') === 'location') return;
+      current.setAttribute('aria-current', 'location');
+      const linkTop = current.offsetTop - nav.offsetTop;
+      if (linkTop < nav.scrollTop || linkTop + current.offsetHeight > nav.scrollTop + nav.clientHeight) {
+        nav.scrollTop = Math.max(0, linkTop - nav.clientHeight / 2);
+      }
+    };
+    const queueSpy = () => { if (!spyFrame) spyFrame = requestAnimationFrame(spy); };
+    document.addEventListener('scroll', queueSpy, { signal, passive: true, capture: true });
+    window.addEventListener('resize', queueSpy, { signal, passive: true });
+    queueSpy();
   };
 
   function init() {
