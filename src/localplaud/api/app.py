@@ -2115,6 +2115,33 @@ def template_library(
     return templates.TemplateResponse(request=request, name="templates.html", context=ctx)
 
 
+@app.get("/explore", response_class=HTMLResponse)
+def explore_hub(request: Request):
+    """Phone Explore tab: local status hero plus grouped entry points (Plaud app parity)."""
+    with session_scope() as session:
+        stats = _stats(session)
+        automation_count = (
+            session.scalar(
+                select(func.count()).select_from(AutomationRule).where(AutomationRule.enabled)
+            )
+            or 0
+        )
+        template_count = (
+            session.scalar(
+                select(func.count())
+                .select_from(NoteTemplate)
+                .where(NoteTemplate.is_active.is_(True))
+            )
+            or 0
+        )
+    ctx = _base_ctx(request, "explore") | {
+        "stats": stats,
+        "automation_count": automation_count,
+        "template_count": template_count,
+    }
+    return templates.TemplateResponse(request=request, name="explore.html", context=ctx)
+
+
 @app.get("/discover", response_class=HTMLResponse)
 def discover_automations(request: Request):
     from ..email_integrations import list_email_integrations

@@ -494,7 +494,7 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     assert 'data-label="Name"' not in r.text
     assert '<span class="row-dur">' in r.text and '<span class="row-date">' in r.text
     assert '<span class="row-meta-mobile">' in r.text
-    assert ".file-row .row-meta-mobile { display: inline; font-variant-numeric: tabular-nums; }" in page
+    assert ".file-row .row-meta-mobile { display: flex; align-items: center; color: var(--c-text-2); font-size: 14px;" in page
     assert ".file-table-head { display: none; }" in page
     assert 'id="select-all-mobile" type="checkbox">Select visible' in r.text
     assert 'id="mobile-sort" aria-label="Sort recordings"' in r.text
@@ -580,7 +580,7 @@ def test_library_paginates_without_truncating_ask_scope(monkeypatch, tmp_path):
     ask = c.get("/?ask=true")
     assert first.text.count('class="row-check checkbox row-select"') == 100
     first_assets = with_assets(c, first)
-    assert ".file-row .row-title { font-size: 16px; line-height: 1.4; white-space: normal;" in first_assets
+    assert ".file-row .row-title { font-size: 17px; line-height: 1.4; white-space: normal;" in first_assets
     assert ".batch-bar { position: fixed;" in first_assets
     assert 'class="sub pagination-summary">1–100 of 105</span>' in first.text
     assert 'class="pagination-current" aria-current="page" aria-label="Page 1">1</span>' in first.text

@@ -1,4 +1,4 @@
-{%- set show_tabbar = active in ('home', 'recordings', 'discover') and request.url.path in ('/', '/home', '/discover') -%}
+{%- set show_tabbar = active in ('home', 'recordings', 'discover', 'explore') and request.url.path in ('/', '/home', '/discover', '/explore') -%}
 {% if not partial_response %}
 <!doctype html>
 <html lang="{{ workspace_preferences.locale }}" data-density="{{ workspace_preferences.density }}" data-theme="light">
@@ -256,6 +256,25 @@
       </div>
       <div class="dialog-foot"><button class="btn-ghost btn" type="button" data-folder-create>{{ icon('folder-plus', 'sm') }}{{ t('New folder') }}</button><span style="flex:1"></span><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn" type="submit">{{ t('Move') }}</button></div>
     </form>
+  </dialog>
+  <dialog class="sheet" id="add-sheet" aria-labelledby="add-sheet-title">
+    <div class="sheet-grabber" aria-hidden="true"></div>
+    <div class="dialog-head"><h2 class="dialog-title" id="add-sheet-title">{{ t('Add audio') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+    <div class="dialog-body add-sheet-body">
+      <label class="add-option" data-add-upload>
+        <span class="add-option-icon">{{ icon('upload') }}</span>
+        <span class="add-option-text"><strong>{{ t('Import audio') }}</strong><small>{{ t('MP3, MP4, M4A, WAV, OGG, Opus, WebM, FLAC or AAC · up to 2 GB') }}</small></span>
+        <input class="visually-hidden" type="file" accept="audio/*,video/mp4,video/webm,.opus,.m4a,.flac,.aac,.amr" data-add-file>
+      </label>
+      <button class="add-option" type="button" data-add-sync>
+        <span class="add-option-icon">{{ icon('refresh') }}</span>
+        <span class="add-option-text"><strong>{{ t('Sync from Plaud now') }}</strong><small>{{ t('Metadata first · audio on demand') }}</small></span>
+      </button>
+      <div class="add-progress" data-add-progress hidden>
+        <div class="import-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="add-progress-label"><span style="width:0%"></span></div>
+        <p class="t-meta" id="add-progress-label" data-add-progress-label role="status" aria-live="polite"></p>
+      </div>
+    </div>
   </dialog>
   <div id="lp-audio-host" hidden></div>
   <section class="mini-player" id="lp-mini-player" aria-label="{{ t('Now playing') }}" hidden>

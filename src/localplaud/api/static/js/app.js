@@ -371,6 +371,214 @@
     render();
   });
 
+  /* ---------------- phone list gestures: swipe actions, long-press, pull-to-refresh
+   * Touch only, and every gesture has a button equivalent (row "…" stays in the
+   * accessibility tree; the header "…" has "Select recordings").
+   */
+  whenReady(() => {
+    const compact = matchMedia('(max-width: 820px)');
+    const SWIPE_W = 72;
+    let gesture = null, suppressClick = false, openSwipe = null;
+    const closeSwipe = (row = openSwipe) => {
+      if (!row) return;
+      row.classList.remove('swipe-open');
+      const main = row.querySelector('.row-main'); if (main) main.style.transform = '';
+      if (openSwipe === row) openSwipe = null;
+    };
+    const swipeActions = row => {
+      let tray = row.querySelector('.row-swipe');
+      if (tray) return tray;
+      const more = row.querySelector('.row-more');
+      if (!more) return null;
+      const actions = more.dataset.trash === '1' ? [['open', 'external-link', 'Open recording']]
+        : [['notes', 'note', 'Notes'], ['move', 'folder-input', 'Move'], ['rename', 'pencil', 'Rename']];
+      tray = document.createElement('div');
+      tray.className = 'row-swipe'; tray.setAttribute('aria-hidden', 'true');
+      for (const [action, iconName, text] of actions) {
+        const button = document.createElement('button');
+        button.type = 'button'; button.tabIndex = -1; button.dataset.swipeAction = action;
+        button.innerHTML = `<svg class="i" aria-hidden="true"><use href="#i-${iconName}"></use></svg><span></span>`;
+        button.querySelector('span').textContent = lp.t(text);
+        tray.append(button);
+      }
+      tray.style.width = `${actions.length * SWIPE_W}px`;
+      row.append(tray);
+      return tray;
+    };
+    document.addEventListener('pointerdown', event => {
+      if (event.pointerType !== 'touch' || !compact.matches) return;
+      const row = event.target.closest('.file-row');
+      if (openSwipe && openSwipe !== row) closeSwipe();
+      if (!row || event.target.closest('.row-swipe, .row-check, button')) return;
+      gesture = {row, x: event.clientX, y: event.clientY, dx: 0, mode: null, pointerId: event.pointerId,
+        timer: setTimeout(() => {
+          if (!gesture || gesture.mode) return;
+          gesture.mode = 'press'; suppressClick = true;
+          navigator.vibrate?.(12);
+          const check = row.querySelector('.row-select');
+          if (check) {
+            row.closest('.file-table')?.classList.add('is-selecting');
+            check.checked = !check.checked;
+            check.dispatchEvent(new Event('change', {bubbles: true}));
+          } else row.querySelector('.row-more')?.click();
+        }, 500)};
+    }, {passive: true});
+    document.addEventListener('pointermove', event => {
+      if (!gesture || event.pointerId !== gesture.pointerId) return;
+      const dx = event.clientX - gesture.x, dy = event.clientY - gesture.y;
+      if (!gesture.mode) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        clearTimeout(gesture.timer);
+        gesture.mode = Math.abs(dx) > Math.abs(dy) * 1.3 ? 'swipe' : 'scroll';
+        if (gesture.mode === 'swipe' && !swipeActions(gesture.row)) gesture.mode = 'scroll';
+      }
+      if (gesture.mode !== 'swipe') return;
+      const tray = gesture.row.querySelector('.row-swipe'), max = tray.offsetWidth;
+      const base = gesture.row.classList.contains('swipe-open') ? -max : 0;
+      gesture.dx = Math.max(-max - 24, Math.min(0, base + dx));
+      gesture.row.classList.add('is-swiping');
+      gesture.row.querySelector('.row-main').style.transform = `translateX(${gesture.dx}px)`;
+    }, {passive: true});
+    const endGesture = event => {
+      if (!gesture || event.pointerId !== gesture.pointerId) return;
+      clearTimeout(gesture.timer);
+      const {row, mode, dx} = gesture;
+      gesture = null;
+      if (mode !== 'swipe') return;
+      suppressClick = true;
+      row.classList.remove('is-swiping');
+      const max = row.querySelector('.row-swipe').offsetWidth;
+      if (dx < -Math.min(80, max / 2)) {
+        row.classList.add('swipe-open'); row.querySelector('.row-main').style.transform = `translateX(${-max}px)`;
+        if (openSwipe && openSwipe !== row) closeSwipe(); openSwipe = row;
+      } else closeSwipe(row);
+    };
+    document.addEventListener('pointerup', endGesture);
+    document.addEventListener('pointercancel', event => { if (gesture?.mode === 'swipe') endGesture(event); else { clearTimeout(gesture?.timer); gesture = null; } });
+    document.addEventListener('click', event => {
+      const action = event.target.closest('[data-swipe-action]');
+      if (action) {
+        const row = action.closest('.file-row'), more = row?.querySelector('.row-more');
+        closeSwipe(row);
+        if (more) lp.rowAction(more, action.dataset.swipeAction);
+        event.preventDefault(); event.stopPropagation(); return;
+      }
+      if (suppressClick) { suppressClick = false; if (event.target.closest('.file-row')) { event.preventDefault(); event.stopPropagation(); } }
+    }, true);
+    document.addEventListener('contextmenu', event => { if (compact.matches && event.target.closest('.file-row') && matchMedia('(pointer: coarse)').matches) event.preventDefault(); });
+
+    // Pull to refresh (lists only; native overscroll reload is disabled in CSS).
+    const indicator = document.createElement('div');
+    indicator.className = 'ptr-indicator'; indicator.setAttribute('aria-hidden', 'true');
+    indicator.innerHTML = '<svg class="i" aria-hidden="true"><use href="#i-refresh"></use></svg>';
+    document.body.append(indicator);
+    let pull = null;
+    const listPage = () => document.querySelector('#app-view .library-page .file-list, #app-view .explore-page');
+    document.addEventListener('touchstart', event => {
+      if (!compact.matches || window.scrollY > 0 || document.querySelector('dialog[open]') || document.body.classList.contains('nav-open') || !listPage()) return;
+      if (event.target.closest('.file-row.swipe-open, .m-tabbar, .mini-player')) return;
+      pull = {y: event.touches[0].clientY, dy: 0};
+    }, {passive: true});
+    document.addEventListener('touchmove', event => {
+      if (!pull) return;
+      pull.dy = Math.max(0, event.touches[0].clientY - pull.y);
+      if (window.scrollY > 0) { pull = null; indicator.style.transform = ''; return; }
+      const distance = Math.min(110, pull.dy * 0.5);
+      indicator.style.transform = `translate(-50%, ${distance}px) rotate(${distance * 3}deg)`;
+      indicator.classList.toggle('is-ready', distance >= 64);
+    }, {passive: true});
+    document.addEventListener('touchend', () => {
+      if (!pull) return;
+      const ready = Math.min(110, pull.dy * 0.5) >= 64;
+      pull = null;
+      if (!ready) { indicator.style.transform = ''; indicator.classList.remove('is-ready'); return; }
+      indicator.classList.add('is-refreshing');
+      indicator.style.transform = 'translate(-50%, 64px)';
+      const done = () => { indicator.classList.remove('is-refreshing', 'is-ready'); indicator.style.transform = ''; };
+      if (window.htmx) {
+        window.htmx.ajax('GET', location.pathname + location.search, {target: '#app-view', select: '#app-view', swap: 'outerHTML'})
+          .then(done, () => { done(); lp.toast(lp.t('Could not refresh'), {type: 'error'}); });
+      } else location.reload();
+    });
+  });
+
+  /* ------------------------------- phone "+" sheet: upload / Plaud sync */
+  whenReady(() => {
+    const sheet = document.getElementById('add-sheet');
+    if (!sheet) return;
+    const box = sheet.querySelector('[data-add-progress]'), label = sheet.querySelector('[data-add-progress-label]');
+    const bar = box.querySelector('[role="progressbar"]'), fill = bar.querySelector('span');
+    const file = sheet.querySelector('[data-add-file]'), sync = sheet.querySelector('[data-add-sync]');
+    const setProgress = (pct, text) => {
+      box.hidden = false;
+      const value = Math.max(0, Math.min(100, Math.round(pct)));
+      fill.style.width = `${value}%`; bar.setAttribute('aria-valuenow', String(value));
+      if (text) label.textContent = text;
+    };
+    const busy = value => {
+      sheet.dataset.busy = String(value);
+      file.disabled = value; sync.disabled = value;
+      sheet.querySelectorAll('.add-option').forEach(item => item.classList.toggle('is-disabled', value));
+    };
+    sheet.addEventListener('lp:dialog-open', () => { if (sheet.dataset.busy !== 'true') { box.hidden = true; label.textContent = ''; } });
+    file.addEventListener('change', () => {
+      const chosen = file.files?.[0];
+      if (!chosen) return;
+      busy(true); setProgress(0, `${lp.t('Importing')} ${chosen.name}…`);
+      const body = new FormData(); body.append('file', chosen);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/imports/local/audio');
+      xhr.upload.addEventListener('progress', event => { if (event.lengthComputable) setProgress((event.loaded / event.total) * 100); });
+      xhr.addEventListener('load', () => {
+        busy(false); file.value = '';
+        let data = {}; try { data = JSON.parse(xhr.responseText || '{}'); } catch (_error) { /* non-JSON */ }
+        if (xhr.status >= 200 && xhr.status < 300 && data.id) {
+          setProgress(100, lp.t('Imported. Opening recording…'));
+          sheet.close();
+          lp.toast(lp.t('Imported. Processing starts automatically.'), {type: 'success', action: {label: lp.t('Open'), onClick: () => { location.href = `/file/${encodeURIComponent(data.id)}`; }}});
+          const link = document.createElement('a'); link.href = `/file/${encodeURIComponent(data.id)}`; link.hidden = true; document.body.append(link); link.click(); link.remove();
+        } else {
+          const detail = typeof data.detail === 'string' ? lp.t(data.detail) : lp.t('Could not upload audio');
+          setProgress(0, detail); lp.toast(detail, {type: 'error'});
+        }
+      });
+      xhr.addEventListener('error', () => { busy(false); file.value = ''; setProgress(0, lp.t('Could not upload audio')); lp.toast(lp.t('Could not upload audio'), {type: 'error'}); });
+      xhr.send(body);
+    });
+    let pollTimer = null;
+    const poll = async () => {
+      try {
+        const response = await fetch('/api/imports/plaud/metadata/status');
+        const data = await response.json();
+        const pct = data.total ? (data.processed / data.total) * 100 : 5;
+        if (['queued', 'running'].includes(data.status)) {
+          setProgress(pct, `${data.processed || 0} ${lp.t('of')} ${data.total || '…'} · ${lp.t('metadata only, audio not downloaded')}`);
+          pollTimer = setTimeout(poll, 1000); return;
+        }
+        busy(false);
+        if (data.status === 'completed') {
+          setProgress(100, `${lp.t('Complete')} · ${data.processed} ${lp.t('recordings')}`);
+          lp.toast(`${lp.t('Plaud sync complete')} · ${data.new || 0} ${lp.t('new')}`, {type: 'success', action: {label: lp.t('Refresh'), onClick: () => location.reload()}});
+        } else if (data.status === 'failed') {
+          const message = `${lp.t('Import stopped')} · ${lp.t(data.error || 'Unknown error')}`;
+          setProgress(0, message); lp.toast(message, {type: 'error'});
+        }
+      } catch (_error) { busy(false); setProgress(0, lp.t('Could not check Plaud import status')); }
+    };
+    sync.addEventListener('click', async () => {
+      if (sheet.dataset.busy === 'true') return;
+      busy(true); setProgress(2, lp.t('Starting Plaud sync…'));
+      try {
+        const response = await fetch('/api/imports/plaud/metadata', {method: 'POST'});
+        if (!response.ok && response.status !== 409) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(typeof data.detail === 'string' ? lp.t(data.detail) : lp.t('Could not start Plaud import'));
+        }
+        clearTimeout(pollTimer); poll();
+      } catch (failure) { busy(false); setProgress(0, failure.message); lp.toast(failure.message, {type: 'error'}); }
+    });
+  });
+
   /* ------------------------------------------ view transitions, offline */
   try {
     if (window.htmx && document.startViewTransition && !reduceMotion()) window.htmx.config.globalViewTransitions = true;
@@ -549,22 +757,31 @@
     }, true);
     window.addEventListener('scroll', () => { if (openMenuButton?.matches('.row-more')) lp.closeMenus(); }, true);
     const renameDialog = document.getElementById('rename-dialog'), moveDialog = document.getElementById('move-dialog');
+    // Shared by the "…" menu, swipe actions, and the long-press sheet.
+    lp.rowAction = (button, action) => {
+      const data = {...button.dataset, button};
+      if (action === 'rename') {
+        const form = renameDialog.querySelector('form');
+        form.elements.title.value = data.title || '';
+        renameDialog.querySelector('[data-rename-error]').textContent = '';
+        renameDialog.dataset.fileId = data.fileId;
+        lp.openDialog(renameDialog, button);
+      } else if (action === 'move') {
+        const form = moveDialog.querySelector('form');
+        [...form.elements.folder_id].forEach(radio => { radio.checked = radio.value === (data.folderId || ''); });
+        moveDialog.querySelector('[data-move-error]').textContent = '';
+        moveDialog.dataset.fileId = data.fileId;
+        lp.openDialog(moveDialog, button);
+      } else if (action === 'notes' || action === 'open') {
+        const link = document.createElement('a');
+        link.href = action === 'notes' ? `/file/${encodeURIComponent(data.fileId)}?tab=notes` : data.href;
+        link.hidden = true; document.body.append(link); link.click(); link.remove();
+      }
+    };
     menu.addEventListener('click', event => {
       const item = event.target.closest('[data-row-action]');
       if (!item || !row) return;
-      if (item.dataset.rowAction === 'rename') {
-        const form = renameDialog.querySelector('form');
-        form.elements.title.value = row.title || '';
-        renameDialog.querySelector('[data-rename-error]').textContent = '';
-        renameDialog.dataset.fileId = row.fileId;
-        lp.openDialog(renameDialog, row.button);
-      } else if (item.dataset.rowAction === 'move') {
-        const form = moveDialog.querySelector('form');
-        [...form.elements.folder_id].forEach(radio => { radio.checked = radio.value === (row.folderId || ''); });
-        moveDialog.querySelector('[data-move-error]').textContent = '';
-        moveDialog.dataset.fileId = row.fileId;
-        lp.openDialog(moveDialog, row.button);
-      }
+      if (['rename', 'move'].includes(item.dataset.rowAction)) lp.rowAction(row.button, item.dataset.rowAction);
     });
     const submitJson = async (dialog, url, method, body, errorEl, fallback) => {
       dialog.dataset.busy = 'true';

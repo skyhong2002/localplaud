@@ -1,0 +1,14 @@
+{#- Phone top bar for root views (Files, Home, Explore), modelled on the Plaud app:
+    no title; left = local processing status (opens the drawer with all navigation),
+    right = AI search and the avatar (Settings / Me). -#}
+{%- set ops = sidebar.ops -%}
+{%- set level = 'attention' if ops.attention else ('busy' if ops.processing or ops.queued else 'ok') -%}
+<header class="m-topbar m-root-topbar">
+  <button class="m-status" type="button" data-nav-open aria-controls="workspace-sidebar" aria-expanded="false"
+    aria-label="{{ t('Open menu') }} · {{ t('Workspace status') }}: {% if ops.attention %}{{ ops.attention }} {{ t('need attention') }}{% elif ops.processing %}{{ ops.processing }} {{ t('generating') }}{% else %}{{ t('All caught up') }}{% endif %}">
+    <span class="m-status-level m-status-{{ level }}" aria-hidden="true"></span>{{ icon('drive', 'lg') }}{{ icon('chevron-down', 'sm') }}
+  </button>
+  <span class="m-title"></span>
+  <a class="icon-btn" href="/search" aria-label="{{ t('Search and Ask') }}">{{ icon('search-ai', 'lg') }}</a>
+  <a class="icon-btn" href="/settings" aria-label="{{ t('Settings') }}"><span class="m-avatar" aria-hidden="true">{{ workspace_preferences.workspace_name | initials }}</span></a>
+</header>

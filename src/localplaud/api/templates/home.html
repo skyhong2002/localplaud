@@ -2,12 +2,7 @@
 {% from "_library.html" import file_row with context %}
 {% block title %}{{ t('Home') }} — localplaud{% endblock %}
 {% block mobile_topbar %}
-<header class="m-topbar">
-  <button class="icon-btn" type="button" data-nav-open aria-label="{{ t('Open menu') }}" aria-controls="workspace-sidebar" aria-expanded="false">{{ icon('sidebar') }}</button>
-  <span class="m-title"><span>{{ workspace_preferences.workspace_name }}</span></span>
-  <a class="icon-btn" href="/search" aria-label="{{ t('Search') }}">{{ icon('search') }}</a>
-  <a class="icon-btn" href="/settings" aria-label="{{ t('Settings') }}"><span class="m-avatar" aria-hidden="true">{{ workspace_preferences.workspace_name | initials }}</span></a>
-</header>
+{% include "_m_root_topbar.html" %}
 {% endblock %}
 {% block body %}
 <div class="library-page home-page"><div class="page-frame">

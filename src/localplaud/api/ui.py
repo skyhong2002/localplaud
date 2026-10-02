@@ -6,7 +6,10 @@ Registered once on the app's template environment (see ``register``):
   references the sprite in ``templates/_icons.html`` (included once by
   ``base.html``). Decorative by default (``aria-hidden``); pass ``label`` for a
   standalone meaningful icon.
-- ``dur_long`` formats milliseconds the way the library rows do (``1h 22m 8s``).
+- ``dur_long`` formats milliseconds the way the library rows do (``1h 22m 8s``);
+  ``dur_short`` is the phone-row form (``1h 22m``).
+- ``dt_rel`` is the shared relative list date (``Yesterday at 22:27`` / ``昨天 22:27``)
+  in the workspace timezone, locale, and hour cycle.
 - ``initials`` turns a workspace name into a two-letter avatar.
 - ``recording_state`` maps a file summary dict to a compact processing-state
   descriptor (``None`` for a healthy, complete recording).
@@ -16,6 +19,7 @@ from __future__ import annotations
 
 import re
 
+from jinja2 import pass_context
 from markupsafe import Markup, escape
 
 _ICON_NAME = re.compile(r"^[a-z0-9-]{1,40}$")
@@ -44,6 +48,73 @@ def dur_long(ms: int | None) -> str:
     if minutes:
         return f"{minutes}m {sec}s"
     return f"{sec}s"
+
+
+def dur_short(ms: int | None) -> str:
+    """Phone-row duration like the Plaud app: ``1h 22m`` / ``8m`` / ``45s``."""
+    if not ms:
+        return "—"
+    seconds = int(ms // 1000)
+    hours, rem = divmod(seconds, 3600)
+    minutes = rem // 60
+    if hours:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    if minutes:
+        return f"{minutes}m"
+    return f"{seconds}s"
+
+
+_MONTHS_EN = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def relative_datetime(
+    ms: int | None,
+    *,
+    timezone: str = "UTC",
+    locale: str = "en",
+    hour_cycle: str = "24",
+    now=None,
+) -> str:
+    """Human list date: Today/Yesterday at HH:MM, ``30 Sep at 21:38``, or a full date.
+
+    zh-TW: ``今天 22:27`` / ``昨天 22:27`` / ``9月30日 21:38`` / ``2025年9月30日``.
+    """
+    if not ms:
+        return ""
+    from datetime import UTC, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    try:
+        zone = ZoneInfo(timezone)
+    except Exception:  # noqa: BLE001 - invalid stored timezone falls back to UTC
+        zone = ZoneInfo("UTC")
+    moment = datetime.fromtimestamp(ms / 1000, tz=UTC).astimezone(zone)
+    today = (now or datetime.now(UTC)).astimezone(zone).date()
+    if hour_cycle == "12":
+        clock = moment.strftime("%I:%M %p").lstrip("0")
+        if locale == "zh-Hant-TW":
+            clock = ("上午 " if moment.hour < 12 else "下午 ") + moment.strftime("%I:%M").lstrip("0")
+    else:
+        clock = moment.strftime("%H:%M")
+    zh = locale == "zh-Hant-TW"
+    day = moment.date()
+    if day == today:
+        return f"今天 {clock}" if zh else f"Today at {clock}"
+    if day == today - timedelta(days=1):
+        return f"昨天 {clock}" if zh else f"Yesterday at {clock}"
+    if day.year == today.year:
+        return f"{day.month}月{day.day}日 {clock}" if zh else f"{day.day} {_MONTHS_EN[day.month - 1]} at {clock}"
+    return f"{day.year}年{day.month}月{day.day}日" if zh else f"{day.day} {_MONTHS_EN[day.month - 1]} {day.year}"
+
+
+def _dt_rel(context, ms: int | None) -> str:
+    preferences = context.get("workspace_preferences") or {}
+    return relative_datetime(
+        ms,
+        timezone=preferences.get("timezone", "UTC"),
+        locale=preferences.get("locale", "en"),
+        hour_cycle=str(preferences.get("hour_cycle", "24")),
+    )
 
 
 def initials(name: str | None) -> str:
@@ -106,5 +177,7 @@ def register(env) -> None:
     env.globals["asset_version"] = asset_version()
     env.globals["icon"] = icon
     env.filters["dur_long"] = dur_long
+    env.filters["dur_short"] = dur_short
+    env.filters["dt_rel"] = pass_context(_dt_rel)
     env.filters["initials"] = initials
     env.globals["recording_state"] = recording_state

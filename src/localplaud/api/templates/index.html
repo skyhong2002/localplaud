@@ -32,12 +32,7 @@
 {%- endmacro -%}
 
 {% block mobile_topbar %}{% if active == 'ask' %}{{ super() }}{% else %}
-<header class="m-topbar">
-  <button class="icon-btn" type="button" data-nav-open aria-label="{{ t('Open menu') }}" aria-controls="workspace-sidebar" aria-expanded="false">{{ icon('sidebar') }}</button>
-  <span class="m-title"></span>
-  <a class="icon-btn" href="/search" aria-label="{{ t('Search') }}">{{ icon('search') }}</a>
-  <a class="icon-btn" href="/settings" aria-label="{{ t('Settings') }}"><span class="m-avatar" aria-hidden="true">{{ workspace_preferences.workspace_name | initials }}</span></a>
-</header>
+{% include "_m_root_topbar.html" %}
 {% endif %}{% endblock %}
 
 {% block body %}
@@ -167,6 +162,7 @@
         <button class="icon-btn" type="button" data-menu="library-more-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="library-more-menu" aria-label="{{ t('More options') }}" data-tooltip="{{ t('More options') }}">{{ icon('more') }}</button>
         <div class="menu" id="library-more-menu" role="menu" data-placement="bottom-end" hidden>
           {% if selectable and files %}<button class="menu-item" role="menuitem" type="button" data-select-mode>{{ icon('check-square') }}{{ t('Select recordings') }}</button>{% endif %}
+          <button class="menu-item" role="menuitem" type="button" data-open-filters>{{ icon('filter') }}{{ t('Filter and organize') }}</button>
           <button class="menu-item" role="menuitem" type="button" data-folder-create>{{ icon('folder-plus') }}{{ t('New folder') }}</button>
           <button class="menu-item" role="menuitem" type="button" data-proxy-click="organization-manager-open">{{ icon('tag') }}{{ t('Manage folders and tags') }}</button>
           <div class="menu-sep"></div>
@@ -548,6 +544,7 @@
       if (!table?.classList.contains('is-selecting')) { checks.forEach(c => { c.checked = false; }); sync(); }
       return;
     }
+    if (event.target.closest('[data-open-filters]') && filterMenu) { filterReturnFocus = document.activeElement; filterMenu.open = true; return; }
     const proxy = event.target.closest('[data-proxy-click]');
     if (proxy) document.getElementById(proxy.dataset.proxyClick)?.click();
   }, {signal:cleanupController.signal});
