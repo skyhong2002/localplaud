@@ -1082,7 +1082,19 @@
     const details = document.getElementById('transcript-find')?.closest('details');
     if (!details) return;
     details.open = true;
-    requestAnimationFrame(() => document.getElementById('transcript-find')?.focus());
+    requestAnimationFrame(() => {
+      document.getElementById('transcript-find')?.focus({ preventScroll: true });
+      // The panel hangs under the transcript toolbar; when that toolbar sits low
+      // in the viewport, scroll just enough to bring the whole panel into view.
+      const panel = details.querySelector('.search-popover');
+      const rect = panel?.getBoundingClientRect();
+      if (!rect || (rect.bottom <= window.innerHeight - 12 && rect.top >= 0)) return;
+      let scroller = details.parentElement;
+      while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+      const target = !scroller || scroller === document.body ? window : scroller;
+      const delta = rect.top < 0 ? rect.top - 12 : rect.bottom - window.innerHeight + 16;
+      target.scrollBy({ top: delta });
+    });
   };
   on(document, 'keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && transcriptVisible() && document.getElementById('transcript-find')) {
