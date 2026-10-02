@@ -156,6 +156,14 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
     if request.stage == JobStage.transcribe:
         from ..worker.transcribe import run_asr, segments_to_json
 
+        if "vad" in request.options:
+            # A stage-scoped speech recovery choice, captured by the durable
+            # request/profile and its idempotency key; never change host defaults.
+            from ..config import VadConfig
+
+            settings.asr.vad = VadConfig.model_validate(
+                settings.asr.vad.model_dump() | request.options["vad"]
+            )
         suffix = request.options.get("suffix", ".wav")
         with tempfile.NamedTemporaryFile(suffix=suffix) as audio:
             audio.write(inputs["audio"])

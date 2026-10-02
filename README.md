@@ -54,7 +54,11 @@ revisions, editable per-recording speaker names,
 single-file Ask with playable citations, richer library filters, and Plaud-style
 Add audio / Import from Plaud flows are implemented. A Plaud import refreshes the
 entire metadata catalog plus any existing Plaud transcript/summary while leaving raw
-audio remote until the user requests one recording. After that baseline, scheduled
+audio remote until the user requests one recording. Imports also resolve link-backed
+note/transcript bodies, retain Plaud note names and stable links, and mirror supported
+images. An empty Notes workspace offers a direct import action; app-only summary
+cards without a downloadable image are explicitly labelled as unavailable.
+After that baseline, scheduled
 polling automatically downloads recordings first observed as new uploads. The
 optional `store.evict_plaud_audio_after_processing` policy releases completed
 Plaud-backed audio while retaining every local artifact, then restores the raw
@@ -89,6 +93,14 @@ The remaining work centers on broader integrations and Plaud-level Web App polis
 Plaud-produced
 transcripts and summaries may be imported for
 migration or comparison, but are not part of the target primary workflow.
+
+To share a recording, open **Share → Public share link → Create public link → Copy**. Choose which
+content to include before creating the link; recipients can read it without signing
+in. **Disable link** revokes access. The separate workspace link requires login.
+The same Share sheet groups clipboard actions and audio, transcript, note, and
+mind-map exports; selecting a row opens its options inside the sheet.
+On mobile, the recording player stays at the bottom while you read notes; generation
+settings expand from **Generate notes** or the notes **+** menu.
 
 ## How it works
 
@@ -312,6 +324,8 @@ on very different hardware:
 
 A bundled Caddy reverse proxy terminates HTTPS for your domain automatically.
 See [`docs/deploy.md`](docs/deploy.md).
+For explicitly requested recovery of failed recordings or model migrations, see
+[`docs/processing-repair.md`](docs/processing-repair.md).
 
 ## Development
 

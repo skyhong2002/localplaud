@@ -17,6 +17,8 @@ import json
 import logging
 import math
 import os
+import threading
+from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -879,6 +881,11 @@ def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
         return enforce_cost_ceiling(session, file_id, stage, snapshot, usage)
 
 
+# Text stages can overlap across recordings; memory-heavy speech stages cannot.
+# Remote workers additionally enforce their own cross-request GPU lock.
+_SPEECH_STAGE_LOCK = threading.Lock()
+
+
 def _run_fallback_stage(
     file_id: str,
     profile_stage: str,
@@ -894,7 +901,13 @@ def _run_fallback_stage(
         stale_generation = _begin_stage(file_id, durable_stage)
         try:
             _renew_processing_claim(file_id)
-            outcome = operation(candidate)
+            speech_stage = durable_stage in {
+                StageName.transcribe,
+                StageName.align,
+                StageName.diarize,
+            }
+            with _SPEECH_STAGE_LOCK if speech_stage else nullcontext():
+                outcome = operation(candidate)
             detail = dict(outcome.get("detail") or {}) | {
                 "fallback": candidate["fallback"],
                 "fallback_failures": failures,
@@ -1959,7 +1972,9 @@ def _run_correction_stage(
                 and current.base_transcript_id == raw.id
                 and current.provider
                 and current.model
-                and current.prompt_version == polish.PROMPT_VERSION
+                # v5 only compacts review output; v4 already reviewed every edit.
+                # Reuse accepted v4 work instead of recharging a completed stage.
+                and current.prompt_version in {"transcript-polish/v4", polish.PROMPT_VERSION}
                 and (current.resolved_profile_snapshot or {})
                 .get("correction_input", {})
                 .get("raw_sha256")
@@ -2789,8 +2804,15 @@ def _finish_processing_cycle(
             if derived_only:
                 for run in row.stage_runs:
                     if run.stage in {
-                        StageName.correct, StageName.summarize, StageName.mind_map, StageName.index
-                    } and run.status in {StageStatus.failed, StageStatus.degraded, StageStatus.pending}:
+                        StageName.correct,
+                        StageName.summarize,
+                        StageName.mind_map,
+                        StageName.index,
+                    } and run.status in {
+                        StageStatus.failed,
+                        StageStatus.degraded,
+                        StageStatus.pending,
+                    }:
                         run.detail = dict(run.detail or {}) | {"derived_only": True}
             row.status = FileStatus.partial
             row.error = "; ".join(partial_errors)[:2000]
@@ -2929,10 +2951,42 @@ def _transcript_lineage(file_id: str, settings: Settings) -> dict | None:
         }
 
 
+# Connection settings that bound how a call runs, not what it produces. Changing a
+# timeout or quota reserve must not discard completed paid work.
+_EXECUTION_ONLY_KEYS = frozenset(
+    {
+        "timeout_seconds",
+        "quota_reserve_percent",
+        "quota_call_headroom_percent",
+        "quota_check_timeout_seconds",
+    }
+)
+# Chunk budgets only shape the stage that uses them.
+_STAGE_IRRELEVANT_KEYS = {
+    "correct": frozenset({"summary_chunk_chars"}),
+    "summarize": frozenset({"polish_chunk_chars"}),
+    "mind_map": frozenset({"polish_chunk_chars"}),
+}
+
+
+def _comparable_selection(selection, stage: str):
+    if not isinstance(selection, dict) or not isinstance(selection.get("configuration"), dict):
+        return selection
+    ignored = _EXECUTION_ONLY_KEYS | _STAGE_IRRELEVANT_KEYS.get(stage, frozenset())
+    return selection | {
+        "configuration": {
+            key: value for key, value in selection["configuration"].items() if key not in ignored
+        }
+    }
+
+
 def _profile_stage_matches(existing: dict | None, current: dict, stage: str) -> bool:
-    existing_selection = ((existing or {}).get("stages") or {}).get(stage)
+    existing_selection = _comparable_selection(
+        ((existing or {}).get("stages") or {}).get(stage), stage
+    )
     return any(
-        existing_selection == ((candidate.get("stages") or {}).get(stage))
+        existing_selection
+        == _comparable_selection((candidate.get("stages") or {}).get(stage), stage)
         for candidate in candidate_snapshots(current, stage)
     )
 
@@ -3166,7 +3220,8 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
                 provider=result["provider"],
                 model=result.get("model"),
                 prompt_version=result["prompt_version"],
-                resolved_profile_snapshot=dict(_PROFILE_SNAPSHOT.get() or {}) | {
+                resolved_profile_snapshot=dict(_PROFILE_SNAPSHOT.get() or {})
+                | {
                     "correction_input": {
                         "revision": result.get("input_revision"),
                         "kind": result.get("input_kind"),
@@ -3449,6 +3504,10 @@ def _persist_summary(
     )
 
     template = result.get("template", "default")
+    if template != "mind_map":
+        from ..note_presentation import without_playback_citations
+
+        result = {**result, "content_md": without_playback_citations(result["content_md"])}
     with session_scope() as session:
         lock_cost_budget(session, file_id)
         _assert_processing_claim_in_session(session, file_id)
@@ -3652,6 +3711,29 @@ def _persist_remote_chunks(file_id: str, payload: dict, lineage: dict | None = N
     return model_name
 
 
+def _recently_transcribed(row: PlaudFile, settings: Settings, now: datetime) -> bool:
+    """Whether a recording's local transcription is recent enough to keep retrying.
+
+    ``auto_process_untranscribed_only`` pauses historical backfills. A recording
+    admitted under that filter still owns its bounded retries, including resume
+    after a restart interrupted it, until its local transcription ages out of
+    ``untranscribed_only_retry_hours``.
+    """
+    hours = settings.pipeline.untranscribed_only_retry_hours
+    if hours <= 0:
+        return False
+    for run in row.stage_runs:
+        if run.stage != StageName.transcribe or run.status != StageStatus.completed:
+            continue
+        completed = run.completed_at
+        if completed is None:
+            continue
+        if completed.tzinfo is None:
+            completed = completed.replace(tzinfo=UTC)
+        return now - completed <= timedelta(hours=hours)
+    return False
+
+
 def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | None:
     """Return the currently eligible processing scope for a queued recording.
 
@@ -3663,6 +3745,18 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
     if processing_claim_active(row, now=now):
         return None
     if row.status not in (FileStatus.downloaded, FileStatus.error, FileStatus.partial):
+        return None
+    if (
+        settings.pipeline.auto_process_untranscribed_only
+        and (
+            row.local_transcript is not None
+            or any(
+                run.stage == StageName.transcribe and run.status == StageStatus.completed
+                for run in row.stage_runs
+            )
+        )
+        and not _recently_transcribed(row, settings, now)
+    ):
         return None
     threshold_ms = settings.pipeline.auto_skip_threshold_ms()
     if (
@@ -3696,6 +3790,29 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
         and run.status != StageStatus.completed
         for run in row.stage_runs
     )
+    # A normal ingestion can finish speech and fail later without having been
+    # explicitly queued as derived-only. Resume from its local transcript even
+    # after the audio cache is evicted; never infer this from cloud artifacts.
+    if not derived_only and not mind_map_only and row.local_transcript is not None:
+        speech_runs = [
+            run
+            for run in row.stage_runs
+            if run.stage
+            in {StageName.convert, StageName.transcribe, StageName.align, StageName.diarize}
+        ]
+        derived_only = (
+            any(
+                run.stage == StageName.transcribe and run.status == StageStatus.completed
+                for run in speech_runs
+            )
+            and all(
+                run.status in {StageStatus.completed, StageStatus.skipped} for run in speech_runs
+            )
+            and any(
+                run.stage in derived_stages and run.status != StageStatus.completed
+                for run in row.stage_runs
+            )
+        )
     if row.status != FileStatus.downloaded:
         if mind_map_only:
             map_run = next(
@@ -3723,6 +3840,17 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
     if row.audio_path is None and not (derived_only or mind_map_only):
         return None
     return "derived" if derived_only else ("mind_map" if mind_map_only else "full")
+
+
+def new_recordings_waiting(session, settings: Settings, now: datetime) -> bool:
+    """Check eligible new audio again at dispatch time, not just at batch creation."""
+    rows = session.scalars(
+        select(PlaudFile).where(
+            PlaudFile.status == FileStatus.downloaded,
+            PlaudFile.is_trash.is_(False),
+        )
+    )
+    return any(_pending_scope(row, settings, now) is not None for row in rows)
 
 
 def process_pending(
@@ -3760,7 +3888,7 @@ def process_pending(
                 value = value.replace(tzinfo=UTC)
             return value.timestamp()
 
-        def queue_key(item) -> tuple[int, float, str]:
+        def queue_key(item) -> tuple[int, float, float, str]:
             # Fresh downloads always outrank retries. Retry timestamps are
             # recent by construction (a due backoff is near "now"), so ranking
             # purely by event time let a churning retry backlog starve a new
@@ -3788,7 +3916,10 @@ def process_pending(
                     row.pipeline_next_retry_at or row.pipeline_last_failure_at or row.created_at
                 )
                 fresh_tiebreak = 0
-            return fresh_tiebreak, event_time, row.id
+            # A new recording must retain priority after its first failure.
+            # Backoff determines eligibility, not which recording is newest.
+            recording_time = row.start_time_ms / 1000 if row.start_time_ms is not None else 0
+            return fresh_tiebreak, recording_time, event_time, row.id
 
         rows.sort(key=queue_key, reverse=True)
         selected = rows[:limit] if limit is not None else rows
@@ -3796,7 +3927,11 @@ def process_pending(
         # regeneration is still pending, let ASR start without starving meeting
         # notes.  The configured concurrency still controls simultaneous work;
         # this only reserves at most one daemon-batch slot for an old full retry.
-        if limit is not None and limit >= 2:
+        if (
+            limit is not None
+            and limit >= 2
+            and not any(item.status == FileStatus.downloaded for item, _ in rows)
+        ):
             full_retries = [
                 item
                 for item in rows
@@ -3807,16 +3942,6 @@ def process_pending(
                 full_retry_ids = {item[0].id for item in full_retries}
                 non_retry_rows = [item for item in rows if item[0].id not in full_retry_ids]
                 selected = [full_retries[0], *non_retry_rows[: limit - 1]]
-            # Symmetrically, when fresh downloads fill the whole batch, keep
-            # one slot for the top due retry so backoff work still progresses
-            # while a download burst drains.
-            retries = [item for item in rows if item[0].status != FileStatus.downloaded]
-            if (
-                retries
-                and len(rows) > len(selected)
-                and all(item[0].status == FileStatus.downloaded for item in selected)
-            ):
-                selected = [*selected[: limit - 1], retries[0]]
         jobs = [(item.id, scope) for item, scope in selected]
     if not jobs:
         return 0
@@ -3834,6 +3959,10 @@ def process_pending(
                 with session_scope() as session:
                     row = session.get(PlaudFile, fid)
                     if row is None or _pending_scope(row, settings, datetime.now(UTC)) != scope:
+                        return False
+                    if row.status != FileStatus.downloaded and new_recordings_waiting(
+                        session, settings, datetime.now(UTC)
+                    ):
                         return False
                 if scope == "derived":
                     process_derived_artifacts(fid, settings)

@@ -76,6 +76,44 @@ def _outline_markdown(raw: str) -> str | None:
     return "\n".join(lines) or None
 
 
+def _resolve_artifact_blocks(blocks: list) -> list:
+    """Read link-backed migration artifacts without sending account credentials.
+
+    Do not turn an unavailable body into an empty successful import: callers must
+    retain their last good mirror and expose a retryable error instead.
+    """
+    resolved = []
+    for block in blocks:
+        item = dict(block)
+        if not item.get("data_content") and item.get("data_link"):
+            url = item["data_link"]
+            _assert_safe_fetch_url(url)
+            body = bytearray()
+            with httpx.Client(timeout=60, follow_redirects=False) as client:
+                with client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    for chunk in response.iter_bytes():
+                        body.extend(chunk)
+                        if len(body) > 16 * 1024 * 1024:
+                            raise PlaudError("Plaud artifact exceeds 16 MB")
+            if not body:
+                raise PlaudError("Plaud artifact returned an empty body; retry import")
+            item["data_content"] = body.decode("utf-8-sig")
+        resolved.append(item)
+    return resolved
+
+
+def _resolved_note_detail(detail: dict) -> dict:
+    return {
+        **detail,
+        "note_list": _resolve_artifact_blocks(detail.get("note_list") or []),
+        "source_list": _resolve_artifact_blocks([
+            item for item in detail.get("source_list") or []
+            if item.get("data_type") == "outline"
+        ]),
+    }
+
+
 def _cloud_notes(detail: dict) -> list[dict]:
     notes = []
     for item in detail.get("note_list") or []:
@@ -92,6 +130,8 @@ def _cloud_notes(detail: dict) -> list[dict]:
                 "key": str(item.get("data_type") or ""),
                 "title": title or str(item.get("data_title") or "").strip() or None,
                 "markdown": markdown,
+                **({"cloud_id": str(item["data_id"])} if item.get("data_id") else {}),
+                **({"tab_name": str(item["data_tab_name"])} if item.get("data_tab_name") else {}),
                 "assets": (
                     dict(item["download_link_map"])
                     if isinstance(item.get("download_link_map"), dict)
@@ -344,7 +384,7 @@ class PlaudOfficialClient:
     def get_cloud_notes(self, file_id: str, detail: dict | None = None) -> list[dict]:
         """Return every Plaud note with explicit cloud provenance metadata."""
         detail = detail if detail is not None else self.get_detail(file_id)
-        return _cloud_notes(detail)
+        return _cloud_notes(_resolved_note_detail(detail))
 
     def get_cloud_transcript_segments(
         self, file_id: str, detail: dict | None = None
@@ -356,5 +396,6 @@ class PlaudOfficialClient:
         ``transaction`` entry of ``source_list``."""
         detail = detail if detail is not None else self.get_detail(file_id)
         return _transcript_from_source_list(
-            detail.get("source_list") or [], context=file_id
+            _resolve_artifact_blocks([item for item in detail.get("source_list") or []
+                                      if item.get("data_type") == _TRANSCRIPT_TYPE]), context=file_id
         )

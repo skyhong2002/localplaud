@@ -920,16 +920,6 @@
     details.open = true;
     requestAnimationFrame(() => document.getElementById('transcript-find')?.focus());
   };
-  on(document.getElementById('menu-find-replace'), 'click', event => {
-    event.currentTarget.closest('details')?.removeAttribute('open');
-    openFind();
-    const row = document.getElementById('replace-row');
-    if (row) row.hidden = false;
-  });
-  on(document.getElementById('menu-rename-recording'), 'click', event => {
-    event.currentTarget.closest('details')?.removeAttribute('open');
-    document.getElementById('edit-recording-title')?.click();
-  });
   on(document, 'keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && transcriptVisible() && document.getElementById('transcript-find')) {
       event.preventDefault();
@@ -1002,36 +992,6 @@
     try { await writeClipboard(`${time ? `[${time}] ` : ''}${who ? `${who}: ` : ''}${text}`); toast(tr('Copied')); } catch (_error) { toast(tr('Copy failed'), { error: true }); }
   });
 
-  const exportButton = document.getElementById('open-export');
-  const exportMenu = document.getElementById('export-menu');
-  const menuItems = () => $$('[role="menuitem"]', exportMenu);
-  const setExportMenu = open => {
-    if (!exportMenu) return;
-    exportMenu.hidden = !open;
-    exportButton.setAttribute('aria-expanded', String(open));
-    if (open) requestAnimationFrame(() => menuItems()[0]?.focus());
-  };
-  on(exportButton, 'click', event => { event.stopPropagation(); setExportMenu(exportMenu.hidden); });
-  on(document, 'click', event => { if (exportMenu && !exportMenu.hidden && !event.target.closest('#export-menu')) setExportMenu(false); });
-  on(exportMenu, 'click', event => { if (event.target.closest('[role="menuitem"]')) setExportMenu(false); });
-  on(exportMenu, 'keydown', event => {
-    const items = menuItems(), index = items.indexOf(document.activeElement);
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus(); }
-    else if (event.key === 'Escape') { event.preventDefault(); setExportMenu(false); exportButton.focus(); }
-    else if (event.key === 'Tab') setExportMenu(false);
-  });
-  on(exportMenu, 'click', async event => {
-    const item = event.target.closest('[data-export-copy]');
-    if (!item) return;
-    const kind = item.dataset.exportCopy;
-    const url = kind === 'notes' ? `/file/${encodeURIComponent(cfg.fileId)}/export/notes.md` : `/file/${encodeURIComponent(cfg.fileId)}/export/transcript.txt?timestamps=true&speakers=true`;
-    try {
-      const response = await fetch(url, { signal });
-      if (!response.ok) throw new Error(String(response.status));
-      await writeClipboard(await response.text());
-      toast(tr(kind === 'notes' ? 'Notes copied' : 'Transcript copied'));
-    } catch (error) { if (error.name !== 'AbortError') toast(tr(kind === 'notes' ? 'Could not copy notes' : 'Could not copy transcript'), { error: true }); }
-  });
   on(document.getElementById('open-find'), 'click', () => openFind());
 
   // Name speakers dialog: one field per voice with sample clips.

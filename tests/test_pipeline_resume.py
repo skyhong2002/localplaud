@@ -1448,3 +1448,26 @@ def test_notes_retry_automatically_upgrades_raw_correction_and_preserves_on_revi
         assert all(c.input_transcript_revision == 2 for c in r.chunks)
         assert next(x for x in r.stage_runs if x.stage == StageName.correct).attempts == 2
         assert r.status.value == "done"
+
+
+def test_execution_only_connection_settings_do_not_invalidate_completed_stages():
+    from localplaud.worker.pipeline import _profile_stage_matches
+
+    def snapshot(**configuration):
+        base = {"executable": "codex", "polish_chunk_chars": 8000, "summary_chunk_chars": 240000}
+        return {
+            "stages": {
+                "correct": {
+                    "connection": "correct:codex-local",
+                    "model": "gpt-6.1-sol",
+                    "configuration": base | {"timeout_seconds": 900} | configuration,
+                }
+            }
+        }
+
+    old = snapshot()
+    assert _profile_stage_matches(old, snapshot(timeout_seconds=1800), "correct")
+    assert _profile_stage_matches(old, snapshot(summary_chunk_chars=6000), "correct")
+    assert _profile_stage_matches(old, snapshot(quota_reserve_percent=10), "correct")
+    assert not _profile_stage_matches(old, snapshot(polish_chunk_chars=4000), "correct")
+    assert not _profile_stage_matches(old, snapshot(reasoning_effort="low"), "correct")

@@ -289,7 +289,10 @@ def run():
             if scheduler.running:
                 scheduler.shutdown(wait=True)
         finally:
-            release_daemon_owner(daemon_owner)
+            try:
+                jobs.shutdown()
+            finally:
+                release_daemon_owner(daemon_owner)
 
 
 def run_processing_cycle(settings, *, daemon_owner: str | None = None) -> int:
@@ -319,6 +322,10 @@ def process_automatic_pending(settings=None, *, daemon_owner: str | None = None)
         return 0
     with processing_owner(daemon_owner):
         count = process_pending(settings, limit=settings.pipeline.files_per_cycle)
+        if settings.pipeline.auto_process_untranscribed_only:
+            # New recordings already run their own indexing stages. Do not drain
+            # historical reindex/backfill queues in this restricted mode.
+            return count
         process_pending_reindexes(settings, limit=settings.pipeline.files_per_cycle)
         process_pending_documents(
             settings, limit=settings.pipeline.files_per_cycle * 4, reconcile=False
@@ -428,9 +435,7 @@ def reprocess(
 
 @app.command(name="reprocess-all")
 def reprocess_all(
-    mode: str = typer.Option(
-        "resume", "--mode", help="resume | force | derived_only"
-    ),
+    mode: str = typer.Option("resume", "--mode", help="resume | force | derived_only"),
     status: list[str] = typer.Option(  # noqa: B008
         None, "--status", help="Only recordings in this status (repeatable)."
     ),
@@ -466,12 +471,8 @@ def reprocess_all(
 
 @app.command(name="backfill-titles")
 def backfill_titles(
-    force: bool = typer.Option(
-        False, "--force", help="Overwrite existing generated titles too."
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Show what would change; write nothing."
-    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing generated titles too."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write nothing."),
     limit: int | None = typer.Option(
         None, "--limit", help="Cap the number of recordings changed (newest first)."
     ),
@@ -583,9 +584,7 @@ def backfill_tags(
     template = settings.pipeline.summary_template
     processed = tagged = 0
     with session_scope() as session:
-        rows = session.scalars(
-            select(PlaudFile).order_by(PlaudFile.created_at.desc())
-        ).all()
+        rows = session.scalars(select(PlaudFile).order_by(PlaudFile.created_at.desc())).all()
         for r in rows:
             if limit is not None and processed >= limit:
                 break
@@ -602,9 +601,7 @@ def backfill_tags(
             )
             if summary is None or not (summary.content_md or "").strip():
                 continue
-            result = apply_auto_tags(
-                session, r.id, summary.content_md, settings, force=force
-            )
+            result = apply_auto_tags(session, r.id, summary.content_md, settings, force=force)
             processed += 1
             if result.get("applied"):
                 tagged += 1
@@ -723,9 +720,7 @@ def serve():
     _serve(get_settings())
 
 
-def _serve(
-    settings, *, database_initialized: bool = False, managed_daemon: bool = False
-):
+def _serve(settings, *, database_initialized: bool = False, managed_daemon: bool = False):
     import logging
 
     import uvicorn

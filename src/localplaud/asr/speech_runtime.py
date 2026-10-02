@@ -16,6 +16,14 @@ from .vad import audio_duration_seconds, merge_speech_regions, slice_region
 
 
 def speech_regions(audio, cfg, duration):
+    if not cfg["vad"]["enabled"]:
+        # Explicit full-audio recovery must include quiet speech and the tail.
+        # Still bound decoder windows so long input cannot truncate output.
+        size = cfg["qwen"]["max_chunk_seconds"]
+        return [
+            (start, min(start + size, duration))
+            for start in (i * size for i in range(math.ceil(duration / size)))
+        ]
     # faster-whisper ships a CPU ONNX Silero model: no network or optional VAD
     # package, and the same detector used by the previous production baseline.
     from faster_whisper.audio import decode_audio
@@ -122,15 +130,15 @@ def qwen(audio, cfg):
     metadata = {
         "algorithm_version": "qwen-vad-bisection-v1",
         "vad": {
-            "provider": "faster-whisper/silero-onnx",
-            "enabled": True,
+            "provider": "faster-whisper/silero-onnx" if cfg["vad"]["enabled"] else None,
+            "enabled": cfg["vad"]["enabled"],
             "regions": len(regions),
             "speech_seconds": sum(e - s for s, e in regions),
             "skipped_seconds": duration - sum(e - s for s, e in regions),
             "timeline": "original-audio",
             "configuration": {
                 **cfg["vad"],
-                "enabled": True,
+                "enabled": cfg["vad"]["enabled"],
                 "max_region_s": options["max_chunk_seconds"],
             },
         },
@@ -267,6 +275,23 @@ def qwen(audio, cfg):
     return result
 
 
+def offload_long_audio_features(model, duration):
+    """Keep a single global speaker cache without a recording-sized CUDA STFT."""
+    if duration <= 600:
+        return
+    if not model.streaming_mode:
+        raise AsrError("Long Nemotron recordings require streaming inference")
+    model.preprocessor.to("cpu")
+
+    def process_signal(audio_signal, audio_signal_length):
+        features, lengths = model.preprocessor(
+            input_signal=audio_signal.cpu(), length=audio_signal_length.cpu()
+        )
+        return features.to(model.device), lengths.to(model.device)
+
+    model.process_signal = process_signal
+
+
 def nemotron(audio, cfg):
     import torch
     from huggingface_hub import hf_hub_download
@@ -287,10 +312,11 @@ def nemotron(audio, cfg):
     }.items():
         setattr(model.sortformer_modules, key, value)
     model._check_streaming_parameters()
+    duration = audio_duration_seconds(audio)
+    offload_long_audio_features(model, duration)
     # Whole recording maintains one speaker cache and stable identities.
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         spans = model.diarize(audio=[str(audio)], batch_size=1)[0]
-    duration = audio_duration_seconds(audio)
     turns = []
     for span in spans:
         start, end, speaker = span.split()
@@ -303,6 +329,24 @@ def nemotron(audio, cfg):
     return {"turns": turns}
 
 
+def runtime_error(kind: str, exc: Exception) -> str:
+    """Expose actionable known dependency failures, never arbitrary runtime logs."""
+    if isinstance(exc, AsrError):
+        return str(exc)
+    if isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower():
+        return f"{kind} ran out of memory; free worker memory and retry this stage"
+    if isinstance(exc, ImportError):
+        for language, package in (("Korean", "soynlp"), ("Japanese", "nagisa")):
+            if exc.name == package or str(exc).startswith(
+                f"{language} forced alignment requires the `{package}` package."
+            ):
+                return (
+                    f"{kind} forced alignment requires {package} for {language}; "
+                    "rebuild the speech worker with requirements/speech-cuda.txt and retry"
+                )
+    return f"{kind} runtime failed: {type(exc).__name__}"
+
+
 if __name__ == "__main__":
     kind, request_path, output_path = sys.argv[1:]
     request = json.loads(Path(request_path).read_text())
@@ -312,11 +356,7 @@ if __name__ == "__main__":
         )
     except Exception as exc:
         # Do not expose decoded text, paths, or provider credentials in UI errors.
-        message = (
-            str(exc)
-            if isinstance(exc, AsrError)
-            else f"{kind} runtime failed: {type(exc).__name__}"
-        )
+        message = runtime_error(kind, exc)
         Path(output_path).write_text(json.dumps({"error": message}))
         raise
     Path(output_path).write_text(json.dumps(result, ensure_ascii=False))

@@ -27,6 +27,33 @@ Private resumable subcall caches live beside the configured audio directory in
 `note-checkpoints/`; retain them across worker restarts. See
 [note-quality.md](note-quality.md) for configuration and evaluation limits.
 
+## Recording concurrency
+
+Set `pipeline.auto_process_untranscribed_only = true` to admit only recordings
+without a local transcript or completed transcription stage. Each admitted recording
+still runs its normal enabled stages, including notes. A recording whose local
+transcription completed within `pipeline.untranscribed_only_retry_hours` (default
+72) keeps its bounded automatic retries, so a new recording whose correction or
+notes failed still finishes. Older failures require manual Resume; automatic
+old-note retries and standalone index backfills are paused. Existing artifacts and user edits remain intact.
+Disable any separately installed maintenance/reprocessing service as well: manual
+and maintenance calls are intentionally outside this automatic queue filter.
+
+`pipeline.concurrency` bounds the daemon's recording slots. With more than one
+slot, each free slot selects one recording from the current queue; new downloads
+take priority over retries. Eligible retries are ordered by recording time, so a
+new recording retains priority after a failed attempt; backoff still controls
+when retry is allowed. A slow sibling does not hold up a free slot. Dispatch
+checks run at most 30 seconds apart and are also requested after discovery.
+`files_per_cycle` remains the batch limit for serial/CLI processing.
+
+Text correction and note generation for different recordings may overlap.
+Transcription, alignment, and diarization serialize within the controller process
+to limit model memory, and the remote GPU worker also enforces its own lock.
+Provider quotas and model limits still apply; parallelism improves library
+throughput, not necessarily one recording's latency. Existing processing leases
+prevent duplicate recording work, and completed stage artifacts remain reusable.
+
 ## Before you start (per host)
 
 1. **DNS**: point your domain's A/AAAA record at the machine's public IP.
@@ -72,6 +99,14 @@ offline deployments.
 > (`nvplaud.observe.tw`) and Oracle (`plaud.skyhong.tw`) standalone instances
 > are retired and their host notes removed; the generic `cpu`/`gpu` profile
 > instructions below remain for anyone deploying localplaud on that hardware.
+
+The retired `plaud.skyhong.tw` address redirects HTTP and HTTPS requests to
+`https://plaud.observe.tw`, preserving paths and query strings. Oracle's Traefik
+file provider owns this redirect; its configuration is tracked in
+[`scripts/deploy/traefik-legacy-domain.yml`](../scripts/deploy/traefik-legacy-domain.yml)
+and installed as `/etc/dokploy/traefik/dynamic/localplaud-legacy.yml`.
+Traefik watches that directory and reloads changes automatically. This route needs
+no application container on Oracle. The production controller still enforces login.
 
 ### 1. Mac mini (Apple Silicon) → `plaud.observe.tw` (production controller)
 
