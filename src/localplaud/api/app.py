@@ -88,6 +88,7 @@ from .backups import router as backups_router
 from .imports import router as imports_router
 from .integrations import router as integrations_router
 from .media import audio_file_response
+from .note_templates import _item as note_template_item
 from .note_templates import router as note_templates_router
 from .notes import router as notes_router
 from .providers import router as providers_router
@@ -4787,3 +4788,6 @@ from .surfaces import router as surfaces_router  # noqa: E402
 
 _install_surface_helpers(templates)
 app.include_router(surfaces_router)
+# Template-library items are now built in surfaces.py; the shared helper stays
+# importable here for other pages (e.g. Home) that render template cards.
+_NOTE_TEMPLATE_ITEM = note_template_item
