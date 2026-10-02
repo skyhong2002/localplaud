@@ -439,6 +439,7 @@ body.ws-mm-full-open { overflow: hidden; }
   .recording-shell .ask-dock .ask-dock-header { justify-content: space-between; margin: 0 0 8px; }
   .recording-shell .ask-dock .ask-dock-title, .recording-shell .ask-dock .ask-dock-close { display: inline-flex; }
   .recording-shell .ask-dock .ask-dock-close { width: 44px; height: 44px; }
+  .recording-shell .ask-dock .ask-dock-actions > .icon-action { min-height: 44px; }
   .recording-shell .ask-dock .ask { order: 10; top: auto; bottom: 0; margin: auto 0 0; padding: 8px 0 0; }
   .recording-shell .ask-dock .ask input { min-height: 46px; border-radius: 12px; font-size: 16px; }
   body:has(.ask-dock:not([hidden])) .ws-ask-pin { visibility: hidden; }
@@ -526,6 +527,11 @@ body.ws-mm-full-open { overflow: hidden; }
 .recording-shell .cloud-import-empty { max-width: 420px; display: grid; justify-items: center; gap: 6px; }
 .recording-shell #reprocess-msg { margin-inline: auto !important; }
 .recording-shell:has(.ask-dock-open) .ws-head, .recording-shell:has(.ask-dock-open) .ws-tabrow { margin-left: max(0px, calc((100% - 360px - 760px) / 2)); }
+/* With the Ask dock open the reading column is 100% - 360px wide; keep the
+   heading and sticky tab row inside it so they never run under the dock. */
+@media (min-width: 1200px) {
+  .recording-shell:has(.ask-dock-open) .ws-head, .recording-shell:has(.ask-dock-open) .ws-tabrow { max-width: min(760px, calc(100% - 362px)); }
+}
 
 /* Generate sheet: Auto vs Custom, provider privacy boundary. */
 .ws-gen-modes { display: grid; gap: 8px; }
