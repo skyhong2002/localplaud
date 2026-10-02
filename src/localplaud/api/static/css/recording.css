@@ -134,6 +134,15 @@ body:has(#persistent-player.ws-player) .toast-region { bottom: calc(var(--ws-pla
 .recording-shell .search-popover #replace-row, .recording-shell .search-popover #toggle-replace { grid-column: 1 / -1; }
 .recording-shell .search-popover #replace-row:not([hidden]) { display: flex !important; flex-wrap: wrap; align-items: center; gap: 8px; }
 .recording-shell .search-popover #transcript-replace { flex: 1 1 200px; }
+/* Find and Replace fields share one column so their right edges line up:
+   the find row's input, arrows and count become popover grid items and the
+   replace row reuses those columns through subgrid. */
+.recording-shell .transcript-popover.search-popover:has(#replace-row) { grid-template-columns: minmax(0, 1fr) auto auto auto; column-gap: 7px; }
+.recording-shell .search-popover:has(#replace-row) > div:has(> #transcript-find) { display: contents !important; }
+.recording-shell .search-popover:has(#replace-row) #find-count { margin-left: 5px; }
+.recording-shell .search-popover #replace-row:not([hidden]) { display: grid !important; grid-template-columns: subgrid; row-gap: 6px; }
+.recording-shell .search-popover #replace-row > label { grid-column: 2 / -1; white-space: nowrap; }
+.recording-shell .search-popover #replace-row > div { grid-column: 1 / -1; }
 .recording-shell .search-popover #toggle-replace { justify-self: start; }
 .recording-shell .search-popover #replace-row label { display: inline-flex; align-items: center; gap: 6px; }
 .recording-shell .search-popover #replace-row label input { margin: 0; }
