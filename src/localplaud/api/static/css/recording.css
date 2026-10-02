@@ -232,7 +232,7 @@ body:has(#persistent-player.ws-player) .toast-region { bottom: calc(var(--ws-pla
 .recording-shell .note-tabs > * { scroll-snap-align: start; }
 .recording-shell .note-tabs button, .recording-shell .note-tabs summary.note-add-tab { border-radius: 5px; }
 .recording-shell .note-tabs button.on { background: var(--c-subtle, #EBEBEB); color: var(--c-text, #000); border-color: var(--c-subtle, #EBEBEB); font-weight: 600; }
-.ws-note-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin: 4px 0 10px; }
+.ws-note-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 4px 0 10px; }
 .ws-provenance { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding-left: 10px; border-left: 2px solid var(--border2); font-size: 12px; }
 .ws-provenance > span { display: inline-flex; align-items: center; gap: 5px; }
 .ws-provenance :is(.nav-icon, .i) { width: 13px; height: 13px; opacity: .7; }
