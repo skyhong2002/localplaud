@@ -22,6 +22,12 @@ def test_quota_defers_text_without_faking_completion():
     assert recovery_action({}, state(status="done"), False) == "completed"
 
 
+def test_finished_recording_with_stale_notes_regenerates_them():
+    stale = state(status="done", derived_stale=True, stages={"summarize": "pending"})
+    assert recovery_action({}, stale, False) == "waiting_for_provider"
+    assert recovery_action({}, stale, True) == "resume"
+
+
 def test_one_speech_retry_can_run_while_text_is_paused():
     failed = state(stages={"transcribe": "failed"})
     assert recovery_action({}, failed, False) == "resume"

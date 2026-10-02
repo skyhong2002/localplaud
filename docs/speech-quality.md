@@ -73,6 +73,47 @@ Original output remains accessible through raw view and revision history. Empty
 corrected text displays “No recognizable speech”; it never silently falls back
 to the old hallucinated raw text.
 
+## Speaker turns
+
+Diarization labels each aligned word; the transcript is then grouped into
+speaker paragraphs (`clause-majority/v1`). Aligners usually omit the text's
+punctuation and spacing (Qwen forced alignment always does), so words are
+located in the segment text by their letters and digits only. Turns change only
+at clause punctuation, or at a pause of at least one second that does not
+strand a one-character fragment, and never inside a Latin token. Each clause
+takes the speaker holding most of its aligned speech, which absorbs
+single-word flicker at diarizer boundaries. Same-speaker turns then merge
+across gaps of up to three seconds, capped at 1,200 characters or two minutes.
+If words cannot account for every letter of the text, the segment stays whole
+under its majority speaker and the diarize stage counts it in
+`unsafe_mixed_segments`.
+
+Before this, every Qwen window failed that check, so two-minute windows
+appeared as single-speaker paragraphs. Against Plaud cloud transcripts of the
+same recordings (opt-in migration data, used only as a reference),
+time-weighted speaker confusion on ten affected Qwen/Nemotron recordings fell
+from 32.0% to 12.4% (word-level runs without clause smoothing: 12.0%, with 60%
+more fragments). Plaud is not ground truth; this compares attribution, not
+accuracy.
+
+The remaining confusion is mostly diarization itself. About two fifths of it
+across 275 compared recordings comes from one voice split into several
+speaker IDs. TitaNet voiceprints cannot yet merge them automatically: at a
+cosine threshold of 0.75 they caught 14 of 54 same-person pairs but merged 6
+different-person pairs. Use speaker renaming instead.
+
+`python -m localplaud.speaker_regroup scan` reports how existing recordings
+would change, using stored word speakers only (no audio, ASR, or diarization).
+`apply [--min-reattributed-seconds N] [--manifest private/regroup.json]`
+regroups the raw transcript in place, as the diarize stage would, and appends
+regrouped copies of machine revisions (automatic correction and any acoustic
+cleanup base beneath it). Corrected wording is carried onto the new turns
+through a character diff, and the correction input fingerprint is updated so
+accepted corrections are reused rather than recomputed. Recordings with human
+transcript edits are skipped. Notes, mind maps, and indexes are marked out of
+date; the manifest drives `scripts/maintenance/repair_processing.py`, which
+regenerates them newest first through `/generate-notes`.
+
 ## Headerless raw Opus
 
 Some original `.opus` uploads have no Ogg container. After ordinary ffmpeg

@@ -39,7 +39,11 @@ def recovery_action(item: dict, state: dict, text_available: bool) -> str:
         return "skipped"
     if state["active"]:
         return "running"
-    if state["status"] == "done" and not needs_model_upgrade(item, state):
+    if (
+        state["status"] == "done"
+        and not state.get("derived_stale")
+        and not needs_model_upgrade(item, state)
+    ):
         return "completed"
     if item.get("attempts", 0) >= 3:
         return "needs_attention"
@@ -90,6 +94,13 @@ def recording_state(file_id: str) -> dict:
             "trash": row.is_trash,
             "has_local_transcript": row.local_transcript is not None,
             "stages": {str(run.stage): str(run.status) for run in row.stage_runs},
+            # Speaker regrouping or a transcript edit can leave a finished
+            # recording with out-of-date notes that need regeneration.
+            "derived_stale": any(
+                bool((run.detail or {}).get("stale"))
+                and str(run.status) not in {"completed", "skipped"}
+                for run in row.stage_runs
+            ),
             "transcribe_model": next(
                 (
                     t.model
@@ -176,7 +187,7 @@ def run_repair_queue(path: Path, *, base_url: str = "http://127.0.0.1:8080") -> 
                         state.get("missing")
                         or state.get("trash")
                         or state.get("active")
-                        or state.get("status") == "done"
+                        or (state.get("status") == "done" and not state.get("derived_stale"))
                     ):
                         healthy, reason = True, ""
                     else:

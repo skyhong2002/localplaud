@@ -877,6 +877,23 @@ def _revision_matches_raw_structure(revision: TranscriptRevision, raw: Transcrip
     )
 
 
+def raw_transcript_fingerprint(raw: TranscriptRow) -> str:
+    """Identify the exact raw ASR input an automatic correction was made from."""
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "id": raw.id,
+                "text": raw.text,
+                "segments": raw.segments,
+                "provider": raw.provider,
+                "model": raw.model,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+
+
 def _select_raw_transcript(row: PlaudFile, settings: Settings) -> TranscriptRow | None:
     """Select the raw transcript allowed by the configured artifact mode."""
     local = [item for item in row.transcripts if item.source == "local"]
@@ -2065,19 +2082,7 @@ def _run_correction_stage(
             input_revision = current.revision if current else None
             input_kind = current_kind
             if raw is not None:
-                raw_fingerprint = hashlib.sha256(
-                    json.dumps(
-                        {
-                            "id": raw.id,
-                            "text": raw.text,
-                            "segments": raw.segments,
-                            "provider": raw.provider,
-                            "model": raw.model,
-                        },
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ).encode()
-                ).hexdigest()
+                raw_fingerprint = raw_transcript_fingerprint(raw)
             machine = current_kind in {"ai_polish", "ai_polish_after_speech"}
             reusable = bool(
                 machine
