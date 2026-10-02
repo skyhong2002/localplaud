@@ -319,3 +319,45 @@ def test_templates_page_shows_recent_usage_personal_and_catalog(monkeypatch, tmp
     assert 'aria-current="true"' in category.text
     searched = client.get("/templates?tab=my&q=stand-up")
     assert "Stand-up digest" in searched.text
+
+
+# --------------------------------------------------------------------------- #
+# Discover / AutoFlow
+# --------------------------------------------------------------------------- #
+
+
+def test_discover_cards_distinguish_editable_and_external_rules(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    local = client.post(
+        "/api/automations/rules",
+        json={"name": "Interviews", "trigger": {"title_contains": "interview"},
+              "actions": {"note_template_key": "plaud-interview"}, "notify": True},
+    )
+    assert local.status_code == 201
+    local_id = local.json()["id"]
+    external = client.put(
+        "/api/automations/external-rules",
+        json={"owner_key": "mobile", "owner_label": "Mobile app", "external_id": "x-1",
+              "name": "Mirrored", "enabled": True, "priority": 50, "trigger": {},
+              "actions": {"note_template_key": "plaud-autopilot"}, "notify": False},
+    )
+    assert external.status_code == 200
+    external_id = external.json()["rule"]["id"]
+    html = client.get("/discover").text
+    # Local rules: enable switch, edit, delete.
+    assert f'class="rule-toggle" data-id="{local_id}" checked' in html
+    assert f'class="btn sec btn-sm rule-edit" data-id="{local_id}"' in html
+    assert 'title="inbox notification enabled"' in html
+    # External rules: read-only lock, view-only editor, no toggle or delete.
+    assert f'class="btn sec btn-sm rule-view" data-id="{external_id}"' in html
+    assert f'class="rule-toggle" data-id="{external_id}"' not in html
+    assert f'rule-delete" data-id="{external_id}"' not in html
+    assert 'title="Managed by Mobile app">Read-only</span>' in html
+    assert "function setReadOnly(rule)" in html
+    assert 'id="rule-readonly-note" hidden' in html
+    # When / Then editor keeps every existing field.
+    for name in ("origin", "title_contains", "transcript_contains", "min_duration_minutes",
+                 "note_template_key", "profile_id", "action_folder_id", "notify"):
+        assert f'name="{name}"' in html
+    assert 'id="run-history"' in html and 'id="integrations"' in html
