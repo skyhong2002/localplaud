@@ -180,15 +180,19 @@
   /* ---------------------------------------------------------- appearance */
   const darkQuery = matchMedia('(prefers-color-scheme: dark)');
   const syncAppearanceButtons = () => {
-    const mode = document.documentElement.dataset.appearanceMode || 'light';
+    const mode = document.documentElement.dataset.appearanceMode || 'system';
     document.querySelectorAll('[data-appearance-set]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.appearanceSet === mode)));
   };
   lp.setAppearance = mode => {
-    if (!['light', 'dark', 'system'].includes(mode)) mode = 'light';
+    if (!['light', 'dark', 'system'].includes(mode)) mode = 'system';
     try { localStorage.setItem('localplaud:appearance', mode); } catch (_error) { /* private mode */ }
     const root = document.documentElement;
     root.dataset.appearanceMode = mode;
     root.dataset.appearance = mode === 'system' ? (darkQuery.matches ? 'dark' : 'light') : mode;
+    // Browser chrome (mobile status bar) follows the chosen appearance, not only the OS.
+    document.querySelectorAll('meta[name="theme-color"]').forEach(meta => {
+      meta.content = root.dataset.appearance === 'dark' ? '#161616' : '#FFFFFF';
+    });
     syncAppearanceButtons();
   };
   darkQuery.addEventListener?.('change', () => { if (document.documentElement.dataset.appearanceMode === 'system') lp.setAppearance('system'); });

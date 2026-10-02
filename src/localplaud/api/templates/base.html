@@ -17,7 +17,7 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
   <script>/* Apply persisted appearance and panel state before first paint. */
-    try{const root=document.documentElement,mode=localStorage.getItem('localplaud:appearance')||'light';
+    try{const root=document.documentElement,mode=localStorage.getItem('localplaud:appearance')||'system';
     root.dataset.appearanceMode=mode;root.dataset.appearance=mode==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):mode;
     if(localStorage.getItem('localplaud:nav-collapsed')==='1')root.classList.add('lp-nav-collapsed');
     if(localStorage.getItem('localplaud:list-collapsed')==='1')root.classList.add('lp-list-collapsed');}catch(_e){}</script>

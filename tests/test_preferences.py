@@ -339,3 +339,27 @@ def test_dynamic_action_messages_use_translation_helper():
                     continue
                 violations.append(f"{template.name}: {message}")
     assert violations == []
+
+
+def test_appearance_defaults_to_system_and_settings_offers_the_control(monkeypatch, tmp_path):
+    """Browsers without a stored choice follow the OS; Settings can pick Light/Dark/Auto."""
+    client = _client(monkeypatch, tmp_path)
+    with client:
+        page = client.get("/settings")
+        assert page.status_code == 200
+        html = page.text
+        assert "localStorage.getItem('localplaud:appearance')||'system'" in html
+        for mode in ("light", "dark", "system"):
+            assert f'data-appearance-set="{mode}"' in html
+        assert 'aria-labelledby="settings-appearance-label"' in html
+
+    app_js = (
+        Path(__file__).parents[1] / "src/localplaud/api/static/js/app.js"
+    ).read_text(encoding="utf-8")
+    assert "dataset.appearanceMode || 'system'" in app_js
+    assert "mode = 'system';" in app_js
+    for standalone in ("login.html", "share.html"):
+        source = (
+            Path(__file__).parents[1] / "src/localplaud/api/templates" / standalone
+        ).read_text(encoding="utf-8")
+        assert ":root[data-appearance=\"dark\"]" in source

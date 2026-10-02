@@ -117,6 +117,11 @@
       <label class="sub">{{ t('Timezone') }}<input class="search-input" name="timezone" list="timezone-suggestions" maxlength="64" required value="{{ workspace_preferences.timezone }}" style="width:100%;margin-top:4px"></label>
       <datalist id="timezone-suggestions"><option value="Asia/Taipei"><option value="UTC"><option value="Asia/Tokyo"><option value="America/Los_Angeles"><option value="Europe/London"></datalist>
       <input type="hidden" name="theme" value="light">
+      <div class="sub" style="grid-column:1/-1"><span id="settings-appearance-label">{{ t('Appearance') }}</span><div style="margin-top:4px"><div class="segmented" role="group" aria-labelledby="settings-appearance-label">
+        <button type="button" data-appearance-set="light" aria-pressed="false">{{ icon('sun', 'xs') }}{{ t('Light') }}</button>
+        <button type="button" data-appearance-set="dark" aria-pressed="false">{{ icon('moon', 'xs') }}{{ t('Dark') }}</button>
+        <button type="button" data-appearance-set="system" aria-pressed="false">{{ icon('monitor', 'xs') }}{{ t('Auto') }}</button>
+      </div></div></div>
       <label class="sub">{{ t('Display density') }}<select class="search-input" name="density" style="width:100%;margin-top:4px"><option value="comfortable" {% if workspace_preferences.density=='comfortable' %}selected{% endif %}>{{ t('Comfortable') }}</option><option value="compact" {% if workspace_preferences.density=='compact' %}selected{% endif %}>{{ t('Compact') }}</option></select></label>
       <label class="sub">{{ t('Clock') }}<select class="search-input" name="hour_cycle" style="width:100%;margin-top:4px"><option value="24" {% if workspace_preferences.hour_cycle=='24' %}selected{% endif %}>{{ t('24-hour') }}</option><option value="12" {% if workspace_preferences.hour_cycle=='12' %}selected{% endif %}>{{ t('12-hour') }}</option></select></label>
       <label class="sub" style="display:flex;align-items:center;gap:9px;grid-column:1/-1;border-top:1px solid var(--border);padding-top:10px"><input type="checkbox" name="auto_process_new_recordings" {% if workspace_preferences.auto_process_new_recordings %}checked{% endif %}> <strong>{{ t('Process new recordings automatically') }}</strong></label>
