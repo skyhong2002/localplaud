@@ -6,15 +6,18 @@
   <meta name="robots" content="noindex">
   <title>{{ recording.title }} · localplaud</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <script>try{const m=localStorage.getItem('localplaud:appearance')||'system';document.documentElement.dataset.appearance=m==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):m;}catch(_e){}</script>
   <style>
     /* Mirrors the Plaud Web public share page: fixed 55px header, 轉錄/摘要
        tabs over a 708px column, each tab an internal scroll region, and a
        play bar pinned above the scrolling transcript. */
-    :root{color-scheme:light;--fg:#101828;--body:#3D3D3D;--muted:#A3A3A3;--tab-off:#7A7A7A;--line:#EBEBEB;--track:#D6D6D6}
+    :root{color-scheme:light;--fg:#101828;--body:#3D3D3D;--muted:#A3A3A3;--tab-off:#7A7A7A;--line:#EBEBEB;--track:#D6D6D6;--ink:#000;--bg:#fff;--soft:#F5F5F6;--soft-2:#F2F2F3;--soft-3:#F7F7F8}
+    /* Dark follows the viewer's OS, or the appearance chosen in this browser's localplaud. */
+    :root[data-appearance="dark"]{color-scheme:dark;--fg:#F5F5F5;--body:#D6D6D6;--muted:#8C8C8C;--tab-off:#A0A0A0;--line:#2C2C2C;--track:#4A4A4A;--ink:#F5F5F5;--bg:#161616;--soft:#242424;--soft-2:#2A2A2A;--soft-3:#1F1F1F}
     *{box-sizing:border-box}
     [hidden]{display:none!important}
     html,body{height:100%}
-    body{margin:0;background:#fff;color:var(--fg);display:flex;flex-direction:column;overflow:hidden;
+    body{margin:0;background:var(--bg);color:var(--fg);display:flex;flex-direction:column;overflow:hidden;
       font:14px/1.5 Inter,"PingFang TC","Hiragino Sans CNS","Microsoft JhengHei","Noto Sans TC",-apple-system,sans-serif}
     button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 
@@ -22,14 +25,14 @@
     .page-head img{width:26px;height:26px;flex:none}
     .page-head .divider{width:1px;height:24px;background:var(--line);flex:none}
     .head-text{min-width:0}
-    .head-title{font-size:14px;line-height:20px;color:#000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .head-title{font-size:14px;line-height:20px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .head-meta{display:flex;align-items:center;gap:10px;font-size:12px;line-height:16px;color:var(--muted)}
     .head-meta .divider{height:12px}
 
     .column{width:min(708px,100% - 48px);margin:0 auto}
     .tabs{flex:none;display:flex;gap:24px;align-items:center;height:39px;margin-top:10px}
     .tabs button{font-size:14px;color:var(--tab-off);font-weight:400}
-    .tabs button[aria-selected="true"]{color:#000;font-weight:600}
+    .tabs button[aria-selected="true"]{color:var(--ink);font-weight:600}
 
     .panels{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:8px}
     .panel{flex:1;min-height:0;overflow-y:auto}
@@ -38,22 +41,22 @@
     #panel-transcript{display:flex;flex-direction:column;overflow:hidden}
     .transcript-scroll{flex:1;min-height:0;overflow-y:auto}
 
-    .import-badge{display:inline-block;padding:2px 9px;border:1px solid var(--line);border-radius:999px;background:#F7F7F8;color:var(--tab-off);font-size:11px;font-weight:600;white-space:nowrap;vertical-align:middle}
+    .import-badge{display:inline-block;padding:2px 9px;border:1px solid var(--line);border-radius:999px;background:var(--soft-3);color:var(--tab-off);font-size:11px;font-weight:600;white-space:nowrap;vertical-align:middle}
     h2 .import-badge,h1 .import-badge{margin-left:10px;vertical-align:4px}
 
     /* transcript tab */
     .player{padding:8px 0 4px}
     .player-time{font-size:14px;line-height:21px;color:var(--muted);font-variant-numeric:tabular-nums}
     .player-controls{display:flex;align-items:center;gap:16px;margin-top:12px}
-    .play-btn{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:50%;background:#F2F2F3}
+    .play-btn{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--soft-2);color:var(--ink)}
     .play-btn svg{display:block}
     .play-btn #pause-icon,.play-btn.playing #play-icon{display:none}
     .play-btn.playing #pause-icon{display:block}
-    .scrubber{flex:1;height:3px;margin:0;appearance:none;background:linear-gradient(#000 0 0) 0/var(--played,0%) 100% no-repeat,var(--track);border-radius:2px;cursor:pointer}
-    .scrubber::-webkit-slider-thumb{appearance:none;width:9px;height:9px;border-radius:50%;background:#000}
-    .scrubber::-moz-range-thumb{width:9px;height:9px;border:0;border-radius:50%;background:#000}
-    .speed-btn{flex:none;min-width:34px;font-size:12px;font-weight:650;color:#000;text-align:center;padding:5px 6px;border-radius:6px}
-    .speed-btn:hover{background:#F2F2F3}
+    .scrubber{flex:1;height:3px;margin:0;appearance:none;background:linear-gradient(var(--ink) 0 0) 0/var(--played,0%) 100% no-repeat,var(--track);border-radius:2px;cursor:pointer}
+    .scrubber::-webkit-slider-thumb{appearance:none;width:9px;height:9px;border-radius:50%;background:var(--ink)}
+    .scrubber::-moz-range-thumb{width:9px;height:9px;border:0;border-radius:50%;background:var(--ink)}
+    .speed-btn{flex:none;min-width:34px;font-size:12px;font-weight:650;color:var(--ink);text-align:center;padding:5px 6px;border-radius:6px}
+    .speed-btn:hover{background:var(--soft-2)}
 
     .transcript-badge-row{margin:10px 0 0}
     .segments{padding:18px 0 8px}
@@ -61,7 +64,7 @@
     .segment.active,.segment:hover{background:var(--line)}
     .segment-meta{display:flex;align-items:baseline;gap:16px;font-size:14px;line-height:21px}
     .segment-meta .ts{color:var(--muted);font-variant-numeric:tabular-nums}
-    .segment-meta .who{color:#000}
+    .segment-meta .who{color:var(--ink)}
     .segment-text{margin:6px 0 0;font-size:16px;line-height:24px;color:var(--body);overflow-wrap:anywhere}
 
     /* summary tab */
@@ -70,23 +73,23 @@
     /* One note per page, switched by a pill row — mirrors Plaud's note pager. */
     .note-tabs{display:flex;gap:8px;margin:18px 0 0;flex-wrap:wrap}
     .note-tabs button{padding:6px 14px;border:1px solid var(--line);border-radius:999px;font-size:13px;line-height:20px;color:var(--tab-off);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-    .note-tabs button:hover{background:#F5F5F6}
-    .note-tabs button[aria-selected="true"]{color:#000;font-weight:600;background:#F5F5F6;border-color:#F5F5F6}
+    .note-tabs button:hover{background:var(--soft)}
+    .note-tabs button[aria-selected="true"]{color:var(--ink);font-weight:600;background:var(--soft);border-color:var(--soft)}
     .note-provenance{margin:16px 0 0}
     .md{font-size:16px;line-height:24px;color:var(--body);overflow-wrap:anywhere}
     .md p{margin:14px 0 0}
     .md ul,.md ol{margin:14px 0 0;padding-left:1.6em}
     .md li+li{margin-top:6px}
-    .md h1,.md h2{font-size:28px;line-height:32px;font-weight:500;color:#000;margin:32px 0 0}
-    .md h3,.md h4{font-size:19px;line-height:26px;font-weight:600;color:#000;margin:24px 0 0}
+    .md h1,.md h2{font-size:28px;line-height:32px;font-weight:500;color:var(--ink);margin:32px 0 0}
+    .md h3,.md h4{font-size:19px;line-height:26px;font-weight:600;color:var(--ink);margin:24px 0 0}
     .md img{display:block;max-width:100%;height:auto;margin:16px 0 0;border-radius:8px}
     .md table{width:100%;margin:16px 0 0;border-collapse:collapse;display:block;max-width:100%;overflow-x:auto}
     .md th,.md td{padding:7px 9px;border:1px solid var(--line);text-align:left;vertical-align:top;overflow-wrap:break-word}
-    .md pre{max-width:100%;overflow:auto;margin:14px 0 0;padding:10px 12px;border-radius:6px;background:#F5F5F6}
+    .md pre{max-width:100%;overflow:auto;margin:14px 0 0;padding:10px 12px;border-radius:6px;background:var(--soft)}
     .md blockquote{margin:14px 0 0;padding:2px 0 2px 12px;border-left:3px solid var(--track);color:var(--tab-off)}
     .md a{color:var(--fg);text-decoration:underline;text-underline-offset:2px}
     .mindmap-frame{margin:28px 0 0;border:1px solid var(--line);border-radius:5px;padding:16px}
-    .mindmap-frame .frame-label{font-size:14px;line-height:21px;color:#000;font-weight:600}
+    .mindmap-frame .frame-label{font-size:14px;line-height:21px;color:var(--ink);font-weight:600}
     .mindmap-frame .md{margin-top:8px;font-size:14px;line-height:22px}
 
     .empty{padding:36px 0;color:var(--muted);font-size:15px}
@@ -95,18 +98,18 @@
     /* desktop section outline, fixed at the right like Plaud */
     .outline{position:fixed;right:40px;top:170px;width:248px;max-height:60vh;overflow-y:auto;display:none}
     .outline button{display:block;width:100%;min-height:34px;padding:7px 24px 7px 16px;text-align:left;font-size:12px;color:var(--tab-off);border-radius:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .outline button.on{color:#000;font-weight:600}
-    .outline button:hover{background:#F5F5F6}
+    .outline button.on{color:var(--ink);font-weight:600}
+    .outline button:hover{background:var(--soft)}
     @media (min-width:1220px){.outline.ready{display:block}}
 
     /* timestamped outline chapters beside the transcript */
     .chapters{position:fixed;right:40px;top:170px;width:280px;max-height:72vh;overflow-y:auto;display:none;padding-bottom:8px}
-    .chapters-head{display:flex;align-items:center;gap:8px;padding:0 16px 8px;font-size:12px;font-weight:700;color:#000}
+    .chapters-head{display:flex;align-items:center;gap:8px;padding:0 16px 8px;font-size:12px;font-weight:700;color:var(--ink)}
     .chapters button{display:flex;gap:10px;width:100%;padding:6px 16px;text-align:left;font-size:12px;line-height:18px;color:var(--tab-off);border-radius:6px}
-    .chapters button:hover{background:#F5F5F6}
-    .chapters button.on{color:#000;font-weight:600}
+    .chapters button:hover{background:var(--soft)}
+    .chapters button.on{color:var(--ink);font-weight:600}
     .chapters .ch-ts{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
-    .chapters button.on .ch-ts{color:#000}
+    .chapters button.on .ch-ts{color:var(--ink)}
     .chapters .ch-tx{min-width:0;overflow-wrap:anywhere}
     @media (min-width:1220px){.chapters.ready{display:block}}
 
@@ -115,7 +118,7 @@
     .minimap{position:fixed;right:10px;top:170px;max-height:64vh;display:none;flex-direction:column;gap:3px;overflow:hidden}
     .minimap button{display:block;width:14px;height:3px;padding:0;border-radius:2px;background:var(--track);transition:background .12s,width .12s}
     .minimap button:hover{background:var(--tab-off)}
-    .minimap button.on{width:18px;background:#000}
+    .minimap button.on{width:18px;background:var(--ink)}
     @media (min-width:1220px){.minimap.ready{display:flex}}
 
     @media (max-width:760px){
@@ -153,8 +156,8 @@
           <div class="player-time"><span id="player-position">00:00:00</span> / {{ recording.duration_clock }}</div>
           <div class="player-controls">
             <button class="play-btn" id="play-toggle" type="button" aria-label="{{ t('Play') }}">
-              <svg id="play-icon" width="14" height="16" viewBox="0 0 14 16" aria-hidden="true"><path d="M1.5 1.6v12.8L12.6 8Z" fill="none" stroke="#000" stroke-width="1.6" stroke-linejoin="round"/></svg>
-              <svg id="pause-icon" width="12" height="14" viewBox="0 0 12 14" aria-hidden="true"><path d="M2 1v12M10 1v12" stroke="#000" stroke-width="2.4" stroke-linecap="round"/></svg>
+              <svg id="play-icon" width="14" height="16" viewBox="0 0 14 16" aria-hidden="true"><path d="M1.5 1.6v12.8L12.6 8Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <svg id="pause-icon" width="12" height="14" viewBox="0 0 12 14" aria-hidden="true"><path d="M2 1v12M10 1v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
             </button>
             <input class="scrubber" id="scrubber" type="range" min="0" max="1000" value="0" aria-label="{{ t('Seek') }}">
             <button class="speed-btn" id="speed-toggle" type="button" aria-label="{{ t('Playback speed') }}">1x</button>
