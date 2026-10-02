@@ -405,7 +405,7 @@ def _static_asset_version(*names: str) -> str:
 
 
 templates.env.globals["workspace_asset_version"] = _static_asset_version(
-    "css/workspace.css", "js/workspace.js"
+    "css/recording.css", "js/workspace.js"
 )
 
 _NOTE_ASSET_NAME = re.compile(r"[0-9a-f]{16}\.(?:png|jpe?g|gif|webp)")

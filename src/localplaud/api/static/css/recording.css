@@ -1,4 +1,5 @@
-/* localplaud recording workspace (detail.html). Layered over the shared shell
+/* localplaud recording workspace (detail.html), loaded after the shared
+ * workspace.css legacy rules so these refinements win. Layered over the shared shell
  * tokens (--fg, --muted, --border, --panel, --blue, --sp0..7, --radius …).
  * Scoped to the workspace so it can coexist with the global stylesheet. */
 
@@ -8,7 +9,7 @@
   --ws-accent: var(--blue);
   --ws-active-bg: color-mix(in srgb, var(--blue) 7%, transparent);
   --ws-word-bg: color-mix(in srgb, var(--blue) 18%, transparent);
-  --ws-ai-gradient: linear-gradient(90deg, #007AFF, #8F53ED);
+  --ws-ai-gradient: var(--g-ai, linear-gradient(90deg, #007AFF, #8F53ED));
 }
 
 /* ------------------------------------------------------------- top bar */
@@ -19,13 +20,13 @@
 }
 .ws-topbar .recording-breadcrumb { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .recording-menu .nav-icon { width: 15px; height: 15px; opacity: .75; flex: none; }
-.ws-topbar.detail-topbar { min-height: 48px; padding: 6px 16px; border-bottom-color: #E5E7EB; }
+.ws-topbar.detail-topbar { min-height: 48px; padding: 6px 16px; border-bottom-color: var(--c-border-ui, #E5E7EB); }
 .ws-topbar .recording-actions { display: flex; align-items: center; gap: 8px; }
 .ws-topbar .icon-action { border-radius: 5px; }
 .ws-topbar .icon-action.icon-only { border-color: transparent; background: none; }
-.ws-topbar .icon-action.icon-only:hover, .ws-topbar .icon-action[aria-expanded="true"] { background: #EBEBEB; }
+.ws-topbar .icon-action.icon-only:hover, .ws-topbar .icon-action[aria-expanded="true"] { background: var(--c-subtle, #EBEBEB); }
 .ws-divider { width: 1px; height: 16px; background: var(--border2); }
-.ws-topbar #open-ask-dock[aria-expanded="true"] { background: #EBEBEB; }
+.ws-topbar #open-ask-dock[aria-expanded="true"] { background: var(--c-subtle, #EBEBEB); }
 .ws-menu-wrap { position: relative; }
 .ws-export-menu { width: 248px; }
 .ws-export-menu hr { margin: 4px 0; border: 0; border-top: 1px solid var(--border); }
@@ -56,9 +57,9 @@
 /* ------------------------------------------------------------- tabs */
 .recording-shell .tabs { top: 0 !important; margin-top: 14px; gap: 6px; background: color-mix(in srgb, var(--panel) 96%, transparent); backdrop-filter: blur(6px); }
 .recording-shell .tabs { border-bottom: 0; }
-.recording-shell .tabs button { padding: 8px 2px; margin-right: 28px; font-size: 14px; font-weight: 400; color: #7A7A7A; border-bottom: 0; }
+.recording-shell .tabs button { padding: 8px 2px; margin-right: 28px; font-size: 14px; font-weight: 400; color: var(--c-text-2, #7A7A7A); border-bottom: 0; }
 .recording-shell .tabs button:hover { color: var(--fg); }
-.recording-shell .tabs button.on { color: #000; font-weight: 600; border-bottom: 0; }
+.recording-shell .tabs button.on { color: var(--c-text, #000); font-weight: 600; border-bottom: 0; }
 .recording-shell .tabs button:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; border-radius: 4px; }
 
 /* ------------------------------------------------------------- player bar */
@@ -76,7 +77,7 @@
 .ws-player .player-transport { grid-area: transport; gap: 6px; }
 .ws-player .ws-time { grid-area: current; display: none; }
 .ws-player .player-waveform { grid-area: wave !important; position: relative; height: 40px; }
-.ws-player .player-waveform canvas { --ws-wave: #D3D5DA; --ws-wave-played: var(--fg); position: absolute; inset: 0; width: 100%; height: 100%; }
+.ws-player .player-waveform canvas { --ws-wave: var(--c-border-strong, #D3D5DA); --ws-wave-played: var(--fg); position: absolute; inset: 0; width: 100%; height: 100%; }
 .ws-player .player-waveform input[type="range"] {
   position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer;
 }
@@ -108,10 +109,10 @@
   position: relative; padding: 16px 12px; margin: 0; border-radius: 6px;
   transition: background-color .3s ease, color .3s ease; scroll-margin: 112px 0 120px;
 }
-.recording-shell .seg:hover { background: #F7F7F7; }
-.recording-shell .seg .seg-text { color: #3D3D3D; }
+.recording-shell .seg:hover { background: var(--c-hover, #F7F7F7); }
+.recording-shell .seg .seg-text { color: var(--c-text-body, #3D3D3D); }
 .recording-shell .seg.active { background: color-mix(in srgb, var(--c, var(--fg)) 5%, transparent); box-shadow: inset 2px 0 0 var(--c, var(--fg)); }
-.recording-shell .seg.active .seg-text { color: #000; }
+.recording-shell .seg.active .seg-text { color: var(--c-text, #000); }
 .recording-shell .seg.saving { opacity: .7; }
 .recording-shell .seg.saved { box-shadow: inset 3px 0 0 var(--ok); }
 .recording-shell .seg.editing { background: var(--blue-soft); cursor: default; }
@@ -119,22 +120,22 @@
 .recording-shell .seg-meta { gap: 4px; min-height: 26px; }
 .recording-shell .seg .who {
   display: inline-flex; align-items: center; gap: 6px; max-width: min(280px, 60%);
-  min-height: 26px; padding: 2px 6px; border: 0; border-radius: 5px; background: none; color: #000;
+  min-height: 26px; padding: 2px 6px; border: 0; border-radius: 5px; background: none; color: var(--c-text, #000);
   font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
 }
-.recording-shell .seg .who:hover { background: #EBEBEB; }
+.recording-shell .seg .who:hover { background: var(--c-subtle, #EBEBEB); }
 .recording-shell .seg .who .dot { width: 8px; height: 8px; }
 .recording-shell .seg-actions { margin-left: auto; display: inline-flex; gap: 2px; opacity: 0; transition: opacity .15s; }
 .recording-shell .seg:hover .seg-actions, .recording-shell .seg:focus-within .seg-actions { opacity: 1; }
 .recording-shell .seg-copy { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
-.recording-shell .seg-copy:hover, .recording-shell .seg-copy:focus-visible { background: #EBEBEB; color: var(--fg); }
+.recording-shell .seg-copy:hover, .recording-shell .seg-copy:focus-visible { background: var(--c-subtle, #EBEBEB); color: var(--fg); }
 .recording-shell .seg-copy .nav-icon { width: 15px; height: 15px; }
 .recording-shell .seg .txt > .editbtn { top: -34px; right: 30px; }
 .recording-shell .seg .who:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .recording-shell .seg .who.who-none { background: var(--panel2); color: var(--muted); font-weight: 560; }
 .recording-shell .seg .ts {
   border: 0; background: none; padding: 2px 4px; border-radius: 5px; cursor: pointer;
-  color: #646A73; font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
+  color: var(--c-text-2, #646A73); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
 }
 .recording-shell .seg .ts:hover, .recording-shell .seg .ts:focus-visible { color: var(--blue); background: var(--blue-soft); outline: none; }
 .recording-shell .seg-text { margin: 4px 0 0 4px; font-size: 15px; line-height: 1.65; }
@@ -147,15 +148,15 @@
 .ws-follow-pill {
   position: sticky; bottom: calc(var(--ws-player-h) + 12px); z-index: 31; display: flex; width: fit-content; align-items: center; gap: 7px;
   margin: 8px auto 0; padding: 9px 16px; border: 0; border-radius: 999px;
-  background: var(--fg); color: #fff; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  background: var(--c-primary, var(--fg)); color: var(--c-on-primary, #fff); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
   box-shadow: 0 8px 22px rgba(0, 0, 0, .18);
 }
 .ws-follow-pill .nav-icon { width: 15px; height: 15px; background-color: currentColor; }
 .ws-follow-pill:focus-visible { outline: 3px solid var(--blue-br); outline-offset: 2px; }
 
-.ws-degraded { border-color: #F2C9A5; }
+.ws-degraded { border-color: var(--c-warn, #F2C9A5); }
 .ws-degraded .sub, .ws-notes-failed .sub { font-size: 12px; margin-top: 3px; }
-.ws-notes-failed { border-color: #F4B7B7; background: var(--red-soft); }
+.ws-notes-failed { border-color: var(--c-danger, #F4B7B7); background: var(--red-soft); }
 .ws-notes-failed .nav-icon { color: var(--red); }
 
 /* Speaker sheet: anchored popover on desktop, bottom sheet on phones. */
@@ -195,19 +196,19 @@
 .recording-shell .note-tabs { flex-wrap: nowrap; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: thin; padding-bottom: 10px; }
 .recording-shell .note-tabs > * { scroll-snap-align: start; }
 .recording-shell .note-tabs button, .recording-shell .note-tabs summary.note-add-tab { border-radius: 5px; }
-.recording-shell .note-tabs button.on { background: #EBEBEB; color: #000; border-color: #EBEBEB; font-weight: 600; }
+.recording-shell .note-tabs button.on { background: var(--c-subtle, #EBEBEB); color: var(--c-text, #000); border-color: var(--c-subtle, #EBEBEB); font-weight: 600; }
 .ws-note-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin: 4px 0 10px; }
 .ws-provenance { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding-left: 10px; border-left: 2px solid var(--border2); font-size: 12px; }
 .ws-provenance > span { display: inline-flex; align-items: center; gap: 5px; }
 .ws-provenance .nav-icon { width: 13px; height: 13px; opacity: .7; }
 .ws-prov-template { color: var(--fg); font-weight: 600; }
-.recording-shell .note-panel .md { font-size: 16px; line-height: 26px; color: #3D3D3D; }
-.recording-shell .md h1 { font-size: 30px; line-height: 42px; font-weight: 500; color: #000; margin-top: .4em; }
-.recording-shell .md h2 { font-size: 22px; line-height: 34px; font-weight: 500; color: #000; margin-top: 32px; }
-.recording-shell .md h3 { font-size: 17px; font-weight: 600; color: #000; }
+.recording-shell .note-panel .md { font-size: 16px; line-height: 26px; color: var(--c-text-body, #3D3D3D); }
+.recording-shell .md h1 { font-size: 30px; line-height: 42px; font-weight: 500; color: var(--c-text, #000); margin-top: .4em; }
+.recording-shell .md h2 { font-size: 22px; line-height: 34px; font-weight: 500; color: var(--c-text, #000); margin-top: 32px; }
+.recording-shell .md h3 { font-size: 17px; font-weight: 600; color: var(--c-text, #000); }
 .recording-shell .md li { line-height: 24px; }
-.recording-shell .md hr { border: 0; border-top: 1px solid #E5E7EB; margin: 32px 0; }
-.ws-template-used { margin: 32px 0 0; font-size: 14px; color: #7A7A7A; }
+.recording-shell .md hr { border: 0; border-top: 1px solid var(--c-border-ui, #E5E7EB); margin: 32px 0; }
+.ws-template-used { margin: 32px 0 0; font-size: 14px; color: var(--c-text-2, #7A7A7A); }
 .ws-template-used a { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
 .recording-shell .md .task-list-item { list-style: none; margin-left: -1.4em; }
 .recording-shell .md .task-list-item input { margin: 0 8px 0 0; vertical-align: -2px; accent-color: var(--fg); }
@@ -260,7 +261,7 @@
 .recording-shell .mm-root > .mm-label > .mm-toggle { color: var(--fg); }
 .recording-shell .mm-toggle:hover, .recording-shell .mm-toggle:focus-visible { color: var(--fg); border-color: var(--fg); outline: none; }
 .recording-shell .mm-node.collapsed > .mm-children { display: none; }
-.recording-shell .mm-node.collapsed > .mm-label > .mm-toggle { background: var(--fg); color: #fff; border-color: var(--fg); }
+.recording-shell .mm-node.collapsed > .mm-label > .mm-toggle { background: var(--c-primary, var(--fg)); color: var(--c-on-primary, #fff); border-color: var(--fg); }
 .recording-shell .ws-mm-full {
   position: fixed; inset: 0; z-index: 90; padding: 12px 16px; background: var(--panel); display: flex; flex-direction: column;
 }
@@ -276,7 +277,7 @@ body.ws-mm-full-open { overflow: hidden; }
 .recording-shell .ask-dock #ask-chips { flex-direction: column; align-items: stretch; }
 .recording-shell .ask-dock #ask-chips .ask-chip {
   min-height: 44px; padding: 11px 14px !important; border-radius: 5px; text-align: left; white-space: normal;
-  font-size: 14px !important; box-shadow: inset 0 0 0 1px #EBEBEB;
+  font-size: 14px !important; box-shadow: inset 0 0 0 1px var(--c-subtle, #EBEBEB);
 }
 .recording-shell .ask-dock #ask-chips + div { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; }
 .recording-shell .ask-dock #ask-chips + div .btn { min-height: 36px; border-radius: 5px; }
@@ -301,7 +302,7 @@ body.ws-mm-full-open { overflow: hidden; }
 .ws-export-include .sub { flex-basis: 100%; font-size: 11.5px; }
 .ws-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; cursor: pointer; }
 .ws-switch input { appearance: none; width: 34px; height: 20px; margin: 0; border-radius: 999px; background: var(--border2); position: relative; cursor: pointer; transition: background .15s; }
-.ws-switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
+.ws-switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--c-on-primary, #fff); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
 .ws-switch input:checked { background: var(--fg); }
 .ws-switch input:checked::after { transform: translateX(14px); }
 .ws-switch input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
@@ -310,12 +311,12 @@ body.ws-mm-full-open { overflow: hidden; }
 /* ------------------------------------------------------------- toast */
 .ws-toast {
   position: fixed; left: 50%; bottom: calc(var(--ws-player-h) + 24px + env(safe-area-inset-bottom)); z-index: 200;
-  max-width: min(440px, calc(100vw - 32px)); padding: 10px 14px; border-radius: 10px; background: var(--fg); color: #fff;
+  max-width: min(440px, calc(100vw - 32px)); padding: 10px 14px; border-radius: 10px; background: var(--c-primary, var(--fg)); color: var(--c-on-primary, #fff);
   font-size: 13px; line-height: 1.45; white-space: pre-line; box-shadow: 0 10px 30px rgba(0, 0, 0, .2);
   opacity: 0; pointer-events: none; transform: translate(-50%, 8px); transition: opacity .18s ease, transform .18s ease;
 }
 .ws-toast.show { opacity: 1; transform: translate(-50%, 0); }
-.ws-toast.error { background: #8a1f1f; }
+.ws-toast.error { background: var(--c-danger, #8a1f1f); }
 
 /* Processing details live below the workspace. */
 .ws-advanced-wrap { margin-top: 28px; padding-top: 8px; border-top: 1px solid var(--border); }
@@ -440,7 +441,7 @@ body.ws-mm-full-open { overflow: hidden; }
 /* Template categories, Name speakers dialog, scoped export dialog */
 .ws-template-cats { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 .ws-chip { flex: none; min-height: 30px; padding: 4px 11px; border: 1px solid var(--border2); border-radius: 5px; background: var(--panel); color: var(--fg); font: inherit; font-size: 12.5px; cursor: pointer; }
-.ws-chip[aria-pressed="true"] { background: #000; border-color: #000; color: #fff; }
+.ws-chip[aria-pressed="true"] { background: var(--c-primary, #000); border-color: var(--c-primary, #000); color: var(--c-on-primary, #fff); }
 .ws-name-speakers { width: min(708px, 100%); min-height: 0; }
 .ws-name-speakers-body { gap: 0; }
 .ws-name-row { padding: 14px 0; border-bottom: 1px solid var(--border); }
@@ -451,8 +452,8 @@ body.ws-mm-full-open { overflow: hidden; }
 .ws-clip { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; }
 .ws-clip-play { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border2); border-radius: 50%; background: var(--panel); cursor: pointer; }
 .ws-clip-play .nav-icon { width: 13px; height: 13px; }
-.ws-clip-play:hover, .ws-clip-play:focus-visible { background: #EBEBEB; }
-.ws-clip p { margin: 2px 0 0; font-size: 14px; line-height: 22px; color: #3D3D3D; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ws-clip-play:hover, .ws-clip-play:focus-visible { background: var(--c-subtle, #EBEBEB); }
+.ws-clip p { margin: 2px 0 0; font-size: 14px; line-height: 22px; color: var(--c-text-body, #3D3D3D); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .ws-name-speakers .ws-dialog-actions { padding-top: 14px; align-items: center; }
 .ws-name-speakers .ws-dialog-actions .sub { margin-right: auto; }
 #export-backdrop[data-section="transcript"] [data-export-section]:not([data-export-section~="transcript"]),
@@ -474,6 +475,6 @@ body.ws-mm-full-open { overflow: hidden; }
    right of the reading column like Plaud's 325px find panel. */
 @media (min-width: 821px) {
   .recording-shell .transcript-tool:has(#transcript-find) > summary { display: none; }
-  .recording-shell .transcript-popover.search-popover { left: auto; right: 0; width: 360px; box-shadow: 0 0 32px rgba(0, 0, 0, .10); border-color: #E5E7EB; border-radius: 5px; }
+  .recording-shell .transcript-popover.search-popover { left: auto; right: 0; width: 360px; box-shadow: 0 0 32px rgba(0, 0, 0, .10); border-color: var(--c-border-ui, #E5E7EB); border-radius: 5px; }
 }
 .ws-template-card .chip { justify-self: start; }

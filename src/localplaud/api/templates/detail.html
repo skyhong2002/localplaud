@@ -3,10 +3,12 @@
 {# lineage labels are API data ("raw ASR", "transcript rev N", …); split the
    dynamic revision number out so the prose part stays translatable. #}
 {% macro lineage(label) %}{% if label and label.startswith('transcript rev ') %}{{ t('transcript rev') }} {{ label[15:] }}{% else %}{{ t(label) }}{% endif %}{% endmacro %}
+{# Pushed screen on phones: the workspace header replaces the shell top bar. #}
+{% block mobile_topbar %}{% endblock %}
 {% block body %}
 {% set mindmaps = f.summaries | selectattr('template', 'equalto', 'mind_map') | list %}
 {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
-<link rel="stylesheet" href="/static/css/workspace.css?v={{ workspace_asset_version }}">
+<link rel="stylesheet" href="/static/css/recording.css?v={{ workspace_asset_version }}">
 <div class="shell recording-shell">
   {% set active_id = f.id %}
   <header class="detail-topbar ws-topbar">

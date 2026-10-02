@@ -111,9 +111,9 @@ def test_workspace_assets_are_served_and_referenced(monkeypatch, tmp_path):
     _seed()
     page = c.get("/file/r1").text
     version = re.search(r'/static/js/workspace\.js\?v=([0-9a-f]{12})"', page)
-    assert version and f"/static/css/workspace.css?v={version.group(1)}" in page
+    assert version and f"/static/css/recording.css?v={version.group(1)}" in page
     assert c.get("/static/js/workspace.js").status_code == 200
-    assert c.get("/static/css/workspace.css").status_code == 200
+    assert c.get("/static/css/recording.css").status_code == 200
     config = re.search(r'<script type="application/json" id="ws-config">(.*?)</script>', page, re.S)
     assert config and '"fileId": "r1"' in config.group(1) and '"canEdit": true' in config.group(1)
 
