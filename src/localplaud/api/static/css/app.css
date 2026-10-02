@@ -456,7 +456,8 @@ body.app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .add-menu .menu-item { min-height: 52px; align-items: center; white-space: normal; }
 .add-menu .menu-item small { display: block; color: var(--c-text-2); font-size: 12px; }
 .sidebar-divider { height: 1px; margin: 16px 8px 8px; background: var(--c-border); flex: none; }
-.sidebar-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin: 0 -8px; padding: 8px 8px 12px; }
+.sidebar-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin: 0 -8px; padding: 8px 8px 20px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent); }
 .nav-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .nav-item {
   min-height: 37px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--radius-row);
@@ -497,7 +498,8 @@ body.app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .status-meter .m-processing { background: var(--c-info); }
 .status-meter .m-attention { background: var(--c-danger); }
 .status-meter .m-other { background: var(--c-border-strong); }
-.status-line { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 12px; color: var(--c-text-2); }
+.status-line { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 8px; font-size: 12px; color: var(--c-text-2); }
+.status-line .ops-stat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-line strong { color: var(--c-text); font-weight: 500; font-variant-numeric: tabular-nums; }
 .status-line .ops-attn { color: var(--c-danger); }
 .status-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--c-ok); flex: none; }
