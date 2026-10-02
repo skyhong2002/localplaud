@@ -177,7 +177,7 @@
     </div>
   </div>
 
-  {% if filter_count %}
+  {% if filter_count and files %}
   <ul class="active-filters" aria-label="{{ t('Active filters') }}">
     {% if q %}<li><a class="chip" href="{{ liburl() | replace('&amp;q=' ~ (q | urlencode), '') }}">{{ t('Search') }}: {{ q }} {{ icon('x', 'xs') }}</a></li>{% endif %}
     {% if lib.state %}<li><a class="chip" href="{{ liburl(state='') }}">{{ t('State') }}: {{ t(lib.state) }} {{ icon('x', 'xs') }}</a></li>{% endif %}
@@ -202,6 +202,19 @@
     {% elif filter_count or lib.view == 'uncategorized' %}
       {{ icon('filter') }}<p class="empty-title filtered-empty-title">{{ t('No recordings match these filters.') }}</p>
       {% if lib.view == 'uncategorized' and not filter_count %}<p class="empty-body">{{ t('Every recording is in a folder or tagged.') }}</p>{% endif %}
+      <ul class="active-filter-list" aria-label="{{ t('Active filters') }}">
+        {% if q %}<li>{{ t('Search') }}: {{ q }}</li>{% endif %}
+        {% if lib.state %}<li>{{ t('State') }}: {{ t(lib.state) }}</li>{% endif %}
+        {% if active_scene %}<li>{{ t('Source') }}: {{ t(active_scene.label) }}</li>{% endif %}
+        {% if active_folder %}<li>{{ t('Folder') }}: {{ active_folder.name }}</li>{% endif %}
+        {% if active_tag %}<li>{{ t('Tag') }}: {{ active_tag.name }}</li>{% endif %}
+        {% if active_origin %}<li>{{ t('Comes from') }}: {{ t(active_origin.label) }}</li>{% endif %}
+        {% if lib.view == 'uncategorized' %}<li>{{ t('View') }}: {{ t('Unfiled') }}</li>{% endif %}
+        {% if lib.date_from %}<li>{{ t('From') }}: {{ lib.date_from }}</li>{% endif %}
+        {% if lib.date_to %}<li>{{ t('To') }}: {{ lib.date_to }}</li>{% endif %}
+        {% if lib.min_duration_minutes is not none %}<li>{{ t('Minimum') }}: {{ lib.min_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
+        {% if lib.max_duration_minutes is not none %}<li>{{ t('Maximum') }}: {{ lib.max_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
+      </ul>
       <div class="empty-actions"><a class="btn sec filtered-empty-reset" href="/?sort={{ lib.sort }}&amp;dir={{ lib.dir }}&amp;view=all">{{ icon('undo', 'sm') }}{{ t('Clear all filters') }}</a></div>
     {% else %}
       {{ icon('waveform') }}<p class="empty-title">{{ t('No recordings yet.') }}</p>

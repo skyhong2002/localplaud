@@ -486,7 +486,7 @@ body.app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .status-meter .m-other { background: var(--c-border-strong); }
 .status-line { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 12px; color: var(--c-text-2); }
 .status-line strong { color: var(--c-text); font-weight: 500; font-variant-numeric: tabular-nums; }
-.status-line .attn strong { color: var(--c-danger); }
+.status-line .ops-attn { color: var(--c-danger); }
 .status-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--c-ok); flex: none; }
 .status-pulse.busy { background: var(--c-info); animation: lp-pulse 1.4s ease-in-out infinite; }
 .status-pulse.attn { background: var(--c-danger); }
@@ -656,6 +656,10 @@ a.home-card:hover { background: var(--c-hover); }
 .page-change-body { gap: 16px; }
 .page-change-body p { margin: 0; color: var(--c-text-2); }
 .page-change-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.active-filter-list { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; max-width: 620px; margin: 4px 0 0; padding: 0; list-style: none; }
+.active-filter-list:empty { display: none; }
+.active-filter-list li { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 8px; border-radius: var(--radius); background: var(--c-surface-2); color: var(--c-text-body); font-size: 12px; }
+.active-filters { list-style: none; padding: 0; }
 .sheet-sort { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 16px 8px; }
 .sheet-sort .chip { min-height: 32px; padding: 0 12px; font-size: 13px; }
 .sheet-section-row { display: flex; align-items: center; justify-content: space-between; padding-top: 6px; padding-bottom: 0; }

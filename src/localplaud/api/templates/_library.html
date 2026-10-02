@@ -16,7 +16,7 @@
   {% if selectable %}<input class="row-check checkbox row-select" type="checkbox" value="{{ f.id }}" aria-label="{{ t('Select recording') }} {{ f.filename }}">{% endif %}
   <div class="row-main">
     <a class="row-title" href="{{ href }}" hx-get="{{ href }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true" title="{{ f.filename }}">{{ f.filename }}</a>
-    <span class="row-sub">{% if state %}<span class="state state-{{ state.kind }}">{{ t(state.label) }}</span>{% endif %}<span class="row-meta-mobile">{{ f.start_time_ms | dt }} · {{ f.duration_ms | dur_long }}</span>{% if show_folder and f.folder %}<span class="chip chip-folder" style="--chip-color:{{ f.folder.color or 'var(--c-text-2)' }}">{{ icon('folder', 'xs') }}{{ f.folder.name }}</span>{% endif %}{% if f.origin == 'local' %}<span class="row-origin">{{ t('Local import') }}</span>{% endif %}</span>
+    <span class="row-sub">{% if state %}<span class="state state-{{ state.kind }}">{{ t(state.label) }}</span>{% endif %}<span class="row-meta-mobile">{{ f.start_time_ms | dt }} · {{ f.duration_ms | dur_long }}</span>{% if show_folder and f.folder %}<span class="chip chip-folder" style="--chip-color:{{ f.folder.color or 'var(--c-text-2)' }}">{{ icon('folder', 'xs') }}{{ f.folder.name }}</span>{% endif %}{% if f.origin == 'local' %}<span class="row-origin">{{ t('Local import') }}</span>{% endif %}{% if f.audio_on_demand %}<span class="row-origin">{{ t('Audio on demand') }}</span>{% endif %}</span>
   </div>
   <span class="row-dur">{{ f.duration_ms | dur_long }}</span>
   <span class="row-date">{{ f.start_time_ms | dt }}</span>

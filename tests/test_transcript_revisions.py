@@ -12,6 +12,8 @@ from threading import Barrier
 import pytest
 from sqlalchemy import create_engine, inspect, select, text
 
+from tests.assets import with_assets
+
 
 def test_local_transcript_uniqueness_migration_preserves_cloud_and_revision(tmp_path):
     from localplaud.db.migrations import migrate_local_transcript_uniqueness
@@ -634,19 +636,20 @@ def test_segment_editor_lists_stable_speakers_and_restores_focus_contract(
     assert '<option value="SPEAKER_00" selected>SPEAKER_00</option>' in transcript.text
     assert '<option value="SPEAKER_01" >Facilitator</option>' in transcript.text
     detail = c.get("/file/r1")
-    assert "form.parentElement.querySelector('.editbtn')?.focus()" in detail.text
-    assert "event.target.closest?.('.seg .segedit')" in detail.text
-    assert "const resetSegmentEditor=form=>{form.reset()" in detail.text
-    assert "form.querySelector('[data-segment-status]').textContent=''" in detail.text
-    assert "form.querySelector('[type=\"submit\"]').disabled=false" in detail.text
-    assert "headers:{accept:'application/json'}" in detail.text
-    assert "url.searchParams.set('tab','transcript')" in detail.text
-    assert "else url.searchParams.delete('t')" in detail.text
-    assert "recording_processing:'Recording is processing." in detail.text
-    assert "document.querySelector('[data-segment-edit-error]')?.focus()" in detail.text
-    assert ".seg:focus-within .editbtn" in detail.text
-    assert ".seg .editbtn:focus-visible" in detail.text
-    assert ".seg .editbtn { opacity:0" in detail.text
+    detail_assets = with_assets(c, detail)
+    assert "form.parentElement.querySelector('.editbtn')?.focus()" in detail_assets
+    assert "event.target.closest?.('.seg .segedit')" in detail_assets
+    assert "const resetSegmentEditor=form=>{form.reset()" in detail_assets
+    assert "form.querySelector('[data-segment-status]').textContent=''" in detail_assets
+    assert "form.querySelector('[type=\"submit\"]').disabled=false" in detail_assets
+    assert "headers:{accept:'application/json'}" in detail_assets
+    assert "url.searchParams.set('tab','transcript')" in detail_assets
+    assert "else url.searchParams.delete('t')" in detail_assets
+    assert "recording_processing:'Recording is processing." in detail_assets
+    assert "document.querySelector('[data-segment-edit-error]')?.focus()" in detail_assets
+    assert ".seg:focus-within .editbtn" in detail_assets
+    assert ".seg .editbtn:focus-visible" in detail_assets
+    assert ".seg .editbtn { opacity:0" in detail_assets
 
 
 def test_native_segment_form_preserves_workspace_and_has_accessible_error_recovery(
