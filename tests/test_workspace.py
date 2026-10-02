@@ -245,6 +245,10 @@ def test_degraded_diarization_banner(monkeypatch, tmp_path):
     assert "Speaker diarization failed" in page and "pyannote token missing" in page
     _seed("ok", diarize_status="completed")
     assert "data-diarization-degraded" not in c.get("/file/ok?tab=transcript").text
+    _seed("degraded", undiarized, diarize_status="degraded")
+    assert "Speaker diarization failed or was unavailable" in c.get(
+        "/file/degraded?tab=transcript"
+    ).text
     _seed("never", undiarized)
     never = c.get("/file/never?tab=transcript").text
     assert "Speaker diarization did not run for this transcript." in never

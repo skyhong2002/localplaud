@@ -11,7 +11,7 @@
   const configElement = document.getElementById('ws-config');
   if (!configElement) return;
   const cfg = JSON.parse(configElement.textContent || '{}');
-  const tr = window.localplaudT || (message => message);
+  const tr = window.localplaudT || window.lp?.t || (message => message);
   const controller = new AbortController();
   const { signal } = controller;
   window.localplaudWorkspaceTeardown?.();
@@ -43,7 +43,8 @@
 
   // ---------------------------------------------------------------- toast
   function toast(message, { error = false } = {}) {
-    if (typeof window.localplaudToast === 'function') { window.localplaudToast(message, { error }); return; }
+    // Prefer the shared design-system toast (CONVENTIONS: lp.toast) when present.
+    if (typeof window.lp?.toast === 'function') { window.lp.toast(message, { type: error ? 'error' : 'success' }); return; }
     let host = document.getElementById('ws-toast');
     if (!host) {
       host = document.createElement('div');

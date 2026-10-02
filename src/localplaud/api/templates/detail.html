@@ -99,7 +99,7 @@
         <span class="nav-icon" style="--nav-icon:url('/static/lucide/triangle-alert.svg')"></span>
         <div class="recording-alert-body">
           <strong>{{ t('Speaker labels are unavailable') }}</strong>
-          <div class="sub">{% if f.diarization.status == 'failed' %}{{ t('Speaker diarization failed, so this transcript is not separated by speaker. The text is usable; resume processing to add speakers.') }}{% elif f.diarization.status in ('pending', 'running') %}{{ t('Speaker diarization has not finished yet. Speaker labels will appear when it completes.') }}{% else %}{{ t('Speaker diarization did not run for this transcript. The text is usable, but it is not separated by speaker.') }}{% endif %}</div>
+          <div class="sub">{% if f.diarization.status in ('failed', 'degraded') %}{{ t('Speaker diarization failed or was unavailable, so this transcript is not separated by speaker. The text is usable; resume processing to add speakers.') }}{% elif f.diarization.status in ('pending', 'running') %}{{ t('Speaker diarization has not finished yet. Speaker labels will appear when it completes.') }}{% else %}{{ t('Speaker diarization did not run for this transcript. The text is usable, but it is not separated by speaker.') }}{% endif %}</div>
           {% if f.diarization.error %}<details class="technical-error"><summary>{{ t('Technical details') }}</summary><div>{{ f.diarization.error }}</div></details>{% endif %}
         </div>
         {% if (f.has_audio or f.audio_on_demand) and f.diarization.status not in ('pending', 'running') %}<div class="recording-alert-actions"><button class="icon-action" hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML">{{ t('Resume') }}</button></div>{% endif %}

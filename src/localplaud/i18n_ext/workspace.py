@@ -56,7 +56,7 @@ ZH_HANT_TW = {
     "Shift": "Shift",
     "Space": "空白鍵",
     "Speaker diarization did not run for this transcript. The text is usable, but it is not separated by speaker.": "此逐字稿未執行講者分離。文字可正常使用，但未依講者區分。",
-    "Speaker diarization failed, so this transcript is not separated by speaker. The text is usable; resume processing to add speakers.": "講者分離失敗，因此此逐字稿未依講者區分。文字可正常使用；繼續處理即可加入講者。",
+    "Speaker diarization failed or was unavailable, so this transcript is not separated by speaker. The text is usable; resume processing to add speakers.": "講者分離失敗或無法使用，因此此逐字稿未依講者區分。文字可正常使用；繼續處理即可加入講者。",
     "Speaker diarization has not finished yet. Speaker labels will appear when it completes.": "講者分離尚未完成，完成後會顯示講者標籤。",
     "Speaker labels are unavailable": "目前沒有講者標籤",
     "Speaker names saved": "已儲存講者名稱",
