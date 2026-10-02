@@ -144,8 +144,10 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
         migrate_processing_claim_schema,
         migrate_profile_resolution_schema,
         migrate_profile_snapshot_columns,
+        migrate_quality_floor_schema,
         migrate_share_link_options_schema,
         migrate_speaker_timeline_schema,
+        migrate_speech_override_column,
         migrate_stage_attempt_schema,
         migrate_summary_revision_schema,
         migrate_tag_kind_columns,
@@ -155,6 +157,7 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
     )
 
     migrate_legacy_provider_profile_schema(engine)
+    migrate_quality_floor_schema(engine)
     migrate_legacy_note_template_schema(engine)
     migrate_legacy_summary_schema(engine)
     migrate_legacy_stage_run_schema(engine)
@@ -178,6 +181,7 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
     migrate_editable_note_revision_schema(engine)
     migrate_editable_note_provenance_schema(engine)
     migrate_speaker_timeline_schema(engine)
+    migrate_speech_override_column(engine)
     migrate_import_schema(engine)
     migrate_incremental_import_schema(engine)
     migrate_knowledge_index_schema(engine)

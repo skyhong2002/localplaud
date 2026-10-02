@@ -121,6 +121,7 @@ def test_delete_processing_preserves_cloud_and_user_data(monkeypatch, tmp_path):
         "transcripts": 1,
         "notes": 1,
         "note_versions": 1,
+        "outlines": 0,
         "chunks": 1,
         "stages": 1,
         "attempts": 0,
@@ -459,3 +460,19 @@ def test_cleanup_restores_quarantined_files_when_commit_fails(
         assert recording.status == FileStatus.done
         assert recording.audio_path == audio_path
         assert recording.wav_path == wav_path
+
+
+def test_explicit_local_cleanup_removes_outline_history_and_keeps_raw_audio(monkeypatch, tmp_path):
+    client, audio, _wav, _waveform = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import Outline, PlaudFile
+    from localplaud.db.session import session_scope
+    with session_scope() as session:
+        for revision in (1, 2):
+            session.add(Outline(file_id="clean", revision=revision, source="local",
+                                chapters=[{"start_ms": 0, "end_ms": 1000, "title": "Private chapter"}]))
+    response = client.delete("/api/files/clean/local-processing")
+    assert response.status_code == 200
+    assert response.json()["removed"]["outlines"] == 2
+    assert audio.exists()
+    with session_scope() as session:
+        assert session.get(PlaudFile, "clean").outlines == []

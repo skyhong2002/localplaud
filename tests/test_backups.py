@@ -207,3 +207,76 @@ def test_authorized_backup_sync_is_durable_idempotent_and_revocable(monkeypatch,
         )
         assert revoked_retry.status_code == 422
         assert "revoked" in revoked_retry.json()["detail"]
+
+
+def test_storage_usage_and_backup_retention_never_touch_originals(monkeypatch, tmp_path):
+    client, database, media = _client(monkeypatch, tmp_path)
+    with client:
+        from localplaud.backups import backup_root
+        from localplaud.db.models import PlaudFile
+        from localplaud.db.session import session_scope
+
+        recording_dir = media / "kept"
+        recording_dir.mkdir(parents=True)
+        original = recording_dir / "audio.opus"
+        original.write_bytes(b"o" * 1000)
+        converted = recording_dir / "audio.wav"
+        converted.write_bytes(b"w" * 300)
+        (recording_dir / "waveform.json").write_bytes(b"x" * 50)
+        with session_scope() as session:
+            session.add(
+                PlaudFile(
+                    id="kept", filename="Kept", audio_path=str(original), wav_path=str(converted)
+                )
+            )
+        root = backup_root()
+        names = [f"localplaud-2026010{day}T000000Z-0000000{day}.zip" for day in range(1, 5)]
+        for name in names:
+            (root / name).write_bytes(b"zip")
+
+        usage = client.get("/api/storage").json()
+        assert usage["usage"]["original_audio"] == {"bytes": 1000, "files": 1}
+        assert usage["usage"]["converted_audio"] == {"bytes": 300, "files": 1}
+        assert usage["usage"]["other_audio_dir"] == {"bytes": 50}
+        assert usage["usage"]["database"]["bytes"] > 0
+        assert usage["usage"]["backups"]["files"] == 4
+        assert usage["retention"] == {"backup_keep_latest": None}
+
+        # Previewing a proposal is read-only and lists the oldest archives only.
+        preview = client.get(
+            "/api/storage/retention/plan?proposed=true&backup_keep_latest=2"
+        ).json()
+        assert [item["name"] for item in preview["backups_to_delete"]] == names[:2][::-1]
+        assert all((root / name).exists() for name in names)
+        assert client.get("/api/storage/retention/plan").json()["backups_to_delete"] == []
+        bad = client.get("/api/storage/retention/plan?proposed=true&backup_keep_latest=0")
+        assert bad.status_code == 422
+        assert client.put("/api/storage/retention", json={"backup_keep_latest": 0}).status_code == 422
+
+        saved = client.put("/api/storage/retention", json={"backup_keep_latest": 2})
+        assert saved.status_code == 200
+        # Only confirmed names that are also in the current plan are deleted.
+        applied = client.post(
+            "/api/storage/retention/apply",
+            json={"confirm_names": [names[0], names[3], "../localplaud.db", "audio.opus"]},
+        ).json()
+        assert applied == {"deleted": [names[0]]}
+        assert not (root / names[0]).exists()
+        assert (root / names[1]).exists() and (root / names[3]).exists()
+
+        # A new backup enforces the saved limit automatically.
+        created = client.post("/api/backups").json()
+        assert set(created["retention_deleted"]) == {names[1], names[2]}
+        remaining = sorted(path.name for path in root.glob("localplaud-*.zip"))
+        assert remaining == sorted([names[3], created["name"]])
+        assert original.read_bytes() == b"o" * 1000
+        assert converted.exists() and database.exists()
+
+        page = client.get("/settings")
+        assert page.status_code == 200
+        assert 'id="retention-form"' in page.text
+        assert 'id="retention-dialog"' in page.text
+        # A saved limit outside the presets is still shown as the selection.
+        assert '<option value="2" selected>' in page.text
+        assert "1.0 kB" in page.text
+        assert "window.confirm" not in page.text

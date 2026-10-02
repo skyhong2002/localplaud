@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ t('Explore') }} — localplaud{% endblock %}
+{% block mobile_topbar %}{% endblock %}
+{% block body %}
+{%- set ops = sidebar.ops -%}
+{%- set total = ops.ready + ops.processing + ops.attention + ops.queued + ops.cloud -%}
+<div class="library-page explore-page">
+  <section class="explore-hero" aria-labelledby="explore-hero-title">
+    <div class="explore-hero-inner">
+      <div class="explore-hero-top">
+        <h2 class="explore-hero-title" id="explore-hero-title">{{ t('Local') }}</h2>
+        <a class="explore-hero-link" href="/status">{{ t('Details') }}{{ icon('chevron-right', 'sm') }}</a>
+      </div>
+      <div class="explore-meter" role="img" aria-label="{{ ops.ready }} {{ t('of') }} {{ total }} {{ t('recordings ready') }}">
+        {% if total %}<span class="m-ready" style="width:{{ (ops.ready * 100 / total) | round(1) }}%"></span><span class="m-processing" style="width:{{ ((ops.processing + ops.queued) * 100 / total) | round(1) }}%"></span><span class="m-attention" style="width:{{ (ops.attention * 100 / total) | round(1) }}%"></span>{% endif %}
+      </div>
+      <div class="explore-hero-meta">
+        <span>{{ ops.ready }} / {{ total }} {{ t('recordings ready') }} · {{ stats.hours }} {{ t('hours') }}</span>
+        {% if ops.attention %}<a href="/?state=attention">{{ ops.attention }} {{ t('need attention') }}</a>{% elif ops.processing or ops.queued %}<a href="/?state=generating">{{ ops.processing + ops.queued }} {{ t('generating') }}</a>{% else %}<span>{{ t('All caught up') }}</span>{% endif %}
+      </div>
+      <a class="btn btn-lg btn-block explore-hero-button" href="/ask">{{ icon('sparkles', 'sm') }}{{ t('Ask your library') }}</a>
+    </div>
+  </section>
+  <div class="explore-body">
+    <h1 class="page-title explore-title">{{ t('Explore') }}</h1>
+    <nav aria-label="{{ t('Explore') }}">
+      <ul class="explore-group">
+        <li><a class="explore-row" href="/settings#plaud-account">{{ icon('cloud') }}<span>{{ t('Plaud sync') }}</span><span class="explore-value">{{ t('Read-only') }}</span>{{ icon('chevron-right', 'sm') }}</a></li>
+        <li><a class="explore-row" href="/settings#private-backup">{{ icon('archive-restore') }}<span>{{ t('Backups & sync') }}</span>{{ icon('chevron-right', 'sm') }}</a></li>
+        <li><a class="explore-row" href="/settings#remote-workers">{{ icon('monitor') }}<span>{{ t('Devices & remote workers') }}</span>{{ icon('chevron-right', 'sm') }}</a></li>
+      </ul>
+      <ul class="explore-group">
+        <li><a class="explore-row" href="/templates">{{ icon('template') }}<span>{{ t('Templates') }}</span><span class="explore-value">{{ template_count }}</span>{{ icon('chevron-right', 'sm') }}</a></li>
+        <li><a class="explore-row" href="/discover">{{ icon('zap') }}<span>{{ t('AutoFlow') }}</span><span class="explore-value">{{ automation_count }} {{ t('on') }}</span>{{ icon('chevron-right', 'sm') }}</a></li>
+        <li><a class="explore-row" href="/settings#group-integrations">{{ icon('link') }}<span>{{ t('Integrations') }}</span>{{ icon('chevron-right', 'sm') }}</a></li>
+      </ul>
+      <ul class="explore-group">
+        <li><a class="explore-row" href="/notifications">{{ icon('bell') }}<span>{{ t('Notifications') }}</span>{% if unread_notifications %}<span class="badge">{{ unread_notifications }}</span>{% endif %}{{ icon('chevron-right', 'sm') }}</a></li>
+        <li><a class="explore-row" href="/notes">{{ icon('note') }}<span>{{ t('Saved notes') }}</span>{{ icon('chevron-right', 'sm') }}</a></li>
+        <li><a class="explore-row" href="/settings#support-about">{{ icon('message') }}<span>{{ t('Support & about') }}</span>{{ icon('chevron-right', 'sm') }}</a></li>
+      </ul>
+    </nav>
+  </div>
+</div>
+{% endblock %}

@@ -991,8 +991,58 @@ def test_provider_read_api(monkeypatch, tmp_path):
         assert "transcribe" in preview.json()["resolved"]["stages"]
         settings_page = client.get("/settings")
         assert settings_page.status_code == 200
-        assert '<h1 class="page">Settings</h1>' in settings_page.text
+        assert '<h1 class="page sf-large-title">Settings</h1>' in settings_page.text
         assert 'aria-label="Settings sections"' in settings_page.text
+
+
+def test_settings_resolution_preview_explains_scope_layers(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'api.db'}")
+    config.get_settings(reload=True)
+    monkeypatch.setattr(db_session, "_engine", None)
+    monkeypatch.setattr(db_session, "_Session", None)
+    with TestClient(app) as client:
+        with db_session.session_scope() as session:
+            folder_profile = ExecutionProfile(
+                key="folder-local", name="Folder local", version=2, no_egress=True
+            )
+            session.add(folder_profile)
+            session.flush()
+            folder = Folder(name="Clients", execution_profile_id=folder_profile.id)
+            session.add(folder)
+            session.add(PlaudFile(id="preview-rec", filename="Preview"))
+            session.flush()
+            folder_id = folder.id
+
+        system_only = client.get("/api/providers/resolution-preview")
+        assert system_only.status_code == 200
+        resolved = system_only.json()["resolved"]
+        assert [item["kind"] for item in resolved["layer_provenance"]] == ["system"]
+        assert "data_egress" in resolved["stages"]["transcribe"]
+
+        scoped = client.get(f"/api/providers/resolution-preview?folder_id={folder_id}")
+        assert scoped.status_code == 200
+        provenance = scoped.json()["resolved"]["layer_provenance"]
+        assert [item["kind"] for item in provenance] == ["system", "folder"]
+        assert provenance[1]["folder_name"] == "Clients"
+        assert provenance[1]["profile_key"] == "folder-local"
+        assert scoped.json()["resolved"]["policy"]["no_egress"] is True
+
+        recording = client.get("/api/providers/resolution-preview?file_id=preview-rec")
+        assert recording.status_code == 200
+        assert recording.json()["resolved"]["layers"][0].startswith("system:")
+
+        assert client.get("/api/providers/resolution-preview?folder_id=9999").status_code == 404
+        assert client.get("/api/providers/resolution-preview?file_id=missing").status_code == 404
+        missing_template = client.get("/api/providers/resolution-preview?template_key=nope")
+        assert missing_template.status_code == 404
+
+        page = client.get("/settings")
+        assert page.status_code == 200
+        assert 'id="resolution-preview-form"' in page.text
+        assert 'id="resolution-preview-result" class="resolution-preview-result" aria-live="polite"' in page.text
+        assert f'<option value="{folder_id}">Clients</option>' in page.text
+        assert "/api/providers/resolution-preview?" in page.text
 
 
 def test_profile_resolution_schema_migration_is_additive_and_idempotent(tmp_path):
@@ -1308,3 +1358,129 @@ def test_stage_run_snapshot_roundtrip(tmp_path):
         )
         session.commit()
         assert session.query(StageRun).one().resolved_profile_snapshot == {"version": 1}
+
+
+def test_cloud_and_remote_starting_profiles_are_explicit_opt_in(monkeypatch, tmp_path):
+    from localplaud.db.models import RemoteWorker
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'api.db'}")
+    config.get_settings(reload=True)
+    monkeypatch.setattr(db_session, "_engine", None)
+    monkeypatch.setattr(db_session, "_Session", None)
+    with TestClient(app) as client:
+        default_before = next(
+            item for item in client.get("/api/providers/profiles").json()["profiles"]
+            if item["is_system_default"]
+        )
+        catalog = client.get("/api/providers/starting-profiles").json()["starting_profiles"]
+        assert [item["kind"] for item in catalog] == [
+            "openai-cloud", "openai-compatible", "remote-gpu"
+        ]
+        assert all("leav" in item["egress"] or "upload" in item["egress"] or "send" in item["egress"]
+                   for item in catalog)
+
+        url = "/api/providers/starting-profiles"
+        # Egress must be acknowledged; raw keys are not secret references.
+        assert client.post(f"{url}/openai-cloud", json={}).status_code == 422
+        bad_secret = client.post(
+            f"{url}/openai-cloud",
+            json={"acknowledge_egress": True, "secret_env": "sk-live-raw-key"},
+        )
+        assert bad_secret.status_code == 422
+        assert client.post(
+            f"{url}/openai-cloud", json={"acknowledge_egress": True, "api_key": "x"}
+        ).status_code == 422
+        assert client.post(f"{url}/nope", json={"acknowledge_egress": True}).status_code == 404
+
+        cloud = client.post(
+            f"{url}/openai-cloud",
+            json={"acknowledge_egress": True, "secret_env": "OPENAI_API_KEY", "model": "gpt-x"},
+        )
+        assert cloud.status_code == 201, cloud.text
+        profile = cloud.json()
+        assert profile["is_system_default"] is False
+        assert profile["policy"]["no_egress"] is False
+        for stage in ("correct", "summarize", "mind_map", "ask"):
+            assert profile["stages"][stage]["connection"] == "llm:openai-cloud"
+            assert profile["stages"][stage]["model"] == "gpt-x"
+        for stage in ("transcribe", "diarize", "embed"):
+            assert profile["stages"][stage] == default_before["stages"][stage]
+        connection = next(
+            item for item in client.get("/api/providers/connections").json()["connections"]
+            if item["key"] == "llm:openai-cloud"
+        )
+        assert connection["secret_ref"] == "env:OPENAI_API_KEY"
+        assert connection["data_egress"] is True
+
+        compatible_missing = client.post(
+            f"{url}/openai-compatible",
+            json={"acknowledge_egress": True, "secret_env": "LLM_KEY", "model": "m"},
+        )
+        assert compatible_missing.status_code == 422
+        compatible = client.post(
+            f"{url}/openai-compatible",
+            json={
+                "acknowledge_egress": True,
+                "secret_env": "LLM_KEY",
+                "base_url": "https://llm.example/v1/",
+                "model": "qwen",
+            },
+        )
+        assert compatible.status_code == 201, compatible.text
+        assert compatible.json()["stages"]["summarize"]["connection"] == "llm:compatible:llm.example-v1"
+
+        no_worker = client.post(
+            f"{url}/remote-gpu", json={"acknowledge_egress": True, "worker_key": "gpu"}
+        )
+        assert no_worker.status_code == 404
+        created = client.post(
+            "/api/providers/workers",
+            json={"key": "gpu", "name": "GPU", "base_url": "https://gpu.example/"},
+        )
+        assert created.status_code == 201
+        untested = client.post(
+            f"{url}/remote-gpu", json={"acknowledge_egress": True, "worker_key": "gpu"}
+        )
+        assert untested.status_code == 422
+        with db_session.session_scope() as session:
+            worker = session.scalar(select(RemoteWorker).where(RemoteWorker.key == "gpu"))
+            worker.capabilities = [
+                {"stage": "transcribe", "models": ["turbo"], "metadata": {}},
+                {"stage": "diarize", "models": ["pyannote"], "metadata": {}},
+            ]
+            connection = session.scalar(
+                select(ProviderConnection).where(ProviderConnection.key == "worker:gpu")
+            )
+            for model_key, stage in (("turbo", "transcribe"), ("pyannote", "diarize")):
+                session.add(
+                    ModelCatalogEntry(
+                        connection_id=connection.id,
+                        model_key=model_key,
+                        display_name=model_key,
+                        capabilities=Capability(
+                            execution_target="remote_worker",
+                            data_egress=True,
+                            stages=(StageCapabilities(stage=ProviderStage(stage)),),
+                        ).model_dump(mode="json"),
+                    )
+                )
+        remote = client.post(
+            f"{url}/remote-gpu", json={"acknowledge_egress": True, "worker_key": "gpu"}
+        )
+        assert remote.status_code == 201, remote.text
+        assert remote.json()["stages"]["transcribe"]["connection"] == "worker:gpu"
+        assert remote.json()["stages"]["diarize"]["model"] == "pyannote"
+        assert remote.json()["is_system_default"] is False
+
+        default_after = next(
+            item for item in client.get("/api/providers/profiles").json()["profiles"]
+            if item["is_system_default"]
+        )
+        assert default_after["id"] == default_before["id"]
+
+        page = client.get("/settings")
+        assert page.status_code == 200
+        assert 'class="starter-form" data-kind="openai-cloud"' in page.text
+        assert 'name="acknowledge_egress" required' in page.text
+        assert "Only the variable name is stored" in page.text

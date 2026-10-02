@@ -1,54 +1,135 @@
 {% extends "base.html" %}
 {% block title %}Discover & AutoFlow — localplaud{% endblock %}
 {% block body %}
-<main class="main"><div class="content" style="max-width:1120px">
-  <div class="autoflow-page-head">
-    <div><h1 class="page">{{ t('Discover') }}</h1><p class="sub" style="margin:5px 0 0">{{ t('Local automation that never sends Plaud credentials or recording data elsewhere.') }}</p></div>
-    <div class="autoflow-page-actions"><button class="btn sec" id="run-all" type="button">{{ t('Run now') }}</button><button class="btn" id="new-rule" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span>{{ t('New AutoFlow') }}</button></div>
+{% set enabled_count = automation_rules | selectattr('enabled') | list | length %}
+{% set failed_runs = automation_runs | rejectattr('status', 'equalto', 'completed') | list %}
+<main class="main"><div class="content" style="max-width:1120px" data-surface="discover">
+  <div class="autoflow-page-head sf-page-head">
+    <div><h1 class="page sf-large-title">{{ t('Discover') }}</h1><p class="sub sf-page-sub" style="margin:5px 0 0">{{ t('Local automation that never sends Plaud credentials or recording data elsewhere.') }}</p></div>
+    <div class="autoflow-page-actions"><button class="btn sec" id="run-all" type="button">{{ t('Run now') }}</button><button class="btn" id="new-rule" type="button">{{ icon('plus', 'sm') }}{{ t('New AutoFlow') }}</button></div>
   </div>
+  <nav class="sf-tabs sf-discover-nav" aria-label="{{ t('Discover sections') }}">
+    <a href="#autoflow" class="on">{{ t('AutoFlow') }} <span class="sf-count">{{ automation_rules|length }}</span></a>
+    <a href="#integrations">{{ t('Applications & integrations') }}</a>
+    <a href="#run-history">{{ t('Run history') }}{% if failed_runs %} <span class="sf-count sf-count-alert">{{ failed_runs|length }}</span>{% endif %}</a>
+  </nav>
   <div id="autoflow-status" class="autoflow-live-status sub" role="status" aria-live="polite"></div>
 
-  <section class="autoflow-section">
-    <div class="autoflow-section-head"><div><h2>{{ t('Applications & integrations') }}</h2><div class="sub">{{ t('Every rule and destination shows who owns it and where it can be changed.') }}</div></div><a class="sub" href="/settings#webhook-integrations">{{ t('Manage authorizations →') }}</a></div>
-    <div class="discover-app-grid">
-      {% for application in application_catalog %}{% if application.href %}<a class="panel" href="{{ application.href }}" style="padding:14px;display:block">{% else %}<div class="panel" style="padding:14px">{% endif %}<div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ t(application.name) }}</strong><span class="chip">{{ application.count }}</span></div><div class="sub" style="font-size:12px;margin-top:7px">{{ t(application.detail) }}</div><div class="sub" style="font-size:11px;margin-top:10px">{{ t(application.status) }}</div>{% if application.href %}</a>{% else %}</div>{% endif %}{% endfor %}
+  <section class="autoflow-section sf-dsection" id="autoflow" aria-labelledby="sf-autoflow-title">
+    <div class="sf-autoflow-intro">
+      <span class="sf-autoflow-tile" aria-hidden="true">{{ icon('workflow', 'lg') }}</span>
+      <div>
+        <h2 class="sf-section-title" id="sf-autoflow-title">{{ t('AutoFlow') }}</h2>
+        <p class="sf-muted">{{ t('Rules run when a recording is synced or imported and its transcript is ready.') }} {{ t('Lower priority number wins when rules set the same field.') }}</p>
+        <p class="sf-muted sf-policy">{{ icon('bell', 'xs') }} {{ t('Notifications are chosen per AutoFlow and delivered to your local inbox.') }} <a href="/notifications">{{ t('Open inbox') }}</a> · {{ enabled_count }} / {{ automation_rules|length }} {{ t('enabled') }}</p>
+      </div>
     </div>
-  </section>
-
-  <section class="autoflow-section">
-    <div class="autoflow-section-head"><div><h2>{{ t('AutoFlow') }}</h2><div class="sub">{{ t('Lower priority number wins when rules set the same field.') }}</div></div><span class="chip">{{ automation_rules|length }} {{ t('rules') }}</span></div>
-    <div class="autoflow-rule-list">
+    <p class="visually-hidden" id="sf-order-help">{{ t('Drag, or use the arrow keys on the handle, to change which rule runs first.') }}</p>
+    <div class="sf-order-status" id="sf-order-status" role="status" aria-live="polite"></div>
+    <div class="sf-rule-grid" data-sf-rule-grid>
       {% for rule in automation_rules %}
-      <article class="panel autoflow-rule-card">
-        <div class="autoflow-rule-copy">
-          <div class="autoflow-rule-title"><strong>{{ rule.name }}</strong><span class="st {% if rule.enabled %}done{% else %}downloaded{% endif %}">{{ t('enabled') if rule.enabled else t('disabled') }}</span><span class="sub">{{ t(rule.owner_label) if rule.owner_type == 'local' else rule.owner_label }} · {{ t('editable') if rule.editable else t('read-only') }} · {{ t('priority') }} {{ rule.priority }} · v{{ rule.version }}</span></div>
-          <div class="sub autoflow-rule-sentence">{{ rule.sentence }}</div>
-          <div class="sub autoflow-rule-meta">{{ rule.run_count }} {{ t('runs') }}{% if rule.notify %} · {{ t('inbox notification enabled') }}{% endif %}{% if rule.last_run %} · {{ t('last') }} {{ t(rule.last_run.status) }} {{ t('on') }} <a href="/file/{{ rule.last_run.file_id }}">{{ rule.last_run.file_id[:10] }}</a>{% endif %}{% if not rule.editable and rule.owner_detail.management_hint %} · {{ rule.owner_detail.management_hint }}{% endif %}</div>
+      {% set owner = t(rule.owner_label) if rule.owner_type == 'local' else rule.owner_label %}
+      <article class="sf-rule-card{% if not rule.enabled %} off{% endif %}{% if rule.last_run and rule.last_run.status != 'completed' %} failing{% endif %}" data-rule-id="{{ rule.id }}">
+        <div class="sf-rule-top">
+          <span class="sf-flow" aria-label="{{ t('Trigger and actions') }}">
+            <span class="sf-flow-step" title="{{ t('New recording') }}">{{ icon('mic' if not rule.trigger.transcript_contains else 'waveform', 'sm') }}</span>
+            <span class="sf-flow-arrow" aria-hidden="true">›</span>
+            {% if rule.actions.note_template_key or not rule.actions %}<span class="sf-flow-step sf-c-note" title="{{ t('Generate notes') }}">{{ icon('file-text', 'sm') }}</span>{% endif %}
+            {% if rule.actions.profile_id %}<span class="sf-flow-step sf-c-profile" title="{{ t('Execution profile') }}">{{ icon('cpu', 'sm') }}</span>{% endif %}
+            {% if rule.actions.folder_id %}<span class="sf-flow-step sf-c-folder" title="{{ t('Move to folder') }}">{{ icon('folder', 'sm') }}</span>{% endif %}
+            {% if rule.actions.add_tag_ids %}<span class="sf-flow-step sf-c-tag" title="{{ t('Add tag') }}">{{ icon('tag', 'sm') }}</span>{% endif %}
+            {% if rule.actions.export_formats %}<span class="sf-flow-step" title="{{ t('Export canonical transcript:') }} {{ rule.actions.export_formats|join(', ')|upper }}">{{ icon('download', 'sm') }}</span>{% endif %}
+            {% if rule.actions.webhook_integration_ids %}<span class="sf-flow-step" title="{{ t('Send webhook') }}">{{ icon('link', 'sm') }}</span>{% endif %}
+            {% if rule.actions.email_integration_ids %}<span class="sf-flow-step" title="{{ t('Send email') }}">{{ icon('send', 'sm') }}</span>{% endif %}
+            {% if rule.notify %}<span class="sf-flow-step" title="{{ t('inbox notification enabled') }}">{{ icon('bell', 'sm') }}</span>{% endif %}
+          </span>
+          {% if rule.editable %}
+          <span class="sf-rule-order">
+            <button class="sf-icon-btn sf-drag" type="button" data-sf-drag aria-label="{{ t('Reorder') }} {{ rule.name }}" aria-describedby="sf-order-help">{{ icon('grip-vertical', 'sm') }}</button>
+            <button class="sf-icon-btn" type="button" data-sf-move="-1" aria-label="{{ t('Move up') }} {{ rule.name }}">{{ icon('chevron-up', 'sm') }}</button>
+            <button class="sf-icon-btn" type="button" data-sf-move="1" aria-label="{{ t('Move down') }} {{ rule.name }}">{{ icon('chevron-down', 'sm') }}</button>
+          </span>
+          <label class="sf-switch" title="{{ t('Disable') if rule.enabled else t('Enable') }}"><input type="checkbox" role="switch" class="rule-toggle" data-id="{{ rule.id }}" {% if rule.enabled %}checked{% endif %} aria-label="{{ t('Enable') }} {{ rule.name }}"><span></span></label>
+          {% else %}
+          <span class="sf-lock">{{ icon('lock', 'xs') }}<span class="chip" title="{{ t('Managed by') }} {{ owner }}">{{ t('Read-only') }}</span></span>
+          {% endif %}
         </div>
-        <div class="autoflow-rule-actions"><button class="btn sec rule-dry" data-id="{{ rule.id }}" type="button">{{ t('Dry run') }}</button>{% if rule.editable %}<button class="btn sec rule-toggle" data-id="{{ rule.id }}" type="button">{{ t('Disable') if rule.enabled else t('Enable') }}</button><button class="btn sec rule-edit" data-id="{{ rule.id }}" type="button">{{ t('Edit') }}</button><button class="btn sec rule-delete" data-id="{{ rule.id }}" type="button" style="color:var(--red)">{{ t('Delete') }}</button>{% else %}<span class="chip" title="{{ t('Managed by') }} {{ t(rule.owner_label) if rule.owner_type == 'local' else rule.owner_label }}">{{ t('Read-only') }}</span>{% endif %}</div>
+        <h3 class="sf-rule-name">{{ rule.name }}</h3>
+        <p class="sf-rule-sentence" title="{{ rule.sentence }}">{{ rule.sentence }}</p>
+        <div class="sf-rule-meta">
+          <span class="sf-badge">{% if rule.owner_type == 'local' %}{{ t('Local') }}{% else %}{{ t('External') }}{% endif %}</span>
+          <span>{{ owner }} · {{ t('editable') if rule.editable else t('read-only') }}</span>
+          <span data-sf-priority>{{ t('priority') }} {{ rule.priority }} · v{{ rule.version }}</span>
+          {% if not rule.editable %}<span>{{ t('enabled') if rule.enabled else t('disabled') }}</span>{% endif %}
+        </div>
+        {#- AutoFlow rules are event-triggered (poll/import), never scheduled:
+            describe what will run them next instead of inventing a time. -#}
+        {% set has_conditions = rule.trigger.values() | reject('none') | list | length > 0 %}
+        <p class="sf-next-run{% if not rule.enabled %} off{% endif %}" data-sf-next-run>
+          {%- if rule.enabled -%}{{ icon('zap', 'xs') }}{% set next_label = t('Next run:') %}<span>{{ next_label }}{{ '' if next_label.endswith('：') else ' ' }}{{ t('the next new recording that matches') if has_conditions else t('the next new recording') }}</span>
+          {%- elif rule.editable -%}{{ icon('pause', 'xs') }}<span>{{ t('Paused · runs again after you enable it') }}</span>
+          {%- else -%}{{ icon('pause', 'xs') }}<span>{{ t('Paused by its owner · will not run until re-enabled there') }}</span>{%- endif -%}
+        </p>
+        <div class="sf-rule-meta">
+          <span>{{ rule.run_count }} {{ t('runs') }}</span>
+          {% if rule.last_run %}<span class="{% if rule.last_run.status != 'completed' %}sf-text-danger{% endif %}">{{ t('last') }} {{ t(rule.last_run.status) }} {{ t('on') }} <a href="/file/{{ rule.last_run.file_id }}">{{ rule.last_run.file_title }}</a></span>{% endif %}
+          {% if not rule.editable and rule.owner_detail.management_hint %}<span>{{ rule.owner_detail.management_hint }}</span>{% endif %}
+        </div>
+        <div class="sf-rule-actions">
+          {% if rule.editable %}
+          <button class="btn sec btn-sm rule-edit" data-id="{{ rule.id }}" type="button">{{ icon('pencil', 'xs') }}{{ t('Edit') }}</button>
+          {% else %}
+          <button class="btn sec btn-sm rule-view" data-id="{{ rule.id }}" type="button">{{ icon('eye', 'xs') }}{{ t('View') }}</button>
+          {% endif %}
+          <button class="btn sec btn-sm rule-dry" data-id="{{ rule.id }}" type="button">{{ t('Dry run') }}</button>
+          {% if rule.editable %}<button class="btn sec btn-sm sf-btn-danger rule-delete" data-id="{{ rule.id }}" type="button" aria-label="{{ t('Delete') }} {{ rule.name }}">{{ icon('trash', 'xs') }}<span class="sf-hide-narrow">{{ t('Delete') }}</span></button>{% endif %}
+        </div>
       </article>
-      {% else %}<div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/audio-lines.svg')"></span>{{ t('No AutoFlows yet. Create one to organize new recordings automatically.') }}</div>{% endfor %}
+      {% else %}
+      <div class="empty sf-rule-empty">{{ icon('waveform', 'lg') }}<span>{{ t('No AutoFlows yet. Create one to organize new recordings automatically.') }}</span><button class="btn" type="button" data-sf-new-rule>{{ icon('plus', 'sm') }}{{ t('New AutoFlow') }}</button></div>
+      {% endfor %}
     </div>
   </section>
 
-  <section class="autoflow-section"><h2>{{ t('Run history') }}</h2><div class="panel autoflow-run-list">
+  <section class="autoflow-section sf-dsection" id="integrations">
+    <div class="autoflow-section-head sf-section-head"><div><h2 class="sf-section-title">{{ t('Applications & integrations') }}</h2><div class="sub">{{ t('Every rule and destination shows who owns it and where it can be changed.') }}</div></div><a class="sub sf-view-all" href="/settings#webhook-integrations">{{ t('Manage authorizations →') }}</a></div>
+    <div class="discover-app-grid sf-app-grid">
+      {% for application in application_catalog %}
+      {% set app_icon = ['workflow','lock','plug','send'][loop.index0] if loop.index0 < 4 else 'plug' %}
+      {% if application.href %}<a class="sf-app-card" href="{{ application.href }}">{% else %}<div class="sf-app-card">{% endif %}
+        <div class="sf-app-top"><span class="sf-app-icon">{{ icon(app_icon) }}</span><span class="chip">{{ application.count }}</span></div>
+        <strong>{{ t(application.name) }}</strong>
+        <div class="sub sf-app-detail">{{ t(application.detail) }}</div>
+        <div class="sf-app-status sf-status-{{ application.status }}">{{ t(application.status) }}</div>
+      {% if application.href %}</a>{% else %}</div>{% endif %}
+      {% endfor %}
+      <a class="sf-app-card" href="/settings#support-about"><div class="sf-app-top"><span class="sf-app-icon">{{ icon('cpu') }}</span></div><strong>{{ t('Clients & API') }}</strong><div class="sub sf-app-detail">{{ t('API documentation, safe diagnostics, and the command-line client for this workspace.') }}</div><div class="sf-app-status">{{ t('available') }}</div></a>
+    </div>
+  </section>
+
+  <section class="autoflow-section sf-dsection" id="run-history"><div class="sf-section-head"><h2 class="sf-section-title">{{ t('Run history') }}</h2>{% if failed_runs %}<span class="sf-text-danger sf-fail-count">{{ failed_runs|length }} {{ t('need attention') }}</span>{% endif %}</div><div class="panel autoflow-run-list">
     {% for run in automation_runs %}
-    <div class="automation-run-row"><span class="st automation-run-status {{ 'done' if run.status=='completed' else 'error' }}">{{ t(run.status) }}</span><a class="automation-run-file" href="/file/{{ run.file_id }}">{{ run.file_id }}</a><span class="sub automation-run-detail">{{ t('rule') }} #{{ run.rule_id }} · v{{ run.rule_version }}{% for export in run.exports %} · {% if export.status=='completed' %}<a href="/api/automations/exports/{{ export.id }}/download" style="color:var(--blue)">{{ export.format|upper }}</a>{% else %}<button class="run-export-retry" data-id="{{ export.id }}" type="button">{{ t('Retry') }} {{ export.format|upper }}</button>{% endif %}{% endfor %}{% for delivery in run.webhooks %} · {% if delivery.status=='completed' %}<span style="color:var(--ok)" title="HTTP {{ delivery.response_status }} · {{ delivery.scopes|join(', ') }}">{{ delivery.integration_name }}</span>{% else %}<button class="run-webhook-retry" data-id="{{ delivery.id }}" type="button" title="{{ delivery.error }}">{{ t('Retry') }} {{ delivery.integration_name }}</button>{% endif %}{% endfor %}{% for delivery in run.emails %} · {% if delivery.status=='completed' %}<span style="color:var(--ok)" title="{{ delivery.recipients|join(', ') }} · {{ delivery.scopes|join(', ') }}">{{ delivery.integration_name }}</span>{% else %}<button class="run-email-retry" data-id="{{ delivery.id }}" type="button" title="{{ delivery.error }}">{{ t('Retry') }} {{ delivery.integration_name }}</button>{% endif %}{% endfor %}</span></div>
+    <div class="automation-run-row"><span class="st automation-run-status {{ 'done' if run.status=='completed' else 'error' }}">{{ t(run.status) }}</span><a class="automation-run-file" href="/file/{{ run.file_id }}">{{ run.file_title }}</a><span class="sub automation-run-detail">{{ run.rule_name or t('Deleted AutoFlow') }} · v{{ run.rule_version }}{% for export in run.exports %} · {% if export.status=='completed' %}<a href="/api/automations/exports/{{ export.id }}/download" style="color:var(--blue)">{{ export.format|upper }}</a>{% else %}<button class="run-export-retry" data-id="{{ export.id }}" type="button">{{ t('Retry') }} {{ export.format|upper }}</button>{% endif %}{% endfor %}{% for delivery in run.webhooks %} · {% if delivery.status=='completed' %}<span style="color:var(--ok)" title="HTTP {{ delivery.response_status }} · {{ delivery.scopes|join(', ') }}">{{ delivery.integration_name }}</span>{% else %}<button class="run-webhook-retry" data-id="{{ delivery.id }}" type="button" title="{{ delivery.error }}">{{ t('Retry') }} {{ delivery.integration_name }}</button>{% endif %}{% endfor %}{% for delivery in run.emails %} · {% if delivery.status=='completed' %}<span style="color:var(--ok)" title="{{ delivery.recipients|join(', ') }} · {{ delivery.scopes|join(', ') }}">{{ delivery.integration_name }}</span>{% else %}<button class="run-email-retry" data-id="{{ delivery.id }}" type="button" title="{{ delivery.error }}">{{ t('Retry') }} {{ delivery.integration_name }}</button>{% endif %}{% endfor %}{% if run.error %}<span class="sf-run-error" title="{{ run.error }}"> · {{ run.error|truncate(120) }}</span>{% endif %}</span></div>
     {% else %}<div class="sub" style="padding:18px">{{ t('No automation runs yet.') }}</div>{% endfor %}
   </div></section>
 </div></main>
 
-<div class="import-backdrop" id="rule-backdrop" hidden><section class="import-modal autoflow-modal" role="dialog" aria-modal="true" aria-labelledby="rule-title"><div class="import-head"><span id="rule-title">{{ t('New AutoFlow') }}</span><button class="import-close" id="rule-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+<div class="import-backdrop" id="rule-backdrop" hidden><section class="import-modal autoflow-modal sf-flow-editor" role="dialog" aria-modal="true" aria-labelledby="rule-title"><div class="import-head"><span id="rule-title">{{ t('New AutoFlow') }}</span><button class="import-close" id="rule-close" type="button" aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
 <form id="rule-form" class="import-body autoflow-form">
+  <p class="sf-notice" id="rule-readonly-note" hidden></p>
   <div class="autoflow-primary-grid"><label>{{ t('Name') }}<input class="search-input" name="name" required maxlength="120"></label><label>{{ t('Priority') }}<input class="search-input" name="priority" type="number" min="0" max="10000" value="100"></label></div>
-  <fieldset><legend>{{ t('When') }}</legend><div class="autoflow-condition-grid">
+  <fieldset class="sf-when"><legend><span class="sf-wt-head">{{ icon('mic') }}<span>{{ t('When') }}</span></span></legend>
+    <p class="sf-wt-lede">{{ t('A new recording is synced or imported and meets every condition below.') }}</p>
+    <div class="autoflow-condition-grid">
     <label>{{ t('Source') }}<select class="search-input" name="origin"><option value="">{{ t('Any') }}</option><option value="plaud">Plaud</option><option value="local">{{ t('Local import') }}</option></select></label>
     <label>{{ t('Title contains') }}<input class="search-input" name="title_contains"></label>
-    <label>{{ t('Early transcript contains') }}<input class="search-input" name="transcript_contains" maxlength="200"></label>
+    <label>{{ t('Early transcript contains') }}<input class="search-input" name="transcript_contains" maxlength="200"><span class="sf-help">{{ t('Matched against the first part of the corrected local transcript.') }}</span></label>
     <label>{{ t('Minimum minutes') }}<input class="search-input" name="min_duration_minutes" type="number" min="0" step="0.1"></label><label>{{ t('Maximum minutes') }}<input class="search-input" name="max_duration_minutes" type="number" min="0" step="0.1"></label>
     <label>{{ t('Folder') }}<select class="search-input" name="trigger_folder_id"><option value="">{{ t('Any') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}</select></label><label>{{ t('Has tag') }}<select class="search-input" name="trigger_tag_id"><option value="">{{ t('Any') }}</option>{% for tag in organization.tags %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}</select></label>
   </div></fieldset>
-  <fieldset><legend>{{ t('Then') }}</legend><div class="autoflow-action-grid">
+  <fieldset class="sf-then"><legend><span class="sf-wt-head">{{ icon('sparkles') }}<span>{{ t('Then') }}</span></span></legend>
+    <p class="sf-wt-lede">{{ t('Transcribe and summarize with these choices, then organize the recording.') }}</p>
+    <div class="autoflow-action-grid">
     <label>{{ t('Note template') }}<select class="search-input" name="note_template_key"><option value="">{{ t('Use smart template (default)') }}</option><option value="auto">{{ t('Auto') }}</option>{% for template in note_templates %}<option value="{{ template.key }}" {% if template.key == default_automation_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}</select></label>
     <label>{{ t('Execution profile') }}<select class="search-input" name="profile_id"><option value="">{{ t('No change') }}</option>{% for profile in profiles %}<option value="{{ profile.id }}">{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}</select></label>
     <label>{{ t('Move to folder') }}<select class="search-input" name="action_folder_id"><option value="">{{ t('No change') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}</select></label>
@@ -56,10 +137,12 @@
     <label>{{ t('Send webhook') }}<select class="search-input" name="webhook_integration_id"><option value="">{{ t('No delivery') }}</option>{% for integration in webhook_integrations %}<option value="{{ integration.id }}">{{ integration.name }} · {{ integration.scopes|join(', ') }}</option>{% endfor %}</select></label>
     <label>{{ t('Send email') }}<select class="search-input" name="email_integration_id"><option value="">{{ t('No delivery') }}</option>{% for integration in email_integrations %}<option value="{{ integration.id }}">{{ integration.name }} · {{ integration.scopes|join(', ') }}</option>{% endfor %}</select></label>
   </div></fieldset>
-  <div class="autoflow-delivery-row"><label><input name="notify" type="checkbox"> {{ t('Create a local inbox notification') }}</label><span class="sub">{{ t('Export canonical transcript:') }}</span>{% for fmt in ['txt','srt','vtt'] %}<label><input name="export_formats" value="{{ fmt }}" type="checkbox"> {{ fmt|upper }}</label>{% endfor %}</div>
+  <div class="autoflow-delivery-row"><label class="sf-inline-switch"><span class="sf-switch"><input name="notify" type="checkbox" role="switch"><span></span></span> {{ t('Create a local inbox notification') }}</label><span class="sub">{{ t('Export canonical transcript:') }}</span>{% for fmt in ['txt','srt','vtt'] %}<label><input name="export_formats" value="{{ fmt }}" type="checkbox"> {{ fmt|upper }}</label>{% endfor %}</div>
+  <div class="sf-rule-preview" aria-live="polite"><span class="sf-rule-preview-label">{{ icon('sparkles', 'xs') }}{{ t('This AutoFlow will run as:') }}</span><p data-sf-rule-sentence>{{ t('Choose at least one condition or action.') }}</p></div>
   <div id="rule-status" class="sub autoflow-form-status" role="status" aria-live="polite"></div>
   <div class="autoflow-form-actions"><button class="btn sec" id="rule-cancel" type="button">{{ t('Cancel') }}</button><button class="btn" id="rule-save" type="submit">{{ t('Save AutoFlow') }}</button></div>
 </form></section></div>
+<script type="application/json" id="sf-rule-data">{{ automation_rules|tojson }}</script>
 {% endblock %}
 {% block scripts %}
 <style>
@@ -78,8 +161,9 @@ function setField(name,value){const field=form.elements[name];if(field)field.val
 function detailMessage(data,fallback){const detail=data?.detail,item=Array.isArray(detail)?detail[0]?.msg:detail;return tr(typeof item==='string'?item:fallback);}
 async function requestJson(url,options,fallback){let response;try{response=await fetch(url,{...options,signal:cleanupController.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr(fallback));}let data={};try{data=await response.json();}catch(_error){}if(!response.ok)throw new Error(detailMessage(data,fallback));return data;}
 function showPageStatus(message,isError=false){pageStatus.textContent=message;pageStatus.classList.toggle('error',isError);}
-function openRule(rule=null,trigger=null){editing=rule?.id||null;form.reset();setField('priority',rule?.priority??100);setField('name',rule?.name);for(const [key,value] of Object.entries(rule?.trigger||{}))setField(key==='folder_id'?'trigger_folder_id':key==='tag_id'?'trigger_tag_id':key,value);for(const [key,value] of Object.entries(rule?.actions||{})){if(key==='folder_id')setField('action_folder_id',value);else if(key==='add_tag_ids')setField('add_tag_id',value[0]);else if(key==='webhook_integration_ids')setField('webhook_integration_id',value[0]);else if(key==='email_integration_ids')setField('email_integration_id',value[0]);else if(key!=='export_formats')setField(key,value);}for(const field of form.querySelectorAll('[name="export_formats"]'))field.checked=(rule?.actions?.export_formats||[]).includes(field.value);form.elements.notify.checked=rule?.notify||false;document.getElementById('rule-title').textContent=tr(rule?'Edit AutoFlow':'New AutoFlow');status.textContent='';status.classList.remove('error');saveButton.disabled=false;ruleModal.setDirty(false);ruleModal.setBusy(false);ruleModal.open(trigger,form.elements.name);}
-document.getElementById('new-rule').addEventListener('click',event=>openRule(null,event.currentTarget));document.getElementById('rule-close').addEventListener('click',()=>ruleModal.close());document.getElementById('rule-cancel').addEventListener('click',()=>ruleModal.close());document.querySelectorAll('.rule-edit').forEach(button=>button.addEventListener('click',event=>openRule(ruleById[+button.dataset.id],event.currentTarget)));form.addEventListener('input',()=>ruleModal.setDirty(true));backdrop.addEventListener('localplaud:modal-close',()=>{editing=null;form.reset();status.textContent='';status.classList.remove('error');ruleModal.setDirty(false);ruleModal.setBusy(false);saveButton.disabled=false;});
+function setReadOnly(rule){const note=document.getElementById('rule-readonly-note'),locked=Boolean(rule&&!rule.editable);form.querySelectorAll('input,select,textarea').forEach(field=>{field.disabled=locked;});saveButton.hidden=locked;note.hidden=!locked;if(locked)note.textContent=`${tr('Managed by')} ${rule.owner_label}. ${rule.owner_detail?.management_hint||tr('This rule is read-only here.')}`;}
+function openRule(rule=null,trigger=null){setReadOnly(null);editing=rule?.id||null;form.reset();setField('priority',rule?.priority??100);setField('name',rule?.name);for(const [key,value] of Object.entries(rule?.trigger||{}))setField(key==='folder_id'?'trigger_folder_id':key==='tag_id'?'trigger_tag_id':key,value);for(const [key,value] of Object.entries(rule?.actions||{})){if(key==='folder_id')setField('action_folder_id',value);else if(key==='add_tag_ids')setField('add_tag_id',value[0]);else if(key==='webhook_integration_ids')setField('webhook_integration_id',value[0]);else if(key==='email_integration_ids')setField('email_integration_id',value[0]);else if(key!=='export_formats')setField(key,value);}for(const field of form.querySelectorAll('[name="export_formats"]'))field.checked=(rule?.actions?.export_formats||[]).includes(field.value);form.elements.notify.checked=rule?.notify||false;document.getElementById('rule-title').textContent=tr(rule?'Edit AutoFlow':'New AutoFlow');status.textContent='';status.classList.remove('error');saveButton.disabled=false;ruleModal.setDirty(false);ruleModal.setBusy(false);ruleModal.open(trigger,form.elements.name);}
+document.getElementById('new-rule').addEventListener('click',event=>openRule(null,event.currentTarget));document.getElementById('rule-close').addEventListener('click',()=>ruleModal.close());document.getElementById('rule-cancel').addEventListener('click',()=>ruleModal.close());document.querySelectorAll('.rule-view').forEach(button=>button.addEventListener('click',event=>{const rule=ruleById[+button.dataset.id];openRule(rule,event.currentTarget);setReadOnly(rule);document.getElementById('rule-title').textContent=`${rule.name} · ${tr('Read-only')}`;}));document.querySelectorAll('[data-sf-new-rule]').forEach(button=>button.addEventListener('click',event=>openRule(null,event.currentTarget)));document.querySelectorAll('.rule-edit').forEach(button=>button.addEventListener('click',event=>openRule(ruleById[+button.dataset.id],event.currentTarget)));form.addEventListener('input',()=>ruleModal.setDirty(true));backdrop.addEventListener('localplaud:modal-close',()=>{editing=null;form.reset();status.textContent='';status.classList.remove('error');ruleModal.setDirty(false);ruleModal.setBusy(false);saveButton.disabled=false;});
 form.addEventListener('submit',async event=>{event.preventDefault();const data=new FormData(form),num=name=>data.get(name)?+data.get(name):null,trigger={origin:data.get('origin')||null,title_contains:data.get('title_contains')||null,transcript_contains:data.get('transcript_contains')||null,min_duration_minutes:num('min_duration_minutes'),max_duration_minutes:num('max_duration_minutes'),folder_id:num('trigger_folder_id'),tag_id:num('trigger_tag_id')},webhookId=num('webhook_integration_id'),emailId=num('email_integration_id'),actions={note_template_key:data.get('note_template_key')||null,profile_id:num('profile_id'),folder_id:num('action_folder_id'),add_tag_ids:num('add_tag_id')?[num('add_tag_id')]:[],export_formats:data.getAll('export_formats'),webhook_integration_ids:webhookId?[webhookId]:[],email_integration_ids:emailId?[emailId]:[]},body={name:data.get('name'),priority:+data.get('priority'),enabled:editing?ruleById[editing].enabled:true,notify:data.get('notify')==='on',trigger,actions};saveButton.disabled=true;ruleModal.setBusy(true);status.textContent=tr('Saving…');status.classList.remove('error');try{await requestJson(editing?`/api/automations/rules/${editing}`:'/api/automations/rules',{method:editing?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)},'Could not save AutoFlow');ruleModal.setDirty(false);location.reload();}catch(error){if(error.name!=='AbortError'){status.textContent=error.message;status.classList.add('error');saveButton.disabled=false;ruleModal.setBusy(false);}}});
 document.querySelectorAll('.rule-toggle').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;showPageStatus(tr('Updating AutoFlow…'));try{await requestJson(`/api/automations/rules/${button.dataset.id}/toggle`,{method:'POST'},'Could not update AutoFlow');location.reload();}catch(error){showPageStatus(error.message,true);button.disabled=false;}}));
 document.querySelectorAll('.rule-delete').forEach(button=>button.addEventListener('click',async()=>{if(!confirm(tr('Delete this AutoFlow and its run history?')))return;button.disabled=true;showPageStatus(tr('Deleting AutoFlow…'));try{await requestJson(`/api/automations/rules/${button.dataset.id}`,{method:'DELETE'},'Could not delete AutoFlow');location.reload();}catch(error){showPageStatus(error.message,true);button.disabled=false;}}));

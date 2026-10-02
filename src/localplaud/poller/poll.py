@@ -102,8 +102,8 @@ def _fetch_note_asset(url: str, *, path: str, destination: Path) -> str:
 def _mirror_note_assets(note: dict, *, file_id: str, settings: Settings) -> str:
     markdown = str(note["markdown"])
     assets = note.get("assets")
-    if not isinstance(assets, dict) or not assets:
-        return markdown
+    if not isinstance(assets, dict):
+        assets = {}
     destination = (
         Path(settings.poller.download_dir) / _safe_id(file_id) / "note-assets"
     )
@@ -114,6 +114,10 @@ def _mirror_note_assets(note: dict, *, file_id: str, settings: Settings) -> str:
         path = match.group(2) or match.group(3)
         key = path if path in assets else unquote(path)
         url = assets.get(key)
+        # Some official notes embed an HTTPS image directly without a map.
+        # The same bounded SSRF-checked fetch below applies to either form.
+        if not url and urlsplit(path).scheme == "https":
+            url = path
         if not isinstance(url, str) or not url:
             return match.group(0)
         if key not in mirrored:
@@ -121,14 +125,14 @@ def _mirror_note_assets(note: dict, *, file_id: str, settings: Settings) -> str:
                 mirrored[key] = _fetch_note_asset(url, path=path, destination=destination)
             except Exception as exc:  # noqa: BLE001
                 log.warning(
-                    "note asset import failed for %s (%s): %s",
+                    "note asset import failed for %s: %s",
                     file_id,
-                    path,
                     type(exc).__name__,
                 )
                 mirrored[key] = None
         name = mirrored[key]
         if name is None:
+            note["unavailable_images"] = note.get("unavailable_images", 0) + 1
             return alt
         return f"![{alt}](/api/files/{file_id}/note-assets/{name})"
 
@@ -456,6 +460,21 @@ def reset_inflight(*, force: bool = False, previous_owner: str | None = None) ->
             PlaudFile.processing_lease_until.is_not(None),
             PlaudFile.processing_lease_until > now,
         )
+        # A legacy partial/done row can have an orphaned roll-up even without
+        # a token. Close that status too; preserve artifacts and retry budgets.
+        for run in session.scalars(
+            select(StageRun).where(
+                StageRun.status == StageStatus.running,
+                StageRun.file_id.not_in(active_claim_ids),
+            )
+        ):
+            reindex_retry = run.stage == StageName.index and bool(
+                (run.detail or {}).get("reindex_only")
+            )
+            run.status = StageStatus.pending if reindex_retry else StageStatus.failed
+            run.error = "Orphaned stage recovered; no active processing claim."
+            run.completed_at = None if reindex_retry else now
+            run.updated_at = now
         session.execute(
             update(StageAttempt)
             .where(
@@ -633,18 +652,57 @@ def release_daemon_owner(owner: str) -> bool:
     return released == 1
 
 
-def reset_download_errors() -> int:
-    """Give failed downloads another chance each cycle: ``error`` rows that
-    never got audio on disk go back to ``discovered``. Download failures are
-    dominated by transient causes (rate limits, expired presigned URLs,
-    network); pipeline errors keep their audio_path and are NOT retried here.
-    Returns the number of rows reset."""
+_DOWNLOAD_RETRY_MAX_DELAY = timedelta(hours=6)
+
+
+def _download_retry_due(row: PlaudFile, now: datetime) -> bool:
+    """Back off as a download keeps failing, without a separate counter.
+
+    The last failure time (``updated_at``) minus discovery time approximates how
+    long the download has been failing. Waiting a quarter of that keeps fresh
+    transient failures (rate limits, expired URLs) on the next cycle while a
+    permanently empty Plaud file is retried at most every six hours.
+    """
+    failed_at = row.updated_at
+    discovered_at = row.created_at
+    if failed_at is None or discovered_at is None:
+        return True
+    if failed_at.tzinfo is None:
+        failed_at = failed_at.replace(tzinfo=UTC)
+    if discovered_at.tzinfo is None:
+        discovered_at = discovered_at.replace(tzinfo=UTC)
+    delay = min(_DOWNLOAD_RETRY_MAX_DELAY, max(timedelta(0), (failed_at - discovered_at) / 4))
+    return now - failed_at >= delay
+
+
+def reset_download_errors(now: datetime | None = None) -> int:
+    """Give failed downloads another chance: ``error`` rows that never got
+    audio on disk go back to ``discovered`` once their backoff has elapsed.
+    Download failures are dominated by transient causes (rate limits, expired
+    presigned URLs, network); pipeline errors keep their audio_path and are NOT
+    retried here. Returns the number of rows reset."""
     from sqlalchemy import update
 
+    now = now or datetime.now(UTC)
     with session_scope() as session:
+        due = [
+            row.id
+            for row in session.scalars(
+                select(PlaudFile).where(
+                    PlaudFile.status == FileStatus.error, PlaudFile.audio_path.is_(None)
+                )
+            )
+            if _download_retry_due(row, now)
+        ]
+        if not due:
+            return 0
         reset = session.execute(
             update(PlaudFile)
-            .where(PlaudFile.status == FileStatus.error, PlaudFile.audio_path.is_(None))
+            .where(
+                PlaudFile.id.in_(due),
+                PlaudFile.status == FileStatus.error,
+                PlaudFile.audio_path.is_(None),
+            )
             .values(
                 status=FileStatus.discovered,
                 error=None,
@@ -797,6 +855,9 @@ def download_pending(client, settings: Settings) -> int:
         stmt = select(PlaudFile.id, PlaudFile.raw).where(PlaudFile.status == FileStatus.discovered)
         if not settings.poller.include_trash:
             stmt = stmt.where(PlaudFile.is_trash.is_(False))
+        stmt = stmt.order_by(
+            PlaudFile.start_time_ms.desc().nullslast(), PlaudFile.created_at.desc(), PlaudFile.id
+        )
         pending = [(fid, raw) for fid, raw in session.execute(stmt)]
     if not pending:
         return 0
@@ -915,9 +976,9 @@ def _unique_cloud_note_templates(notes: list[dict]) -> list[dict]:
 def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
     """Refresh Plaud transcript/summary for one metadata import.
 
-    Returns ``(transcript_present, summary_present)``. Existing cloud rows are
-    replaced only after a successful detail fetch, so a network failure never
-    destroys the last mirrored artifact.
+    Returns ``(transcript_present, summary_present)`` for the fetched response.
+    Notes retain their identity across refreshes. Empty or failed responses never
+    remove the last successful mirror; local artifacts are never replaced.
     """
     from ..db.models import Summary as SummaryRow
     from ..db.models import Transcript as TranscriptRow
@@ -926,36 +987,59 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
     notes = client.get_cloud_notes(file_id, detail)
     segments = client.get_cloud_transcript_segments(file_id, detail)
     settings = get_settings()
-    mirrored_notes = _unique_cloud_note_templates([
-        {**note, "markdown": _mirror_note_assets(note, file_id=file_id, settings=settings)}
-        for note in notes
-    ])
+    mirrored_notes = []
+    for note in notes:
+        markdown = _mirror_note_assets(note, file_id=file_id, settings=settings)
+        mirrored_notes.append({**note, "markdown": markdown})
+    mirrored_notes = _unique_cloud_note_templates(mirrored_notes)
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
         if row is None:
             return (False, False)
-        session.execute(
-            delete(SummaryRow).where(
-                SummaryRow.file_id == file_id, SummaryRow.source.in_(("cloud", "plaud"))
-            )
-        )
-        session.execute(
-            delete(TranscriptRow).where(
+        existing = list(session.scalars(select(SummaryRow).where(
+            SummaryRow.file_id == file_id,
+            SummaryRow.source.in_(("cloud", "plaud")),
+        )))
+        used_ids = set()
+        for note in mirrored_notes:
+            cloud_id = note.get("cloud_id")
+            summary = next((item for item in existing
+                            if item.id not in used_ids and cloud_id
+                            and (item.template_snapshot or {}).get("cloud_id") == cloud_id), None)
+            if summary is None:
+                summary = next((item for item in existing
+                                if item.id not in used_ids
+                                and (item.template_snapshot or {}).get("cloud_key", item.template) == note["key"]
+                                and not (item.template_snapshot or {}).get("cloud_id")), None)
+            if summary is None:
+                key = note["key"]
+                occupied = set(session.scalars(select(SummaryRow.template).where(
+                    SummaryRow.file_id == file_id)))
+                number = 1
+                while key in occupied:
+                    number += 1
+                    suffix = f"__{number}"
+                    key = note["key"][:64 - len(suffix)] + suffix
+                summary = SummaryRow(file_id=file_id, template=key, source="cloud")
+                session.add(summary)
+                session.flush()
+            used_ids.add(summary.id)
+            summary.title = note["title"]
+            summary.content_md = note["markdown"]
+            summary.template_snapshot = {
+                "source": "plaud",
+                "cloud_key": note["key"],
+                "unavailable_images": note.get("unavailable_images", 0),
+                "name": note.get("tab_name") or note["title"] or note["key"],
+                **({"cloud_id": cloud_id} if cloud_id else {}),
+            }
+        # A refresh is additive: an empty/partial cloud reply must not erase
+        # previously imported notes or break their stable workspace links.
+        if segments:
+            session.execute(delete(TranscriptRow).where(
                 TranscriptRow.file_id == file_id,
                 TranscriptRow.source.in_(("cloud", "plaud")),
-            )
-        )
-        for note in mirrored_notes:
-            session.add(
-                SummaryRow(
-                    file_id=file_id,
-                    template=note["key"],
-                    title=note["title"],
-                    content_md=note["markdown"],
-                    source="cloud",
-                )
-            )
-        if segments:
+            ))
             session.add(
                 TranscriptRow(
                     file_id=file_id,
@@ -966,8 +1050,9 @@ def refresh_cloud_artifacts_for(client, file_id: str) -> tuple[bool, bool]:
                     segments=segments,
                 )
             )
-        row.cloud_is_summary = bool(mirrored_notes)
-        row.cloud_is_trans = bool(segments)
+        row.cloud_is_summary = bool(mirrored_notes) or bool(existing)
+        row.cloud_is_trans = bool(segments) or row.cloud_is_trans
+        row.cloud_artifacts_synced_at = datetime.now(UTC)
         row.raw = {
             **(row.raw or {}),
             _ARTIFACT_CHECKED_KEY: row.filename,

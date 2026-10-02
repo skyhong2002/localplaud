@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.assets import with_assets
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -67,7 +69,7 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
         assert '<html lang="zh-Hant-TW" data-density="compact" data-theme="light">' in page.text
         assert 'name="theme" value="light"' in page.text
         assert 'option value="dark"' not in page.text
-        assert "Sky Lab · 自架服務" in page.text
+        assert '<span class="ws-name">Sky Lab</span>' in page.text and "自架工作區" in page.text
         assert 'id="workspace-preferences"' in page.text
         assert 'href="#workspace-preferences"' in page.text
         assert 'value="UTC"' in page.text
@@ -80,7 +82,7 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
         for text in (
             "帳號",
             "存取與安全性",
-            "資料與備份",
+            "同步與備份",
             "私人工作區備份",
             "此主機的建議設定",
             "連線",
@@ -240,7 +242,7 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         )
         assert updated.status_code == 200
         for path, text in (
-            ("/home", "歡迎回來"),
+            ("/home", "最近的檔案"),
             ("/templates", "結構化筆記"),
             ("/discover", "本機自動化"),
             ("/notifications", "目前沒有通知"),
@@ -256,33 +258,34 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
             assert text in page.text
 
         settings = client.get("/settings")
-        assert 'aria-label="設定區段"' in settings.text
+        settings_assets = with_assets(client, settings)
+        assert 'aria-label="設定區段"' in settings_assets
         assert 'aria-label="Settings sections"' not in settings.text
-        assert 'const tr=window.localplaudT' in settings.text
-        assert 'window.localplaudT = message => ({' in settings.text
-        assert "建立含資訊清單與 SHA-256 的一致性 SQLite 快照" in settings.text
-        assert "目前沒有工作區備份" in settings.text
-        assert "已授權的備份目的地" in settings.text
-        assert "尚未授權遠端備份目的地" in settings.text
-        assert "明確允許私人／區網目的地與 HTTP" in settings.text
-        assert "依實際證據推薦本機 ASR 設定" in settings.text
-        assert "密鑰只會以參照方式保存" in settings.text
-        assert "修正姓名與專業詞彙，不變更原始 ASR" in settings.text
-        assert "每個處理階段皆明確指定" in settings.text
-        assert "對外資料傳送須明確啟用" in settings.text
-        assert "SMTP 傳送須明確啟用" in settings.text
-        assert "診斷檔只包含彙總計數" in settings.text
-        assert "同步 Plaud 錄音與會議記錄" in settings.text
-        assert "localStatus.textContent=`${tr('Importing')}" in settings.text
-        assert "label.textContent=`${tr('Complete')}" in settings.text
-        assert "button.textContent=tr('Uploading…')" in settings.text
-        assert "out.textContent=tr('Authorizing…')" in settings.text
-        assert "confirm(tr('Revoke this backup destination? Upload history is preserved.'))" in settings.text
-        assert "out.textContent=tr('Creating a verified profile…')" in settings.text
-        assert "out.textContent=tr('Created. Reloading…')" in settings.text
-        assert "out.textContent=tr('Registered. Reloading…')" in settings.text
-        assert "out.textContent=tr('Authorized. Reloading…')" in settings.text
-        assert "out.textContent=tr(data.status||'error')" in settings.text
+        assert 'const tr=window.localplaudT' in settings_assets
+        assert 'window.localplaudT = message => ({' in settings_assets
+        assert "建立含資訊清單與 SHA-256 的一致性 SQLite 快照" in settings_assets
+        assert "目前沒有工作區備份" in settings_assets
+        assert "已授權的備份目的地" in settings_assets
+        assert "尚未授權遠端備份目的地" in settings_assets
+        assert "明確允許私人／區網目的地與 HTTP" in settings_assets
+        assert "依實際證據推薦本機 ASR 設定" in settings_assets
+        assert "密鑰只會以參照方式保存" in settings_assets
+        assert "修正姓名與專業詞彙，不變更原始 ASR" in settings_assets
+        assert "每個處理階段皆明確指定" in settings_assets
+        assert "對外資料傳送須明確啟用" in settings_assets
+        assert "SMTP 傳送須明確啟用" in settings_assets
+        assert "診斷檔只包含彙總計數" in settings_assets
+        assert "同步 Plaud 錄音與會議記錄" in settings_assets
+        assert "localStatus.textContent=`${tr('Importing')}" in settings_assets
+        assert "label.textContent=`${tr('Complete')}" in settings_assets
+        assert "button.textContent=tr('Uploading…')" in settings_assets
+        assert "out.textContent=tr('Authorizing…')" in settings_assets
+        assert "confirm(tr('Revoke this backup destination? Upload history is preserved.'))" in settings_assets
+        assert "out.textContent=tr('Creating a verified profile…')" in settings_assets
+        assert "out.textContent=tr('Created. Reloading…')" in settings_assets
+        assert "out.textContent=tr('Registered. Reloading…')" in settings_assets
+        assert "out.textContent=tr('Authorized. Reloading…')" in settings_assets
+        assert "out.textContent=tr(data.status||'error')" in settings_assets
 
         from localplaud.i18n import catalog
 
@@ -298,8 +301,9 @@ def test_traditional_chinese_catalog_covers_all_static_template_messages():
     from localplaud.i18n import catalog
 
     template_dir = Path(__file__).parents[1] / "src/localplaud/api/templates"
+    workspace_js = Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
     keys: set[str] = set()
-    for template in template_dir.glob("*.html"):
+    for template in [*template_dir.glob("*.html"), workspace_js]:
         source = template.read_text(encoding="utf-8")
         keys.update(re.findall(r"\b(?:t|tr)\('([^']+)'\)", source))
 
@@ -319,12 +323,15 @@ def test_dynamic_action_messages_use_translation_helper():
         "${position",
         "${matches.length}",
         "${stamp",
+        # User-owned speaker names joined by an arrow are not locale prose.
+        "${speakerLabel(source)} → ${speakerLabel(target)}",
         # Playback-speed display (e.g. "1.5x") — a language-neutral multiplier
         # suffix, not translatable prose. The app's own player uses "1×"/"2×"
         # unlocalized as well.
         "${speeds[speedIndex]}",
     )
-    for template in template_dir.glob("*.html"):
+    workspace_js = Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    for template in [*template_dir.glob("*.html"), workspace_js]:
         source = template.read_text(encoding="utf-8")
         for pattern in literal_patterns:
             for message in re.findall(pattern, source):

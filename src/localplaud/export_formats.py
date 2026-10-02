@@ -10,7 +10,7 @@ from xml.sax.saxutils import escape
 from .config import get_settings
 from .db.models import PlaudFile, StageName
 from .db.session import session_scope
-from .store.speakers import display_names
+from .store.speakers import speaker_labels
 
 _PDF_FONT_PATH = Path(__file__).parent / "assets" / "fonts" / "NotoSansTC.ttf"
 
@@ -82,7 +82,7 @@ def recording_data(file_id: str) -> dict:
             raw = file.local_transcript
         corrected = file.corrected_transcript_for_source(raw.source) if raw else None
         segments = list((corrected.segments if corrected else raw.segments) or []) if raw else []
-        names = display_names(session, file.id)
+        names = speaker_labels(session, file.id)
         stale = {
             run.stage for run in file.stage_runs if (run.detail or {}).get("stale")
         }

@@ -1,0 +1,47 @@
+{#- Shared recording-list macros (owner: foundation).
+
+  file_row(f, return_to_param='', selectable=true, show_folder=true)
+    One recording row for library tables, Home, Search results, folder previews.
+    `f` is a dict from app._file_summaries(). The whole row opens the recording;
+    the "…" button opens the shared row menu (#row-menu in base.html) whose
+    actions are wired in app.js (Open, Notes, Rename, Move to folder, Export).
+
+  Import WITH CONTEXT so t() resolves:
+    {% from "_library.html" import file_row with context %}
+-#}
+{% macro file_row(f, return_to_param='', selectable=true, show_folder=true) -%}
+{%- set state = recording_state(f) -%}
+{%- set href = '/file/' ~ f.id ~ ('?return_to=' ~ return_to_param if return_to_param else '') -%}
+<li class="file-row{% if f.needs_attention %} attn{% endif %}" data-file-id="{{ f.id }}">
+  {% if selectable %}<input class="row-check checkbox row-select" type="checkbox" value="{{ f.id }}" aria-label="{{ t('Select recording') }} {{ f.filename }}">{% endif %}
+  <div class="row-main">
+    <a class="row-title" href="{{ href }}" hx-get="{{ href }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true" title="{{ f.filename }}">{{ f.filename }}</a>
+    <span class="row-meta-mobile">{{ f.start_time_ms | dt_rel }}<span class="row-sep" aria-hidden="true"></span>{{ f.duration_ms | dur_short }}</span>
+    <span class="row-sub">{% if state %}<span class="state state-{{ state.kind }}">{{ t(state.label) }}</span>{% endif %}{% if show_folder and f.folder %}<span class="chip chip-folder" style="--chip-color:{{ f.folder.color or 'var(--c-text-2)' }}">{{ icon('folder', 'xs') }}{{ f.folder.name }}</span>{% endif %}{% if f.origin == 'local' %}<span class="row-origin">{{ t('Local import') }}</span>{% endif %}{% if f.audio_on_demand %}<span class="row-origin">{{ t('Audio on demand') }}</span>{% endif %}</span>
+  </div>
+  <span class="row-dur">{{ f.duration_ms | dur_long }}</span>
+  <span class="row-date">{{ f.start_time_ms | dt }}</span>
+  <span class="row-actions">
+    {%- if f.has_transcript and not f.is_trash %}<a class="icon-btn reveal" href="/file/{{ f.id }}?tab=notes{{ '&return_to=' ~ return_to_param if return_to_param else '' }}" aria-label="{{ t('Notes') }} · {{ f.filename }}" data-tooltip="{{ t('Notes') }}">{{ icon('wand', 'sm') }}</a>{% endif -%}
+    <button class="icon-btn row-more" type="button" data-menu="row-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="row-menu" aria-label="{{ t('More actions') }} · {{ f.filename }}" data-file-id="{{ f.id }}" data-title="{{ f.filename }}" data-href="{{ href }}" data-folder-id="{{ f.folder.id if f.folder else '' }}" data-exportable="{{ '1' if (f.has_transcript or f.has_summary) else '0' }}" data-trash="{{ '1' if f.is_trash else '0' }}">{{ icon('more') }}</button>
+  </span>
+</li>
+{%- endmacro %}
+
+{% macro sort_link(lib, liburl, col, label) -%}
+  {%- set on = lib.sort == col -%}
+  {%- set nxt = ('desc' if (on and lib.dir == 'asc') else ('asc' if on else ('asc' if col == 'name' else 'desc'))) -%}
+  <a class="sort-link{% if on %} on{% endif %}"{% if on %} aria-current="true"{% endif %} href="{{ liburl(sort=col, dir=nxt) }}">{{ label }}{% if on %}{{ icon('arrow-up' if lib.dir == 'asc' else 'arrow-down', 'xs') }}<span class="visually-hidden">, {{ t('sorted ascending') if lib.dir == 'asc' else t('sorted descending') }}</span>{% endif %}</a>
+{%- endmacro %}
+
+{% macro file_table_head(lib, liburl, selectable=true) -%}
+{#- Sortable header; `liburl` is the page's URL-builder macro. -#}
+
+<div class="file-table-head">
+  {% if selectable %}<input class="checkbox head-check" id="select-all" type="checkbox" aria-label="{{ t('Select all visible recordings') }}">{% endif %}
+  <span>{{ sort_link(lib, liburl, 'name', t('Name')) }}</span>
+  <span>{{ sort_link(lib, liburl, 'duration', t('Duration')) }}</span>
+  <span>{{ sort_link(lib, liburl, 'recorded', t('Date created')) }}</span>
+  <span class="visually-hidden">{{ t('Actions') }}</span>
+</div>
+{%- endmacro %}

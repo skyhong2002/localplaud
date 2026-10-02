@@ -22,7 +22,6 @@ KINDS = {"fact", "proposal", "decision", "action", "question"}
 STATUSES = {"reported", "proposed", "planned", "conditional", "agreed", "completed", "unresolved"}
 REF = re.compile(r"\[\[(f\d+)\]\]")
 ANY_REF = re.compile(r"\[\[([^\]]+)\]\]")
-FILE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 
 SOURCE_SCHEMA = {
     "type": "object",
@@ -151,6 +150,14 @@ def _norm(value):
     return " ".join(value.split())
 
 
+def _quote_matches(quote, source):
+    """Whether ``quote`` is contiguous source text, ignoring whitespace and script."""
+    from ..zh import fold_script
+
+    quote, source = _norm(quote), _norm(source)
+    return quote in source or fold_script(quote) in fold_script(source)
+
+
 def _fail(phase, detail):
     raise LLMOutputInvalid(f"證據筆記的{phase}驗證失敗：{detail}。請檢查逐字稿與模型輸出後重試。")
 
@@ -208,6 +215,13 @@ _EXTRACT_REPAIR_TASK = (
 )
 
 _AUDIT_TASK = "逐項完整掃描原始 target、facts 與 skipped；context 不是本批目標。一次列出所有實質缺漏，勿每輪只列少數。skipped 若包含有用的理由、請求或數值，應報出。只報會改變理解或漏掉獨立實質資訊的問題；不要為口頭附和、填充語或同義改寫要求修補。找遺漏、否定/條件翻轉、事件數字錯配、虛構負責人/期限、示範與真實決定混淆。回 issues 與 warnings。\n"
+
+_REPAIR_REVIEW_TASK = (
+    "這是同一批來源的修補覆核。先逐一確認 previous_issues 是否已解決，"
+    "再核對修補有無引入錯誤或遺失原有資訊。維持初次覆核的實質資訊標準，"
+    "不要每輪提高詳盡程度或把旁枝措辭變成新的阻擋條件。"
+    "仍須報告任何有來源支持的實質錯誤或重要缺漏；不得僅因已重試就放行。\n"
+)
 
 _DRAFT_TASK = "撰寫各 heading 對應的筆記段落；本批所有事實必須出現並有引用，不重複解釋同一資訊。\n"
 
@@ -292,6 +306,7 @@ class _Calls:
                 "latency_ms": 0,
             },
         )
+        system += "\n引用說話者或歸屬行動時保留來源完整 Speaker N 標籤，不翻譯、不重新編號、不推測人名或職稱。"
         metadata = {k: self.context[k] for k in ("recorded_at", "timezone") if k in self.context}
         if metadata:
             system += "\n錄音時間背景（相對日期仍保留原話，不推測期限）：" + _json(metadata)
@@ -411,7 +426,7 @@ def _facts_validator(scope):
         if not isinstance(data, dict) or not isinstance(data.get("facts"), list):
             _fail("擷取", "缺少 facts 陣列")
         target_ids = {p["id"] for p in scope["target"]}
-        for fact in data["facts"]:
+        for fact_index, fact in enumerate(data["facts"]):
             if not isinstance(fact, dict) or set(fact) != {
                 "topic",
                 "text",
@@ -446,9 +461,31 @@ def _facts_validator(scope):
                     or ref["id"] not in allowed
                     or not isinstance(ref["quote"], str)
                     or not ref["quote"].strip()
-                    or _norm(ref["quote"]) not in _norm(allowed[ref["id"]]["text"])
+                    or not _quote_matches(ref["quote"], allowed[ref["id"]]["text"])
                 ):
-                    _fail("擷取", "來源 ID 或逐字引文不符")
+                    # A generic error made retries regenerate blindly. Identify
+                    # the rejected reference so the next call can repair it
+                    # against the exact source already present in its prompt.
+                    reference = _json(ref)[:240]
+                    try:
+                        _fail(
+                            "擷取",
+                            f"第 {fact_index + 1} 項事實的來源 ID 或逐字引文不符：{reference}。"
+                            "請從該 ID 的 text 複製連續原文；不可改字、合併不相鄰句子或省略中間文字",
+                        )
+                    except LLMOutputInvalid as exc:
+                        skipped = data.get("skipped")
+                        if isinstance(skipped, list) and all(
+                            isinstance(item, dict)
+                            and set(item) == {"id", "reason"}
+                            and isinstance(item["id"], str)
+                            and isinstance(item["reason"], str)
+                            for item in skipped
+                        ):
+                            # Keep the rejected draft only in memory for a bounded
+                            # patch. It is never cached or published as accepted.
+                            exc.rejected_extraction = data
+                        raise
             if not any(ref["id"] in target_ids for ref in fact["sources"]):
                 _fail("擷取", "事實缺少 target 來源")
         skipped = data.get("skipped")
@@ -632,13 +669,6 @@ def _batches(items, limit):
     return groups
 
 
-def _clock(seconds):
-    seconds = max(0, int(seconds or 0))
-    h, rem = divmod(seconds, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
-
-
 def generate_evidence_notes(
     transcript,
     settings,
@@ -649,7 +679,7 @@ def generate_evidence_notes(
     checkpoint_dir: Path | None = None,
     progress: Callable | None = None,
 ) -> dict:
-    """Generate a checked evidence ledger and source-linked Markdown note."""
+    """Generate readable notes with a separately retained evidence ledger."""
     context = context or {}
     pipeline = settings.pipeline
     requested = int(getattr(pipeline, "note_evidence_chunk_chars", 120000) or 120000)
@@ -674,6 +704,7 @@ def generate_evidence_notes(
             "strategy": "chunk-extract-audit-plan-draft-verify",
             "chunk_chars": budget,
             "repair_strategy": "targeted-fact-patches",
+            "repair_review": "prior-issues-and-regressions/v1",
         },
     }
     evidence["sources"] = [
@@ -783,12 +814,17 @@ def generate_evidence_notes(
                 )
             except LLMOutputInvalid as exc:
                 issues = list(dict.fromkeys([*issues, str(exc)]))
+                rejected = getattr(exc, "rejected_extraction", None)
+                if rejected is not None:
+                    previous = rejected
                 if attempt == repairs:
                     raise
                 continue
             audit_prompt = review_policy + (
                 _AUDIT_TASK + _json({"source": scope, "extraction": extracted})
             )
+            if issues and previous is not None:
+                audit_prompt += "\n" + _REPAIR_REVIEW_TASK + _json({"previous_issues": issues})
             audit = calls.call(
                 "audit",
                 audit_prompt,
@@ -894,7 +930,6 @@ def generate_evidence_notes(
         k: list(dict.fromkeys(v for plan in plans for v in plan["tags"][k]))
         for k in ("topics", "people", "orgs")
     }
-    part_map = {p["id"]: p for p in parts}
     fact_map = {f["id"]: f for f in ledger}
     sections = []
     for plan in plans:
@@ -982,6 +1017,8 @@ def generate_evidence_notes(
             review_prompt = review_policy + (
                 _VERIFY_TASK + _json({"source_and_facts": batch, "draft": draft["content_md"]})
             )
+            if issues and previous_draft is not None:
+                review_prompt += "\n" + _REPAIR_REVIEW_TASK + _json({"previous_issues": issues})
             review = calls.call(
                 "verify",
                 review_prompt,
@@ -1006,24 +1043,10 @@ def generate_evidence_notes(
             for warning in review["warnings"]
         )
         rendered.append(draft["content_md"])
-    file_id = context.get("file_id")
-    if file_id is not None and (not isinstance(file_id, str) or not FILE_ID.fullmatch(file_id)):
-        file_id = None
-
-    def link(match):
-        fact = fact_map[match.group(1)]
-        source = part_map[fact["sources"][0]["id"]]
-        stamp = _clock(source["start"])
-        return f"[{stamp}](/file/{file_id}?t={source['start']})" if file_id else f"[{stamp}]"
-
     def render_references(md):
-        # Several facts can share one source passage. Keep their ledger entries
-        # intact, but show each playable timestamp only once in a citation run.
-        def render_run(match):
-            links = [link(ref) for ref in REF.finditer(match.group(0))]
-            return " ".join(dict.fromkeys(links))
-
-        return re.sub(r"\[\[f\d+\]\](?:[ \t]*\[\[f\d+\]\])*", render_run, md)
+        # References remain mandatory during validation and in the evidence
+        # ledger, but playback markers are not part of readable note prose.
+        return re.sub(r"[ \t]*\[\[f\d+\]\](?:[ \t]*\[\[f\d+\]\])*", "", md)
 
     body = "\n\n".join(render_references(md) for md in rendered)
     return finish(title, body, tags)

@@ -174,11 +174,25 @@ def _item(row: NoteTemplate) -> dict:
                 "Custom structured notes",
             ),
         ),
-        "author": row.author or catalog.get("author", "Local workspace"),
+        "author": _author_label(row, catalog),
         "popularity": row.popularity if row.popularity is not None else catalog.get("popularity"),
         "provenance": row.provenance or ("first-party" if row.is_builtin else "personal"),
         "execution_profile_id": row.execution_profile_id,
     }
+
+
+def _author_label(row: NoteTemplate, catalog: dict) -> str:
+    """Attribute templates truthfully without branding localplaud as Plaud.
+
+    Bundled templates whose prompts are read-only Plaud Web snapshots keep
+    that provenance ("Adapted from Plaud"); other bundled templates are
+    localplaud's own, and personal templates belong to the local workspace.
+    """
+    if row.author:
+        return row.author
+    if row.provenance == "plaud-web-readonly" or catalog.get("author") == "Plaud":
+        return "Adapted from Plaud"
+    return "localplaud" if row.is_builtin else "Local workspace"
 
 
 def _validate_profile(session, profile_id: int | None) -> None:

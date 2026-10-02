@@ -50,6 +50,7 @@ from .pipeline import (
     _claim_processing,
     _cost_guard,
     _profile_stage_matches,
+    _recently_transcribed,
     _rehydrate_revision,
     _rehydrate_transcript,
     _release_processing,
@@ -587,7 +588,7 @@ def _reindex_file_claimed(
 
 
 def process_pending_reindexes(
-    settings: Settings | None = None, *, limit: int = 20
+    settings: Settings | None = None, *, limit: int = 20, recent_only: bool = False
 ) -> int:
     """Run profile-change transcript reindexes from the durable stage queue."""
     settings = settings or get_settings()
@@ -607,6 +608,8 @@ def process_pending_reindexes(
                 continue
             recording = session.get(PlaudFile, run.file_id)
             if recording is None or processing_claim_active(recording):
+                continue
+            if recent_only and not _recently_transcribed(recording, settings, datetime.now(UTC)):
                 continue
             queued.append(run.file_id)
             if len(queued) >= max(1, min(limit, 100)):

@@ -1,0 +1,76 @@
+{# Library Ask chat thread (ask.html). Rendered for GET /ask?thread= and POST /ask ui=chat. #}
+<div class="sf-chat" data-sf-chat data-thread-id="{{ thread.thread_id or '' }}" data-thread-title="{{ thread.title or '' }}">
+  {% set scope = thread.retrieval_scope or {} %}
+  {% if scope.folder_id or scope.tag_id or scope.origin or scope.speaker_name or scope.file_ids or scope.date_from or scope.date_to %}
+  <div class="sf-chat-scope" data-sf-chat-scope>
+    {{ icon('filter') }}
+    {% if scope.folder_id %}<span class="sf-chip">{{ t('Folder') }} · {% for item in organization.folders if item.id == scope.folder_id %}{{ item.name }}{% else %}#{{ scope.folder_id }}{% endfor %}</span>{% endif %}
+    {% if scope.tag_id %}<span class="sf-chip">{{ t('Tag') }} · {% for item in organization.tags if item.id == scope.tag_id %}{{ item.name }}{% else %}#{{ scope.tag_id }}{% endfor %}</span>{% endif %}
+    {% if scope.origin %}<span class="sf-chip">{{ t('Source') }} · {{ scope.origin }}</span>{% endif %}
+    {% if scope.speaker_name %}<span class="sf-chip">{{ t('Named speaker') }} · {{ scope.speaker_name }}</span>{% endif %}
+    {% if scope.date_from or scope.date_to %}<span class="sf-chip">{{ scope.date_from or '…' }} – {{ scope.date_to or '…' }}</span>{% endif %}
+    {% if scope.file_ids %}<span class="sf-chip">{{ scope.file_ids|length }} {{ t('recordings') }}</span>{% endif %}
+    <span class="sf-muted">{{ t('Follow-ups keep this scope.') }}</span>
+  </div>
+  {% endif %}
+  {% for message in thread.messages %}
+    {% if message.role == 'user' %}
+    <div class="sf-msg-user">{{ message.content }}{% if message.skill_key %}<span class="sf-msg-skill">{{ t('quick action') }} · v{{ message.skill_snapshot.version }}</span>{% endif %}</div>
+    {% elif message.unavailable %}
+    <article class="sf-msg-ai sf-msg-error" data-sf-unavailable>
+      <div class="sf-error-card" role="alert">
+        {{ icon('alert-circle') }}
+        <div><strong>{{ t('Ask is unavailable right now') }}</strong><p>{{ t(message.content) }}</p>
+        <div class="sf-error-actions"><button type="button" class="btn sec" data-sf-retry="{{ thread.messages[loop.index0 - 1].content if loop.index0 > 0 else '' }}">{{ t('Retry') }}</button><a class="btn sec" href="/settings#connections">{{ t('Open provider settings') }}</a></div></div>
+      </div>
+    </article>
+    {% else %}
+    {% set summary = message.sources | source_summary %}
+    <article class="sf-msg-ai" data-message-id="{{ message.id or '' }}">
+      {% if message.sources %}
+      <button type="button" class="sf-trail" data-sf-open-sources aria-label="{{ t('Show sources') }}">
+        {{ icon('check') }}
+        <span>{{ t('Searched the library') }} · {{ summary.recordings }} {{ t('recording' if summary.recordings == 1 else 'recordings') }} · {{ summary.passages }} {{ t('passage' if summary.passages == 1 else 'passages') }}</span>
+        {{ icon('chevron-right', cls='sf-chev') }}
+      </button>
+      {% endif %}
+      <div class="md sf-answer" data-sf-answer>{{ (message.content | markdown) | ask_cite(message.sources|length) }}</div>
+      {% if message.sources and '[1]' not in message.content %}
+      <div class="sf-cite-row" aria-label="{{ t('Sources') }}">{% for source in message.sources %}<button type="button" class="sf-cite" data-cite="{{ loop.index }}" aria-label="{{ t('Source') }} {{ loop.index }}">{{ loop.index }}</button>{% endfor %}</div>
+      {% endif %}
+      <template data-sf-source-list>
+        {% for source in message.sources %}
+        <div class="sf-source" data-source-index="{{ loop.index }}">
+          <span class="sf-source-n">{{ loop.index }}</span>
+          <div class="sf-source-main">
+            <div class="sf-source-title">{{ source.artifact_title or source.filename }}</div>
+            <div class="sf-source-meta">{% if source.target in ('generated_note', 'saved_note') %}{{ t(source.label or 'Note') }}{% else %}{% if source.start is not none %}{{ source.start | mmss }}{% endif %}{% if source.speaker %} · {{ source.speaker }}{% endif %}{% endif %}</div>
+            <p class="sf-source-text">{{ source.text | truncate(320) }}</p>
+            {% if source.target in ('generated_note', 'saved_note') %}
+            <a class="sf-source-link" href="{{ source.url or ('/file/' ~ source.file_id) }}">{{ icon('note') }}{{ t('Open note') }}</a>
+            {% else %}
+            <a class="sf-source-link" href="{{ source.url or ('/file/' ~ source.file_id ~ ('?t=' ~ source.start if source.start is not none else '')) }}">{{ icon('play') }}{% if source.start is not none %}{{ t('Play from') }} {{ source.start | mmss }}{% else %}{{ t('Open recording') }}{% endif %}</a>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </template>
+      <div class="sf-answer-actions">
+        <button type="button" class="sf-icon-btn" data-sf-copy aria-label="{{ t('Copy answer') }}" title="{{ t('Copy answer') }}">{{ icon('copy') }}</button>
+        {% if message.sources %}<button type="button" class="sf-icon-btn" data-sf-open-sources aria-label="{{ t('Show sources') }}" title="{{ t('Show sources') }}">{{ icon('file-text') }}</button>{% endif %}
+        {% if message.provider or message.model %}<details class="sf-details"><summary class="sf-icon-btn" aria-label="{{ t('Response details') }}" title="{{ t('Response details') }}">{{ icon('more') }}</summary><div class="sf-details-pop">{{ message.provider or t('unknown provider') }}{% if message.model %} · {{ message.model }}{% endif %}{% if message.fallback %} · {{ t('fallback') }} {{ message.fallback.index }}{% endif %}{% if message.estimated_cost_usd %} · {{ t('estimated') }} ${{ '%.4f' | format(message.estimated_cost_usd) }}{% endif %}</div></details>{% endif %}
+        <span class="sf-spacer"></span>
+        {% if message.id %}<button type="button" class="sf-save-note" data-sf-save-note="{{ message.id }}">{{ icon('bookmark-plus') }}<span data-sf-save-label>{{ t('Save as note') }}</span></button>{% endif %}
+      </div>
+      <div class="sf-save-status" data-sf-save-status role="status" aria-live="polite"></div>
+    </article>
+    {% endif %}
+  {% endfor %}
+  {% set followups = ask_followups(thread, t) %}
+  {% if followups %}
+  <div class="sf-keep" data-sf-keep>
+    <div class="sf-keep-label">{{ t('Keep asking') }}</div>
+    {% for prompt in followups %}<button type="button" class="sf-keep-item" data-sf-ask="{{ prompt }}">{{ prompt }}</button>{% endfor %}
+  </div>
+  {% endif %}
+</div>

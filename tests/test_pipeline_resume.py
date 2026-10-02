@@ -1448,3 +1448,78 @@ def test_notes_retry_automatically_upgrades_raw_correction_and_preserves_on_revi
         assert all(c.input_transcript_revision == 2 for c in r.chunks)
         assert next(x for x in r.stage_runs if x.stage == StageName.correct).attempts == 2
         assert r.status.value == "done"
+
+
+def test_execution_only_connection_settings_do_not_invalidate_completed_stages():
+    from localplaud.worker.pipeline import _profile_stage_matches
+
+    def snapshot(**configuration):
+        base = {"executable": "codex", "polish_chunk_chars": 8000, "summary_chunk_chars": 240000}
+        return {
+            "stages": {
+                "correct": {
+                    "connection": "correct:codex-local",
+                    "model": "gpt-6.1-sol",
+                    "configuration": base | {"timeout_seconds": 900} | configuration,
+                }
+            }
+        }
+
+    old = snapshot()
+    assert _profile_stage_matches(old, snapshot(timeout_seconds=1800), "correct")
+    assert _profile_stage_matches(old, snapshot(summary_chunk_chars=6000), "correct")
+    assert _profile_stage_matches(old, snapshot(quota_reserve_percent=10), "correct")
+    assert not _profile_stage_matches(old, snapshot(polish_chunk_chars=4000), "correct")
+    assert not _profile_stage_matches(old, snapshot(reasoning_effort="low"), "correct")
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_timestamp_validation_preserves_forced_evidence_only_for_reused_asr(
+    monkeypatch, tmp_path, force
+):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.asr.base import Segment, Transcript, Word
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageRun, StageStatus
+    from localplaud.db.models import Transcript as StoredTranscript
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker import pipeline
+
+    settings = get_settings()
+    settings.pipeline.summarize = settings.pipeline.mind_map = settings.pipeline.index = False
+    settings.pipeline.diarize = False
+    init_db()
+    audio = tmp_path / "original.wav"
+    audio.write_bytes(b"retained raw audio")
+    segments = [{"text": "hello world", "start": 0, "end": 1,
+                 "words": [{"text": "hello", "start": 0, "end": .5},
+                           {"text": "world", "start": .5, "end": 1}]}]
+    with session_scope() as session:
+        session.add(PlaudFile(id="aligned", status=FileStatus.done, audio_path=str(audio)))
+        session.add(StoredTranscript(file_id="aligned", source="local", provider="mlx-whisper",
+                                    model="turbo", text="hello world", segments=segments))
+        session.add(StageRun(file_id="aligned", stage=StageName.align, status=StageStatus.completed,
+                             provider="whisperx", model="wav2vec2-auto",
+                             resolved_profile_snapshot={"stages": {"align": {"provider_type": "whisperx"}}},
+                             detail={"forced_alignment": True, "word_count": 2,
+                                     "implementation_version": "verified-version"}))
+    monkeypatch.setattr(pipeline, "_ensure_generated_title", lambda *a, **kw: None)
+    calls = []
+    def asr(*a, **kw):
+        calls.append(1)
+        return Transcript(provider="mlx-whisper", model="turbo", segments=[
+            Segment(text="hello world", start=0, end=1,
+                    words=[Word(text="hello", start=0, end=.5), Word(text="world", start=.5, end=1)])
+        ])
+    monkeypatch.setattr(pipeline.transcribe, "run_asr", asr)
+    pipeline.process_file("aligned", settings, force=force)
+    with session_scope() as session:
+        row = session.get(PlaudFile, "aligned")
+        run = next(r for r in row.stage_runs if r.stage == StageName.align)
+        assert run.detail["forced_alignment"] is (not force)
+        if not force:
+            assert run.provider == "whisperx"
+            assert run.detail["implementation_version"] == "verified-version"
+            assert run.detail["timing_validation"]["forced_alignment"] is False
+            assert row.local_transcript.segments == segments
+        assert calls == ([1] if force else [])

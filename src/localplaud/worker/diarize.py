@@ -369,6 +369,11 @@ def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig) -> Transcript:
         kwargs = {}
         if cfg.num_speakers:
             kwargs["num_speakers"] = cfg.num_speakers
+        else:
+            if cfg.min_speakers:
+                kwargs["min_speakers"] = cfg.min_speakers
+            if cfg.max_speakers:
+                kwargs["max_speakers"] = cfg.max_speakers
         log.info("Running pyannote diarization on %s", wav_path)
         output = pipeline(str(wav_path), **kwargs)
         annotation = getattr(output, "speaker_diarization", output)

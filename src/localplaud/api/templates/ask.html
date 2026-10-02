@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ t('Ask localplaud') }} — localplaud{% endblock %}
+{% block body %}
+<div class="sf-ask" data-surface="ask" data-thread-id="{{ thread.thread_id if thread else '' }}" data-locked="{{ 'true' if thread else 'false' }}">
+  <aside class="sf-ask-rail" id="sf-ask-rail" aria-label="{{ t('Conversations') }}" data-sf-drawer>
+    <div class="sf-rail-head">
+      <strong>{{ t('Conversations') }}</strong>
+      <button class="sf-icon-btn sf-only-mobile" type="button" data-sf-drawer-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button>
+    </div>
+    <a class="sf-new-chat" href="/ask">{{ icon('plus') }}{{ t('New conversation') }}</a>
+    <label class="sf-rail-search"><span class="visually-hidden">{{ t('Search conversations…') }}</span>{{ icon('search') }}<input type="search" data-sf-thread-search placeholder="{{ t('Search conversations…') }}" autocomplete="off"></label>
+    <nav class="sf-thread-list" data-sf-thread-list aria-label="{{ t('Ask history') }}">
+      {% for item in history.threads %}
+      <div class="sf-thread-item{% if thread and thread.thread_id == item.thread_id %} on{% endif %}" data-thread-id="{{ item.thread_id }}">
+        <a href="/ask?thread={{ item.thread_id }}" {% if thread and thread.thread_id == item.thread_id %}aria-current="page"{% endif %}><span class="sf-thread-title">{{ item.title }}</span><span class="sf-thread-meta">{{ item.question_count }} {{ t('question' if item.question_count == 1 else 'questions') }}{% if item.saved_note_count %} · {{ item.saved_note_count }} {{ t('saved note' if item.saved_note_count == 1 else 'saved notes') }}{% endif %}</span></a>
+        <button class="sf-icon-btn sf-thread-more" type="button" data-sf-thread-menu aria-haspopup="menu" aria-label="{{ t('Conversation actions') }}">{{ icon('more') }}</button>
+      </div>
+      {% else %}
+      <p class="sf-rail-empty">{{ t('No conversations yet.') }}</p>
+      {% endfor %}
+    </nav>
+  </aside>
+  <button class="sf-drawer-scrim" type="button" data-sf-drawer-close aria-label="{{ t('Close') }}" hidden></button>
+
+  <section class="sf-ask-main" aria-labelledby="sf-ask-title">
+    <header class="sf-ask-top">
+      <button class="sf-icon-btn sf-only-mobile" type="button" data-sf-drawer-open aria-controls="sf-ask-rail" aria-expanded="false" aria-label="{{ t('Ask history') }}">{{ icon('history') }}</button>
+      <h1 id="sf-ask-title" class="sf-ask-title">{{ t('Ask localplaud') }}</h1>
+      <button class="sf-scope-chip" type="button" data-sf-scope-open aria-haspopup="dialog" {% if thread %}aria-describedby="sf-scope-locked"{% endif %}>
+        {{ icon('filter') }}
+        <span data-sf-scope-label>{% if thread and thread.retrieval_scope and (thread.retrieval_scope.folder_id or thread.retrieval_scope.tag_id or thread.retrieval_scope.origin or thread.retrieval_scope.speaker_name or thread.retrieval_scope.file_ids or thread.retrieval_scope.date_from or thread.retrieval_scope.date_to) %}{{ t('Custom scope') }}{% else %}{{ t('All files') }}{% endif %}</span>
+        {{ icon('chevron-down', cls='sf-chev') }}
+      </button>
+      {% if thread %}<span id="sf-scope-locked" class="visually-hidden">{{ t('Follow-ups keep this scope.') }}</span>{% endif %}
+      <a class="sf-icon-btn" href="/ask" aria-label="{{ t('New conversation') }}" title="{{ t('New conversation') }}">{{ icon('pencil') }}</a>
+    </header>
+
+    <div class="sf-ask-banner" data-sf-readiness role="status" aria-live="polite" hidden></div>
+
+    <div class="sf-ask-scroll" data-sf-scroll>
+      <div class="sf-ask-col">
+        {% if missing_thread %}<div class="sf-notice sf-notice-warn" role="alert">{{ t('That conversation no longer exists. Start a new one below.') }}</div>{% endif %}
+        <div id="sf-thread" data-sf-thread>
+          {% if thread %}{% include '_ask_chat.html' %}{% else %}
+          <div class="sf-ask-empty" data-sf-empty>
+            <h2 class="sf-large-title sf-ask-hero">{{ t('What’s on your mind?') }}</h2>
+            <p class="sf-ask-lede">{{ t('Ask about your recordings, notes, or any topic in your library. Every answer cites the moments it used.') }}</p>
+            <p class="sf-ask-coverage">{{ index_stats.indexed_recordings }} / {{ index_stats.total_recordings }} {{ t('recordings indexed for Ask') }}</p>
+            {% if not index_stats.total_recordings %}
+            <div class="sf-ask-firstrun"><p class="sf-muted">{{ t('Your library is empty. Import audio or sync from Plaud, and Ask can answer once recordings are processed.') }}</p><button class="btn" type="button" data-open-import="device">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button></div>
+            {% elif not index_stats.indexed_recordings %}
+            <div class="sf-notice sf-notice-warn" role="status"><p>{{ t('No recordings are indexed yet. Ask can answer once processing has built the search index.') }}</p><a href="/status">{{ t('Check processing and index status') }}</a></div>
+            {% else %}
+            <div class="sf-suggest" role="list" aria-label="{{ t('Suggested questions') }}">
+              {% for chip in ["What decisions were made recently?", "Show action items across recordings", "What themes keep recurring?"] %}
+              <button type="button" class="sf-suggest-item" role="listitem" data-sf-ask="{{ t(chip) }}">{{ t(chip) }}</button>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <button class="sf-scroll-bottom" type="button" data-sf-scroll-bottom aria-label="{{ t('Scroll to latest') }}" hidden>{{ icon('chevron-down') }}</button>
+
+    <div class="sf-composer-wrap">
+      <div class="sf-quick" role="group" aria-label="{{ t('Quick actions') }}">
+        {% for skill in ask_skills %}<button type="button" class="sf-quick-chip sf-quick-{{ loop.index0 % 4 }}" data-sf-skill="{{ skill.key }}" data-sf-skill-name="{{ t(skill.name) }}" title="{{ t(skill.description) }}">{{ t(skill.name) }}</button>{% endfor %}
+        <span class="sf-quick-note">{{ t('creates an Ask thread; recordings and notes stay unchanged') }}</span>
+      </div>
+      <form class="sf-composer" id="sf-ask-form" data-sf-ask-form autocomplete="off">
+        <input type="hidden" name="ui" value="chat">
+        <input type="hidden" name="thread_id" value="{{ thread.thread_id if thread else '' }}" data-sf-thread-field>
+        <label class="visually-hidden" for="sf-ask-input">{{ t('Ask anything about your recordings…') }}</label>
+        <textarea id="sf-ask-input" name="q" rows="1" maxlength="2000" enterkeyhint="send" placeholder="{{ t('Ask a follow-up…') if thread else t('Ask anything about your recordings…') }}" required>{{ prefill }}</textarea>
+        <button class="sf-send" type="submit" aria-label="{{ t('Ask') }}">{{ icon('arrow-up') }}</button>
+      </form>
+      <div class="sf-composer-status" data-sf-status role="status" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <aside class="sf-sources" data-sf-sources role="dialog" aria-modal="false" aria-labelledby="sf-sources-title" hidden>
+    <div class="sf-sheet-grab" aria-hidden="true"></div>
+    <div class="sf-sources-head"><h2 id="sf-sources-title">{{ t('Sources') }}</h2><button class="sf-icon-btn" type="button" data-sf-sources-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+    <div class="sf-sources-body" data-sf-sources-body></div>
+  </aside>
+  <button class="sf-sheet-scrim" type="button" data-sf-sources-close aria-label="{{ t('Close') }}" hidden></button>
+
+  <dialog class="sf-dialog sf-scope-dialog" data-sf-scope-dialog aria-labelledby="sf-scope-title">
+    <div class="sf-sheet-grab" aria-hidden="true"></div>
+    <div class="sf-dialog-head"><h2 id="sf-scope-title">{{ t('Scope') }}</h2><button class="sf-icon-btn" type="button" data-sf-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+    {% if thread %}
+    <div class="sf-dialog-body">
+      <p class="sf-muted">{{ t('Follow-ups keep this scope.') }} {{ t('Start a new conversation to ask with a different scope.') }}</p>
+      {% set scope = thread.retrieval_scope or {} %}
+      <ul class="sf-scope-summary">
+        {% if scope.folder_id %}<li>{{ t('Folder') }} · {% for item in organization.folders if item.id == scope.folder_id %}{{ item.name }}{% else %}#{{ scope.folder_id }}{% endfor %}</li>{% endif %}
+        {% if scope.tag_id %}<li>{{ t('Tag') }} · {% for item in organization.tags if item.id == scope.tag_id %}{{ item.name }}{% else %}#{{ scope.tag_id }}{% endfor %}</li>{% endif %}
+        {% if scope.origin %}<li>{{ t('Source') }} · {{ scope.origin }}</li>{% endif %}
+        {% if scope.speaker_name %}<li>{{ t('Named speaker') }} · {{ scope.speaker_name }}</li>{% endif %}
+        {% if scope.date_from or scope.date_to %}<li>{{ t('Recorded date') }} · {{ scope.date_from or '…' }} – {{ scope.date_to or '…' }}{% if scope.date_timezone %} ({{ scope.date_timezone }}){% endif %}</li>{% endif %}
+        {% if scope.file_ids %}<li>{{ scope.file_ids|length }} {{ t('recordings') }}</li>{% endif %}
+        {% if not (scope.folder_id or scope.tag_id or scope.origin or scope.speaker_name or scope.date_from or scope.date_to or scope.file_ids) %}<li>{{ t('Entire library') }}</li>{% endif %}
+      </ul>
+      <div class="sf-dialog-actions"><a class="btn" href="/ask">{{ t('New conversation') }}</a></div>
+    </div>
+    {% else %}
+    <fieldset class="sf-dialog-body sf-scope-form" data-sf-scope-form>
+      <legend class="visually-hidden">{{ t('Scope') }}</legend>
+      <p class="sf-notice" data-sf-scope-locked-note hidden>{{ t('Follow-ups keep this scope.') }} {{ t('Start a new conversation to ask with a different scope.') }} <a href="/ask">{{ t('New conversation') }}</a></p>
+      <div class="sf-seg" role="radiogroup" aria-label="{{ t('Scope') }}">
+        {% for value, label in [('all', 'All files'), ('folder', 'Folder'), ('files', 'Selected files'), ('dates', 'Date range')] %}
+        <label class="sf-seg-item"><input type="radio" name="sf_scope_kind" value="{{ value }}" {% if loop.first %}checked{% endif %}><span>{{ t(label) }}</span></label>
+        {% endfor %}
+      </div>
+      <div class="sf-scope-pane" data-sf-scope-pane="all"><p class="sf-muted">{{ t('Ask across every indexed recording and note. Trash is never included.') }}</p></div>
+      <div class="sf-scope-pane" data-sf-scope-pane="folder" hidden>
+        <label class="sf-field">{{ t('Folder') }}<select name="ask_folder_id" form="sf-ask-form" disabled><option value="">{{ t('Any folder') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }} · {{ folder.count }}</option>{% endfor %}</select></label>
+      </div>
+      <div class="sf-scope-pane" data-sf-scope-pane="files" hidden>
+        <label class="sf-field">{{ t('Find recordings') }}<input type="search" data-sf-picker-search placeholder="{{ t('Search titles…') }}" autocomplete="off"></label>
+        <div class="sf-picker" data-sf-picker role="group" aria-label="{{ t('Recordings') }}"><p class="sf-muted">{{ t('Loading…') }}</p></div>
+        <p class="sf-muted" data-sf-picker-count></p>
+      </div>
+      <div class="sf-scope-pane" data-sf-scope-pane="dates" hidden>
+        <div class="sf-field-row"><label class="sf-field">{{ t('From') }}<input type="date" name="ask_date_from" form="sf-ask-form" disabled></label><label class="sf-field">{{ t('To') }}<input type="date" name="ask_date_to" form="sf-ask-form" disabled></label></div>
+        <p class="sf-muted">{{ t('Recorded date') }} · {{ workspace_preferences.timezone }}</p>
+      </div>
+      <details class="sf-more-filters">
+        <summary>{{ t('More filters') }}</summary>
+        <div class="sf-field-row">
+          <label class="sf-field">{{ t('Tag') }}<select name="ask_tag_id" form="sf-ask-form"><option value="">{{ t('Any tag') }}</option>{% for tag in organization.tags %}<option value="{{ tag.id }}">{{ tag.name }}</option>{% endfor %}</select></label>
+          <label class="sf-field">{{ t('Source') }}<select name="ask_origin" form="sf-ask-form"><option value="">{{ t('Any source') }}</option><option value="plaud">Plaud</option><option value="local">{{ t('Local') }}</option></select></label>
+          <label class="sf-field">{{ t('Named speaker') }}<select name="ask_speaker_name" form="sf-ask-form"><option value="">{{ t('Any named speaker') }}</option>{% for speaker in named_speakers %}<option value="{{ speaker.name }}">{{ speaker.name }} · {{ speaker.recording_count }}</option>{% endfor %}</select></label>
+        </div>
+      </details>
+      <div class="sf-dialog-actions"><button class="btn sec" type="button" data-sf-scope-reset>{{ t('Reset') }}</button><button class="btn" type="button" data-sf-dialog-close>{{ t('Done') }}</button></div>
+    </fieldset>
+    {% endif %}
+  </dialog>
+
+  <div class="sf-menu" data-sf-thread-popover role="menu" hidden>
+    <button type="button" role="menuitem" data-sf-thread-rename>{{ icon('pencil') }}{{ t('Rename') }}</button>
+    <button type="button" role="menuitem" class="sf-danger" data-sf-thread-delete>{{ icon('trash') }}{{ t('Delete') }}</button>
+  </div>
+</div>
+{% endblock %}

@@ -10,6 +10,8 @@ import pytest
 from docx import Document
 from pypdf import PdfReader
 
+from tests.assets import with_assets
+
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
@@ -95,6 +97,7 @@ def test_recording_and_notes_hub_render_manual_lifecycle_contract(client):
         manual_id = notes[0].id
 
     detail = client.get(f"/file/r1?tab=notes&note_id={manual_id}")
+    detail_assets = with_assets(client, detail)
     assert detail.status_code == 200
     assert re.search(
         rf'data-note-target="saved-{manual_id}" class="note-tab saved-note-tab on"',
@@ -102,58 +105,59 @@ def test_recording_and_notes_hub_render_manual_lifecycle_contract(client):
     )
     assert f'data-note-panel="saved-{manual_id}" hidden' not in detail.text
     for label in ("Created by you", "Saved from Ask", "Editable generated copy"):
-        assert label in detail.text
-    assert 'id="manual-note-backdrop" data-dirty="false" hidden' in detail.text
-    assert "Discard this unfinished note?" in detail.text
-    assert "window.localplaudModal" in detail.text
-    assert "data-note-copy" in detail.text and "data-note-delete" in detail.text
-    assert "textarea[name=\"content_md\"]'" in detail.text
+        assert label in detail_assets
+    assert 'id="manual-note-backdrop" data-dirty="false" hidden' in detail_assets
+    assert "Discard this unfinished note?" in detail_assets
+    assert "window.localplaudModal" in detail_assets
+    assert "data-note-copy" in detail_assets and "data-note-delete" in detail_assets
+    assert "textarea[name=\"content_md\"]'" in detail_assets
     assert "data-note-add" not in detail.text
-    assert f'data-user-note-history="{manual_id}"' in detail.text
-    assert 'data-note-version="1"' in detail.text
-    assert 'name="base_version" value="1"' in detail.text
+    assert f'data-user-note-history="{manual_id}"' in detail_assets
+    assert 'data-note-version="1"' in detail_assets
+    assert 'name="base_version" value="1"' in detail_assets
     assert detail.text.count('id="user-note-history-backdrop"') == 1
-    assert 'class="import-modal user-note-history-drawer"' in detail.text
-    assert "window.localplaudModal({backdrop,background" in detail.text
-    assert "before_version" in detail.text and "next_before_version" in detail.text
-    assert "timeZone:workspaceTimezone" in detail.text
-    assert "Discard unsaved changes and open version history?" in detail.text
-    assert "This note changed elsewhere. Your text is still here." in detail.text
-    assert "event.stopImmediatePropagation();closeConfirmation()" in detail.text
-    assert "previewController?.abort();previewController=null" in detail.text
-    assert "preview.innerHTML=data.content_html" in detail.text
-    assert "cancel.disabled=true;restore.disabled=true" in detail.text
-    assert "data.detail?.code==='note_changed'" in detail.text
-    assert "Copy draft and reload" in detail.text
-    assert "history_restored" in detail.text
-    assert "requestAnimationFrame(()=>document.querySelector" in detail.text
+    assert 'class="import-modal user-note-history-drawer"' in detail_assets
+    assert "window.localplaudModal({backdrop,background" in detail_assets
+    assert "before_version" in detail_assets and "next_before_version" in detail_assets
+    assert "timeZone:workspaceTimezone" in detail_assets
+    assert "Discard unsaved changes and open version history?" in detail_assets
+    assert "This note changed elsewhere. Your text is still here." in detail_assets
+    assert "event.stopImmediatePropagation();closeConfirmation()" in detail_assets
+    assert "previewController?.abort();previewController=null" in detail_assets
+    assert "preview.innerHTML=data.content_html" in detail_assets
+    assert "cancel.disabled=true;restore.disabled=true" in detail_assets
+    assert "data.detail?.code==='note_changed'" in detail_assets
+    assert "Copy draft and reload" in detail_assets
+    assert "history_restored" in detail_assets
+    assert "requestAnimationFrame(()=>document.querySelector" in detail_assets
 
     hub = client.get("/notes")
+    hub_assets = with_assets(client, hub)
     assert hub.status_code == 200
-    assert "Write your own notes, edit generated copies" in hub.text
-    assert 'id="manual-note-recording-search"' in hub.text
-    assert "Search recordings…" in hub.text
+    assert "Write your own notes, edit generated copies" in hub_assets
+    assert 'id="manual-note-recording-search"' in hub_assets
+    assert "Search recordings…" in hub_assets
     assert "Library · ask" not in hub.text
     for label in ("Created by you", "Saved from Ask", "Editable generated copy"):
-        assert label in hub.text
-    assert "area.value=text" in hub.text and "document.execCommand('copy')" in hub.text
-    assert "deleteMessages={manual:" in hub.text
-    assert "clearTimeout(searchTimer)" in hub.text
-    assert "if(cleanupController.signal.aborted)return" in hub.text
-    assert "controller===pickerController" in hub.text
-    assert "pickerController?.abort();pickerController=null;results.replaceChildren()" in hub.text
-    assert "function renderRecordings(data){selectedFileId=null;create.disabled=true" in hub.text
-    assert "modal.setBusy(true)" in hub.text
-    assert "closeButton.disabled=true;cancelButton.disabled=true" in hub.text
-    assert "backdrop.dataset.busy==='true'" in hub.text
-    assert "manualNoteModal.setBusy(true)" in detail.text
-    assert "if(error.name!=='AbortError')status.textContent" in detail.text
-    assert f'data-user-note-history="{manual_id}"' in hub.text
+        assert label in hub_assets
+    assert "area.value=text" in hub_assets and "document.execCommand('copy')" in hub_assets
+    assert "deleteMessages={manual:" in hub_assets
+    assert "clearTimeout(searchTimer)" in hub_assets
+    assert "if(cleanupController.signal.aborted)return" in hub_assets
+    assert "controller===pickerController" in hub_assets
+    assert "pickerController?.abort();pickerController=null;results.replaceChildren()" in hub_assets
+    assert "function renderRecordings(data){selectedFileId=null;create.disabled=true" in hub_assets
+    assert "modal.setBusy(true)" in hub_assets
+    assert "closeButton.disabled=true;cancelButton.disabled=true" in hub_assets
+    assert "backdrop.dataset.busy==='true'" in hub_assets
+    assert "manualNoteModal.setBusy(true)" in detail_assets
+    assert "if(error.name!=='AbortError')status.textContent" in detail_assets
+    assert f'data-user-note-history="{manual_id}"' in hub_assets
     assert hub.text.count('id="user-note-history-backdrop"') == 1
-    assert ".user-note-history-preview { max-width:100%;max-height:280px;overflow:auto" in hub.text
-    assert ".user-note-history-title { overflow-wrap:anywhere" in hub.text
-    assert ".user-note-history-snippet { display:-webkit-box" in hub.text
-    assert ".user-note-history-footer [role=\"status\"] { min-width:0;flex:1 1 180px;overflow-wrap:anywhere; }" in hub.text
+    assert ".user-note-history-preview { max-width:100%;max-height:280px;overflow:auto" in hub_assets
+    assert ".user-note-history-title { overflow-wrap:anywhere" in hub_assets
+    assert ".user-note-history-snippet { display:-webkit-box" in hub_assets
+    assert ".user-note-history-footer [role=\"status\"] { min-width:0;flex:1 1 180px;overflow-wrap:anywhere; }" in hub_assets
 
 
 def test_notes_hub_without_recordings_guides_to_add_audio(client):

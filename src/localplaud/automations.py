@@ -88,12 +88,44 @@ def early_transcript_text(recording: PlaudFile) -> str | None:
     return "\n".join(parts)[:EARLY_TRANSCRIPT_WINDOW_CHARS]
 
 
+def rule_display_names(session) -> dict:
+    """Resolve presentation labels without changing a rule's stored references."""
+    return {
+        "folder": {row.id: row.name for row in session.scalars(select(Folder))},
+        "tag": {row.id: row.name for row in session.scalars(select(Tag))},
+        "template": {row.key: row.name for row in session.scalars(select(NoteTemplate))},
+        "profile": {row.id: row.name for row in session.scalars(select(ExecutionProfile))},
+    }
+
+
+def template_fallback_name(key: str) -> str:
+    """A readable name for a template key with no active catalog row.
+
+    Prefers the bundled template's display name; never shows the raw key.
+    """
+    from .worker.summary_templates import TEMPLATES
+
+    bundled = TEMPLATES.get(key)
+    if bundled is not None and bundled.display_name:
+        return bundled.display_name
+    words = key.removeprefix("plaud-").replace("-", " ").strip()
+    return words[:1].upper() + words[1:] if words else key
+
+
 def rule_sentence(
     rule: AutomationRule | dict,
     *,
     translate: Callable[[str], str] | None = None,
+    names: dict | None = None,
 ) -> str:
     t = translate or (lambda value: value)
+    names = names or {}
+
+    def label(kind, value):
+        if kind == "template":
+            return names.get(kind, {}).get(value) or template_fallback_name(value)
+        return names.get(kind, {}).get(value, f"#{value}")
+
     trigger = rule.trigger if isinstance(rule, AutomationRule) else rule.get("trigger", {})
     actions = rule.actions if isinstance(rule, AutomationRule) else rule.get("actions", {})
     conditions = []
@@ -123,30 +155,30 @@ def rule_sentence(
             )
         )
     if trigger.get("folder_id") is not None:
-        conditions.append(t("folder is #{value}").format(value=trigger["folder_id"]))
+        conditions.append(t("folder is {value}").format(value=label("folder", trigger["folder_id"])))
     if trigger.get("tag_id") is not None:
-        conditions.append(t("tag includes #{value}").format(value=trigger["tag_id"]))
+        conditions.append(t("tag includes {value}").format(value=label("tag", trigger["tag_id"])))
     effects = []
     if actions.get("note_template_key"):
         effects.append(
-            t("use {value} notes").format(value=actions["note_template_key"])
+            t("use {value} notes").format(value=label("template", actions["note_template_key"]))
         )
     elif actions:
         effects.append(
             t("use {value} notes").format(
-                value=effective_note_template_key(actions)
+                value=label("template", effective_note_template_key(actions))
             )
         )
     if actions.get("profile_id") is not None:
         effects.append(
-            t("use execution profile #{value}").format(value=actions["profile_id"])
+            t("use execution profile {value}").format(value=label("profile", actions["profile_id"]))
         )
     if actions.get("folder_id") is not None:
-        effects.append(t("move to folder #{value}").format(value=actions["folder_id"]))
+        effects.append(t("move to folder {value}").format(value=label("folder", actions["folder_id"])))
     if actions.get("add_tag_ids"):
         effects.append(
             t("add tags {value}").format(
-                value=t(", ").join(f"#{value}" for value in actions["add_tag_ids"])
+                value=t(", ").join(label("tag", value) for value in actions["add_tag_ids"])
             )
         )
     if actions.get("export_formats"):

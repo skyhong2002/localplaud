@@ -141,7 +141,7 @@ def decision():
     }
 
 
-def test_local_only_recording_reuses_voiceprint_and_invalidates_derived_artifacts(database):
+def test_local_only_recording_reuses_voiceprint_without_regenerating_notes(database):
     session, row, speaker = database
     samples = inventory(session, row)
     original = copy.deepcopy(row.local_transcript.segments)
@@ -156,7 +156,7 @@ def test_local_only_recording_reuses_voiceprint_and_invalidates_derived_artifact
     assert row.local_transcript.segments == original
     assert len(list(session.scalars(select(VoiceEvent)))) == 1
     stages = list(session.scalars(select(StageRun)))
-    assert {s.stage.value for s in stages} == {"summarize", "mind_map", "index"}
+    assert {s.stage.value for s in stages} == {"index"}
     assert all(s.detail["stale"] for s in stages)
     # Auto-named voice is never enrolled as a manual reference.
     assert references(inventory(session, row)) == []
@@ -434,3 +434,86 @@ def test_alias_validation_rejects_cycles_chains_and_invalid_names(aliases):
 
     with pytest.raises(ValueError):
         validate_name_aliases(aliases)
+
+
+def test_automatic_name_and_undo_update_notes_with_history_preserving_raw(database):
+    from localplaud.db.models import StageName, StageStatus, Summary, SummaryRevision
+
+    session, row, speaker = database
+    sample = inventory(session, row)[0]
+    raw = copy.deepcopy(row.local_transcript.segments)
+    note = Summary(file_id=row.id, source="local", template="meeting", content_md="Speaker 1 owns follow-up.")
+    session.add(note)
+    session.add(StageRun(file_id=row.id, stage=StageName.summarize,
+                         status=StageStatus.completed, detail={"stale": False}))
+    session.commit()
+    assert apply_match(session, sample, decision()) == "applied"
+    session.commit()
+    assert note.content_md == "Alice owns follow-up."
+    assert session.scalar(select(SummaryRevision)).content_md == "Speaker 1 owns follow-up."
+    assert undo_assignment(session, speaker.id)
+    session.commit()
+    assert note.content_md == "Speaker 1 owns follow-up."
+    assert row.local_transcript.segments == raw
+    run = session.scalar(select(StageRun).where(StageRun.stage == StageName.summarize))
+    assert run.status == StageStatus.completed and run.detail == {"stale": False}
+    assert len(list(session.scalars(select(SummaryRevision)))) == 2
+
+
+@pytest.mark.parametrize("undo", [False, True])
+def test_busy_note_index_preflight_never_partially_changes_identity_or_notes(database, undo):
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.db.models import Summary, SummaryRevision
+    from localplaud.worker.knowledge_index import KnowledgeIndexBusyError, sync_summary_document
+
+    session, row, speaker = database
+    sample = inventory(session, row)[0]
+    notes = [Summary(file_id=row.id, source="local", template=template,
+                     input_transcript_id=row.local_transcript.id,
+                     input_transcript_revision=0, input_transcript_source="local",
+                     content_md="Speaker 1 owns follow-up.") for template in ("first", "busy")]
+    session.add_all(notes)
+    session.commit()
+    if undo:
+        assert apply_match(session, sample, decision()) == "applied"
+        session.commit()
+    before_names = speaker.display_name
+    before_notes = [note.content_md for note in notes]
+    before_history = len(list(session.scalars(select(SummaryRevision))))
+    before_events = len(list(session.scalars(select(VoiceEvent))))
+    document = sync_summary_document(session, notes[-1])
+    document.status = "running"
+    document.lease_token = "active-index"
+    document.lease_until = datetime.now(UTC) + timedelta(minutes=5)
+    session.commit()
+    with pytest.raises(KnowledgeIndexBusyError):
+        if undo:
+            undo_assignment(session, speaker.id)
+        else:
+            apply_match(session, sample, decision())
+    # Deliberately commit after catching: preflight must itself prevent partial writes.
+    session.commit()
+    assert speaker.display_name == before_names
+    assert [note.content_md for note in notes] == before_notes
+    assert len(list(session.scalars(select(SummaryRevision)))) == before_history
+    assert len(list(session.scalars(select(VoiceEvent)))) == before_events
+    assignment = session.get(VoiceAssignment, speaker.id)
+    assert assignment.status == "applied" if undo else assignment is None
+
+
+def test_uncertain_voice_match_does_not_name_or_rewrite_notes(database):
+    from localplaud.db.models import Summary, SummaryRevision
+
+    session, row, speaker = database
+    sample = inventory(session, row)[0]
+    note = Summary(file_id=row.id, source="local", template="meeting", content_md="Speaker 1 owns follow-up.")
+    session.add(note)
+    session.commit()
+    unknown = decision() | {"status": "unknown", "name": None}
+    assert apply_match(session, sample, unknown) == "unknown"
+    session.commit()
+    assert speaker.display_name is None
+    assert note.content_md == "Speaker 1 owns follow-up."
+    assert not list(session.scalars(select(SummaryRevision)))
+    assert not list(session.scalars(select(StageRun)))

@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from html import unescape
 from urllib.parse import parse_qs, urlsplit
 
+from tests.assets import with_assets
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -258,7 +260,7 @@ def test_empty_filtered_library_summarizes_and_clears_active_filters(monkeypatch
     )
 
     assert page.status_code == 200
-    assert '<strong class="filtered-empty-title">No recordings match these filters.</strong>' in page.text
+    assert '<p class="empty-title filtered-empty-title">No recordings match these filters.</p>' in page.text
     summary = page.text.split('<ul class="active-filter-list"', 1)[1].split("</ul>", 1)[0]
     for label in (
         "Search: missing",
@@ -325,7 +327,7 @@ def test_unknown_source_legacy_plaud_and_uncategorized_counts_match(monkeypatch,
     page = c.get("/")
     assert "Unknown capture source" in page.text
     assert 'href="/?view=uncategorized"' in page.text
-    assert ">1</span>" in page.text.split('href="/?view=uncategorized"', 1)[1].split("</a>", 1)[0]
+    assert ">(1)</span>" in page.text.split('href="/?view=uncategorized"', 1)[1].split("</a>", 1)[0]
 
 
 def test_unknown_source_and_origin_facets_are_localized(monkeypatch, tmp_path):
@@ -413,12 +415,12 @@ def test_library_search_box_is_visible_and_preserves_filters(monkeypatch, tmp_pa
     assert page.status_code == 200
     # The search form is surfaced (no longer force-hidden) and reflects the query.
     assert ".library-search { display:none; }" not in page.text
-    assert 'class="library-search"' in page.text
+    assert 'class="library-search search-field"' in page.text
     assert 'name="q"' in page.text
     assert 'value="Alpha"' in page.text
     # Active source filter travels with the query as a hidden field so submitting
     # the box keeps the combined filter state instead of dropping to plain search.
-    search_form = page.text.split('class="library-search"', 1)[1].split("</form>", 1)[0]
+    search_form = page.text.split('class="library-search search-field"', 1)[1].split("</form>", 1)[0]
     assert '<input type="hidden" name="scene" value="1">' in search_form
 
 
@@ -471,9 +473,12 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     _seed()
     r = c.get("/")
     assert r.status_code == 200
-    assert "rectable" in r.text  # sortable table present
-    assert ".table-wrap { border:0;overflow:visible; }" in r.text
-    assert ".select-cell input:focus-visible { opacity:1; }" in r.text
+    page = with_assets(c, r)
+    # Plaud-style file table: header row with sortable columns, list rows.
+    assert 'class="file-table-head"' in r.text and 'class="file-list"' in r.text
+    assert 'class="sort-link on" aria-current="true" href=' in r.text
+    assert ".file-row:hover, .file-row:focus-within, .file-row.is-selected { background: var(--c-hover); }" in page
+    assert ".file-row:hover .row-check, .file-row .row-check:checked, .file-row .row-check:focus-visible" in page
     assert "Bravo call" in r.text
     assert "Trash" in r.text  # trash view link
     assert "Plaud recorder" in r.text  # curated capture-source facet
@@ -483,17 +488,16 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     assert "Capture source 2" in r.text
     assert ">Source 2</span>" in r.text
     assert 'title="Capture source 2"' in r.text
-    # Mobile rows are title-first cards: no repeated per-cell column labels,
+    # Mobile rows are title-first two-line rows: no per-cell column labels;
     # duration and recorded date collapse into one muted meta line.
-    assert "content:attr(data-label)" not in r.text
+    assert "content:attr(data-label)" not in page
     assert 'data-label="Name"' not in r.text
-    assert '<td class="num dur-cell">' in r.text
-    assert '<td class="num rec-cell">' in r.text
-    assert ".rectable tbody td.rec-cell::before { content:'· '; }" in r.text
-    assert ".rectable .nm { max-width:none; text-align:left;" in r.text
-    assert '<input id="select-all-mobile" type="checkbox">Select visible' in r.text
+    assert '<span class="row-dur">' in r.text and '<span class="row-date">' in r.text
+    assert '<span class="row-meta-mobile">' in r.text
+    assert ".file-row .row-meta-mobile { display: flex; align-items: center; color: var(--c-text-2); font-size: 14px;" in page
+    assert ".file-table-head { display: none; }" in page
+    assert 'id="select-all-mobile" type="checkbox">Select visible' in r.text
     assert 'id="mobile-sort" aria-label="Sort recordings"' in r.text
-    assert ".rectable thead { display:none; }" in r.text
     assert "[all, mobileAll].filter(Boolean).forEach(control =>" in r.text
     assert "mobileSort?.addEventListener('change'" in r.text
     assert "window.addEventListener('pageshow', syncMobileSortFromLocation" in r.text
@@ -503,10 +507,11 @@ def test_index_page_renders_table_and_controls(monkeypatch, tmp_path):
     assert 'id="app-view" hx-history-elt' in r.text
     assert 'id="recording-file-list"' not in r.text
     assert 'href="/file/b?return_to=%2F"' in r.text
-    assert 'class="filter-close"' in r.text
+    assert 'class="icon-btn filter-close"' in r.text
     assert "event.key === 'Escape' && filterMenu?.open" in r.text
     assert "filterReturnFocus?.isConnected ? filterReturnFocus : filterTrigger" in r.text
-    assert 'class="file-subline"><span>error</span>' in r.text
+    # Unhealthy rows carry a processing-state chip; done rows stay clean.
+    assert '<span class="state state-attention">Needs attention</span>' in r.text
     assert 'name="date_from"' in r.text and 'name="date_to"' in r.text
     assert 'name="min_duration_minutes"' in r.text
     assert 'name="max_duration_minutes"' in r.text
@@ -573,10 +578,10 @@ def test_library_paginates_without_truncating_ask_scope(monkeypatch, tmp_path):
     first = c.get("/")
     second = c.get("/?page=2")
     ask = c.get("/?ask=true")
-    assert first.text.count('class="row-select"') == 100
-    assert ".quickadd { min-width:0;flex-basis:100%;margin-left:0; }" in first.text
-    assert ".rectable tbody td.name-cell { padding:0 44px 3px 12px!important; }" in first.text
-    assert ".rectable tbody td.select-cell ~ td.name-cell { padding-left:40px!important; }" in first.text
+    assert first.text.count('class="row-check checkbox row-select"') == 100
+    first_assets = with_assets(c, first)
+    assert ".file-row .row-title { font-size: 17px; line-height: 1.4; white-space: normal;" in first_assets
+    assert ".batch-bar { position: fixed;" in first_assets
     assert 'class="sub pagination-summary">1–100 of 105</span>' in first.text
     assert 'class="pagination-current" aria-current="page" aria-label="Page 1">1</span>' in first.text
     assert 'data-page-nav href="http://testserver/?page=2" aria-label="Page 2">2</a>' in first.text
@@ -606,7 +611,7 @@ def test_library_paginates_without_truncating_ask_scope(monkeypatch, tmp_path):
     assert '<span class="fl-page-label">1 / 2</span>' in detail.text
     assert "data-replace-filelist" in detail.text
     assert "return_to=%2F%3Fpage%3D2&amp;tab=mindmap" in detail.text
-    assert "!trigger?.closest?.('[data-replace-filelist]')" in detail.text
+    assert "!trigger?.closest?.('[data-replace-filelist]')" in with_assets(c, detail)
 
 
 def test_index_trash_view_shows_banner(monkeypatch, tmp_path):
@@ -720,10 +725,10 @@ def test_home_generating_tile_matches_destination_with_trashed_pending_row(monke
 
     destination_rows = len(c.get("/api/files?state=generating").json()["files"])
     home = c.get("/home").text
-    tile = home.split('class="tile" href="/?state=generating"', 1)[1].split("</a>", 1)[0]
+    tile = home.split('class="home-card" href="/?state=generating"', 1)[1].split("</a>", 1)[0]
     import re as _re
 
-    tile_count = int(_re.search(r'class="v">(\d+)<', tile).group(1))
+    tile_count = int(_re.search(r'class="home-count" data-count>(\d+)<', tile).group(1))
     # The tile's number equals its linked destination: trashed pending rows
     # are excluded from both.
     assert destination_rows == 1

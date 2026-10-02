@@ -147,6 +147,7 @@ class StageName(enum.StrEnum):
     correct = "correct"
     summarize = "summarize"
     mind_map = "mind_map"
+    outline = "outline"
     index = "index"
 
 
@@ -238,6 +239,10 @@ class PlaudFile(Base):
         ForeignKey("folders.id", ondelete="SET NULL"), default=None, index=True
     )
     note_template_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    # Per-recording Custom speech settings ({"language": "zh", "num_speakers": 3}
+    # or {"min_speakers": 2, "max_speakers": 4}). Applied as the top resolution
+    # layer on the next explicit ASR/diarize rerun; saving never touches artifacts.
+    speech_overrides: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -283,6 +288,9 @@ class PlaudFile(Base):
     )
     knowledge_documents: Mapped[list[KnowledgeDocument]] = relationship(
         back_populates="file", cascade="all, delete-orphan", order_by="KnowledgeDocument.id"
+    )
+    outlines: Mapped[list[Outline]] = relationship(
+        back_populates="file", cascade="all, delete-orphan", order_by="Outline.revision"
     )
     folder: Mapped[Folder | None] = relationship(back_populates="recordings")
     tags: Mapped[list[Tag]] = relationship(
@@ -540,6 +548,46 @@ class SummaryRevision(Base):
             name="uq_summary_revision_file_template_revision",
         ),
     )
+
+
+class Outline(Base):
+    """One immutable generation of a recording's chapter outline.
+
+    Every generation inserts the next ``revision``; the highest revision is the
+    live outline and earlier rows remain as history. ``chapters`` is an ordered,
+    contiguous list of ``{"start_ms", "end_ms", "title"}`` covering the whole
+    canonical transcript. ``method`` distinguishes an LLM outline (``llm``) from
+    the explicitly selected deterministic alternative (``time_slices``) so a
+    time-sliced outline is never presented as an AI result.
+    """
+
+    __tablename__ = "outlines"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    chapters: Mapped[list] = mapped_column(JSON, default=list)
+    method: Mapped[str] = mapped_column(String(32), default="llm")
+    source: Mapped[str] = mapped_column(String(16), default="local")
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    language: Mapped[str | None] = mapped_column(String(16), default=None)
+    input_transcript_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    input_transcript_revision: Mapped[int | None] = mapped_column(Integer, default=None)
+    input_transcript_source: Mapped[str | None] = mapped_column(String(16), default=None)
+    resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Local-only thumbs up/down; never sent anywhere.
+    feedback: Mapped[str | None] = mapped_column(String(8), default=None)
+    feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    file: Mapped[PlaudFile] = relationship(back_populates="outlines")
+
+    __table_args__ = (UniqueConstraint("file_id", "revision", name="uq_outline_file_revision"),)
 
 
 class NoteTemplate(Base):
@@ -1266,6 +1314,7 @@ class ExecutionProfile(Base):
     privacy_policy: Mapped[str] = mapped_column(String(32), default="allow-egress")
     no_egress: Mapped[bool] = mapped_column(default=False)
     cost_ceiling: Mapped[float | None] = mapped_column(Float, default=None)
+    quality_floor: Mapped[dict] = mapped_column(JSON, default=dict)
     fallback_policy: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     stage_selections: Mapped[list[ProfileStageSelection]] = relationship(

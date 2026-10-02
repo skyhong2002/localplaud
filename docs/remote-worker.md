@@ -9,6 +9,11 @@ application Settings, or provider credentials.
 The authenticated API is mounted at `/api/worker/v1`:
 
 - `GET /capabilities` — protocol/version handshake and stage/model catalog.
+  Newer workers also return an optional `runtime` object (`software_version`,
+  `device`, `memory_total_mb`, `memory_available_mb`, `queued_jobs`,
+  `running_jobs`). Every field is optional and older workers omit the object;
+  Settings then shows "not reported". The controller stores the last reported
+  runtime and `last_healthy_at` inside the worker's health record (no schema change).
 - `POST /jobs` — idempotent submission with a caller-generated key.
 - `GET /jobs/{id}` — durable status, progress, artifacts, or structured error.
 - `POST /jobs/{id}/cancel` — durable cancellation intent.
@@ -97,7 +102,15 @@ Do not put the token itself in the connection, model, profile, job, or repositor
 
 Profiles select a connection whose `execution_target` is `remote_worker`. The
 resolver rejects that selection under a local-only/no-egress policy. Supported
-remote stages are transcription, diarization, notes, mind maps, and embeddings.
+remote stages are transcription, diarization, notes, mind maps, chapter outlines,
+and embeddings. Outline jobs (`stage: "outline"`) use the profile mind-map model
+and fallback policy, carry only the canonical transcript and duration/prompt options,
+and return a checksummed `result.json`. The controller requires an authenticated
+outline/model capability handshake before submitting; a missing capability is an
+explicit stage failure or uses only an explicitly configured fallback. Chapter
+coverage and segment boundaries are validated before publishing. Outline retries
+remain isolated from transcript and notes. Deploy the updated worker before enabling
+remote outlines; support in code does not assert production deployment.
 The controller sends only audio or the canonical transcript required by that stage,
 polls with bounded exponential backoff, and reuses the idempotency key on reconnect.
 

@@ -17,6 +17,8 @@ import json
 import logging
 import math
 import os
+import threading
+from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -40,6 +42,7 @@ from ..db.models import (
 from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
+from ..note_speakers import SPEAKER_ATTRIBUTION_PROMPT_VERSION, anonymous_summary_content
 from ..providers.fallback import candidate_snapshots, is_retryable_fallback_error
 from ..providers.service import lock_library_profile_resolution, resolve_recording_profile
 from ..providers.usage import (
@@ -53,7 +56,7 @@ from ..providers.usage import (
     provider_cost_reservation_total,
     reserve_provider_cost,
 )
-from ..remote.client import RemoteWorkerClient
+from ..remote.client import RemoteWorkerClient, RemoteWorkerError
 from ..remote.protocol import InputReference, JobStage, JobSubmitRequest
 from ..store.files import wav_path
 from ..store.speakers import (
@@ -63,6 +66,7 @@ from ..store.speakers import (
     sync_speakers,
 )
 from . import align, convert, index, mindmap, polish, summarize, summary_templates, transcribe
+from . import outline as outline_stage
 from .claims import (
     current_processing_claim,
     current_processing_owner,
@@ -411,6 +415,42 @@ def _remote_selection(snapshot: dict, stage: str) -> dict | None:
     return selection if selection and selection.get("execution_target") == "remote_worker" else None
 
 
+_SPEECH_OVERRIDE_KEYS = {
+    "transcribe": ("language",),
+    "diarize": ("num_speakers", "min_speakers", "max_speakers"),
+}
+
+
+def _requested_speech_overrides(snapshot: dict, stage: str) -> dict:
+    """Per-recording Custom speech options present in a resolved stage selection."""
+    if not any(
+        (layer or {}).get("kind") == "recording_speech"
+        for layer in snapshot.get("layer_provenance") or []
+    ):
+        return {}
+    options = (snapshot.get("stages", {}).get(stage) or {}).get("options") or {}
+    return {key: options[key] for key in _SPEECH_OVERRIDE_KEYS[stage] if key in options}
+
+
+def _remote_speech_ack(snapshot: dict, stage: str, payload: dict) -> bool | None:
+    """Whether a remote worker confirmed the Custom options; older workers cannot."""
+    if not _requested_speech_overrides(snapshot, stage):
+        return None
+    return isinstance(payload.get("applied_speech_overrides"), dict)
+
+
+def _speech_override_detail(snapshot: dict, stage: str, remote_ack: bool | None) -> dict:
+    requested = _requested_speech_overrides(snapshot, stage)
+    if not requested:
+        return {}
+    detail: dict = {"speech_overrides": requested}
+    if remote_ack is False:
+        # A pre-override remote worker ignores unknown options; say so instead
+        # of claiming the Custom language/speaker count was honoured.
+        detail["speech_overrides_unconfirmed"] = True
+    return detail
+
+
 def _remote_json_input(name: str, payload: dict) -> InputReference:
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
     return InputReference(
@@ -485,6 +525,17 @@ def _run_remote_stage(
     )
     client = RemoteWorkerClient.from_config(config)
     try:
+        if stage == "outline":
+            handshake = client.handshake()
+            if not any(
+                capability.stage == JobStage.outline and request.model in capability.models
+                for capability in handshake.capabilities
+            ):
+                raise RemoteWorkerError(
+                    f"remote outline capability unavailable for model {request.model}; "
+                    "upgrade the worker or configure an explicit mind-map fallback",
+                    retryable=True,
+                )
         result = client.submit_and_wait(request, timeout=float(config.get("job_timeout", 3600)))
     finally:
         client.close()
@@ -510,6 +561,12 @@ def _validate_remote_returned_model(payload: dict, snapshot: dict, stage: str) -
     if returned_model != requested_model:
         raise ValueError(f"remote {stage} returned a different model than requested")
     return returned_model
+
+
+# Durable stages that run on another stage's resolved profile selection. The
+# outline uses the text LLM explicitly selected for mind maps, so provider,
+# privacy, pricing and fallback rules are the same as that selection's.
+_PROFILE_STAGE_FOR = {StageName.index: "embed", StageName.outline: "mind_map"}
 
 
 def _set_stage_in_session(
@@ -545,7 +602,7 @@ def _set_stage_in_session(
     reused = bool((detail or {}).get("reused"))
     if snapshot is not None and not (reused and run.resolved_profile_snapshot is not None):
         run.resolved_profile_snapshot = snapshot
-    profile_stage = "embed" if stage == StageName.index else stage.value
+    profile_stage = _PROFILE_STAGE_FOR.get(stage, stage.value)
     if begin_attempt:
         run.attempts = (run.attempts or 0) + 1
         run.started_at = now
@@ -681,6 +738,12 @@ def _begin_stage_in_session(session, file_id: str, stage: StageName) -> str | No
         if previous_detail.get("stale")
         else ({"stale_generation": stale_generation} if stale_generation is not None else {})
     )
+    if stage == StageName.outline and previous_detail.get("outline_only"):
+        # Retry intent is durable even when there was no previous artifact to
+        # mark stale. A crash during this attempt must retain its narrow scope.
+        running_detail = running_detail | {
+            key: value for key, value in previous_detail.items() if key.startswith("outline_")
+        }
     _set_stage_in_session(
         session,
         file_id,
@@ -836,11 +899,20 @@ def _audio_seconds(row: PlaudFile, transcript: Transcript | None = None) -> floa
     return float(row.duration_ms or 0) / 1000
 
 
-def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
+def _cost_guard(
+    file_id: str,
+    stage: str,
+    snapshot: dict,
+    usage: dict,
+    *,
+    durable_stage: StageName | None = None,
+) -> dict:
     with session_scope() as session:
         selection = (snapshot.get("stages") or {}).get(stage) or {}
         if selection.get("execution_target") in {"cloud", "remote_worker"}:
-            durable_stage = StageName.index if stage == "embed" else StageName(stage)
+            durable_stage = durable_stage or (
+                StageName.index if stage == "embed" else StageName(stage)
+            )
             attempt = session.scalar(
                 select(StageAttempt)
                 .where(
@@ -853,7 +925,9 @@ def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
             if attempt is None:
                 raise RuntimeError(f"{stage} dispatch has no active stage attempt")
             file_scope = hashlib.sha256(file_id.encode()).hexdigest()[:16]
-            reservation_id = f"stage:{file_scope}:{stage}:{attempt.attempt}"
+            # Stages borrowing another selection keep their own reservation ids.
+            reservation_scope = durable_stage.value if durable_stage == StageName.outline else stage
+            reservation_id = f"stage:{file_scope}:{reservation_scope}:{attempt.attempt}"
             projected, pricing = reserve_provider_cost(
                 session,
                 reservation_id=reservation_id,
@@ -879,6 +953,11 @@ def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
         return enforce_cost_ceiling(session, file_id, stage, snapshot, usage)
 
 
+# Text stages can overlap across recordings; memory-heavy speech stages cannot.
+# Remote workers additionally enforce their own cross-request GPU lock.
+_SPEECH_STAGE_LOCK = threading.Lock()
+
+
 def _run_fallback_stage(
     file_id: str,
     profile_stage: str,
@@ -894,7 +973,13 @@ def _run_fallback_stage(
         stale_generation = _begin_stage(file_id, durable_stage)
         try:
             _renew_processing_claim(file_id)
-            outcome = operation(candidate)
+            speech_stage = durable_stage in {
+                StageName.transcribe,
+                StageName.align,
+                StageName.diarize,
+            }
+            with _SPEECH_STAGE_LOCK if speech_stage else nullcontext():
+                outcome = operation(candidate)
             detail = dict(outcome.get("detail") or {}) | {
                 "fallback": candidate["fallback"],
                 "fallback_failures": failures,
@@ -1040,7 +1125,7 @@ def queue_library_reprocess(
     if mode not in {"resume", "force", "derived_only"}:
         raise ValueError(f"unknown reprocess mode: {mode}")
     now = datetime.now(UTC)
-    derived = (StageName.summarize, StageName.mind_map, StageName.index)
+    derived = (StageName.summarize, StageName.mind_map, StageName.outline, StageName.index)
     result = {"mode": mode, "queued": 0, "skipped": 0, "processing": 0, "no_audio": 0}
     queued_ids: list[str] = []
     with session_scope() as session:
@@ -1477,9 +1562,11 @@ def _process_file_claimed(
         # --- transcribe (reuse an existing transcript to resume) ------ #
         transcript: Transcript | None = None
         transcript_source = "local"
+        reused_asr = False
         if pcfg.transcribe:
             existing = _load_transcript(file_id, settings) if not force else None
             if existing is not None:
+                reused_asr = True
                 transcript, transcript_source = existing
                 # ``transcript`` may be the canonical corrected revision used by
                 # downstream stages.  The transcribe stage, however, describes
@@ -1502,10 +1589,12 @@ def _process_file_claimed(
                     candidate_settings = _settings_for_stage(settings, candidate, "transcribe")
                     projected_usage = {"audio_seconds": _audio_seconds(row)}
                     cost_budget = _cost_guard(file_id, "transcribe", candidate, projected_usage)
+                    speech_ack = None
                     if _remote_selection(candidate, "transcribe"):
                         payload = _run_remote_stage(
                             file_id, candidate, "transcribe", [_remote_audio_input(wav)]
                         )
+                        speech_ack = _remote_speech_ack(candidate, "transcribe", payload)
                         result = Transcript(
                             segments=_rehydrate_segments(payload.get("segments")),
                             language=payload.get("language"),
@@ -1522,6 +1611,7 @@ def _process_file_claimed(
                         result, speaker_grouping = group_speaker_segments(result)
                     _persist_transcript(file_id, result)
                     detail = {"cost_budget": cost_budget, **result.processing_metadata}
+                    detail |= _speech_override_detail(candidate, "transcribe", speech_ack)
                     if speaker_grouping is not None:
                         detail["speaker_grouping"] = speaker_grouping
                     return {
@@ -1662,6 +1752,25 @@ def _process_file_claimed(
                     )
                     if result.detail.get("forced_alignment"):
                         _persist_aligned_transcript(file_id, result.transcript)
+                    elif (
+                        reused_asr
+                        and align_run is not None
+                        and align_run.status == StageStatus.completed
+                        and (align_run.detail or {}).get("forced_alignment") is True
+                        and _canonical_digest(result.transcript) == _canonical_digest(alignment_input)
+                    ):
+                        # Validation consumes the same retained word timings; it
+                        # is not a new alignment and must not erase their actual
+                        # forced-aligner provenance when the profile changes.
+                        result = align.AlignmentResult(
+                            result.transcript,
+                            align_run.provider,
+                            align_run.model,
+                            dict(align_run.detail) | {
+                                "reused": True,
+                                "timing_validation": dict(result.detail),
+                            },
+                        )
                     return {
                         "value": result.transcript,
                         "provider": result.provider,
@@ -1781,7 +1890,9 @@ def _process_file_claimed(
                         source.segments = _rehydrate_segments(payload.get("segments"))
                         source.has_speakers = payload.get("has_speakers", True)
                         provider = "remote-worker"
+                        speech_ack = _remote_speech_ack(candidate, "diarize", payload)
                     else:
+                        speech_ack = None
                         source = diarize(wav, source, candidate_settings.diarize)
                         provider = candidate_settings.diarize.provider
                     source, speaker_grouping = group_speaker_segments(source)
@@ -1798,6 +1909,7 @@ def _process_file_claimed(
                             "cost_budget": cost_budget,
                             "speaker_reconciliation": speaker_mapping,
                             "speaker_grouping": speaker_grouping,
+                            **_speech_override_detail(candidate, "diarize", speech_ack),
                         },
                         "usage": {
                             "audio_seconds": _audio_seconds(row, source),
@@ -1959,7 +2071,9 @@ def _run_correction_stage(
                 and current.base_transcript_id == raw.id
                 and current.provider
                 and current.model
-                and current.prompt_version == polish.PROMPT_VERSION
+                # v5 only compacts review output; v4 already reviewed every edit.
+                # Reuse accepted v4 work instead of recharging a completed stage.
+                and current.prompt_version in {"transcript-polish/v4", polish.PROMPT_VERSION}
                 and (current.resolved_profile_snapshot or {})
                 .get("correction_input", {})
                 .get("raw_sha256")
@@ -2191,7 +2305,7 @@ def _mind_map_rebuild_inputs(file_id: str, settings: Settings) -> dict:
             source_note["restored_from_revision"] = source.restored_from_revision
         return {
             "template_key": source.template,
-            "summary_md": source.content_md,
+            "summary_md": anonymous_summary_content(source),
             "source_note": source_note,
             "transcript": transcript,
             "transcript_lineage": lineage,
@@ -2266,7 +2380,25 @@ def _mind_map_source_input(file_id: str, template: str) -> tuple[str | None, dic
         provenance = source_summary_provenance(row)
         if row.restored_from_revision:
             provenance["restored_from_revision"] = row.restored_from_revision
-        return row.content_md, provenance
+        return anonymous_summary_content(row), provenance
+
+
+def _note_speaker_transcript(file_id: str, settings: Settings) -> Transcript:
+    """Give generators stable friendly aliases; persistence binds them to keys."""
+    from ..store.speakers import speaker_labels
+
+    canonical = _load_transcript(file_id, settings, display_speaker_names=False)
+    if canonical is None:
+        raise ValueError("a canonical transcript is required for generated speaker bindings")
+    if canonical[1] != "local":
+        if settings.pipeline.artifact_mode == "migration" and settings.pipeline.prefer_cloud_artifacts:
+            # Explicit migration keeps its original cloud lineage and labels.
+            # Those identities cannot be bound to the local diarization lane.
+            return canonical[0]
+        raise ValueError("a local canonical transcript is required for generated speaker bindings")
+    with session_scope() as session:
+        labels = speaker_labels(session, file_id, anonymous=True)
+    return _apply_speaker_display_names(canonical[0], labels)
 
 
 def _mind_map_operation(
@@ -2287,9 +2419,10 @@ def _mind_map_operation(
     """
 
     def run_mind_map(candidate):
+        speaker_transcript = _note_speaker_transcript(file_id, settings)
         candidate_settings = _settings_for_stage(settings, candidate, "mind_map")
         candidate_settings.pipeline.summary_template = template_key
-        projected_usage = _llm_projected_usage(transcript, candidate_settings, stage="mind_map")
+        projected_usage = _llm_projected_usage(speaker_transcript, candidate_settings, stage="mind_map")
         cost_budget = _cost_guard(file_id, "mind_map", candidate, projected_usage)
         summary_md, source_note = (
             source_input
@@ -2301,12 +2434,12 @@ def _mind_map_operation(
                 file_id,
                 candidate,
                 "mind_map",
-                [_remote_json_input("transcript", _transcript_payload(transcript))],
+                [_remote_json_input("transcript", _transcript_payload(speaker_transcript))],
                 options={"summary_md": summary_md},
             )
             result.setdefault("provider", "remote-worker")
         else:
-            result = mindmap.generate_mind_map(transcript, candidate_settings, summary_md)
+            result = mindmap.generate_mind_map(speaker_transcript, candidate_settings, summary_md)
         result["template_snapshot"] = {
             "source_template_key": template_key,
             "source_template_version": summary_templates.get_effective_template(
@@ -2334,6 +2467,7 @@ def _mind_map_operation(
             | {
                 "transcript": transcript_lineage,
                 "auto_template": auto_recommendation,
+                "speaker_binding_prompt_version": SPEAKER_ATTRIBUTION_PROMPT_VERSION,
                 "cost_budget": cost_budget,
             },
             "usage": {
@@ -2350,6 +2484,375 @@ def _mind_map_operation(
     return run_mind_map
 
 
+_LINEAGE_KEYS = ("input_transcript_id", "input_transcript_revision", "input_transcript_source")
+
+
+def outline_is_current(outline_row, lineage: dict | None) -> bool:
+    """Whether a stored outline was built from exactly this canonical transcript."""
+    return bool(
+        outline_row is not None
+        and lineage is not None
+        and all(getattr(outline_row, key) == lineage.get(key) for key in _LINEAGE_KEYS)
+    )
+
+
+def _has_current_outline(
+    file_id: str, lineage: dict | None, method: str, snapshot: dict | None = None
+) -> bool:
+    """Reuse the live outline only for the same transcript, method and prompt."""
+    expected_version = (
+        outline_stage.PROMPT_VERSION if method == "llm" else outline_stage.TIME_SLICES_VERSION
+    )
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        run = next((item for item in row.stage_runs if item.stage == StageName.outline), None)
+        if run is not None and (run.detail or {}).get("stale"):
+            return False
+        live = row.outlines[-1] if row.outlines else None
+        return bool(
+            live is not None
+            and live.source == "local"
+            and live.method == method
+            and live.prompt_version == expected_version
+            and outline_is_current(live, lineage)
+            and (
+                method == "time_slices"
+                or snapshot is None
+                or _profile_stage_matches(live.resolved_profile_snapshot, snapshot, "mind_map")
+            )
+        )
+
+
+def _persist_outline(file_id: str, result: dict, lineage: dict | None, settings: Settings) -> int:
+    """Insert the next outline revision; earlier revisions stay as history."""
+    from ..db.models import Outline
+
+    with session_scope() as session:
+        row = _assert_processing_claim_in_session(session, file_id)
+        current = None
+        raw = _select_raw_transcript(row, settings)
+        if raw is not None:
+            revision = row.corrected_transcript_for_source(raw.source)
+            current = {
+                "input_transcript_id": raw.id,
+                "input_transcript_revision": revision.revision if revision else 0,
+                "input_transcript_source": raw.source,
+            }
+        if (
+            lineage is None
+            or current != {key: lineage.get(key) for key in _LINEAGE_KEYS}
+            or (
+                result.get("detail", {}).get("speaker_names")
+                != {
+                    speaker.key: speaker.display_name
+                    for speaker in row.speakers
+                    if speaker.display_name
+                }
+            )
+        ):
+            raise RuntimeError(
+                "transcript changed while the outline was generated; retry from the current version"
+            )
+        base = (
+            session.get(TranscriptRow, revision.base_transcript_id)
+            if revision and revision.base_transcript_id
+            else None
+        )
+        current_transcript = (
+            _rehydrate_revision(revision, base) if revision else _rehydrate_transcript(raw)
+        )
+        _apply_speaker_display_names(
+            current_transcript,
+            {speaker.key: speaker.display_name for speaker in row.speakers if speaker.display_name},
+        )
+        if _canonical_digest(current_transcript) != result.get("detail", {}).get("input_digest"):
+            raise RuntimeError(
+                "transcript changed while the outline was generated; retry from the current version"
+            )
+        next_revision = max((item.revision for item in row.outlines), default=0) + 1
+        session.add(
+            Outline(
+                file_id=file_id,
+                revision=next_revision,
+                chapters=list(result["chapters"]),
+                method=result["method"],
+                source="local",
+                provider=result.get("provider"),
+                model=result.get("model"),
+                prompt_version=result.get("prompt_version"),
+                language=result.get("language"),
+                resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
+                detail=dict(result.get("detail") or {}),
+                **{key: lineage.get(key) for key in _LINEAGE_KEYS},
+            )
+        )
+        return next_revision
+
+
+def _outline_profile(snapshot: dict, method: str) -> dict:
+    if method == "llm":
+        if not (snapshot.get("stages") or {}).get("mind_map"):
+            raise ValueError("select a mind-map text provider in the execution profile first")
+        return snapshot
+    return {
+        "stages": {
+            "mind_map": {
+                "connection": "localplaud:time-slices",
+                "provider_type": "localplaud",
+                "model": "time-slices",
+                "execution_target": "local",
+                "data_egress": False,
+            }
+        },
+        "policy": {"no_egress": True},
+        "outline_method": "time_slices",
+    }
+
+
+def _outline_operation(
+    file_id: str,
+    settings: Settings,
+    transcript: Transcript,
+    transcript_lineage: dict | None,
+    method: str,
+):
+    """Build the fallback-stage operation that generates and persists an outline.
+
+    ``llm`` runs on the text-LLM selection resolved for the mind-map stage (and
+    that selection's explicit fallbacks); ``time_slices`` is deterministic and
+    is only used when explicitly configured or requested.
+    """
+    if method not in {"llm", "time_slices"}:
+        raise ValueError(f"unknown outline method: {method}")
+    if not transcript_lineage or transcript_lineage.get("input_transcript_source") != "local":
+        raise ValueError("outline requires a local canonical transcript")
+
+    def run_outline(candidate):
+        with session_scope() as session:
+            recording = session.get(PlaudFile, file_id)
+            duration_ms = recording.duration_ms
+            speaker_names = {
+                speaker.key: speaker.display_name
+                for speaker in recording.speakers
+                if speaker.display_name
+            }
+        cost_budget = None
+        if method == "time_slices":
+            result = outline_stage.time_slice_outline(transcript, duration_ms=duration_ms)
+        else:
+            candidate_settings = _settings_for_stage(settings, candidate, "mind_map")
+            projected_usage = outline_stage.projected_usage(
+                transcript, candidate_settings, remote=bool(_remote_selection(candidate, "mind_map"))
+            )
+            cost_budget = _cost_guard(
+                file_id,
+                "mind_map",
+                candidate,
+                projected_usage,
+                durable_stage=StageName.outline,
+            )
+            if _remote_selection(candidate, "mind_map"):
+                remote_snapshot = copy.deepcopy(candidate)
+                remote_snapshot["stages"]["outline"] = remote_snapshot["stages"]["mind_map"]
+                result = _run_remote_stage(
+                    file_id, remote_snapshot, "outline",
+                    [_remote_json_input("transcript", _transcript_payload(transcript))],
+                    options={"duration_ms": duration_ms, "prompt_version": outline_stage.PROMPT_VERSION},
+                )
+                end_ms = outline_stage._end_ms(outline_stage._segments(transcript), duration_ms)
+                outline_stage.validate_chapters(result["chapters"], end_ms)
+                valid_starts = {0} | {
+                    outline_stage._start_ms(segment) for segment in transcript.segments
+                }
+                if any(chapter["start_ms"] not in valid_starts for chapter in result["chapters"]):
+                    raise ValueError("remote outline returned a non-segment chapter boundary")
+                if result.get("method") != "llm" or result.get("prompt_version") != outline_stage.PROMPT_VERSION:
+                    raise ValueError("remote outline returned incompatible method or prompt version")
+                result["provider"] = "remote-worker"
+            else:
+                result = outline_stage.generate_outline(
+                    transcript, candidate_settings, duration_ms=duration_ms
+                )
+        result["detail"] = dict(result.get("detail") or {}) | {
+            "speaker_names": speaker_names,
+            "input_digest": _canonical_digest(transcript),
+        }
+        revision = _persist_outline(file_id, result, transcript_lineage, settings)
+        detail = dict(result.get("detail") or {})
+        return {
+            "value": result,
+            "provider": result.get("provider"),
+            "model": result.get("model"),
+            "artifact_source": "local",
+            "detail": detail
+            | {
+                "method": result["method"],
+                "prompt_version": result.get("prompt_version"),
+                "outline_revision": revision,
+                "transcript": transcript_lineage,
+                "cost_budget": cost_budget,
+            },
+            "usage": detail.get("usage") or {"input_chars": 0, "output_chars": 0, "requests": 0},
+        }
+
+    return run_outline
+
+
+def claim_outline_rebuild(file_id: str, *, method: str | None = None) -> str:
+    """Synchronously reserve a recording for an outline-only rebuild.
+
+    The recording's rollup status is left untouched while the outline runs;
+    progress is visible on the outline stage run itself.
+    """
+    token = _claim_processing(file_id, require_audio=False, mark_processing=False)
+    try:
+        with processing_claim(file_id, token), session_scope() as session:
+            _assert_processing_claim_in_session(session, file_id)
+            _set_stage_in_session(
+                session,
+                file_id,
+                StageName.outline,
+                StageStatus.pending,
+                detail={
+                    "outline_only": True,
+                    "outline_method": method or get_settings().pipeline.outline_method,
+                    "stale": True,
+                    "reason": "user requested outline rebuild",
+                },
+            )
+    except Exception:
+        _release_processing(file_id, token)
+        raise
+    return token
+
+
+def process_outline_only(
+    file_id: str,
+    settings: Settings | None = None,
+    *,
+    claim_token: str | None = None,
+    method: str | None = None,
+) -> None:
+    """Regenerate only the outline from the current canonical local transcript.
+
+    ASR, transcript revisions, notes, mind map and index are never touched.
+    The previous outline stays as an earlier revision. A failure is recorded on
+    the outline stage run only; it never downgrades usable notes.
+    """
+    settings = settings or get_settings()
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        run = next((run for run in row.stage_runs if run.stage == StageName.outline), None)
+        previous_detail = dict(run.detail or {}) if run else {}
+    method = method or previous_detail.get("outline_method") or settings.pipeline.outline_method
+    token = claim_token or _claim_processing(file_id, require_audio=False, mark_processing=False)
+    try:
+        with processing_claim(file_id, token):
+            _assert_processing_claim(file_id, token)
+            error: Exception | None = None
+            stage_started = False
+            try:
+                with session_scope() as session:
+                    row = _assert_processing_claim_in_session(session, file_id)
+                    _set_stage_in_session(
+                        session, file_id, StageName.outline, StageStatus.pending,
+                        detail=previous_detail | {"outline_only": True, "outline_method": method},
+                    )
+                    template_key = row.note_template_key or settings.pipeline.summary_template
+                    snapshot = _outline_profile(
+                        resolve_recording_profile(
+                            session,
+                            file_id,
+                            template_key=(
+                                settings.pipeline.summary_template
+                                if template_key == "auto"
+                                else template_key
+                            ),
+                        ).to_dict()
+                        if method == "llm"
+                        else {},
+                        method,
+                    )
+                canonical = _load_transcript(file_id, settings)
+                if canonical is None or canonical[1] != "local":
+                    raise ValueError("a local transcript is required before an outline")
+                transcript = canonical[0]
+                if not transcript.text.strip():
+                    raise ValueError("the transcript has no recognizable speech to outline")
+                lineage = _transcript_lineage(file_id, settings)
+                profile_token = _PROFILE_SNAPSHOT.set(snapshot)
+                try:
+                    stage_started = True
+                    _run_fallback_stage(
+                        file_id,
+                        "mind_map",
+                        StageName.outline,
+                        snapshot,
+                        _outline_operation(file_id, settings, transcript, lineage, method),
+                    )
+                finally:
+                    _PROFILE_SNAPSHOT.reset(profile_token)
+            except PipelineAlreadyRunning:
+                raise
+            except Exception as exc:  # noqa: BLE001 - recorded on the outline stage
+                log.exception("Outline rebuild failed for %s", file_id)
+                error = exc
+                if not stage_started:
+                    _set_stage(file_id, StageName.outline, StageStatus.failed, error=str(exc))
+            _finish_outline_cycle(file_id, error, settings, method, previous_detail)
+            if error is not None:
+                raise error
+    finally:
+        _release_processing(file_id, token)
+
+
+def _finish_outline_cycle(
+    file_id: str,
+    error: Exception | None,
+    settings: Settings,
+    method: str,
+    previous_detail: dict,
+) -> None:
+    """Let a successful outline rebuild clear a rollup that only it was holding."""
+    with session_scope() as session:
+        row = _assert_processing_claim_in_session(session, file_id)
+        if error is not None:
+            run = next(item for item in row.stage_runs if item.stage == StageName.outline)
+            count = int(previous_detail.get("outline_retry_count") or 0) + 1
+            delay = min(
+                settings.pipeline.retry_base_seconds * 2 ** min(count - 1, 20),
+                settings.pipeline.retry_max_seconds,
+            )
+            run.detail = dict(run.detail or {}) | {
+                "outline_only": True,
+                "outline_method": method,
+                "outline_retry_count": count,
+                "outline_next_retry_at": (datetime.now(UTC) + timedelta(seconds=delay)).isoformat(),
+            }
+            return
+        if row.status != FileStatus.partial:
+            return
+        leftover = [
+            run
+            for run in row.stage_runs
+            if run.stage != StageName.outline
+            and (
+                (run.detail or {}).get("stale")
+                or run.status
+                in {
+                    StageStatus.pending,
+                    StageStatus.running,
+                    StageStatus.failed,
+                    StageStatus.degraded,
+                }
+            )
+        ]
+        if not leftover:
+            row.status = FileStatus.done
+            row.error = None
+            reset_pipeline_retry(row)
+
+
 def _skip_empty_derivatives(file_id: str) -> None:
     """Keep historical artifacts, but never publish guesses from empty text."""
     from ..vocabulary import _mark_derived_stale
@@ -2364,7 +2867,12 @@ def _skip_empty_derivatives(file_id: str) -> None:
         row.generated_title_provider = None
         row.generated_title_model = None
         row.generated_title_at = None
-        for stage in (StageName.summarize, StageName.mind_map, StageName.index):
+        for stage in (
+            StageName.summarize,
+            StageName.mind_map,
+            StageName.outline,
+            StageName.index,
+        ):
             _set_stage_in_session(
                 session,
                 file_id,
@@ -2402,6 +2910,7 @@ def _run_derived_stages(
             for stage, enabled in (
                 (StageName.summarize, pcfg.summarize),
                 (StageName.mind_map, pcfg.mind_map),
+                (StageName.outline, pcfg.outline),
                 (StageName.index, pcfg.index),
             ):
                 if enabled:
@@ -2479,14 +2988,15 @@ def _run_derived_stages(
                             / "note-checkpoints"
                             / _safe_id(file_id)
                         )
-                        projected_usage = _llm_projected_usage(transcript, candidate_settings)
+                        speaker_transcript = _note_speaker_transcript(file_id, candidate_settings)
+                        projected_usage = _llm_projected_usage(speaker_transcript, candidate_settings)
                         cost_budget = _cost_guard(file_id, "summarize", candidate, projected_usage)
                         if _remote_selection(candidate, "summarize"):
                             result = _run_remote_stage(
                                 file_id,
                                 candidate,
                                 "summarize",
-                                [_remote_json_input("transcript", _transcript_payload(transcript))],
+                                [_remote_json_input("transcript", _transcript_payload(speaker_transcript))],
                                 options={
                                     "note_prompt_version": summarize.NOTE_PROMPT_VERSION,
                                     "note_context": note_context,
@@ -2505,7 +3015,7 @@ def _run_derived_stages(
                             result.setdefault("provider", "remote-worker")
                         else:
                             result = summarize.summarize(
-                                transcript,
+                                speaker_transcript,
                                 candidate_settings,
                                 context=note_context,
                                 checkpoint_dir=checkpoint_dir,
@@ -2538,7 +3048,7 @@ def _run_derived_stages(
                                     "summarize",
                                     [
                                         _remote_json_input(
-                                            "transcript", _transcript_payload(transcript)
+                                            "transcript", _transcript_payload(speaker_transcript)
                                         )
                                     ],
                                     options={
@@ -2551,7 +3061,7 @@ def _run_derived_stages(
                                 result["title"] = repaired.get("title")
                             else:
                                 result["title"] = summarize.repair_recording_title(
-                                    transcript,
+                                    speaker_transcript,
                                     result.get("content_md") or "",
                                     result.get("title"),
                                     candidate_settings,
@@ -2576,6 +3086,7 @@ def _run_derived_stages(
                                 "coverage": result.get("coverage", {}),
                                 "transcript": transcript_lineage,
                                 "auto_template": auto_recommendation,
+                                "speaker_binding_prompt_version": SPEAKER_ATTRIBUTION_PROMPT_VERSION,
                                 "title_repair_calls": title_repair_calls,
                                 "cost_budget": cost_budget,
                             },
@@ -2678,6 +3189,41 @@ def _run_derived_stages(
                 file_id,
                 StageName.mind_map,
                 "disabled" if not pcfg.mind_map else "no transcript",
+            )
+
+        if pcfg.outline and transcript is not None:
+            if force or not _has_current_outline(
+                file_id, transcript_lineage, pcfg.outline_method, derived_snapshot
+            ):
+                try:
+                    _run_fallback_stage(
+                        file_id,
+                        "mind_map",
+                        StageName.outline,
+                        _outline_profile(derived_snapshot, pcfg.outline_method),
+                        _outline_operation(
+                            file_id,
+                            settings,
+                            transcript,
+                            transcript_lineage,
+                            pcfg.outline_method,
+                        ),
+                    )
+                except Exception as exc:  # noqa: BLE001 - transcript/notes stay usable
+                    log.exception("Outline generation failed for %s", file_id)
+                    partial_errors.append(f"outline: {exc}")
+            else:
+                _finish_stage(
+                    file_id,
+                    StageName.outline,
+                    artifact_source="local",
+                    detail={"reused": True},
+                )
+        else:
+            _skip_stage(
+                file_id,
+                StageName.outline,
+                "disabled" if not pcfg.outline else "no transcript",
             )
 
         if pcfg.index and transcript is not None:
@@ -2789,8 +3335,16 @@ def _finish_processing_cycle(
             if derived_only:
                 for run in row.stage_runs:
                     if run.stage in {
-                        StageName.correct, StageName.summarize, StageName.mind_map, StageName.index
-                    } and run.status in {StageStatus.failed, StageStatus.degraded, StageStatus.pending}:
+                        StageName.correct,
+                        StageName.summarize,
+                        StageName.mind_map,
+                        StageName.outline,
+                        StageName.index,
+                    } and run.status in {
+                        StageStatus.failed,
+                        StageStatus.degraded,
+                        StageStatus.pending,
+                    }:
                         run.detail = dict(run.detail or {}) | {"derived_only": True}
             row.status = FileStatus.partial
             row.error = "; ".join(partial_errors)[:2000]
@@ -2929,10 +3483,46 @@ def _transcript_lineage(file_id: str, settings: Settings) -> dict | None:
         }
 
 
+# Connection settings that bound how a call runs, not what it produces. Changing a
+# timeout or quota reserve must not discard completed paid work.
+_EXECUTION_ONLY_KEYS = frozenset(
+    {
+        "timeout_seconds",
+        "quota_reserve_percent",
+        "quota_call_headroom_percent",
+        "quota_check_timeout_seconds",
+    }
+)
+# Chunk budgets only shape the stage that uses them.
+_STAGE_IRRELEVANT_KEYS = {
+    "correct": frozenset({"summary_chunk_chars"}),
+    "summarize": frozenset({"polish_chunk_chars"}),
+    "mind_map": frozenset({"polish_chunk_chars"}),
+}
+
+
+def _comparable_selection(selection, stage: str):
+    if not isinstance(selection, dict):
+        return selection
+    # A quality-floor verdict describes eligibility, not how the artifact was made.
+    selection = {key: value for key, value in selection.items() if key != "quality_resolution"}
+    if not isinstance(selection.get("configuration"), dict):
+        return selection
+    ignored = _EXECUTION_ONLY_KEYS | _STAGE_IRRELEVANT_KEYS.get(stage, frozenset())
+    return selection | {
+        "configuration": {
+            key: value for key, value in selection["configuration"].items() if key not in ignored
+        }
+    }
+
+
 def _profile_stage_matches(existing: dict | None, current: dict, stage: str) -> bool:
-    existing_selection = ((existing or {}).get("stages") or {}).get(stage)
+    existing_selection = _comparable_selection(
+        ((existing or {}).get("stages") or {}).get(stage), stage
+    )
     return any(
-        existing_selection == ((candidate.get("stages") or {}).get(stage))
+        existing_selection
+        == _comparable_selection((candidate.get("stages") or {}).get(stage), stage)
         for candidate in candidate_snapshots(current, stage)
     )
 
@@ -3166,7 +3756,8 @@ def _persist_polished_revision(file_id: str, result: dict, settings: Settings) -
                 provider=result["provider"],
                 model=result.get("model"),
                 prompt_version=result["prompt_version"],
-                resolved_profile_snapshot=dict(_PROFILE_SNAPSHOT.get() or {}) | {
+                resolved_profile_snapshot=dict(_PROFILE_SNAPSHOT.get() or {})
+                | {
                     "correction_input": {
                         "revision": result.get("input_revision"),
                         "kind": result.get("input_kind"),
@@ -3449,6 +4040,10 @@ def _persist_summary(
     )
 
     template = result.get("template", "default")
+    if template != "mind_map":
+        from ..note_presentation import without_playback_citations
+
+        result = {**result, "content_md": without_playback_citations(result["content_md"])}
     with session_scope() as session:
         lock_cost_budget(session, file_id)
         _assert_processing_claim_in_session(session, file_id)
@@ -3527,6 +4122,8 @@ def _persist_summary(
             **(lineage or {}),
             resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
         )
+        from ..note_speakers import bind_generated_summary
+        bind_generated_summary(session, replacement)
         displaced = list(
             session.scalars(
                 select(SummaryRow)
@@ -3563,7 +4160,7 @@ def _persist_summary(
         _apply_generated_title(
             session,
             file_id,
-            result,
+            result | {"title": replacement.title, "content_md": replacement.content_md},
             template,
             primary_summary=sets_recording_title,
         )
@@ -3652,6 +4249,29 @@ def _persist_remote_chunks(file_id: str, payload: dict, lineage: dict | None = N
     return model_name
 
 
+def _recently_transcribed(row: PlaudFile, settings: Settings, now: datetime) -> bool:
+    """Whether a recording's local transcription is recent enough to keep retrying.
+
+    ``auto_process_untranscribed_only`` pauses historical backfills. A recording
+    admitted under that filter still owns its bounded retries, including resume
+    after a restart interrupted it, until its local transcription ages out of
+    ``untranscribed_only_retry_hours``.
+    """
+    hours = settings.pipeline.untranscribed_only_retry_hours
+    if hours <= 0:
+        return False
+    for run in row.stage_runs:
+        if run.stage != StageName.transcribe or run.status != StageStatus.completed:
+            continue
+        completed = run.completed_at
+        if completed is None:
+            continue
+        if completed.tzinfo is None:
+            completed = completed.replace(tzinfo=UTC)
+        return now - completed <= timedelta(hours=hours)
+    return False
+
+
 def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | None:
     """Return the currently eligible processing scope for a queued recording.
 
@@ -3662,7 +4282,34 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
     """
     if processing_claim_active(row, now=now):
         return None
+    outline_run = next((run for run in row.stage_runs if run.stage == StageName.outline), None)
+    if (
+        outline_run is not None
+        and (outline_run.detail or {}).get("outline_only")
+        and outline_run.status != StageStatus.completed
+    ):
+        detail = outline_run.detail or {}
+        due = _retry_snapshot_datetime(detail.get("outline_next_retry_at"))
+        if (
+            row.is_trash
+            or int(detail.get("outline_retry_count") or 0) >= settings.pipeline.retry_max_attempts
+            or (due is not None and due > now)
+        ):
+            return None
+        return "outline"
     if row.status not in (FileStatus.downloaded, FileStatus.error, FileStatus.partial):
+        return None
+    if (
+        settings.pipeline.auto_process_untranscribed_only
+        and (
+            row.local_transcript is not None
+            or any(
+                run.stage == StageName.transcribe and run.status == StageStatus.completed
+                for run in row.stage_runs
+            )
+        )
+        and not _recently_transcribed(row, settings, now)
+    ):
         return None
     threshold_ms = settings.pipeline.auto_skip_threshold_ms()
     if (
@@ -3681,7 +4328,13 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
         # transcript exists the remaining stages are allowed to finish.
         return None
 
-    derived_stages = {StageName.correct, StageName.summarize, StageName.mind_map, StageName.index}
+    derived_stages = {
+        StageName.correct,
+        StageName.summarize,
+        StageName.mind_map,
+        StageName.outline,
+        StageName.index,
+    }
     derived_only = any(
         run.stage in derived_stages
         and bool((run.detail or {}).get("derived_only"))
@@ -3696,6 +4349,29 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
         and run.status != StageStatus.completed
         for run in row.stage_runs
     )
+    # A normal ingestion can finish speech and fail later without having been
+    # explicitly queued as derived-only. Resume from its local transcript even
+    # after the audio cache is evicted; never infer this from cloud artifacts.
+    if not derived_only and not mind_map_only and row.local_transcript is not None:
+        speech_runs = [
+            run
+            for run in row.stage_runs
+            if run.stage
+            in {StageName.convert, StageName.transcribe, StageName.align, StageName.diarize}
+        ]
+        derived_only = (
+            any(
+                run.stage == StageName.transcribe and run.status == StageStatus.completed
+                for run in speech_runs
+            )
+            and all(
+                run.status in {StageStatus.completed, StageStatus.skipped} for run in speech_runs
+            )
+            and any(
+                run.stage in derived_stages and run.status != StageStatus.completed
+                for run in row.stage_runs
+            )
+        )
     if row.status != FileStatus.downloaded:
         if mind_map_only:
             map_run = next(
@@ -3725,6 +4401,17 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
     return "derived" if derived_only else ("mind_map" if mind_map_only else "full")
 
 
+def new_recordings_waiting(session, settings: Settings, now: datetime) -> bool:
+    """Check eligible new audio again at dispatch time, not just at batch creation."""
+    rows = session.scalars(
+        select(PlaudFile).where(
+            PlaudFile.status == FileStatus.downloaded,
+            PlaudFile.is_trash.is_(False),
+        )
+    )
+    return any(_pending_scope(row, settings, now) is not None for row in rows)
+
+
 def process_pending(
     settings: Settings | None = None, limit: int | None = None, force: bool = False
 ) -> int:
@@ -3740,8 +4427,16 @@ def process_pending(
         candidate_rows = list(
             session.scalars(
                 select(PlaudFile).where(
-                    PlaudFile.status.in_(
-                        [FileStatus.downloaded, FileStatus.error, FileStatus.partial]
+                    or_(
+                        PlaudFile.status.in_(
+                            [FileStatus.downloaded, FileStatus.error, FileStatus.partial]
+                        ),
+                        PlaudFile.stage_runs.any(
+                            (StageRun.stage == StageName.outline)
+                            & StageRun.status.in_(
+                                [StageStatus.pending, StageStatus.failed, StageStatus.running]
+                            )
+                        ),
                     )
                 )
             )
@@ -3760,7 +4455,7 @@ def process_pending(
                 value = value.replace(tzinfo=UTC)
             return value.timestamp()
 
-        def queue_key(item) -> tuple[int, float, str]:
+        def queue_key(item) -> tuple[int, float, float, str]:
             # Fresh downloads always outrank retries. Retry timestamps are
             # recent by construction (a due backoff is near "now"), so ranking
             # purely by event time let a churning retry backlog starve a new
@@ -3788,7 +4483,10 @@ def process_pending(
                     row.pipeline_next_retry_at or row.pipeline_last_failure_at or row.created_at
                 )
                 fresh_tiebreak = 0
-            return fresh_tiebreak, event_time, row.id
+            # A new recording must retain priority after its first failure.
+            # Backoff determines eligibility, not which recording is newest.
+            recording_time = row.start_time_ms / 1000 if row.start_time_ms is not None else 0
+            return fresh_tiebreak, recording_time, event_time, row.id
 
         rows.sort(key=queue_key, reverse=True)
         selected = rows[:limit] if limit is not None else rows
@@ -3796,7 +4494,11 @@ def process_pending(
         # regeneration is still pending, let ASR start without starving meeting
         # notes.  The configured concurrency still controls simultaneous work;
         # this only reserves at most one daemon-batch slot for an old full retry.
-        if limit is not None and limit >= 2:
+        if (
+            limit is not None
+            and limit >= 2
+            and not any(item.status == FileStatus.downloaded for item, _ in rows)
+        ):
             full_retries = [
                 item
                 for item in rows
@@ -3807,16 +4509,6 @@ def process_pending(
                 full_retry_ids = {item[0].id for item in full_retries}
                 non_retry_rows = [item for item in rows if item[0].id not in full_retry_ids]
                 selected = [full_retries[0], *non_retry_rows[: limit - 1]]
-            # Symmetrically, when fresh downloads fill the whole batch, keep
-            # one slot for the top due retry so backoff work still progresses
-            # while a download burst drains.
-            retries = [item for item in rows if item[0].status != FileStatus.downloaded]
-            if (
-                retries
-                and len(rows) > len(selected)
-                and all(item[0].status == FileStatus.downloaded for item in selected)
-            ):
-                selected = [*selected[: limit - 1], retries[0]]
         jobs = [(item.id, scope) for item, scope in selected]
     if not jobs:
         return 0
@@ -3835,10 +4527,16 @@ def process_pending(
                     row = session.get(PlaudFile, fid)
                     if row is None or _pending_scope(row, settings, datetime.now(UTC)) != scope:
                         return False
+                    if row.status != FileStatus.downloaded and new_recordings_waiting(
+                        session, settings, datetime.now(UTC)
+                    ):
+                        return False
                 if scope == "derived":
                     process_derived_artifacts(fid, settings)
                 elif scope == "mind_map":
                     process_mind_map_only(fid, settings)
+                elif scope == "outline":
+                    process_outline_only(fid, settings)
                 else:
                     process_file(fid, settings, force=force)
                 return True

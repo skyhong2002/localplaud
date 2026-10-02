@@ -82,7 +82,7 @@ from ..preferences import (
 from ..remote.server import resume_pending_jobs
 from ..remote.server import router as worker_router
 from ..store.files import _safe_id
-from ..store.speakers import display_names, speaker_keys_from_segments
+from ..store.speakers import display_names, speaker_keys_from_segments, speaker_labels
 from .automations import router as automations_router
 from .backups import router as backups_router
 from .imports import router as imports_router
@@ -91,13 +91,17 @@ from .media import audio_file_response
 from .note_templates import _item as note_template_item
 from .note_templates import router as note_templates_router
 from .notes import router as notes_router
+from .outline import router as outline_router
 from .providers import router as providers_router
 from .share_links import router as share_links_router
+from .storage import router as storage_router
 from .system import router as system_router
+from .ui import register as register_ui_helpers
 from .vocabulary import router as vocabulary_router
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
+register_ui_helpers(templates.env)
 _NOTE_SOURCE_LABELS = {
     "manual": "Created by you",
     "ask": "Saved from Ask",
@@ -134,10 +138,12 @@ app.include_router(providers_router)
 app.include_router(vocabulary_router)
 app.include_router(note_templates_router)
 app.include_router(notes_router)
+app.include_router(outline_router)
 app.include_router(imports_router)
 app.include_router(integrations_router)
 app.include_router(automations_router)
 app.include_router(backups_router)
+app.include_router(storage_router)
 app.include_router(worker_router)
 app.include_router(system_router)
 app.include_router(share_links_router)
@@ -382,7 +388,9 @@ def _fmt_dur(ms: int | None) -> str:
 def _mmss(seconds) -> str:
     if seconds is None:
         return ""
-    s = int(seconds)
+    s = max(0, int(seconds))
+    if s >= 3600:
+        return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
     return f"{s // 60}:{s % 60:02d}"
 
 
@@ -390,6 +398,23 @@ templates.env.filters["dt"] = _fmt_dt
 templates.env.filters["dur"] = _fmt_dur
 templates.env.filters["mmss"] = _mmss
 templates.env.filters["markdown"] = _render_markdown
+
+
+def _static_asset_version(*names: str) -> str:
+    """Content hash for cache-busting the recording workspace's static assets."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    for name in names:
+        path = _HERE / "static" / name
+        if path.exists():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+templates.env.globals["workspace_asset_version"] = _static_asset_version(
+    "css/recording.css", "js/workspace.js"
+)
 
 _NOTE_ASSET_NAME = re.compile(r"[0-9a-f]{16}\.(?:png|jpe?g|gif|webp)")
 _NOTE_ASSET_MEDIA_TYPES = {
@@ -653,6 +678,7 @@ def _base_ctx(request: Request, active: str) -> dict:
                 .order_by(PlaudFile.scene)
             )
         ]
+        sidebar_tags = _sidebar_tags(session, request.query_params.get("tag"))
     return {
         "request": request,
         "active": active,
@@ -664,6 +690,7 @@ def _base_ctx(request: Request, active: str) -> dict:
             "counts": sidebar_counts,
             "scenes": sidebar_scenes,
             "ops": sidebar_ops,
+            "tags": sidebar_tags,
         },
         "workspace_preferences": workspace_preferences,
         "supported_locales": SUPPORTED_LOCALES,
@@ -671,6 +698,49 @@ def _base_ctx(request: Request, active: str) -> dict:
         "translations": catalog(workspace_preferences["locale"]),
         "partial_response": partial_response,
     }
+
+
+SIDEBAR_TAG_LIMIT = 8
+HOME_RECENT_LIMIT = 5
+
+
+def _tag_usage_rows(session, *, limit: int | None = None) -> list[dict]:
+    """Tags with live (non-trash) recording counts, most used first."""
+    usage = (
+        select(recording_tags.c.tag_id, func.count(recording_tags.c.file_id).label("n"))
+        .join(PlaudFile, PlaudFile.id == recording_tags.c.file_id)
+        .where(PlaudFile.is_trash.is_(False))
+        .group_by(recording_tags.c.tag_id)
+        .subquery()
+    )
+    count = func.coalesce(usage.c.n, 0)
+    query = (
+        select(Tag.id, Tag.name, Tag.color, count)
+        .outerjoin(usage, usage.c.tag_id == Tag.id)
+        .order_by(count.desc(), func.lower(Tag.name), Tag.id)
+    )
+    if limit is not None:
+        query = query.limit(limit)
+    return [
+        {"id": tag_id, "name": name, "color": color, "count": n}
+        for tag_id, name, color, n in session.execute(query)
+    ]
+
+
+def _sidebar_tags(session, active_tag: str | None) -> dict:
+    """A bounded, most-used tag list for the persistent sidebar.
+
+    Large libraries can carry hundreds of tags; the full list is fetched
+    lazily from ``/ui/sidebar-tags`` so every page stays light.
+    """
+    total = session.scalar(select(func.count()).select_from(Tag)) or 0
+    items = _tag_usage_rows(session, limit=SIDEBAR_TAG_LIMIT) if total else []
+    active = None
+    if active_tag and active_tag.isdigit() and all(str(i["id"]) != active_tag for i in items):
+        row = session.get(Tag, int(active_tag))
+        if row is not None:
+            active = {"id": row.id, "name": row.name, "color": row.color}
+    return {"items": items, "total": total, "active_extra": active}
 
 
 def _workspace_timezone_name() -> str:
@@ -938,6 +1008,14 @@ def _transcript_revision_reason(note: str | None) -> dict | None:
             "segment": int(reassigned.group(2)) + 1,
             "from": None if reassigned.group(3) == "unassigned" else reassigned.group(3),
             "to": None if reassigned.group(4) == "unassigned" else reassigned.group(4),
+        }
+    merged = re.fullmatch(r"merged speaker (.+) into (.+) across (\d+) segments?", note)
+    if merged:
+        return {
+            "kind": "speaker_merge",
+            "segment": int(merged.group(3)),
+            "from": merged.group(1),
+            "to": merged.group(2),
         }
     normalized = re.fullmatch(r"normalized segment (\d+) word speakers as (.+)", note)
     if normalized:
@@ -1579,6 +1657,32 @@ def update_recording_title(file_id: str, body: RecordingTitleBody) -> dict:
         }
 
 
+class SpeechSettingsBody(BaseModel):
+    language: str | None = None
+    num_speakers: int | None = None
+    min_speakers: int | None = None
+    max_speakers: int | None = None
+
+
+@app.put("/api/files/{file_id}/speech-settings")
+def update_recording_speech_settings(file_id: str, body: SpeechSettingsBody) -> dict:
+    """Save Custom ASR language / speaker count for the next explicit rerun.
+
+    Saving is metadata only: transcripts, user edits, and stage runs are untouched.
+    """
+    from ..providers.service import set_recording_speech_overrides
+
+    with session_scope() as session:
+        try:
+            return set_recording_speech_overrides(
+                session, file_id, body.model_dump(exclude_none=True)
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.delete("/api/files/{file_id}/local-audio")
 def delete_recording_local_audio(file_id: str) -> dict:
     from ..local_cleanup import remove_local_audio
@@ -1820,7 +1924,7 @@ def home(request: Request):
                 select(PlaudFile)
                 .where(PlaudFile.is_trash.is_(False))
                 .order_by(PlaudFile.start_time_ms.desc().nullslast(), PlaudFile.id)
-                .limit(12)
+                .limit(HOME_RECENT_LIMIT)
             )
         )
         attention_rows = list(
@@ -1858,9 +1962,51 @@ def home(request: Request):
         stats = _stats(session)
         recent_files = _file_summaries(session, recent_rows)
         attention_files = _file_summaries(session, attention_rows)
+        processing_files = _file_summaries(
+            session,
+            list(
+                session.scalars(
+                    select(PlaudFile)
+                    .where(
+                        PlaudFile.is_trash.is_(False),
+                        PlaudFile.status.in_(_STATE_ALIASES["generating"]),
+                    )
+                    .order_by(PlaudFile.updated_at.desc())
+                    .limit(3)
+                )
+            ),
+        )
+        # The stage that needs the user, so Home can say *what* is wrong.
+        attention_ids = [item["id"] for item in attention_files]
+        attention_stages: dict[str, str] = {}
+        for file_id, stage, status in session.execute(
+            select(StageRun.file_id, StageRun.stage, StageRun.status)
+            .where(
+                StageRun.file_id.in_(attention_ids),
+                StageRun.status.in_([StageStatus.failed, StageStatus.degraded]),
+            )
+            .order_by(StageRun.id)
+        ):
+            attention_stages.setdefault(file_id, f"{stage.value}:{status.value}")
+        home_templates = [
+            note_template_item(row)
+            for row in session.scalars(
+                select(NoteTemplate)
+                .where(NoteTemplate.is_active.is_(True))
+                .order_by(
+                    NoteTemplate.is_builtin.asc(),
+                    NoteTemplate.created_at.desc(),
+                    NoteTemplate.name,
+                )
+                .limit(4)
+            )
+        ]
     ctx = _base_ctx(request, "home") | {
         "recent_files": recent_files,
         "attention_files": attention_files,
+        "attention_stages": attention_stages,
+        "processing_files": processing_files,
+        "home_templates": home_templates,
         "stats": stats,
         "metadata_only": metadata_only,
         "audio_local": audio_local,
@@ -2019,141 +2165,16 @@ def search(
     date_from: str | None = None,
     date_to: str | None = None,
 ):
-    def optional_int(value: str | None) -> int | None:
-        try:
-            return int(value) if value else None
-        except ValueError:
-            return None
+    from .surfaces import library_search
 
-    def optional_date(value: str | None) -> str | None:
-        if value in (None, ""):
-            return None
-        try:
-            return normalize_calendar_date(value)
-        except ValueError:
-            return None
-
-    normalized_from = optional_date(date_from)
-    normalized_to = optional_date(date_to)
-    invalid_date_filter = bool(
-        (date_from not in (None, "") and normalized_from is None)
-        or (date_to not in (None, "") and normalized_to is None)
-    )
-    invalid_date_range = bool(
-        not invalid_date_filter
-        and normalized_from
-        and normalized_to
-        and normalized_from > normalized_to
-    )
-    timezone_name = _workspace_timezone_name()
-    date_scope = (
-        {}
-        if invalid_date_filter or invalid_date_range
-        else resolve_date_scope(
-            normalized_from,
-            normalized_to,
-            timezone_name,
-        )
-    )
-    filters = {
-        "folder_id": optional_int(folder),
-        "tag_id": optional_int(tag),
-        "origin": origin if origin in {"plaud", "local"} else None,
-        "date_from_ms": date_scope.get("date_from_ms"),
-        "date_to_ms": date_scope.get("date_to_ms_exclusive"),
-    }
-    groups: list[dict] = []
-    if q and not invalid_date_filter and not invalid_date_range:
-        from ..library_search import lexical_search
-        from ..worker.qa import retrieve
-
-        hits = lexical_search(q, **filters, limit=100)
-        semantic_scope = {
-            key: value
-            for key, value in {
-                "folder_id": filters["folder_id"],
-                "tag_id": filters["tag_id"],
-                "origin": filters["origin"],
-            }.items()
-            if value is not None
-        } | date_scope
-        try:
-            semantic_hits = retrieve(
-                q,
-                top_k=30,
-                retrieval_scope=semantic_scope or None,
-            )
-        except Exception:  # noqa: BLE001 - embeddings/provider may be unavailable
-            semantic_hits = []
-        with session_scope() as session:
-            stmt = select(PlaudFile.id).where(PlaudFile.is_trash.is_(False))
-            if filters["folder_id"] is not None:
-                stmt = stmt.where(PlaudFile.folder_id == filters["folder_id"])
-            if filters["tag_id"] is not None:
-                stmt = stmt.where(PlaudFile.tags.any(Tag.id == filters["tag_id"]))
-            if filters["origin"] == "plaud":
-                stmt = stmt.where(or_(PlaudFile.origin == "plaud", PlaudFile.origin.is_(None)))
-            elif filters["origin"] == "local":
-                stmt = stmt.where(PlaudFile.origin == filters["origin"])
-            if filters["date_from_ms"] is not None:
-                stmt = stmt.where(PlaudFile.start_time_ms >= filters["date_from_ms"])
-            if filters["date_to_ms"] is not None:
-                stmt = stmt.where(PlaudFile.start_time_ms < filters["date_to_ms"])
-            allowed_ids = set(session.scalars(stmt))
-        seen = {
-            (hit["file_id"], round(hit.get("start") or -1, 1), hit["text"][:80].casefold())
-            for hit in hits
-        }
-        for hit in semantic_hits:
-            if hit["file_id"] not in allowed_ids:
-                continue
-            hit = hit | {"kind": "semantic"}
-            key = (
-                hit["file_id"],
-                round(hit.get("start") or -1, 1),
-                hit["text"][:80].casefold(),
-            )
-            if key not in seen:
-                hits.append(hit)
-                seen.add(key)
-        by_file: dict[str, dict] = {}
-        for h in sorted(hits, key=lambda item: -item["score"]):
-            g = by_file.setdefault(
-                h["file_id"], {"file_id": h["file_id"], "filename": h["filename"], "hits": []}
-            )
-            g["hits"].append(h)
-        groups = sorted(by_file.values(), key=lambda g: -max(x["score"] for x in g["hits"]))
-        if groups:
-            with session_scope() as session:
-                meta_rows = session.scalars(
-                    select(PlaudFile).where(PlaudFile.id.in_([g["file_id"] for g in groups]))
-                )
-                meta = {
-                    row.id: {
-                        "duration_ms": row.duration_ms,
-                        "start_time_ms": row.start_time_ms,
-                        "folder": row.folder.name if row.folder else None,
-                    }
-                    for row in meta_rows
-                }
-            for g in groups:
-                g.update(meta.get(g["file_id"], {}))
+    result = library_search(q, folder, tag, origin, date_from, date_to)
     with session_scope() as session:
         organization = _organization_summary(session)
     ctx = _base_ctx(request, "search") | {
         "q": q or "",
-        "groups": groups,
+        "groups": result["groups"],
         "organization": organization,
-        "search_filters": {
-            "folder": filters["folder_id"],
-            "tag": filters["tag_id"],
-            "origin": filters["origin"],
-            "date_from": normalized_from or "",
-            "date_to": normalized_to or "",
-            "date_timezone": date_scope.get("date_timezone") or timezone_name,
-            "invalid_date_filter": invalid_date_filter,
-            "invalid_date_range": invalid_date_range,
-        },
+        "search_filters": result["search_filters"],
     }
     return templates.TemplateResponse(request=request, name="search.html", context=ctx)
 
@@ -2165,43 +2186,42 @@ def template_library(
     q: str = "",
     category: str | None = None,
 ):
-    tab = tab if tab in {"my", "explore"} else "my"
-    with session_scope() as session:
-        rows = list(
-            session.scalars(
-                select(NoteTemplate)
-                .where(NoteTemplate.is_active.is_(True))
-                .order_by(NoteTemplate.is_builtin.desc(), NoteTemplate.name)
-            )
-        )
-        items = [note_template_item(row) for row in rows]
-    if tab == "explore":
-        items = [item for item in items if item["is_builtin"]]
-    query = q.strip().casefold()
-    if query:
-        items = [
-            item
-            for item in items
-            if query
-            in " ".join(
-                [item["name"], item["description"], item["category"], item["scenario"]]
-            ).casefold()
-        ]
-    categories = sorted({item["category"] for item in items})
-    if category:
-        items = [item for item in items if item["category"] == category]
-    ctx = _base_ctx(request, "templates") | {
-        "tab": tab,
-        "q": q,
-        "category": category,
-        "categories": categories,
-        "template_items": items,
-    }
+    from .surfaces import template_library_context
+
+    ctx = _base_ctx(request, "templates") | template_library_context(tab, q, category)
     return templates.TemplateResponse(request=request, name="templates.html", context=ctx)
+
+
+@app.get("/explore", response_class=HTMLResponse)
+def explore_hub(request: Request):
+    """Phone Explore tab: local status hero plus grouped entry points (Plaud app parity)."""
+    with session_scope() as session:
+        stats = _stats(session)
+        automation_count = (
+            session.scalar(
+                select(func.count()).select_from(AutomationRule).where(AutomationRule.enabled)
+            )
+            or 0
+        )
+        template_count = (
+            session.scalar(
+                select(func.count())
+                .select_from(NoteTemplate)
+                .where(NoteTemplate.is_active.is_(True))
+            )
+            or 0
+        )
+    ctx = _base_ctx(request, "explore") | {
+        "stats": stats,
+        "automation_count": automation_count,
+        "template_count": template_count,
+    }
+    return templates.TemplateResponse(request=request, name="explore.html", context=ctx)
 
 
 @app.get("/discover", response_class=HTMLResponse)
 def discover_automations(request: Request):
+    from ..automations import rule_display_names
     from ..email_integrations import list_email_integrations
     from ..integrations import list_webhook_integrations
     from .automations import list_rules, list_runs
@@ -2229,12 +2249,24 @@ def discover_automations(request: Request):
         ]
         email_integrations = [item for item in list_email_integrations(session) if item["enabled"]]
     automation_rules = list_rules()["rules"]
+    automation_runs = list_runs(limit=50)["runs"]
+    with session_scope() as session:
+        display_names = rule_display_names(session)
+        run_items = automation_runs + [rule["last_run"] for rule in automation_rules if rule["last_run"]]
+        file_ids = {run["file_id"] for run in run_items}
+        titles = {row.id: row.display_title for row in session.scalars(
+            select(PlaudFile).where(PlaudFile.id.in_(file_ids))
+        )}
+        rule_names = {rule["id"]: rule["name"] for rule in automation_rules}
+        for run in run_items:
+            run["file_title"] = titles.get(run["file_id"], run["file_id"])
+            run["rule_name"] = (run.get("detail") or {}).get("rule_name") or rule_names.get(run.get("rule_id"))
     ctx = _base_ctx(request, "discover")
     for rule in automation_rules:
-        rule["sentence"] = rule_sentence(rule, translate=ctx["t"])
+        rule["sentence"] = rule_sentence(rule, translate=ctx["t"], names=display_names)
     ctx |= {
         "automation_rules": automation_rules,
-        "automation_runs": list_runs(limit=50)["runs"],
+        "automation_runs": automation_runs,
         "organization": organization,
         "profiles": profiles,
         "note_templates": note_templates,
@@ -2273,6 +2305,18 @@ def discover_automations(request: Request):
         ],
     }
     return templates.TemplateResponse(request=request, name="discover.html", context=ctx)
+
+
+@app.get("/ui/sidebar-tags", response_class=HTMLResponse)
+def sidebar_tags_fragment(request: Request):
+    with session_scope() as session:
+        tags = _tag_usage_rows(session)
+        locale = get_workspace_preferences(session)["locale"]
+    return templates.TemplateResponse(
+        request=request,
+        name="_sidebar_tags.html",
+        context={"request": request, "tags": tags, "t": translator(locale)},
+    )
 
 
 @app.get("/notifications", response_class=HTMLResponse)
@@ -2468,6 +2512,14 @@ def _serialize_transcript_mutation(session, file_id: str) -> None:
     _guard_ask_evidence_mutation(session, file_id)
 
 
+_DERIVED_REGENERATION_STAGES = (
+    StageName.summarize,
+    StageName.mind_map,
+    StageName.outline,
+    StageName.index,
+)
+
+
 def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) -> None:
     """Preserve derived rows but make stale artifacts ineligible for reuse/UI."""
     if StageName.summarize in stages:
@@ -2491,12 +2543,12 @@ def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) ->
         }
 
 
-def _queue_transcript_reindex(session, file_id: str) -> None:
+def _queue_transcript_reindex(session, file_id: str, *, names_only: bool = False) -> None:
     """Invalidate stale derivatives and leave a daemon-resumable index marker."""
     _mark_derived_stale(
         session,
         file_id,
-        (StageName.summarize, StageName.mind_map, StageName.index),
+        (StageName.index,) if names_only else _DERIVED_REGENERATION_STAGES,
     )
     run = session.scalar(
         select(StageRun).where(
@@ -2507,7 +2559,7 @@ def _queue_transcript_reindex(session, file_id: str) -> None:
     assert run is not None
     run.detail = dict(run.detail or {}) | {
         "reindex_only": True,
-        "reason": "canonical transcript changed",
+        "reason": "speaker names changed" if names_only else "canonical transcript changed",
     }
 
 
@@ -2538,6 +2590,38 @@ def _start_transcript_reindex(
     except RuntimeError:
         return False
     return True
+
+
+_WORD_SPAN_LIMIT = 600
+
+
+def _segment_word_spans(segment: dict) -> list[dict] | None:
+    """Timed word spans that reproduce the segment text exactly, else None.
+
+    Word-level playback highlighting must never alter what the reader sees: an
+    edited segment (whose words were cleared) or providers whose word tokens do
+    not losslessly rebuild the text fall back to plain segment text."""
+    words = segment.get("words") or []
+    text = (segment.get("text") or "").strip()
+    if not words or not text or len(words) > _WORD_SPAN_LIMIT:
+        return None
+    tokens = [str(word.get("text") or word.get("word") or "") for word in words]
+    if "".join(tokens).strip() == text:
+        spans = tokens
+        spans[0] = spans[0].lstrip()
+    elif " ".join(token.strip() for token in tokens) == text:
+        spans = [(" " if index else "") + token.strip() for index, token in enumerate(tokens)]
+    else:
+        return None
+    out = []
+    for token, word in zip(spans, words, strict=True):
+        try:
+            start = float(word.get("start"))
+            end = float(word.get("end"))
+        except (TypeError, ValueError):
+            return None
+        out.append({"text": token, "start": round(start, 2), "end": round(end, 2)})
+    return out
 
 
 @app.get("/file/{file_id}/transcript-page", response_class=HTMLResponse)
@@ -2642,9 +2726,19 @@ def recording_transcript_page(
             segments = list(selected_revision.segments or [])
             transcript_revision = selected_revision.revision
             can_edit = revision is None
-        page_segments = segments[offset : offset + limit]
+        page_segments = [
+            dict(seg) | {"word_spans": _segment_word_spans(seg)}
+            for seg in segments[offset : offset + limit]
+        ]
         next_offset = offset + limit if offset + limit < len(segments) else None
-        speaker_names = display_names(session, file_id)
+        speaker_names = speaker_labels(session, file_id)
+        explicit_names = display_names(session, file_id)
+        translate = translator(get_workspace_preferences(session)["locale"])
+        speaker_names = {
+            key: (label if key in explicit_names else
+                  translate("Speaker {number}").format(number=label.removeprefix("Speaker ")))
+            for key, label in speaker_names.items()
+        }
         speaker_options = [
             {"key": key, "name": speaker_names.get(key) or key}
             for key in _speaker_keys_for_editing(session, row, segments)
@@ -2721,6 +2815,101 @@ def _note_history_entries(
         }
         for item in rows[:limit]
     ]
+
+
+def _speaker_talk_stats(segments: list[dict], samples: int = 2) -> dict[str, dict]:
+    """Per-speaker talk time and a few representative clips for naming voices."""
+    stats: dict[str, dict] = {}
+    for segment in segments or []:
+        key = segment.get("speaker")
+        if not key:
+            continue
+        try:
+            start = float(segment.get("start") or 0)
+            end = float(segment.get("end") or start)
+        except (TypeError, ValueError):
+            continue
+        entry = stats.setdefault(key, {"seconds": 0.0, "candidates": []})
+        entry["seconds"] += max(0.0, end - start)
+        text = (segment.get("text") or "").strip()
+        if text:
+            entry["candidates"].append((end - start, start, end, text))
+    out: dict[str, dict] = {}
+    for key, entry in stats.items():
+        # Longest utterances identify a voice best; present them in time order.
+        best = sorted(entry["candidates"], key=lambda item: -item[0])[:samples]
+        out[key] = {
+            "seconds": round(entry["seconds"], 1),
+            "samples": [
+                {"start": round(start, 2), "end": round(end, 2), "text": text[:220]}
+                for _length, start, end, text in sorted(best, key=lambda item: item[1])
+            ],
+        }
+    return out
+
+
+_NOTES_STAGE_KEYS = ("summarize", "notes", "summary")
+
+
+def _notes_boundary(stages: dict, connections: dict, no_egress: bool) -> dict:
+    """Where generated notes would run: local host, remote worker, or cloud."""
+    choice = next((stages[key] for key in _NOTES_STAGE_KEYS if stages.get(key)), None)
+    if not choice:
+        return {"privacy": "unknown", "connection": None, "model": None, "no_egress": no_egress}
+    connection = connections.get(choice.get("connection"))
+    target = (connection.execution_target if connection is not None else None) or "local"
+    egress = bool(connection.data_egress) if connection is not None else False
+    if target == "local" and not egress:
+        privacy = "local"
+    elif target in {"remote", "remote-worker", "worker"}:
+        privacy = "remote"
+    else:
+        privacy = "cloud"
+    return {
+        "privacy": privacy,
+        "connection": choice.get("connection"),
+        "model": choice.get("model"),
+        "no_egress": no_egress,
+    }
+
+
+def _diarization_state(stage_runs, transcript: dict | None, speakers: list[dict]) -> dict:
+    """Workspace-facing diarization health for the shown transcript.
+
+    Whisper never labels speakers, so a transcript without diarization output is
+    a degraded result that the workspace must say out loud rather than present
+    as complete. Imported or empty transcripts are not judged here."""
+    run = next((item for item in stage_runs if item.stage == StageName.diarize), None)
+    status = run.status.value if run is not None else None
+    if transcript is None or not transcript.get("segments"):
+        return {"degraded": False, "status": status, "error": None}
+    has_speakers = any(seg.get("speaker") for seg in transcript["segments"]) or bool(speakers)
+    degraded = (not has_speakers) or status in {
+        StageStatus.failed.value,
+        StageStatus.degraded.value,
+        StageStatus.skipped.value,
+    }
+    return {
+        "degraded": degraded,
+        "status": status,
+        "has_speakers": has_speakers,
+        "error": (
+            sanitize_error(run.error, max_length=300) if run is not None and run.error else None
+        ),
+    }
+
+
+def _notes_stage_state(stage_runs) -> dict:
+    """Generation state of the notes stage for progress and failure recovery."""
+    run = next((item for item in stage_runs if item.stage == StageName.summarize), None)
+    if run is None:
+        return {"status": None, "error": None, "provider": None, "model": None}
+    return {
+        "status": run.status.value,
+        "error": sanitize_error(run.error, max_length=500) if run.error else None,
+        "provider": run.provider,
+        "model": run.model,
+    }
 
 
 @app.get("/file/{file_id}", response_class=HTMLResponse)
@@ -2865,12 +3054,16 @@ def file_detail(
                     "id": s.id,
                     "title": s.title,
                     "content_md": s.content_md,
+                    "stale": s.source == "local" and StageName.summarize in stale_stages,
                     "template": s.template,
+                    "unavailable_images": (s.template_snapshot or {}).get("unavailable_images", 0),
                     "template_name": (s.template_snapshot or {}).get("name")
                     or s.template.replace("-", " ").title(),
                     "template_version": s.template_version,
                     "created_at": _fmt_history_time(s.created_at),
                     "source": s.source,
+                    "provider": s.llm_provider,
+                    "model": s.model,
                     "input_transcript_revision": s.input_transcript_revision,
                     "input_transcript_source": s.input_transcript_source,
                     "lineage_label": _lineage_label(s.input_transcript_revision),
@@ -2889,10 +3082,8 @@ def file_detail(
                 for s in r.summaries
                 if not (
                     s.source == "local"
-                    and (
-                        (s.template == "mind_map" and StageName.mind_map in stale_stages)
-                        or (s.template != "mind_map" and StageName.summarize in stale_stages)
-                    )
+                    and s.template == "mind_map"
+                    and StageName.mind_map in stale_stages
                 )
             ],
             key=lambda s: (s["template"] != "default", s["template"]),
@@ -2922,8 +3113,16 @@ def file_detail(
             else (raw_row.segments if raw_row is not None else [])
         )
         speaker_names = display_names(session, r.id)
+        labels = speaker_labels(session, r.id)
+        fallback_names = speaker_labels(session, r.id, anonymous=True)
+        speaker_stats = _speaker_talk_stats(canonical_segments)
+        from ..voice_suggestions import speaker_suggestions
+
+        voice_suggestions = speaker_suggestions(session, r.id)
         speakers = [
-            {"key": key, "name": speaker_names.get(key)}
+            {"key": key, "name": speaker_names.get(key), "display_label": labels.get(key, key),
+             "suggestion": None if speaker_names.get(key) else voice_suggestions.get(key)}
+            | speaker_stats.get(key, {"seconds": 0, "samples": []})
             for key in _speaker_keys_for_editing(session, r, canonical_segments)
         ]
         show_corrected = corrected is not None and view != "raw"
@@ -2978,12 +3177,19 @@ def file_detail(
                 and r.local_transcript is not None
             ),
             "is_trash": r.is_trash,
+            "scene_label": _scene_label(r.scene),
             "has_local_transcript": r.local_transcript is not None,
             "origin": r.origin or "plaud",
             "transcript": transcript,
             "imported_transcript": imported_transcript,
             "speakers": speakers,
             "speaker_names": speaker_names,
+            "speaker_labels": labels,
+            "speaker_fallback_names": fallback_names,
+            "speaker_note_unresolved": any(
+                (s.template_snapshot or {}).get("speaker_bindings", {}).get("unresolved")
+                for s in r.summaries if s.source == "local"
+            ),
             # Whether both raw and corrected views exist (drives the toggle).
             "has_corrected": corrected is not None,
             "speech_cleanup": (
@@ -3063,6 +3269,7 @@ def file_detail(
                 note_id if any(note.id == note_id for note in r.user_notes) else None
             ),
             "note_template_key": r.note_template_key or settings.pipeline.summary_template,
+            "speech_overrides": dict(r.speech_overrides or {}),
             "stages": [
                 {
                     "name": stage.stage.value,
@@ -3115,6 +3322,8 @@ def file_detail(
                 "stages": len(r.stage_runs),
             },
         }
+        f["diarization"] = _diarization_state(r.stage_runs, transcript, speakers)
+        f["notes_state"] = _notes_stage_state(r.stage_runs)
         profile_rows = list(
             session.scalars(
                 select(ExecutionProfile).order_by(
@@ -3144,6 +3353,29 @@ def file_detail(
             f["profile_resolution_error"] = sanitize_error(exc)
             profile_resolution = preview_resolution(session).to_dict()
         f["profile_resolution"] = profile_resolution
+        # Notes-stage privacy boundary (principle 7): shown before generation so
+        # sending a transcript to a cloud or remote provider is never implicit.
+        from ..db.models import ProviderConnection
+
+        connections = {
+            row.key: row for row in session.scalars(select(ProviderConnection))
+        }
+        f["notes_boundary"] = _notes_boundary(
+            (profile_resolution.get("stages") or {}), connections,
+            bool((profile_resolution.get("policy") or {}).get("no_egress")),
+        )
+        for profile, row in zip(f["profiles"], profile_rows, strict=True):
+            profile["notes_boundary"] = _notes_boundary(
+                {
+                    selection.stage: {
+                        "connection": selection.connection.key,
+                        "model": selection.model_entry.model_key,
+                    }
+                    for selection in row.stage_selections
+                },
+                connections,
+                row.no_egress,
+            )
         resolved_profile_id = next(
             (
                 layer.get("profile_id")
@@ -3166,6 +3398,8 @@ def file_detail(
                 "key": item.key,
                 "name": item.name,
                 "version": item.version,
+                "description": item.description,
+                "category": item.category or item.scenario,
             }
             for item in session.scalars(
                 select(NoteTemplate)
@@ -3368,7 +3602,9 @@ def settings_page(request: Request):
     from ..providers.contracts import ProviderStage
     from ..providers.hardware import hardware_recommendations
     from ..providers.service import list_connections, list_models, list_profiles
+    from ..providers.starting_profiles import STARTING_PROFILES
     from ..remote.registry import list_workers
+    from ..storage_usage import retention_plan, storage_usage
     from ..system_info import about_info
 
     settings = get_settings()
@@ -3402,7 +3638,13 @@ def settings_page(request: Request):
                 .order_by(BrowserSession.last_seen_at.desc())
             )
         )
+        from .surfaces import library_profile_stats, settings_phone_context
+
         ctx = _base_ctx(request, "settings") | {
+            "library_stats": _stats(session) | library_profile_stats(session),
+            **settings_phone_context(
+                session, settings, get_workspace_preferences(session)["timezone"]
+            ),
             "connections": list_connections(session),
             "models": list_models(session),
             "profiles": list_profiles(session),
@@ -3452,6 +3694,9 @@ def settings_page(request: Request):
                 item for item in backup_destinations if item["enabled"]
             ],
             "backup_sync_deliveries": list_deliveries(session, 30),
+            "starting_profiles": STARTING_PROFILES,
+            "storage": storage_usage(session),
+            "storage_retention": retention_plan(session),
             "about": about_info(settings),
             "browser_sessions": [
                 {
@@ -3744,6 +3989,21 @@ def _ask_fragment_context(request: Request, thread: dict, file_id: str | None, t
     return context | {"thread": thread, "file_id": file_id, "target": target}
 
 
+def _library_ask_response(request: Request, thread: dict, ui: str | None):
+    """Render a library Ask thread for the legacy panel or the chat page (ui=chat)."""
+    if ui == "chat":
+        return templates.TemplateResponse(
+            request=request,
+            name="_ask_chat.html",
+            context=_ask_fragment_context(request, thread, None, "sf-thread"),
+        )
+    return templates.TemplateResponse(
+        request=request,
+        name="_ask_thread.html",
+        context=_ask_fragment_context(request, thread, None, "answer"),
+    )
+
+
 @app.post("/ask", response_class=HTMLResponse)
 def ask(
     request: Request,
@@ -3756,6 +4016,7 @@ def ask(
     ask_date_from: str | None = Form(None),
     ask_date_to: str | None = Form(None),
     ask_file_ids: Annotated[list[str] | None, Form()] = None,
+    ui: str | None = Form(None),
 ):
     from ..ask_threads import ask_in_thread, get_thread
 
@@ -3794,11 +4055,7 @@ def ask(
             thread_id,
             retrieval_scope=fallback_scope,
         )
-    return templates.TemplateResponse(
-        request=request,
-        name="_ask_thread.html",
-        context=_ask_fragment_context(request, thread, None, "answer"),
-    )
+    return _library_ask_response(request, thread, ui)
 
 
 @app.post("/file/{file_id}/ask", response_class=HTMLResponse)
@@ -3849,6 +4106,7 @@ def library_ask_skill(
     ask_date_from: str | None = Form(None),
     ask_date_to: str | None = Form(None),
     ask_file_ids: Annotated[list[str] | None, Form()] = None,
+    ui: str | None = Form(None),
 ):
     """Run a read-only skill through whole-library grounded Ask."""
     try:
@@ -3886,11 +4144,7 @@ def library_ask_skill(
             None,
             retrieval_scope=normalize_library_scope(retrieval_scope),
         )
-    return templates.TemplateResponse(
-        request=request,
-        name="_ask_thread.html",
-        context=_ask_fragment_context(request, thread, None, "answer"),
-    )
+    return _library_ask_response(request, thread, ui)
 
 
 @app.post("/file/{file_id}/ask/skill", response_class=HTMLResponse)
@@ -3942,6 +4196,7 @@ def _unavailable_ask_thread(
                 "content": "Ask is unavailable right now — the embeddings or language "
                 "model provider could not be reached. Check Settings and try again.",
                 "sources": [],
+                "unavailable": True,
             },
         ],
     }
@@ -4178,10 +4433,10 @@ def generate_recording_notes(
                 _mark_derived_stale(
                     session,
                     file_id,
-                    (StageName.summarize, StageName.mind_map, StageName.index),
+                    _DERIVED_REGENERATION_STAGES,
                 )
                 for run in recording.stage_runs:
-                    if run.stage in {StageName.summarize, StageName.mind_map, StageName.index}:
+                    if run.stage in _DERIVED_REGENERATION_STAGES:
                         detail = dict(run.detail or {}) | {
                             "reason": "user requested regeneration",
                             "derived_only": True,
@@ -4372,17 +4627,72 @@ def choose_recording_profile(file_id: str, profile_id: str = Form("")):
     return RedirectResponse(f"/file/{file_id}", status_code=303)
 
 
+def _speaker_note_projection(session, recording: PlaudFile) -> dict:
+    """Return updated generated-note fragments without replacing the workspace.
+
+    Saved user notes and their in-progress editors are deliberately absent.
+    Pre-existing transcript staleness remains visible and is never cleared by
+    changing a presentation label.
+    """
+    stale = {run.stage for run in recording.stage_runs if (run.detail or {}).get("stale")}
+    t = translator(get_workspace_preferences(session)["locale"])
+    result: dict = {"file_id": recording.id, "notes": [], "mind_map": None}
+    session.flush()
+    for summary in recording.summaries:
+        if summary.source != "local":
+            continue
+        is_map = summary.template == "mind_map"
+        if is_map and StageName.mind_map in stale:
+            continue
+        versions = list(session.scalars(
+            select(SummaryRevision)
+            .where(SummaryRevision.file_id == recording.id,
+                   SummaryRevision.template == summary.template)
+            .order_by(SummaryRevision.revision.desc())
+            .limit(_NOTE_HISTORY_PREVIEW_LIMIT)
+        ))
+        count = session.scalar(select(func.count(SummaryRevision.id)).where(
+            SummaryRevision.file_id == recording.id,
+            SummaryRevision.template == summary.template,
+        )) or 0
+        history = {
+            "id": summary.id, "version_count": count,
+            "versions": _note_history_entries(versions, content_fingerprint(summary)),
+        }
+        history_html = templates.env.get_template("_note_history.html").render(
+            f={"id": recording.id}, history_summary=history,
+            history_tab="mindmap" if is_map else "notes", t=t,
+        )
+        item = {
+            "id": summary.id, "title": summary.title,
+            "content_html": str(_render_markdown(summary.content_md)),
+            "history_html": history_html,
+            "stale": StageName.summarize in stale,
+        }
+        if is_map:
+            result["mind_map"] = item | {"content_md": summary.content_md, "stale": False}
+        else:
+            result["notes"].append(item)
+    return result
+
+
 @app.post("/file/{file_id}/speakers")
 def rename_speaker(
+    request: Request,
     file_id: str,
-    key: str = Form(...),
+    key: str = Form(""),
     name: str = Form(""),
+    names: str | None = Form(None),
+    suggested: str | None = Form(None),
     return_to: str = Form("/"),
     t: str = Form(""),
 ):
     """Set (or clear, with an empty name) the display name for one stable
     speaker key. The key itself never changes — it is the diarization label
-    stored inside the transcript segments."""
+    stored inside the transcript segments.
+
+    ``suggested`` optionally lists keys whose name the user took from a voice
+    suggestion; those are audited as user-confirmed, never as automatic."""
     with session_scope() as session:
         _serialize_transcript_mutation(session, file_id)
         r = session.get(PlaudFile, file_id)
@@ -4401,33 +4711,192 @@ def rename_speaker(
             if corrected is not None
             else (raw_row.segments if raw_row is not None else [])
         )
-        existing = session.scalar(
-            select(Speaker).where(Speaker.file_id == file_id, Speaker.key == key)
-        )
-        if key not in speaker_keys_from_segments(segments) and existing is None:
-            return JSONResponse({"error": f"unknown speaker key: {key}"}, status_code=400)
-        clean = name.strip() or None
-        if existing is None:
-            session.add(Speaker(file_id=file_id, key=key, display_name=clean))
+        if names is not None:
+            try:
+                updates = json.loads(names)
+            except (ValueError, TypeError):
+                return JSONResponse({"error": "invalid speaker names"}, status_code=400)
+            if not isinstance(updates, dict) or not updates or len(updates) > 100:
+                return JSONResponse({"error": "invalid speaker names"}, status_code=400)
         else:
-            existing.display_name = clean
-        session.execute(delete(Chunk).where(Chunk.file_id == file_id))
-        _queue_transcript_reindex(session, file_id)
-        expected_revision = corrected.revision if corrected is not None else 0
-        expected_names = display_names(session, file_id) | ({key: clean} if clean else {})
-        if not clean:
-            expected_names.pop(key, None)
+            updates = {key: name}
+        try:
+            suggested_keys = json.loads(suggested) if suggested else []
+        except (ValueError, TypeError):
+            suggested_keys = None
+        if not isinstance(suggested_keys, list) or len(suggested_keys) > 100 or any(
+            not isinstance(k, str) or k not in updates for k in suggested_keys
+        ):
+            return JSONResponse({"error": "invalid speaker names"}, status_code=400)
+        if any(not isinstance(k, str) or not isinstance(v, str)
+               or len(v.strip()) > 128 for k, v in updates.items()):
+            return JSONResponse({"error": "invalid speaker names"}, status_code=400)
+        rows = {row.key: row for row in session.scalars(
+            select(Speaker).where(Speaker.file_id == file_id)
+        )}
+        valid_keys = set(speaker_keys_from_segments(segments)) | rows.keys()
+        if any(k not in valid_keys for k in updates):
+            return JSONResponse({"error": "unknown speaker key"}, status_code=400)
+        previous_names = display_names(session, file_id)
+        cleaned = {k: v.strip() or None for k, v in updates.items()}
+        names_changed = any(previous_names.get(k) != v for k, v in cleaned.items())
+        for speaker_key, clean_name in cleaned.items():
+            if speaker_key not in rows:
+                session.add(Speaker(file_id=file_id, key=speaker_key, display_name=clean_name))
+            else:
+                rows[speaker_key].display_name = clean_name
+        session.flush()
+        from ..voice_suggestions import record_confirmations
 
-    _start_transcript_reindex(
-        file_id,
-        expected_revision=expected_revision,
-        expected_speaker_names=expected_names,
-    )
+        record_confirmations(session, file_id, suggested_keys, cleaned)
+        from ..note_speakers import refresh_generated_note_speaker_names
+        from ..worker.knowledge_index import KnowledgeIndexBusyError
+
+        try:
+            note_updates = refresh_generated_note_speaker_names(
+                session, file_id, previous_names=previous_names
+            )
+        except KnowledgeIndexBusyError as exc:
+            session.rollback()
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        if names_changed:
+            session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+            _queue_transcript_reindex(session, file_id, names_only=True)
+        note_projection = _speaker_note_projection(session, r)
+        labels = speaker_labels(session, file_id)
+        updated_speakers = [
+            {"key": k, "name": v, "display": labels.get(k, k),
+             "display_label": labels.get(k, k)} for k, v in cleaned.items()
+        ]
+        expected_revision = corrected.revision if corrected is not None else 0
+        expected_names = display_names(session, file_id)
+
+    if names_changed:
+        _start_transcript_reindex(
+            file_id,
+            expected_revision=expected_revision,
+            expected_speaker_names=expected_names,
+        )
+    if "application/json" in request.headers.get("accept", ""):
+        # The workspace renames in place (optimistic UI) instead of reloading.
+        return {
+            **(updated_speakers[0] if len(updated_speakers) == 1 else {}),
+            "speakers": updated_speakers, "names": cleaned,
+            "note_projection": note_projection, "note_updates": note_updates,
+        }
     return_to = _validated_library_return_url(return_to)
     redirect_url = _file_workspace_url(
         file_id, return_to, tab="transcript", t=_safe_playback_second(t)
     )
     return RedirectResponse(url=redirect_url, status_code=303)
+
+
+@app.post("/file/{file_id}/speakers/merge")
+def merge_speakers(
+    file_id: str,
+    source: str = Form(...),
+    target: str = Form(...),
+    base_revision: int = Form(...),
+):
+    """Reassign every segment (and timed word) of one speaker to another.
+
+    The merge is a new immutable TranscriptRevision on top of the canonical
+    transcript; raw ASR and earlier revisions are untouched, so it can be
+    reverted from revision history. Display names are not deleted."""
+    import copy
+
+    if source == target:
+        return JSONResponse(
+            {"error": "choose two different speakers", "code": "same_speaker"}, status_code=400
+        )
+    with session_scope() as session:
+        _serialize_transcript_mutation(session, file_id)
+        r = session.get(PlaudFile, file_id)
+        if r is None:
+            return JSONResponse({"error": "not found", "code": "not_found"}, status_code=404)
+        if _recording_edit_blocked(r):
+            return JSONResponse(
+                {
+                    "error": "recording is processing; try again when it finishes",
+                    "code": "recording_processing",
+                },
+                status_code=409,
+            )
+        settings = get_settings()
+        raw_row = _canonical_raw_row(r, settings)
+        corrected = _canonical_revision(r, raw_row)
+        if corrected is not None:
+            base_segments = corrected.segments
+            base_transcript_id = corrected.base_transcript_id
+            revision_source = corrected.source
+        elif raw_row is not None:
+            base_segments = raw_row.segments
+            base_transcript_id = raw_row.id
+            revision_source = raw_row.source
+        else:
+            return JSONResponse(
+                {"error": "no transcript to edit", "code": "no_transcript"}, status_code=400
+            )
+        current_revision = corrected.revision if corrected is not None else 0
+        if base_revision != current_revision:
+            return JSONResponse(
+                {"error": "transcript changed; reload before saving", "code": "stale_revision"},
+                status_code=409,
+            )
+        valid_speakers = set(_speaker_keys_for_editing(session, r, base_segments))
+        if source not in valid_speakers or target not in valid_speakers:
+            return JSONResponse(
+                {"error": "unknown speaker key", "code": "unknown_speaker"}, status_code=400
+            )
+        segments = copy.deepcopy(base_segments)
+        moved = 0
+        for index, segment in enumerate(segments):
+            words = list(segment.get("words") or [])
+            touched = segment.get("speaker") == source or any(
+                word.get("speaker") == source for word in words
+            )
+            if not touched:
+                continue
+            moved += 1
+            for word in words:
+                if word.get("speaker") == source:
+                    word["speaker"] = target
+            segments[index] = dict(segment) | {
+                "speaker": target if segment.get("speaker") == source else segment.get("speaker"),
+                "words": words,
+            }
+        if not moved:
+            return {"changed": False, "revision": current_revision, "segments": 0}
+        next_revision = max((rev.revision for rev in r.transcript_revisions), default=0) + 1
+        joined = "\n".join(
+            (seg.get("text") or "").strip() for seg in segments if (seg.get("text") or "").strip()
+        )
+        session.add(
+            TranscriptRevision(
+                file_id=file_id,
+                base_transcript_id=base_transcript_id,
+                revision=next_revision,
+                source=revision_source,
+                segments=segments,
+                text=joined,
+                has_speakers=bool(speaker_keys_from_segments(segments)),
+                note=(
+                    f"merged speaker {source} into {target} across {moved} "
+                    f"segment{'s' if moved != 1 else ''}"
+                ),
+                kind="speaker_edit",
+            )
+        )
+        session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+        _queue_transcript_reindex(session, file_id)
+        expected_names = display_names(session, file_id)
+
+    _start_transcript_reindex(
+        file_id,
+        expected_revision=next_revision,
+        expected_speaker_names=expected_names,
+    )
+    return {"changed": True, "revision": next_revision, "segments": moved, "target": target}
 
 
 @app.post("/file/{file_id}/transcript/segments/{idx}")
@@ -4919,3 +5388,15 @@ def restore_summary_version_route(
     # Land back on the note output that was just restored, not the first one.
     note_param = f"&note=sum-{summary_id}" if safe_tab == "notes" else ""
     return RedirectResponse(f"/file/{file_id}?tab={safe_tab}{note_param}", status_code=303)
+
+
+# Library surfaces (whole-library Ask page, search helpers). Included last so
+# their routes never shadow the established pages above.
+from .surfaces import install as _install_surface_helpers  # noqa: E402
+from .surfaces import router as surfaces_router  # noqa: E402
+
+_install_surface_helpers(templates)
+app.include_router(surfaces_router)
+# Template-library items are now built in surfaces.py; the shared helper stays
+# importable here for other pages (e.g. Home) that render template cards.
+_NOTE_TEMPLATE_ITEM = note_template_item

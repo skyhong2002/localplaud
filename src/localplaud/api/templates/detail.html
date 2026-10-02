@@ -2,70 +2,439 @@
 {% block title %}{{ f.filename }} — localplaud{% endblock %}
 {# lineage labels are API data ("raw ASR", "transcript rev N", …); split the
    dynamic revision number out so the prose part stays translatable. #}
+{% macro privacy_badge(boundary) %}<span class="ws-privacy ws-privacy-{{ boundary.privacy if boundary else 'unknown' }}">{% if not boundary or boundary.privacy == 'unknown' %}{{ t('Provider not configured') }}{% elif boundary.privacy == 'local' %}{{ t('Local') }}{% elif boundary.privacy == 'remote' %}{{ t('Remote worker') }}{% else %}{{ t('Cloud') }}{% endif %}</span>{% endmacro %}
+{% macro privacy_note(boundary) %}{% if not boundary or boundary.privacy == 'unknown' %}{{ t('No notes provider is configured for this profile.') }}{% elif boundary.privacy == 'local' %}{{ t('Runs on this host. The transcript does not leave it.') }}{% elif boundary.privacy == 'remote' %}{{ t('Runs on your remote worker. The transcript is sent to that worker.') }}{% else %}{{ t('Runs with a cloud provider. The transcript text is sent to it.') }}{% endif %}{% endmacro %}
 {% macro lineage(label) %}{% if label and label.startswith('transcript rev ') %}{{ t('transcript rev') }} {{ label[15:] }}{% else %}{{ t(label) }}{% endif %}{% endmacro %}
+{% macro anonymous_label(value) -%}{% if value and value.startswith('Speaker ') and value[8:].isdigit() %}{{ t('Speaker {number}').replace('{number}', value[8:]) }}{% else %}{{ value }}{% endif %}{%- endmacro %}
+{# Pushed screen on phones: the workspace header replaces the shell top bar. #}
+{% block mobile_topbar %}{% endblock %}
 {% block body %}
-<div class="shell recording-shell">
+{% set mindmaps = f.summaries | selectattr('template', 'equalto', 'mind_map') | list %}
+{% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
+{# One shared active target keeps the highlighted tab and the initially
+   visible panel in lockstep even if either list's ordering changes. #}
+{% set active_note_target = (('saved-' ~ f.selected_note_id) if f.selected_note_id else (('sum-' ~ notes[0].id) if notes else (('saved-' ~ f.user_notes[0].id) if f.user_notes else none))) %}
+<link rel="stylesheet" href="/static/css/recording.css?v={{ workspace_asset_version }}">
+<link rel="stylesheet" href="/static/css/speaker-suggestions.css?v={{ workspace_asset_version }}">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-rotate-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+</svg>
+<div class="shell recording-shell" data-active-panel="{{ active_tab }}">
   {% set active_id = f.id %}
-  <header class="detail-topbar">
+  <header class="detail-topbar ws-topbar">
     <div class="recording-breadcrumb">
-      <button class="collapse-toggle" type="button" data-collapse-toggle="list" aria-label="{{ t('Hide file list') }}" title="{{ t('Hide file list') }}" aria-controls="recording-file-list" aria-expanded="true"><span class="nav-icon" style="--nav-icon:url('/static/lucide/list-collapse.svg')"></span></button>
-      <a class="recording-crumb-link" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true"><span class="nav-icon" style="--nav-icon:url('/static/lucide/folder.svg')"></span>{{ t('All files') }}</a>
+      <a class="ws-back" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true" aria-label="{{ t('Back to files') }}" title="{{ t('Back to files') }}">{{ icon('chevron-left') }}</a>
+      <button class="collapse-toggle" type="button" data-collapse-toggle="list" aria-label="{{ t('Hide file list') }}" title="{{ t('Hide file list') }}" aria-controls="recording-file-list" aria-expanded="true">{{ icon('list-collapse') }}</button>
+      <a class="recording-crumb-link" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ icon('folder') }}{{ t('All files') }}</a>
       <span class="recording-crumb-separator" aria-hidden="true">›</span>
-      <div class="recording-title-row" id="recording-title-display-row">
-        <h1 id="recording-title-display" title="{{ f.filename }}">{{ f.filename }}</h1>
-        <button class="title-edit" id="edit-recording-title" type="button" aria-label="{{ t('Edit title') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></button>
-      </div>
-      <form id="recording-title-form" class="recording-title-row" hidden>
-        <input id="recording-title" value="{{ f.filename }}" maxlength="512" aria-label="{{ t('Recording title') }}">
-        <button class="icon-action icon-only" type="submit" aria-label="{{ t('Save title') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></span></button>
-        <button class="icon-action icon-only" id="cancel-recording-title" type="button" aria-label="{{ t('Cancel') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
-      </form>
+      <span class="ws-crumb-title" aria-hidden="true">{{ f.filename }}</span>
+    </div>
+    <div class="ws-m-switch" role="group" aria-label="{{ t('Recording workspace') }}">
+      <button type="button" data-m-switch="transcript" aria-pressed="{{ 'true' if active_tab == 'transcript' else 'false' }}">{{ t('Sources') }}</button>
+      <button type="button" data-m-switch="notes" aria-pressed="{{ 'false' if active_tab == 'transcript' else 'true' }}">{{ t('Notes') }}</button>
     </div>
     <div class="recording-actions">
-      <button class="icon-action" id="open-ask-dock" type="button" aria-controls="recording-panel-ask" aria-expanded="false"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span><span class="action-label">{{ t('Ask') }}</span></button>
-      <button class="icon-action" id="open-share" type="button" aria-label="{{ t('Share') }}" title="{{ t('Share') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span><span class="action-label">{{ t('Share') }}</span></button>
-      {% if f.transcript or f.summaries or f.user_notes or f.has_audio %}<button class="icon-action" id="open-export" type="button" aria-label="{{ t('Export') }}" title="{{ t('Export') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span><span class="action-label">{{ t('Export') }}</span></button>{% endif %}
-      <details class="recording-more"><summary class="icon-action icon-only" aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></summary><div class="recording-menu">
-        {% if not f.has_audio and f.origin == 'plaud' and not f.audio_on_demand %}<button id="import-recording-audio" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Import audio') }}</button>{% endif %}
-        {% if f.origin == 'plaud' and not f.is_trash %}<button id="refresh-plaud-cloud" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Refresh Plaud cloud artifacts') }}</button>{% endif %}
+      <button class="icon-action" id="open-share" type="button" data-recording-share aria-label="{{ t('Share') }}" title="{{ t('Share') }}">{{ icon('share') }}<span class="action-label">{{ t('Share') }}</span></button>
+      {% if f.transcript %}<button class="icon-action icon-only" id="open-find" type="button" aria-label="{{ t('Find & replace') }}" title="{{ t('Find & replace') }} (Ctrl+F)">{{ icon('search') }}</button>{% endif %}
+      <details class="recording-more"><summary class="icon-action icon-only" aria-label="{{ t('More actions') }}">{{ icon('more') }}</summary><div class="recording-menu">
+        <button id="menu-edit-title" type="button">{{ icon('pencil') }}{{ t('Edit title') }}</button>
+        {% if not f.has_audio and f.origin == 'plaud' and not f.audio_on_demand %}<button id="import-recording-audio" type="button" data-import-audio>{{ icon('cloud') }}{{ t('Import audio') }}</button>{% endif %}
+        {% if f.origin == 'plaud' and not f.is_trash %}<button id="refresh-plaud-cloud" data-refresh-plaud-cloud type="button">{{ icon('cloud') }}{{ t('Refresh Plaud cloud artifacts') }}</button>{% endif %}
         {% if f.local_title %}<button id="clear-local-title" type="button">{{ t('Use Plaud title') }}</button>{% endif %}
-        <button id="menu-edit-recording-metadata" type="button">{{ t('Folder and tags') }}</button>
-        {% if f.has_audio or f.audio_on_demand %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>{% endif %}
-        <button id="menu-processing-details" type="button">{{ t('Processing details') }}</button>
+        {% if f.transcript %}<button id="menu-find-transcript" type="button">{{ icon('search') }}{{ t('Find in transcript') }} / {{ t('Replace') }}</button>{% endif %}
+        {% if f.speakers %}<button id="menu-name-speakers" type="button">{{ icon('waveform') }}{{ t('Name speakers') }}</button>{% endif %}
+        <button id="menu-edit-recording-metadata" type="button">{{ icon('folder') }}{{ t('Folder and tags') }}</button>
+        {% if f.has_audio or f.audio_on_demand %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ icon('rotate-cw') }}{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ icon('rotate-ccw') }}{{ t('Rebuild all') }}</button>{% endif %}
+        {% if f.has_audio or f.audio_on_demand %}<button id="menu-speech-settings" type="button" data-dialog-open="speech-settings-dialog">{{ icon('waveform') }}{{ t('Speech settings') }}{% if f.speech_overrides %} <span class="chip">{{ t('Custom') }}</span>{% endif %}</button>{% endif %}
+        <button id="menu-processing-details" type="button">{{ icon('activity') }}{{ t('Processing details') }}</button>
       </div></details>
+      <span class="ws-divider" aria-hidden="true"></span>
+      <button class="icon-action ws-ask-button" id="open-ask-dock" type="button" aria-controls="recording-panel-ask" aria-expanded="false" {% if not f.has_local_transcript %}title="{{ t('A local transcript is required first.') }}"{% endif %}>{{ icon('sparkles') }}<span class="action-label">{{ t('Ask') }}</span></button>
     </div>
   </header>
   <div class="detail-body">
   {% include "_filelist.html" %}
   <section class="pane recording-pane{% if f.has_audio or f.audio_on_demand %} has-player{% endif %}"><div class="pane-inner">
-    <div class="recording-header">
+    <div class="recording-header ws-head">
       <div class="recording-heading">
-        {% if f.local_title %}<div class="sub" style="font-size:11.5px;margin:2px 5px">{{ t('Plaud title') }}: {{ f.cloud_filename or t('Untitled') }}</div>{% endif %}
+        <div class="recording-title-row" id="recording-title-display-row">
+          <h1 id="recording-title-display" title="{{ f.filename }}">{{ f.filename }}</h1>
+          <button class="title-edit" id="edit-recording-title" type="button" aria-label="{{ t('Edit title') }}" title="{{ t('Edit title') }}">{{ icon('pencil') }}</button>
+        </div>
+        <form id="recording-title-form" class="recording-title-row" hidden>
+          <input id="recording-title" value="{{ f.filename }}" maxlength="512" aria-label="{{ t('Recording title') }}">
+          <button class="icon-action icon-only" type="submit" aria-label="{{ t('Save title') }}">{{ icon('check') }}</button>
+          <button class="icon-action icon-only" id="cancel-recording-title" type="button" aria-label="{{ t('Cancel') }}">{{ icon('x') }}</button>
+        </form>
+        {% if f.local_title %}<div class="sub ws-cloud-title">{{ t('Plaud title') }}: {{ f.cloud_filename or t('Untitled') }}</div>{% endif %}
         <div class="recording-context">
           <div class="recording-meta">
-            <span>{{ f.start_time_ms | dt }}</span><span>·</span><span>{{ f.duration_ms | dur }}</span>
-            {% if f.status != 'done' %}<span>·</span><span class="st {{ f.status }}" id="recording-state-label" aria-live="polite">{{ t('Generating…') if f.status == 'processing' else t(f.status) }}</span>{% endif %}
+            <span>{{ f.start_time_ms | dt }}</span><span aria-hidden="true">·</span><span>{{ f.duration_ms | dur }}</span>
+            <span aria-hidden="true">·</span><span class="ws-source">{{ t(f.scene_label) if f.origin == 'plaud' else t('Local upload') }}</span>
+            {% if f.status != 'done' %}<span aria-hidden="true">·</span><span class="st {{ f.status }}" id="recording-state-label" aria-live="polite">{{ t('Generating…') if f.status == 'processing' else t(f.status) }}</span>{% endif %}
             {% if auto_skipped_overlong %}<span>·</span><span class="sub" style="font-size:11.5px">{{ t('Skipped automatically: recording reaches the length cap and is likely accidental. Use Import audio / Resume processing to run it anyway.') }}</span>{% endif %}
           </div>
           <div class="recording-org">
             {% if f.folder %}<a class="chip on" href="/?folder={{ f.folder.id }}">{{ f.folder.name }}</a>{% endif %}
             {% for tag in f.tags %}<a class="chip" href="/?tag={{ tag.id }}">{{ tag.name }}</a>{% endfor %}
-            <button type="button" id="edit-recording-metadata" style="border:0;background:none;color:var(--blue);cursor:pointer;font-size:11.5px;padding:2px 4px">{% if f.folder or f.tags %}{{ t('Edit metadata') }}{% else %}{{ t('Add folder or tags') }}{% endif %}</button>
+            <button type="button" id="edit-recording-metadata" class="ws-link-button">{% if f.folder or f.tags %}{{ t('Edit metadata') }}{% else %}{{ t('Add folder or tags') }}{% endif %}</button>
           </div>
         </div>
       </div>
     </div>
-    {% set mindmaps = f.summaries | selectattr('template', 'equalto', 'mind_map') | list %}
-    {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
+    <div class="ws-tabrow">
     <div class="tabs" role="tablist" aria-label="{{ t('Recording workspace') }}">
       <button id="recording-tab-transcript" role="tab" aria-controls="recording-panel-transcript" aria-selected="{{ 'true' if active_tab == 'transcript' else 'false' }}" tabindex="{{ '0' if active_tab == 'transcript' else '-1' }}" data-panel="transcript" class="{% if active_tab == 'transcript' %}on{% endif %}">{{ t('Transcript') }}</button>
-      <button id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' else '-1' }}" data-panel="notes" class="{% if active_tab == 'notes' %}on{% endif %}">{{ t('Meeting notes') }}</button>
+      {% if notes or f.user_notes %}
+      {# Plaud-style flat tab row: every note output is a workspace tab. The
+         first carries the stable #recording-tab-notes id the panel points at. #}
+      {% for s in notes %}<button {% if loop.first %}id="recording-tab-notes" {% else %}id="recording-tab-note-{{ s.id }}" {% endif %}role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' and ('sum-' ~ s.id) == active_note_target else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' and ('sum-' ~ s.id) == active_note_target else '-1' }}" data-panel="notes" data-note-target="sum-{{ s.id }}" class="note-tab {% if active_tab == 'notes' and ('sum-' ~ s.id) == active_note_target %}on{% endif %}" title="{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.created_at %} · {{ s.created_at }}{% endif %}">{{ s.template_name }}{% if s.source in ('cloud', 'plaud') %} <span class="chip plaud-note-chip">Plaud</span>{% endif %}</button>{% endfor %}
+      {% for note in f.user_notes %}<button {% if loop.first and not notes %}id="recording-tab-notes" {% else %}id="recording-tab-saved-{{ note.id }}" {% endif %}role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' and ('saved-' ~ note.id) == active_note_target else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' and ('saved-' ~ note.id) == active_note_target else '-1' }}" data-panel="notes" data-note-target="saved-{{ note.id }}" class="note-tab saved-note-tab {% if active_tab == 'notes' and ('saved-' ~ note.id) == active_note_target %}on{% endif %}" title="{{ t('Editable note') }} · {{ note.title }}">{{ icon('pencil', 'xs') }}{{ note.title }}</button>{% endfor %}
+      {% else %}
+      <button id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' else '-1' }}" data-panel="notes" class="{% if active_tab == 'notes' %}on{% endif %}">{{ t('Notes') }}</button>
+      {% endif %}
       <button id="recording-tab-mindmap" role="tab" aria-controls="recording-panel-mindmap" aria-selected="{{ 'true' if active_tab == 'mindmap' else 'false' }}" tabindex="{{ '0' if active_tab == 'mindmap' else '-1' }}" data-panel="mindmap" class="{% if active_tab == 'mindmap' %}on{% endif %}">{{ t('Mind map') }}</button>
       <button id="recording-tab-ask" role="tab" aria-controls="recording-panel-ask" aria-selected="{{ 'true' if active_tab == 'ask' else 'false' }}" tabindex="{{ '0' if active_tab == 'ask' else '-1' }}" data-panel="ask" class="{% if active_tab == 'ask' %}on{% endif %}">{{ t('Ask') }}</button>
     </div>
+    {% if not f.is_trash %}<details class="note-add-menu ws-tab-add"><summary class="note-tab note-add-tab" aria-label="{{ t('New note') }}" title="{{ t('New note') }}">{{ icon('plus', 'xs') }}</summary><div class="note-add-popover" role="menu"><button type="button" data-open-note-generation role="menuitem">{{ icon('sparkles') }}{{ t('Generate AI note') }}</button><button type="button" data-open-manual-note role="menuitem">{{ icon('note') }}{{ t('Blank note') }}</button></div></details>{% endif %}
+    </div>
     <div id="reprocess-msg" class="sub" aria-live="polite" style="margin:6px 0; font-size:13px">{% if f.audio_on_demand %}{{ t('Processing is complete. Audio is stored in Plaud and downloads automatically when played, exported, or reprocessed.') }}{% elif not f.has_audio and f.origin == 'plaud' %}{{ t('Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.') }}{% endif %}</div>
-    {% if f.error %}<div class="recording-alert"><span class="nav-icon" style="--nav-icon:url('/static/lucide/triangle-alert.svg')"></span><div class="recording-alert-body"><strong>{{ t('Processing paused') }}</strong><div class="sub" style="font-size:11.5px;margin-top:3px">{% if f.retry.exhausted %}{{ t('Resume with the active AI profile and a fresh retry budget.') }}{% elif f.retry.next_at %}{{ t('Automatic retry scheduled for') }} {{ f.retry.next_at }}.{% else %}{{ t('Resume the missing or failed stages when ready.') }}{% endif %}</div><details class="technical-error"><summary>{{ t('Technical details') }}</summary><div>{{ f.error }}</div></details></div>{% if f.has_audio %}<div class="recording-alert-actions"><button class="icon-action" hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML">{{ t('Resume') }}</button></div>{% endif %}</div>{% endif %}
+    {% if f.error and notes %}<details class="recording-recovery" style="margin:8px 0;color:var(--muted);font-size:12px"><summary style="cursor:pointer">{{ t('Processing details') }} · {{ t('Processing paused') }}</summary>{% endif %}
+    {% if f.error %}<div class="recording-alert">{{ icon('alert') }}<div class="recording-alert-body"><strong>{{ t('Processing paused') }}</strong><div class="sub" style="font-size:11.5px;margin-top:3px">{% if f.retry.exhausted %}{{ t('Resume with the active AI profile and a fresh retry budget.') }}{% elif f.retry.next_at %}{{ t('Automatic retry scheduled for') }} {{ f.retry.next_at }}.{% else %}{{ t('Resume the missing or failed stages when ready.') }}{% endif %}</div><details class="technical-error"><summary>{{ t('Technical details') }}</summary><div>{{ f.error }}</div></details></div>{% if f.has_audio %}<div class="recording-alert-actions"><button class="icon-action" hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML">{{ t('Resume') }}</button></div>{% endif %}</div>{% endif %}
+    {% if f.error and notes %}</details>{% endif %}
 
+    <div class="recording-workspace-layout">
+      <main class="recording-workspace-main">
+    <div class="tabpanel" id="recording-panel-transcript" role="tabpanel" aria-labelledby="recording-tab-transcript" data-panel="transcript" {% if active_tab != 'transcript' %}hidden{% endif %}>
+      {% if segment_edit_error %}<div class="recording-alert" role="alert" tabindex="-1" data-segment-edit-error>{{ icon('alert') }}<div class="recording-alert-body"><strong>{{ t('Could not save transcript correction') }}</strong><div class="sub" style="font-size:11.5px;margin-top:3px">{{ t(segment_edit_error) }}</div></div></div>{% endif %}
+      {% if f.transcript %}
+      <div class="ws-m-sources">
+        <div class="ws-m-subtabs"><span class="on">{{ t('Transcript') }}</span></div>
+        {% if f.has_audio or f.audio_on_demand %}
+        <div class="ws-m-player">
+          <button type="button" class="ws-m-play" data-m-play aria-label="{{ t('Play') }}">{{ icon('play') }}</button>
+          <span class="ws-m-time" data-m-time>{{ (f.duration_ms | dur) if f.duration_ms else '0:00' }}</span>
+          <button type="button" class="ws-m-expand" data-transcript-expand aria-label="{{ t('Open full transcript') }}" title="{{ t('Open full transcript') }}">{{ icon('list-collapse') }}</button>
+        </div>
+        {% endif %}
+      </div>
+      {% if f.has_local_transcript %}
+      <section class="ws-outline" data-outline aria-labelledby="ws-outline-title">
+        <div class="ws-outline-head"><h3 id="ws-outline-title">{{ t('Outline') }}</h3><span class="sub ws-outline-prov" data-outline-provenance></span></div>
+        <p data-outline-status role="status">{{ t('Loading outline…') }}</p>
+        <ol class="ws-outline-list" data-outline-list></ol>
+        <div class="ws-outline-controls">
+          <label>{{ t('Outline method') }}
+            <select data-outline-method class="select">
+              <option value="time_slices">{{ t('Time sections · no AI') }}</option>
+              <option value="llm">{{ t('Topic chapters · configured AI') }}</option>
+            </select>
+          </label>
+          <button type="button" class="btn sec" data-outline-generate disabled>{{ t('Generate outline') }}</button>
+          <button type="button" class="btn sec" data-outline-refresh hidden>{{ t('Retry') }}</button>
+        </div>
+        <p class="sub" data-outline-provider>{{ t('Time sections are generated locally without a model.') }}</p>
+        <button type="button" class="btn sec ws-outline-more" data-transcript-expand hidden>{{ t('Open full transcript') }}</button>
+      </section>
+      {% endif %}
+      <div class="ws-chapter-card" data-chapter-card hidden>
+        <button type="button" class="ws-chapter-back" data-transcript-collapse aria-label="{{ t('Back') }}">{{ icon('chevron-left') }}</button>
+        <button type="button" class="ws-m-play" data-m-play aria-label="{{ t('Play') }}">{{ icon('play') }}</button>
+        <span class="ws-chapter-text"><span class="ws-m-time" data-m-time>0:00</span><strong data-chapter-title></strong></span>
+      </div>
+      {% endif %}
+      {% if f.transcript or f.imported_transcript %}
+      {% if f.transcript %}
+      {% if f.diarization.degraded %}
+      <div class="recording-alert ws-degraded" role="status" data-diarization-degraded>
+        {{ icon('alert') }}
+        <div class="recording-alert-body">
+          <strong>{{ t('Speaker labels are unavailable') }}</strong>
+          <div class="sub">{% if f.diarization.status in ('failed', 'degraded') %}{{ t('Speaker diarization failed or was unavailable, so this transcript is not separated by speaker. The text is usable; resume processing to add speakers.') }}{% elif f.diarization.status in ('pending', 'running') %}{{ t('Speaker diarization has not finished yet. Speaker labels will appear when it completes.') }}{% else %}{{ t('Speaker diarization did not run for this transcript. The text is usable, but it is not separated by speaker.') }}{% endif %}</div>
+          {% if f.diarization.error %}<details class="technical-error"><summary>{{ t('Technical details') }}</summary><div>{{ f.diarization.error }}</div></details>{% endif %}
+        </div>
+        {% if (f.has_audio or f.audio_on_demand) and f.diarization.status not in ('pending', 'running') %}<div class="recording-alert-actions"><button class="icon-action" hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML">{{ t('Resume') }}</button></div>{% endif %}
+      </div>
+      {% endif %}
+      <div class="transcript-toolbar">
+        {% if f.has_corrected %}
+        <div class="transcript-view-notice" aria-label="{{ t('Transcript view') }}">
+          {% if f.transcript.kind == 'raw ASR' %}<span>{{ t('Viewing the raw transcript.') }}</span><a href="/file/{{ f.id }}?view=corrected&amp;tab=transcript&amp;return_to={{ return_to_param }}">{{ t('Back to polished view') }}</a><span class="visually-hidden">{{ t('raw ASR') }}</span>{% else %}<span>{{ t('Transcript rechecked against audio.') if f.speech_cleanup else t('Transcript polished.') }}</span><a href="/file/{{ f.id }}?view=raw&amp;tab=transcript&amp;return_to={{ return_to_param }}">{{ t('View raw transcript') }}</a><span class="visually-hidden">{{ t('Corrected') }} (rev {{ f.corrected_revision }})</span>{% endif %}
+        </div>
+        {% else %}<span class="visually-hidden">{{ t('raw ASR') }}</span>
+        {% endif %}
+        {% if f.preview_revision %}<span class="chip">{{ t('Revision') }} {{ f.preview_revision }} {{ t('preview') }}</span>{% endif %}
+        <div class="transcript-tools">
+          <details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Find in transcript') }}">{{ icon('search') }}</summary><div class="transcript-popover search-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}">{{ icon('x') }}</button>
+            <div style="display:flex;gap:7px;align-items:center"><input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript') }}"><button class="icon-action icon-only" id="find-previous" type="button" aria-label="{{ t('Previous') }}">↑</button><button class="icon-action icon-only" id="find-next" type="button" aria-label="{{ t('Next') }}">↓</button></div><span id="find-count" class="sub" style="font-size:11px">0 {{ t('results') }}</span>
+            {% if f.can_edit %}<div id="replace-row" style="display:grid;gap:7px;margin-top:8px" hidden><input id="transcript-replace" class="search-input" type="text" placeholder="{{ t('Replace with') }}"><label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> {{ t('Match case') }}</label><div><button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">{{ t('Replace all') }}</button> <span id="replace-result" class="sub" style="font-size:12px"></span></div></div><button type="button" id="toggle-replace" class="text-action">{{ t('Replace') }}</button>{% endif %}
+          </div></details>
+          {% if f.revisions %}<details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Revision history') }}">{{ icon('history') }}</summary><div class="transcript-popover history-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}">{{ icon('x') }}</button><strong>{{ t('Revision history') }} · {{ f.revisions | length }}</strong>{% for revision in f.revisions %}<div class="revision-row"><div><a href="/file/{{ f.id }}?view=corrected&amp;revision={{ revision.revision }}&amp;tab=transcript&amp;return_to={{ return_to_param }}"><strong>{{ t('Revision') }} {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">{{ t('Current') }}</span>{% endif %}<div class="sub" style="font-size:11px">{% if revision.reason %}{% if revision.reason.kind == 'text_and_speaker' %}{{ t('Edited text and reassigned segment') }}{% elif revision.reason.kind == 'speaker_normalized' %}{{ t('Normalized speaker attribution for segment') }}{% elif revision.reason.kind == 'speaker_merge' %}{{ t('Merged speakers across segments') }}{% else %}{{ t('Reassigned segment') }}{% endif %} {{ revision.reason.segment }}{% if revision.reason.kind == 'speaker_normalized' %}: {{ revision.reason.to or t('No speaker') }}{% else %}: {{ revision.reason.from or t('No speaker') }} → {{ revision.reason.to or t('No speaker') }}{% endif %}{% else %}{{ t(revision.note) }}{% endif %} · {{ revision.created_at }}</div></div>{% if not revision.current %}<form method="post" action="/file/{{ f.id }}/transcript/revisions/{{ revision.revision }}/restore" onsubmit="return confirm({{ t('Restore this revision as a new revision? Current history will be preserved.')|tojson|forceescape }})"><input type="hidden" name="base_revision" value="{{ f.corrected_revision }}"><button class="icon-action" type="submit">{{ t('Restore') }}</button></form>{% endif %}</div>{% endfor %}</div></details>{% endif %}
+        </div>
+      </div>
+      {% if f.speakers %}
+      <div class="legend" id="legend" aria-label="{{ t('Speakers') }}">
+        {% for sp in f.speakers %}
+        <details class="speaker-pill"><summary><span class="swatch" data-spk="{{ sp.key }}"></span><span>{{ sp.name or anonymous_label(sp.display_label or sp.key) }}</span>{{ icon('pencil') }}</summary><form class="speaker-editor" method="post" action="/file/{{ f.id }}/speakers"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}">{{ icon('x') }}</button><input type="hidden" name="key" value="{{ sp.key }}"><input type="hidden" name="return_to" value="{{ return_to }}"><input type="hidden" name="t" value=""><label class="sub">{{ t('Speaker name') }}<input class="spk-name" type="text" name="name" value="{{ sp.name or '' }}" placeholder="{{ sp.name or anonymous_label(sp.display_label or sp.key) }}" aria-label="{{ t('Display name for') }} {{ sp.name or anonymous_label(sp.display_label or sp.key) }}"></label><button class="btn" type="submit">{{ t('Save') }}</button>{% if f.can_edit and f.speakers|length > 1 %}<div class="ws-merge"><label class="sub">{{ t('Merge into') }}<select class="search-input" data-merge-target aria-label="{{ t('Merge into') }}">{% for other in f.speakers if other.key != sp.key %}<option value="{{ other.key }}">{{ other.name or anonymous_label(other.display_label or other.key) }}</option>{% endfor %}</select></label><button class="btn sec" type="button" data-merge-speaker="{{ sp.key }}">{{ t('Merge') }}</button></div>{% endif %}<span class="sub" data-speaker-status role="status" aria-live="polite"></span></form></details>
+        {% endfor %}
+        {% set suggestion_count = f.speakers | selectattr('suggestion') | rejectattr('name') | list | length %}{% if suggestion_count %}<button type="button" class="ws-suggestion-hint" id="speaker-suggestion-hint" aria-haspopup="dialog" aria-controls="name-speakers-backdrop" data-count="{{ suggestion_count }}">{{ icon('users', 'sm') }}<span data-suggestion-count>{{ t('1 suggested name') if suggestion_count == 1 else t('{count} suggested names').replace('{count}', suggestion_count | string) }}</span></button>{% endif %}
+      </div>
+      {% endif %}
+      <div id="transcript" hx-get="/file/{{ f.id }}/transcript-page?view={{ 'raw' if f.transcript.kind == 'raw ASR' else 'corrected' }}{% if f.preview_revision %}&amp;revision={{ f.preview_revision }}{% endif %}&amp;return_to={{ return_to_param }}&amp;tab={{ active_tab }}{% if playback_second %}&amp;t={{ playback_second }}{% endif %}"
+        hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+        <div class="skeleton-transcript" aria-label="{{ t('Loading transcript…') }}">
+          {% for width in [85,68,92,74,88] %}<div><span class="skeleton-avatar"></span><span class="skeleton-line" style="width:{{ width }}%"></span></div>{% endfor %}
+        </div>
+      </div>
+      <button class="ws-follow-pill" id="ws-follow" type="button" hidden>{{ icon('waveform') }}{{ t('Back to current') }}</button>
+      <div class="ws-speaker-sheet" id="ws-speaker-sheet" role="dialog" aria-modal="false" aria-labelledby="ws-speaker-sheet-title" hidden>
+        <div class="ws-sheet-grip" aria-hidden="true"></div>
+        <div class="ws-sheet-head"><strong id="ws-speaker-sheet-title">{{ t('Name this speaker') }}</strong><button class="popover-close" type="button" data-sheet-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+        <form class="ws-sheet-form" data-sheet-form>
+          <input class="search-input" id="ws-speaker-name" name="name" maxlength="128" autocomplete="off" aria-label="{{ t('Speaker name') }}">
+          <div class="ws-sheet-section">
+            <span class="sub">{{ t('Speakers in this recording') }}</span>
+            <div class="ws-speaker-choices" data-sheet-choices role="group" aria-label="{{ t('Speakers in this recording') }}"></div>
+          </div>
+          {% if f.can_edit %}
+          <fieldset class="ws-sheet-scope">
+            <legend class="visually-hidden">{{ t('Apply to') }}</legend>
+            <label><input type="radio" name="scope" value="segment">{{ t('Apply to this paragraph') }}</label>
+            <label><input type="radio" name="scope" value="all" checked>{{ t('Apply to all paragraphs from this speaker') }}</label>
+          </fieldset>
+          {% endif %}
+          <span class="sub ws-hint">{{ t('Using another speaker name for all paragraphs merges the two speakers as a new transcript revision. Search and Ask re-index automatically; regenerate notes to update them.') }}</span>
+          <div class="ws-dialog-actions"><button class="btn sec" type="button" data-sheet-close>{{ t('Cancel') }}</button><button class="btn ws-sheet-save" type="submit">{{ t('Save') }}</button></div>
+          <span class="sub" data-sheet-status role="status" aria-live="polite"></span>
+        </form>
+      </div>
+      {% endif %}
+      {% if f.imported_transcript %}
+      <details class="panel" style="margin:12px 0 0;padding:10px 12px" {% if not f.transcript %}open{% endif %}>
+        <summary style="cursor:pointer;font-weight:650">{{ t('Plaud import') }} <span class="sub" style="font-size:11px">· {{ t('migration and comparison only') }}</span></summary>
+        <div class="sub" style="margin:9px 0 12px">{{ t('Imported from Plaud for migration/comparison. Independent processing does not use this transcript as its canonical result.') }}</div>
+        <div class="transcript-import" data-imported-transcript-loader hx-get="/file/{{ f.id }}/transcript-page?source=imported" hx-trigger="{{ 'load' if not f.transcript else 'load-imported once' }}" hx-target="this" hx-swap="innerHTML">
+          <div class="skeleton-transcript" aria-label="{{ t('Loading transcript…') }}">{% for width in [76,91,64,83] %}<div><span class="skeleton-avatar"></span><span class="skeleton-line" style="width:{{ width }}%"></span></div>{% endfor %}</div>
+        </div>
+      </details>
+      {% endif %}
+      {% else %}
+      {% set generation_pending = f.has_audio and (f.status == 'processing' or (request.query_params.get('queued') and f.status in ('downloaded', 'downloading', 'processing'))) %}
+      {% if generation_pending %}
+      <div class="empty generate-empty" data-generation-progress>
+        {{ icon('rotate-cw', none, cls='empty-icon generate-progress-icon') }}
+        <strong class="empty-title" id="generation-progress-title">{{ t('Generating…') if f.status == 'processing' else t('Queued for generation') }}</strong>
+        <span class="sub empty-sub" aria-live="polite" id="generation-progress-note">{{ t('This page updates automatically when results are ready.') }}</span>
+      </div>
+      {% elif f.has_audio %}
+      <div class="empty generate-empty">
+        {{ icon('sparkles', none, cls='empty-icon') }}
+        <strong class="empty-title">{{ t('Ready to generate') }}</strong>
+        <span class="sub empty-sub">{{ t('The transcript, notes, and mind map will appear here after generation.') }}</span>
+        <button class="btn generate-cta" type="button" data-open-generate>{{ icon('sparkles') }}{{ t('Generate') }}</button>
+      </div>
+      {% elif f.origin == 'plaud' %}
+      <div class="empty generate-empty">
+        {{ icon('cloud', none, cls='empty-icon') }}
+        <strong class="empty-title">{{ t('Audio not imported yet') }}</strong>
+        <span class="sub empty-sub">{{ t('Import the original audio from Plaud first — everything else is generated here afterwards.') }}</span>
+        <button class="btn generate-cta" type="button" data-import-audio>{{ icon('cloud') }}<span class="action-label">{{ t('Import audio') }}</span></button>
+      </div>
+      {% else %}
+      <div class="empty">{{ icon('waveform', none, cls='empty-icon') }}{{ t('Transcript is not available yet.') }}</div>
+      {% endif %}
+      {% endif %}
+    </div>
+
+    <div class="tabpanel" id="recording-panel-notes" role="tabpanel" aria-labelledby="recording-tab-notes" data-panel="notes" {% if active_tab != 'notes' %}hidden{% endif %}>
+      {% if not f.is_trash or notes or f.user_notes %}
+      <div class="ws-m-notebar">
+        {% if notes or f.user_notes or mindmaps %}<div class="ws-note-picker">
+          <button type="button" class="ws-note-picker-btn" data-note-picker aria-haspopup="menu" aria-expanded="false" aria-controls="ws-note-picker-menu"><span data-note-picker-label>{{ t('Notes') }}</span>{{ icon('chevron-down') }}</button>
+          <div class="ws-note-picker-menu" id="ws-note-picker-menu" role="menu" hidden></div>
+        </div>{% endif %}
+        {% if not f.is_trash %}<details class="note-add-menu ws-m-add"><summary class="note-add-tab" aria-label="{{ t('New note') }}" title="{{ t('New note') }}">{{ icon('plus', 'xs') }}</summary><div class="note-add-popover" role="menu"><button type="button" data-open-note-generation role="menuitem">{{ icon('sparkles') }}{{ t('Generate AI note') }}</button><button type="button" data-open-manual-note role="menuitem">{{ icon('note') }}{{ t('Blank note') }}</button></div></details>{% endif %}
+      </div>
+      {% endif %}
+      <p class="ws-note-stale" data-speaker-note-warning role="status" {% if not f.speaker_note_unresolved %}hidden{% endif %}>{{ t('Some older notes contain names that could not be linked safely. Review them before relying on speaker attribution.') }}</p>
+      <h2 class="recording-reading-title" title="{{ f.filename }}">{{ f.filename }}</h2>
+      {# QA W2: generation lives in the tab row's + menu (and the empty-state CTA);
+         this disclosure only hosts the dialog trigger, so it never renders as a
+         second navigation level above the note. #}
+      <details class="note-generation-settings" id="note-generation-settings" {% if not notes and not f.user_notes %}open {% endif %}hidden><summary>{{ t('Generate notes') }}</summary>
+      <div class="notes-toolbar ws-notes-toolbar">
+        {% set current_template = f.note_templates | selectattr('key', 'equalto', f.note_template_key) | first %}
+        <div class="ws-notes-template sub">{{ t('Template') }}: <strong>{% if f.note_template_key == 'auto' %}{{ t('Auto') }}{% elif current_template %}{{ current_template.name }} · v{{ current_template.version }}{% else %}{{ f.note_template_key }}{% endif %}</strong></div>
+        <button class="btn sec" type="button" data-open-note-dialog {% if not f.has_local_transcript %}disabled{% endif %}>{{ icon('sparkles') }}{{ t('Regenerate notes') if notes else t('Generate notes') }}</button>
+        <span class="notes-status sub" data-notes-status>{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% endif %}</span>
+      </div>
+      </details>
+      {% if f.notes_state.status == 'failed' %}
+      <div class="recording-alert ws-notes-failed" role="alert" data-notes-failed>
+        {{ icon('alert') }}
+        <div class="recording-alert-body">
+          <strong>{{ t('Notes could not be generated') }}</strong>
+          <div class="sub">{{ t('The transcript is safe. Try again, or choose another template or AI profile.') }}{% if f.notes_state.provider %} · {{ f.notes_state.provider }}{% if f.notes_state.model %}:{{ f.notes_state.model }}{% endif %}{% endif %}</div>
+          {% if f.notes_state.error %}<details class="technical-error"><summary>{{ t('Technical details') }}</summary><div>{{ f.notes_state.error }}</div></details>{% endif %}
+        </div>
+        {% if f.has_local_transcript and not f.is_trash %}<div class="recording-alert-actions"><button class="icon-action" type="button" data-open-note-dialog>{{ t('Try again') }}</button></div>{% endif %}
+      </div>
+      {% elif f.notes_state.status in ('pending', 'running') and f.status == 'processing' %}
+      <div class="ws-progress-card" data-generation-progress data-static-title role="status">
+        {{ icon('rotate-cw', none, cls='generate-progress-icon') }}
+        <div><strong id="generation-progress-title">{{ t('Generating notes…') }}</strong><div class="sub" id="generation-progress-note">{{ t('This page updates automatically when results are ready.') }}</div></div>
+        <span class="ws-progress-bar" aria-hidden="true"><span></span></span>
+      </div>
+      {% endif %}
+      {% if notes or f.user_notes %}
+    {% for s in notes %}
+    <div class="note-panel" data-note-panel="sum-{{ s.id }}" {% if ('sum-' ~ s.id) != active_note_target %}hidden{% endif %}>
+      <p class="ws-note-stale" data-note-stale role="status" {% if not s.stale %}hidden{% endif %}>{{ t('This note is out of date. You can still read it; regenerate it to include transcript changes.') }}</p>
+      <div class="ws-note-head">
+        <div class="ws-provenance sub" data-note-provenance>{% if s.source in ('cloud', 'plaud') %}<span class="chip plaud-note-chip">Plaud</span> · {{ t('Read-only') }}{% else %}<span class="ws-prov-template">{{ icon('template') }}{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}</span>{% if s.provider %}<span class="ws-prov-model" title="{{ t('Generated by') }}">{{ icon('sparkles') }}{{ s.provider }}{% if s.model %}:{{ s.model }}{% endif %}</span>{% endif %}{% if s.created_at %}<span>{{ s.created_at }}</span>{% endif %}<span>{{ t('Generated from') }} {{ lineage(s.lineage_label) }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}</span>{% if s.restored_from_revision %}<span>{{ t('restored from version') }} {{ s.restored_from_revision }}</span>{% endif %}{% endif %}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex:none">
+          {% if s.source == 'local' %}
+          {% set history_summary = s %}{% set history_tab = 'notes' %}{% include '_note_history.html' %}
+          <button class="btn sec" type="button" data-summary-edit="{{ s.id }}" style="padding:6px 9px">{{ t('Edit') }}</button>
+          {% endif %}
+        </div>
+      </div>
+      {% if s.source in ('cloud', 'plaud') and ('plaud://image?' in s.content_md or s.unavailable_images) %}<p class="sub cloud-image-notice" role="note">{{ t('A Plaud image is unavailable through the official interface or its link has expired. The original text is shown below.') }}</p>{% endif %}
+      <div class="md" data-generated-note-prose>{{ s.content_md | markdown }}</div>
+      <script>
+      document.currentScript.previousElementSibling.querySelectorAll('a[href]').forEach(link=>{
+        const href=link.getAttribute('href');
+        if(!href.startsWith('/file/'))return;
+        const url=new URL(href,location.href);
+        if(url.origin===location.origin&&/^\/file\/[A-Za-z0-9_-]+$/.test(url.pathname)&&url.searchParams.has('t')&&/^(?:\d+:)?\d{2}:\d{2}$/.test(link.textContent.trim()))link.remove();
+      });
+      </script>
+      {% if s.source == 'local' %}<p class="ws-template-used">{{ t('Template used') }}: <a href="/templates">{{ s.template_name }}</a>{% if s.template_version %} · v{{ s.template_version }}{% endif %}</p>{% endif %}
+    </div>
+    {% endfor %}
+
+    {% for note in f.user_notes %}
+    <div class="note-panel" data-note-panel="saved-{{ note.id }}" {% if ('saved-' ~ note.id) != active_note_target %}hidden{% endif %}>
+      <div class="saved-note-head" style="margin-bottom:8px">
+        <div class="sub" style="font-size:12px">{{ t(note.source_label) }}</div>
+        <div class="saved-note-actions">
+          <span class="sub" data-note-action-status="{{ note.id }}" role="status" aria-live="polite"></span>
+          <button class="btn sec" type="button" data-note-copy="{{ note.id }}" style="padding:6px 9px">{{ t('Copy') }}</button>
+          <a class="btn sec" href="/api/notes/{{ note.id }}/export.md" style="padding:6px 9px">{{ t('Export') }}</a>
+          <button class="icon-action icon-only" type="button" data-user-note-history="{{ note.id }}" data-note-version="{{ note.version }}" data-note-title="{{ note.title }}" data-note-return="/file/{{ f.id }}?tab=notes&amp;note_id={{ note.id }}&amp;history_restored={{ note.id }}" title="{{ t('Version history') }}" aria-label="{{ t('Version history') }} · {{ note.title }}">{{ icon('history') }}</button><span class="chip">v{{ note.version }}</span>
+          <button class="btn sec" type="button" data-note-edit="{{ note.id }}" style="padding:6px 9px">{{ t('Edit') }}</button>
+          <button class="btn sec" type="button" data-note-delete="{{ note.id }}" data-note-source="{{ note.source_type }}" style="padding:6px 9px;color:var(--red)">{{ t('Delete') }}</button>
+        </div>
+      </div>
+      <div class="md" data-workspace-note-body>{{ note.content_md | markdown }}</div>
+      <form data-workspace-note-form="{{ note.id }}" hidden style="display:grid;gap:8px;margin-top:10px">
+        <input type="hidden" name="base_version" value="{{ note.version }}">
+        <input class="search-input" name="title" value="{{ note.title }}" maxlength="200" required>
+        <textarea class="search-input" name="content_md" rows="12" maxlength="200000" required style="width:100%;resize:vertical">{{ note.content_md }}</textarea>
+        <div><button class="btn" type="submit">{{ t('Save') }}</button> <button class="btn sec" type="button" data-note-cancel="{{ note.id }}">{{ t('Cancel') }}</button> <span class="sub" data-note-status></span></div>
+      </form>
+      {% if note.citations %}<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px">{% for citation in note.citations %}<a class="chip" href="/file/{{ citation.file_id }}{% if citation.start is not none %}?t={{ citation.start }}{% endif %}">{{ citation.start | mmss }}</a>{% endfor %}</div>{% endif %}
+    </div>
+    {% endfor %}
+      {% else %}
+      {% set notes_generating = f.notes_state.status in ('pending', 'running') and f.status == 'processing' %}
+      <div class="empty generate-empty ws-notes-empty">
+        {{ icon('note', none, cls='empty-icon') }}
+        <strong class="empty-title">{{ t('No notes yet.') }}</strong>
+        <span class="sub empty-sub">{% if f.has_local_transcript %}{{ t('Create your own note or choose a template to generate one from the transcript.') }}{% else %}{{ t('Create a note now. Generated notes become available after a local transcript exists.') }}{% endif %}</span>
+        {% if not f.is_trash %}
+        {# One primary entry: the Generate sheet (auto/custom, template, AI
+           profile and privacy). Manual notes and Plaud import are secondary. #}
+        {% if f.has_local_transcript and not notes_generating %}<button class="btn generate-cta ws-generate-primary" type="button" data-open-note-dialog>{{ icon('sparkles') }}{{ t('Generate') }}</button>{% endif %}
+        <div class="ws-empty-secondary"><button class="text-action" type="button" data-open-manual-note>{{ t('New note') }}</button>
+        {% if f.origin == 'plaud' %}<div class="cloud-import-empty"><p class="sub">{{ t('Already generated notes in Plaud? Import them here with their original content and Plaud source label.') }}</p><button class="text-action" type="button" data-refresh-plaud-cloud>{{ t('Import Plaud notes') }}</button><p class="sub" data-cloud-import-status role="status" aria-live="polite"></p></div>{% endif %}</div>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if mindmaps %}
+      <button class="ws-mindmap-card" type="button" data-panel-link="mindmap">
+        <span class="ws-mindmap-card-head"><strong>{{ t('Mind map') }}</strong>{{ icon('share') }}</span>
+        <span class="sub">{{ t('Open the full mind map to pan, zoom, and collapse branches.') }}</span>
+      </button>
+      {% endif %}
+    </div>
+
+    <div class="tabpanel" id="recording-panel-mindmap" role="tabpanel" aria-labelledby="recording-tab-mindmap" data-panel="mindmap" {% if active_tab != 'mindmap' %}hidden{% endif %}>
+      {% if mindmaps %}
+      <div class="mindmap-toolbar">
+        <div><strong>{{ t('Mind map') }}</strong><div class="sub" style="font-size:11.5px">{% if mindmaps[-1].provider %}{{ mindmaps[-1].provider }}{% if mindmaps[-1].model %}:{{ mindmaps[-1].model }}{% endif %} · {% endif %}{% if mindmaps[-1].created_at %}{{ mindmaps[-1].created_at }} · {% endif %}{{ t('Generated from') }} {{ lineage(mindmaps[-1].lineage_label) }}{% if mindmaps[-1].restored_from_revision %} · {{ t('restored from version') }} {{ mindmaps[-1].restored_from_revision }}{% endif %}</div></div>
+        <div class="mindmap-zoom">
+          <button class="icon-action icon-only" id="mm-zoom-out" type="button" aria-label="{{ t('Zoom out') }}">{{ icon('minus') }}</button>
+          <input id="mm-zoom" type="range" min="15" max="140" value="100" aria-label="{{ t('Mind map zoom') }}">
+          <button class="icon-action icon-only" id="mm-zoom-in" type="button" aria-label="{{ t('Zoom in') }}">{{ icon('plus') }}</button>
+          <button class="icon-action" id="mm-fit" type="button">{{ t('Fit') }}</button>
+          <button class="icon-action" id="mm-toggle-all" type="button" aria-pressed="false">{{ t('Collapse all') }}</button>
+          <button class="icon-action" id="mm-fullscreen" type="button" aria-pressed="false">{{ t('Full screen') }}</button>
+          <a class="icon-action" href="/file/{{ f.id }}/export/mind-map.png">{{ icon('download') }}{{ t('Export') }}</a>
+          {% set history_summary = mindmaps[-1] %}{% set history_tab = 'mindmap' %}{% include '_note_history.html' %}
+        </div>
+      </div>
+      <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
+      <div id="mindmap-viewport" class="mindmap-viewport" tabindex="0" aria-label="{{ t('Mind map canvas. Drag to pan, pinch or Ctrl+scroll to zoom.') }}"><div id="mindmap-tree" class="mindmap-tree"></div></div>
+      {% elif f.mind_map_out_of_date %}
+      {% if f.mind_map_rebuild_in_progress %}
+      <div class="empty generate-empty" data-generation-progress data-static-title>
+        {{ icon('rotate-cw', none, cls='empty-icon generate-progress-icon') }}
+        <strong class="empty-title" id="generation-progress-title">{{ t('Rebuilding mind map…') }}</strong>
+        <span class="sub empty-sub" aria-live="polite" id="generation-progress-note">{{ t('This page updates automatically when results are ready.') }}</span>
+      </div>
+      {% elif f.mind_map_rebuild_available %}
+      <div class="empty generate-empty">
+        {{ icon('rotate-cw', none, cls='empty-icon') }}
+        <strong class="empty-title">{{ t('Mind map is out of date.') }}</strong>
+        <span class="sub empty-sub">{{ t('The notes it was built from have changed. Rebuild it from the current notes — the notes stay untouched and the previous mind map is kept in version history.') }}</span>
+        {% if f.mind_map_rebuild_error %}<span class="sub empty-sub" role="status" style="color:var(--red)">{{ t('The last rebuild failed:') }} {{ f.mind_map_rebuild_error }}</span>{% endif %}
+        <button class="btn generate-cta" type="button" id="rebuild-mindmap">{{ icon('rotate-cw') }}{{ t('Try the rebuild again') if f.mind_map_rebuild_error else t('Rebuild mind map') }}</button>
+        <span id="mindmap-rebuild-result" class="sub" aria-live="polite"></span>
+      </div>
+      {% else %}
+      <div class="empty generate-empty">
+        {{ icon('rotate-cw', none, cls='empty-icon') }}
+        <strong class="empty-title">{{ t('Mind map is out of date.') }}</strong>
+        <span class="sub empty-sub">{{ t('The notes or transcript it was built from have changed. Regenerate notes to rebuild it; the previous mind map stays in version history.') }}</span>
+      </div>
+      {% endif %}
+      {% else %}
+      <div class="empty">{{ icon('sparkles', none, cls='empty-icon') }}{{ t('Mind map is not available yet.') }}</div>
+      {% endif %}
+    </div>
+
+      </main>
+    <aside class="tabpanel ask-dock" id="recording-panel-ask" role="tabpanel" aria-labelledby="recording-tab-ask" data-panel="ask" {% if active_tab != 'ask' %}hidden{% endif %}>
+      <div class="ask-dock-header"><strong class="ask-dock-title">{{ t('Ask') }}</strong><div class="ask-dock-actions"><button class="icon-action" type="button" data-open-ask-history>{{ icon('history') }}{{ t('History') }}</button><button class="icon-action icon-only ask-dock-close" id="close-ask-dock" type="button" aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div></div>
+      <form class="ask" data-ask-request data-ask-status="file-ask-status" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-sync="#file-answer:drop" hx-swap="innerHTML"
+            hx-indicator="#file-ask-spin">
+        <input type="text" data-ask-question name="q" id="ask-q" placeholder="{{ t('Ask a question about this recording…') }}"
+          autocomplete="off" required {% if not f.has_local_transcript %}disabled{% endif %}>
+        <button class="btn" type="submit" {% if not f.has_local_transcript %}disabled{% endif %}>{{ t('Ask') }}</button>
+      </form>
+      <div id="file-ask-spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% else %}{{ t('thinking…') }}{% endif %}</div>
+      <div id="file-ask-status" class="ask-request-status" role="status" aria-live="polite"></div>
+      <div id="ask-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:11px">
+        {% for chip in ["What was decided?", "List action items with owners", "What are the key topics?"] %}
+        <button type="button" class="btn sec ask-chip" data-q="{{ t(chip) }}"
+          style="padding:5px 11px; font-size:12px" {% if not f.has_local_transcript %}disabled{% endif %}>{{ t(chip) }}</button>
+        {% endfor %}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">
+        {% for skill in f.ask_skills %}
+        <form data-ask-request data-ask-status="file-ask-status" hx-post="/file/{{ f.id }}/ask/skill" hx-target="#file-answer" hx-sync="#file-answer:drop" hx-swap="innerHTML" hx-indicator="#file-ask-spin">
+          <input type="hidden" name="skill_key" value="{{ skill.key }}">
+          <button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px" {% if not f.has_local_transcript %}disabled{% endif %}>{{ skill.name }}</button>
+        </form>
+        {% endfor %}
+      </div>
+      {% if f.ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 10px"><span class="sub" style="font-size:11px">{{ t('Recent threads') }}</span>{% for thread in f.ask_threads %}<a class="chip {% if f.selected_ask_thread and f.selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/file/{{ f.id }}?tab=ask&amp;ask_thread={{ thread.id }}&amp;return_to={{ return_to_param }}">{{ thread.title | truncate(34) }}</a>{% endfor %}</div>{% endif %}
+      <div id="file-answer" role="region" aria-label="{{ t('Answer') }}">{% if f.selected_ask_thread %}{% set thread=f.selected_ask_thread %}{% set file_id=f.id %}{% set target='file-answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
+    </aside>
+    </div>
+    <div class="ws-advanced-wrap">
     <details class="recording-advanced" id="recording-advanced">
       <summary>{{ t('Processing details') }}</summary>
       <div class="recording-advanced-body">
@@ -138,249 +507,39 @@
       </div>
     </details>
 
+    </div>
+  </div>
+    <button class="ws-ask-pin" type="button" data-open-ask-sheet {% if not f.has_local_transcript %}hidden{% endif %}>{{ icon('sparkles') }}<span>{{ t('Ask about this recording…') }}</span></button>
     {% if f.has_audio or f.audio_on_demand %}
-    <section id="persistent-player" class="recording-player">
+    <section id="persistent-player" class="recording-player ws-player" aria-label="{{ t('Audio player') }}">
       <audio id="player" preload="metadata" src="/audio/{{ f.id }}"></audio>
-      <div class="player-waveform"><canvas id="waveform" height="54" aria-label="{{ t('Audio waveform') }}"></canvas><input id="player-progress" type="range" min="0" max="1000" value="0" aria-label="{{ t('Playback position') }}"></div>
-      <div class="player-controls">
-        <span id="player-clock" class="player-clock">0:00 / {{ (f.duration_ms | dur) if f.duration_ms else '0:00' }}</span>
+      <div class="ws-player-row">
         <div class="player-transport">
-          <button class="player-skip" id="player-back" type="button" aria-label="{{ t('Back 15 seconds') }}" title="{{ t('Back 15 seconds') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/rotate-ccw.svg')"></span><span aria-hidden="true">15</span></button>
-          <button class="player-toggle" id="player-toggle" type="button" aria-label="{{ t('Play') }}"><span id="player-toggle-icon" class="nav-icon" style="--nav-icon:url('/static/lucide/play.svg')"></span></button>
-          <button class="player-skip" id="player-forward" type="button" aria-label="{{ t('Forward 15 seconds') }}" title="{{ t('Forward 15 seconds') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span><span aria-hidden="true">15</span></button>
+          <button class="player-skip" id="player-back" type="button" aria-label="{{ t('Back 15 seconds') }}" title="{{ t('Back 15 seconds') }}">{{ icon('rotate-ccw') }}<span aria-hidden="true">15</span></button>
+          <button class="player-toggle" id="player-toggle" type="button" aria-label="{{ t('Play') }}" title="{{ t('Play') }}"><svg id="player-toggle-icon" class="i" aria-hidden="true" focusable="false"><use href="#i-play"></use></svg></button>
+          <button class="player-skip" id="player-forward" type="button" aria-label="{{ t('Forward 15 seconds') }}" title="{{ t('Forward 15 seconds') }}">{{ icon('rotate-cw') }}<span aria-hidden="true">15</span></button>
         </div>
-        <select id="player-speed" class="search-input" aria-label="{{ t('Playback speed') }}"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+        <span id="player-current" class="player-clock ws-time" aria-hidden="true">0:00</span>
+        <div class="player-waveform"><canvas id="waveform" height="40" aria-hidden="true"></canvas><input id="player-progress" type="range" min="0" max="1000" value="0" aria-label="{{ t('Playback position') }}" aria-valuetext="0:00"></div>
+        <span id="player-clock" class="player-clock" aria-live="off">0:00 / {{ (f.duration_ms | dur) if f.duration_ms else '0:00' }}</span>
+        <div class="ws-speed">
+          <button class="ws-speed-btn" id="player-speed" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="player-speed-menu" aria-label="{{ t('Playback speed') }}" title="{{ t('Playback speed') }}" data-rate="1">1×</button>
+          <div class="ws-speed-menu" id="player-speed-menu" role="menu" aria-label="{{ t('Playback speed') }}" hidden>
+            <div class="ws-speed-caption" aria-hidden="true">{{ t('Playback speed') }}</div>
+            {% for rate in ['0.75', '1', '1.25', '1.5', '1.75', '2'] %}<button type="button" role="menuitemradio" aria-checked="{{ 'true' if rate == '1' else 'false' }}" data-rate="{{ rate }}">{{ rate }}×</button>{% endfor %}
+          </div>
+        </div>
+        <button class="icon-action icon-only ws-shortcuts-btn" type="button" id="player-shortcuts" aria-label="{{ t('Keyboard shortcuts') }}" data-tooltip="{{ t('Keyboard shortcuts') }} (?)">{{ icon('keyboard') }}</button>
       </div>
     </section>
     {% endif %}
-    <div class="recording-workspace-layout">
-      <main class="recording-workspace-main">
-    <div class="tabpanel" id="recording-panel-transcript" role="tabpanel" aria-labelledby="recording-tab-transcript" data-panel="transcript" {% if active_tab != 'transcript' %}hidden{% endif %}>
-      {% if segment_edit_error %}<div class="recording-alert" role="alert" tabindex="-1" data-segment-edit-error><span class="nav-icon" style="--nav-icon:url('/static/lucide/triangle-alert.svg')"></span><div class="recording-alert-body"><strong>{{ t('Could not save transcript correction') }}</strong><div class="sub" style="font-size:11.5px;margin-top:3px">{{ t(segment_edit_error) }}</div></div></div>{% endif %}
-      {% if f.transcript or f.imported_transcript %}
-      {% if f.transcript %}
-      <div class="transcript-toolbar">
-        {% if f.has_corrected %}
-        <div class="transcript-view-notice" aria-label="{{ t('Transcript view') }}">
-          {% if f.transcript.kind == 'raw ASR' %}<span>{{ t('Viewing the raw transcript.') }}</span><a href="/file/{{ f.id }}?view=corrected&amp;tab=transcript&amp;return_to={{ return_to_param }}">{{ t('Back to polished view') }}</a><span class="visually-hidden">{{ t('raw ASR') }}</span>{% else %}<span>{{ t('Transcript rechecked against audio.') if f.speech_cleanup else t('Transcript polished.') }}</span><a href="/file/{{ f.id }}?view=raw&amp;tab=transcript&amp;return_to={{ return_to_param }}">{{ t('View raw transcript') }}</a><span class="visually-hidden">{{ t('Corrected') }} (rev {{ f.corrected_revision }})</span>{% endif %}
-        </div>
-        {% else %}<span class="visually-hidden">{{ t('raw ASR') }}</span>
-        {% endif %}
-        {% if f.preview_revision %}<span class="chip">{{ t('Revision') }} {{ f.preview_revision }} {{ t('preview') }}</span>{% endif %}
-        <div class="transcript-tools">
-          <details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Find in transcript') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span></summary><div class="transcript-popover search-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button>
-            <div style="display:flex;gap:7px;align-items:center"><input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript') }}"><button class="icon-action icon-only" id="find-previous" type="button" aria-label="{{ t('Previous') }}">↑</button><button class="icon-action icon-only" id="find-next" type="button" aria-label="{{ t('Next') }}">↓</button></div><span id="find-count" class="sub" style="font-size:11px">0 {{ t('results') }}</span>
-            {% if f.can_edit %}<div id="replace-row" style="display:grid;gap:7px;margin-top:8px" hidden><input id="transcript-replace" class="search-input" type="text" placeholder="{{ t('Replace with') }}"><label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> {{ t('Match case') }}</label><div><button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">{{ t('Replace all') }}</button> <span id="replace-result" class="sub" style="font-size:12px"></span></div></div><button type="button" id="toggle-replace" class="text-action">{{ t('Replace') }}</button>{% endif %}
-          </div></details>
-          {% if f.revisions %}<details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Revision history') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span></summary><div class="transcript-popover history-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button><strong>{{ t('Revision history') }} · {{ f.revisions | length }}</strong>{% for revision in f.revisions %}<div class="revision-row"><div><a href="/file/{{ f.id }}?view=corrected&amp;revision={{ revision.revision }}&amp;tab=transcript&amp;return_to={{ return_to_param }}"><strong>{{ t('Revision') }} {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">{{ t('Current') }}</span>{% endif %}<div class="sub" style="font-size:11px">{% if revision.reason %}{% if revision.reason.kind == 'text_and_speaker' %}{{ t('Edited text and reassigned segment') }}{% elif revision.reason.kind == 'speaker_normalized' %}{{ t('Normalized speaker attribution for segment') }}{% else %}{{ t('Reassigned segment') }}{% endif %} {{ revision.reason.segment }}{% if revision.reason.kind == 'speaker_normalized' %}: {{ revision.reason.to or t('No speaker') }}{% else %}: {{ revision.reason.from or t('No speaker') }} → {{ revision.reason.to or t('No speaker') }}{% endif %}{% else %}{{ t(revision.note) }}{% endif %} · {{ revision.created_at }}</div></div>{% if not revision.current %}<form method="post" action="/file/{{ f.id }}/transcript/revisions/{{ revision.revision }}/restore" onsubmit="return confirm({{ t('Restore this revision as a new revision? Current history will be preserved.')|tojson|forceescape }})"><input type="hidden" name="base_revision" value="{{ f.corrected_revision }}"><button class="icon-action" type="submit">{{ t('Restore') }}</button></form>{% endif %}</div>{% endfor %}</div></details>{% endif %}
-        </div>
-      </div>
-      {% if f.speakers %}
-      <div class="legend" id="legend">
-        {% for sp in f.speakers %}
-        <details class="speaker-pill"><summary><span class="swatch" data-spk="{{ sp.key }}"></span><span>{{ sp.name or sp.key }}</span><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></summary><form class="speaker-editor" method="post" action="/file/{{ f.id }}/speakers"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button><input type="hidden" name="key" value="{{ sp.key }}"><input type="hidden" name="return_to" value="{{ return_to }}"><input type="hidden" name="t" value=""><label class="sub">{{ t('Speaker name') }}<input class="spk-name" type="text" name="name" value="{{ sp.name or '' }}" placeholder="{{ sp.key }}" aria-label="{{ t('Display name for') }} {{ sp.key }}"></label><button class="btn" type="submit">{{ t('Save') }}</button></form></details>
-        {% endfor %}
-      </div>
-      {% endif %}
-      <div id="transcript" hx-get="/file/{{ f.id }}/transcript-page?view={{ 'raw' if f.transcript.kind == 'raw ASR' else 'corrected' }}{% if f.preview_revision %}&amp;revision={{ f.preview_revision }}{% endif %}&amp;return_to={{ return_to_param }}&amp;tab={{ active_tab }}{% if playback_second %}&amp;t={{ playback_second }}{% endif %}"
-        hx-trigger="load" hx-target="this" hx-swap="innerHTML">
-        <div class="skeleton-transcript" aria-label="{{ t('Loading transcript…') }}">
-          {% for width in [85,68,92,74,88] %}<div><span class="skeleton-avatar"></span><span class="skeleton-line" style="width:{{ width }}%"></span></div>{% endfor %}
-        </div>
-      </div>
-      {% endif %}
-      {% if f.imported_transcript %}
-      <details class="panel" style="margin:12px 0 0;padding:10px 12px" {% if not f.transcript %}open{% endif %}>
-        <summary style="cursor:pointer;font-weight:650">{{ t('Plaud import') }} <span class="sub" style="font-size:11px">· {{ t('migration and comparison only') }}</span></summary>
-        <div class="sub" style="margin:9px 0 12px">{{ t('Imported from Plaud for migration/comparison. Independent processing does not use this transcript as its canonical result.') }}</div>
-        <div class="transcript-import" data-imported-transcript-loader hx-get="/file/{{ f.id }}/transcript-page?source=imported" hx-trigger="{{ 'load' if not f.transcript else 'load-imported once' }}" hx-target="this" hx-swap="innerHTML">
-          <div class="skeleton-transcript" aria-label="{{ t('Loading transcript…') }}">{% for width in [76,91,64,83] %}<div><span class="skeleton-avatar"></span><span class="skeleton-line" style="width:{{ width }}%"></span></div>{% endfor %}</div>
-        </div>
-      </details>
-      {% endif %}
-      {% else %}
-      {% set generation_pending = f.has_audio and (f.status == 'processing' or (request.query_params.get('queued') and f.status in ('downloaded', 'downloading', 'processing'))) %}
-      {% if generation_pending %}
-      <div class="empty generate-empty" data-generation-progress>
-        <span class="nav-icon empty-icon generate-progress-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>
-        <strong class="empty-title" id="generation-progress-title">{{ t('Generating…') if f.status == 'processing' else t('Queued for generation') }}</strong>
-        <span class="sub empty-sub" aria-live="polite" id="generation-progress-note">{{ t('This page updates automatically when results are ready.') }}</span>
-      </div>
-      {% elif f.has_audio %}
-      <div class="empty generate-empty">
-        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>
-        <strong class="empty-title">{{ t('Ready to generate') }}</strong>
-        <span class="sub empty-sub">{{ t('The transcript, notes, and mind map will appear here after generation.') }}</span>
-        <button class="btn generate-cta" type="button" data-open-generate><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Generate') }}</button>
-      </div>
-      {% elif f.origin == 'plaud' %}
-      <div class="empty generate-empty">
-        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>
-        <strong class="empty-title">{{ t('Audio not imported yet') }}</strong>
-        <span class="sub empty-sub">{{ t('Import the original audio from Plaud first — everything else is generated here afterwards.') }}</span>
-        <button class="btn generate-cta" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span><span class="action-label">{{ t('Import audio') }}</span></button>
-      </div>
-      {% else %}
-      <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/audio-lines.svg')"></span>{{ t('Transcript is not available yet.') }}</div>
-      {% endif %}
-      {% endif %}
-    </div>
-
-    <div class="tabpanel" id="recording-panel-notes" role="tabpanel" aria-labelledby="recording-tab-notes" data-panel="notes" {% if active_tab != 'notes' %}hidden{% endif %}>
-      <div class="notes-toolbar">
-        <div class="notes-template-control">
-          <label for="note-template-select">{{ t('Note template') }}</label>
-          <select id="note-template-select" class="search-input">
-            <option value="auto" {% if f.note_template_key == 'auto' %}selected{% endif %}>{{ t('Auto · choose from recording') }}</option>
-            {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="notes-template-control">
-          <label for="note-profile-select">{{ t('AI') }}</label>
-          <select id="note-profile-select" class="search-input" name="profile_id">
-            <option value="" selected>{{ t('Automatic (from resolved profile)') }}{% if f.resolved_profile_label %} · {{ f.resolved_profile_label }}{% endif %}</option>
-            {% for profile in f.profiles %}<option value="{{ profile.id }}">{{ profile.label }}</option>{% endfor %}
-          </select>
-        </div>
-        <button class="btn" type="button" id="generate-notes" {% if not f.has_local_transcript %}disabled{% endif %}><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Regenerate notes') if notes else t('Generate notes') }}</button>
-        <span id="note-template-result" class="notes-status sub">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% endif %}</span>
-      </div>
-      {% if notes or f.user_notes %}
-      {# One shared active target keeps the highlighted tab and the initially
-         visible panel in lockstep even if either list's ordering changes. #}
-      {% set active_note_target = ('saved-' ~ f.selected_note_id) if f.selected_note_id else (('sum-' ~ notes[0].id) if notes else ('saved-' ~ f.user_notes[0].id)) %}
-      <div class="note-tabs">
-        {% for s in notes %}<button type="button" data-note-target="sum-{{ s.id }}" class="note-tab {% if ('sum-' ~ s.id) == active_note_target %}on{% endif %}" title="{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.created_at %} · {{ s.created_at }}{% endif %}">{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.source in ('cloud', 'plaud') %} <span class="chip plaud-note-chip">Plaud</span>{% endif %}</button>{% endfor %}
-        {% for note in f.user_notes %}<button type="button" data-note-target="saved-{{ note.id }}" class="note-tab saved-note-tab {% if ('saved-' ~ note.id) == active_note_target %}on{% endif %}" title="{{ t('Editable note') }} · {{ note.title }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg');width:11px;height:11px"></span>{{ note.title }}</button>{% endfor %}
-        {% if not f.is_trash %}<details class="note-add-menu"><summary class="note-tab note-add-tab" aria-label="{{ t('New note') }}" title="{{ t('New note') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg');width:12px;height:12px"></span></summary><div class="note-add-popover" role="menu"><button type="button" data-open-note-generation role="menuitem"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Generate AI note') }}</button><button type="button" data-open-manual-note role="menuitem"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span>{{ t('Blank note') }}</button></div></details>{% endif %}
-      </div>
-    {% for s in notes %}
-    <div class="note-panel" data-note-panel="sum-{{ s.id }}" {% if ('sum-' ~ s.id) != active_note_target %}hidden{% endif %}>
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0">
-        <div class="sub" style="font-size:11.5px">{% if s.source in ('cloud', 'plaud') %}<span class="chip plaud-note-chip">Plaud</span> · {{ t('Read-only') }}{% else %}{% if s.template_version %}v{{ s.template_version }} · {% endif %}{% if s.created_at %}{{ s.created_at }} · {% endif %}{{ t('Generated from') }} {{ lineage(s.lineage_label) }}{% if s.input_transcript_source %} · {{ s.input_transcript_source }}{% endif %}{% if s.restored_from_revision %} · {{ t('restored from version') }} {{ s.restored_from_revision }}{% endif %}{% endif %}</div>
-        <div style="display:flex;gap:6px;align-items:center;flex:none">
-          {% if s.source == 'local' %}
-          {% set history_summary = s %}{% set history_tab = 'notes' %}{% include '_note_history.html' %}
-          <button class="btn sec" type="button" data-summary-edit="{{ s.id }}" style="padding:6px 9px">{{ t('Edit') }}</button>
-          {% endif %}
-        </div>
-      </div>
-      <div class="md">{{ s.content_md | markdown }}</div>
-    </div>
-    {% endfor %}
-
-    {% for note in f.user_notes %}
-    <div class="note-panel" data-note-panel="saved-{{ note.id }}" {% if ('saved-' ~ note.id) != active_note_target %}hidden{% endif %}>
-      <div class="saved-note-head" style="margin-bottom:8px">
-        <div class="sub" style="font-size:12px">{{ t(note.source_label) }}</div>
-        <div class="saved-note-actions">
-          <span class="sub" data-note-action-status="{{ note.id }}" role="status" aria-live="polite"></span>
-          <button class="btn sec" type="button" data-note-copy="{{ note.id }}" style="padding:6px 9px">{{ t('Copy') }}</button>
-          <a class="btn sec" href="/api/notes/{{ note.id }}/export.md" style="padding:6px 9px">{{ t('Export') }}</a>
-          <button class="icon-action icon-only" type="button" data-user-note-history="{{ note.id }}" data-note-version="{{ note.version }}" data-note-title="{{ note.title }}" data-note-return="/file/{{ f.id }}?tab=notes&amp;note_id={{ note.id }}&amp;history_restored={{ note.id }}" title="{{ t('Version history') }}" aria-label="{{ t('Version history') }} · {{ note.title }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span></button><span class="chip">v{{ note.version }}</span>
-          <button class="btn sec" type="button" data-note-edit="{{ note.id }}" style="padding:6px 9px">{{ t('Edit') }}</button>
-          <button class="btn sec" type="button" data-note-delete="{{ note.id }}" data-note-source="{{ note.source_type }}" style="padding:6px 9px;color:var(--red)">{{ t('Delete') }}</button>
-        </div>
-      </div>
-      <div class="md" data-workspace-note-body>{{ note.content_md | markdown }}</div>
-      <form data-workspace-note-form="{{ note.id }}" hidden style="display:grid;gap:8px;margin-top:10px">
-        <input type="hidden" name="base_version" value="{{ note.version }}">
-        <input class="search-input" name="title" value="{{ note.title }}" maxlength="200" required>
-        <textarea class="search-input" name="content_md" rows="12" maxlength="200000" required style="width:100%;resize:vertical">{{ note.content_md }}</textarea>
-        <div><button class="btn" type="submit">{{ t('Save') }}</button> <button class="btn sec" type="button" data-note-cancel="{{ note.id }}">{{ t('Cancel') }}</button> <span class="sub" data-note-status></span></div>
-      </form>
-      {% if note.citations %}<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px">{% for citation in note.citations %}<a class="chip" href="/file/{{ citation.file_id }}{% if citation.start is not none %}?t={{ citation.start }}{% endif %}">{{ citation.start | mmss }}</a>{% endfor %}</div>{% endif %}
-    </div>
-    {% endfor %}
-      {% else %}
-      <div class="empty generate-empty">
-        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span>
-        <strong class="empty-title">{{ t('No notes yet.') }}</strong>
-        <span class="sub empty-sub">{% if f.has_local_transcript %}{{ t('Create your own note or choose a template to generate one from the transcript.') }}{% else %}{{ t('Create a note now. Generated notes become available after a local transcript exists.') }}{% endif %}</span>
-        {% if not f.is_trash %}<button class="btn sec generate-cta" type="button" data-open-manual-note><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span>{{ t('New note') }}</button>{% endif %}
-      </div>
-      {% endif %}
-    </div>
-
-    <div class="tabpanel" id="recording-panel-mindmap" role="tabpanel" aria-labelledby="recording-tab-mindmap" data-panel="mindmap" {% if active_tab != 'mindmap' %}hidden{% endif %}>
-      {% if mindmaps %}
-      <div class="mindmap-toolbar">
-        <div><strong>{{ t('Mind map') }}</strong><div class="sub" style="font-size:11.5px">{{ t('Generated from') }} {{ lineage(mindmaps[-1].lineage_label) }}{% if mindmaps[-1].restored_from_revision %} · {{ t('restored from version') }} {{ mindmaps[-1].restored_from_revision }}{% endif %}</div></div>
-        <div class="mindmap-zoom">
-          <button class="icon-action icon-only" id="mm-zoom-out" type="button" aria-label="{{ t('Zoom out') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/minus.svg')"></span></button>
-          <input id="mm-zoom" type="range" min="15" max="140" value="100" aria-label="{{ t('Mind map zoom') }}">
-          <button class="icon-action icon-only" id="mm-zoom-in" type="button" aria-label="{{ t('Zoom in') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span></button>
-          <button class="icon-action" id="mm-fit" type="button">{{ t('Fit') }}</button>
-          <a class="icon-action" href="/file/{{ f.id }}/export/mind-map.png"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>{{ t('Export') }}</a>
-          {% set history_summary = mindmaps[-1] %}{% set history_tab = 'mindmap' %}{% include '_note_history.html' %}
-        </div>
-      </div>
-      <div id="mindmap-src" hidden>{{ mindmaps[-1].content_md }}</div>
-      <div id="mindmap-viewport" class="mindmap-viewport"><div id="mindmap-tree" class="mindmap-tree"></div></div>
-      {% elif f.mind_map_out_of_date %}
-      {% if f.mind_map_rebuild_in_progress %}
-      <div class="empty generate-empty" data-generation-progress data-static-title>
-        <span class="nav-icon empty-icon generate-progress-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>
-        <strong class="empty-title" id="generation-progress-title">{{ t('Rebuilding mind map…') }}</strong>
-        <span class="sub empty-sub" aria-live="polite" id="generation-progress-note">{{ t('This page updates automatically when results are ready.') }}</span>
-      </div>
-      {% elif f.mind_map_rebuild_available %}
-      <div class="empty generate-empty">
-        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>
-        <strong class="empty-title">{{ t('Mind map is out of date.') }}</strong>
-        <span class="sub empty-sub">{{ t('The notes it was built from have changed. Rebuild it from the current notes — the notes stay untouched and the previous mind map is kept in version history.') }}</span>
-        {% if f.mind_map_rebuild_error %}<span class="sub empty-sub" role="status" style="color:var(--red)">{{ t('The last rebuild failed:') }} {{ f.mind_map_rebuild_error }}</span>{% endif %}
-        <button class="btn generate-cta" type="button" id="rebuild-mindmap"><span class="nav-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>{{ t('Try the rebuild again') if f.mind_map_rebuild_error else t('Rebuild mind map') }}</button>
-        <span id="mindmap-rebuild-result" class="sub" aria-live="polite"></span>
-      </div>
-      {% else %}
-      <div class="empty generate-empty">
-        <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/rotate-cw.svg')"></span>
-        <strong class="empty-title">{{ t('Mind map is out of date.') }}</strong>
-        <span class="sub empty-sub">{{ t('The notes or transcript it was built from have changed. Regenerate notes to rebuild it; the previous mind map stays in version history.') }}</span>
-      </div>
-      {% endif %}
-      {% else %}
-      <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Mind map is not available yet.') }}</div>
-      {% endif %}
-    </div>
-
-      </main>
-    <aside class="tabpanel ask-dock" id="recording-panel-ask" role="tabpanel" aria-labelledby="recording-tab-ask" data-panel="ask" {% if active_tab != 'ask' %}hidden{% endif %}>
-      <div class="ask-dock-header"><strong class="ask-dock-title">{{ t('Ask') }}</strong><div class="ask-dock-actions"><button class="icon-action" type="button" data-open-ask-history><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span>{{ t('History') }}</button><button class="icon-action icon-only ask-dock-close" id="close-ask-dock" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div></div>
-      <form class="ask" data-ask-request data-ask-status="file-ask-status" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-sync="#file-answer:drop" hx-swap="innerHTML"
-            hx-indicator="#file-ask-spin">
-        <input type="text" data-ask-question name="q" id="ask-q" placeholder="{{ t('Ask a question about this recording…') }}"
-          autocomplete="off" required {% if not f.has_local_transcript %}disabled{% endif %}>
-        <button class="btn" type="submit" {% if not f.has_local_transcript %}disabled{% endif %}>{{ t('Ask') }}</button>
-      </form>
-      <div id="file-ask-spin" class="htmx-indicator sub" style="margin:-6px 2px 8px">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% else %}{{ t('thinking…') }}{% endif %}</div>
-      <div id="file-ask-status" class="ask-request-status" role="status" aria-live="polite"></div>
-      <div id="ask-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:11px">
-        {% for chip in ["What was decided?", "List action items with owners", "What are the key topics?"] %}
-        <button type="button" class="btn sec ask-chip" data-q="{{ t(chip) }}"
-          style="padding:5px 11px; font-size:12px" {% if not f.has_local_transcript %}disabled{% endif %}>{{ t(chip) }}</button>
-        {% endfor %}
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px">
-        {% for skill in f.ask_skills %}
-        <form data-ask-request data-ask-status="file-ask-status" hx-post="/file/{{ f.id }}/ask/skill" hx-target="#file-answer" hx-sync="#file-answer:drop" hx-swap="innerHTML" hx-indicator="#file-ask-spin">
-          <input type="hidden" name="skill_key" value="{{ skill.key }}">
-          <button type="submit" class="btn sec" title="{{ skill.description }}" style="padding:6px 11px;font-size:12px" {% if not f.has_local_transcript %}disabled{% endif %}>{{ skill.name }}</button>
-        </form>
-        {% endfor %}
-      </div>
-      {% if f.ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 10px"><span class="sub" style="font-size:11px">{{ t('Recent threads') }}</span>{% for thread in f.ask_threads %}<a class="chip {% if f.selected_ask_thread and f.selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/file/{{ f.id }}?tab=ask&amp;ask_thread={{ thread.id }}&amp;return_to={{ return_to_param }}">{{ thread.title | truncate(34) }}</a>{% endfor %}</div>{% endif %}
-      <div id="file-answer" role="region" aria-label="{{ t('Answer') }}">{% if f.selected_ask_thread %}{% set thread=f.selected_ask_thread %}{% set file_id=f.id %}{% set target='file-answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
-    </aside>
-    </div>
-  </div></section>
+  </section>
   </div>
 </div>
 {% if f.has_audio and not f.transcript %}
 <div class="import-backdrop" id="generate-backdrop" hidden>
   <section class="import-modal" style="min-height:0;width:min(520px,100%)" role="dialog" aria-modal="true" aria-labelledby="generate-title">
-    <div class="import-head"><span id="generate-title">{{ t('Select generation method') }}</span><button class="import-close" id="generate-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="import-head"><span id="generate-title">{{ t('Select generation method') }}</span><button class="import-close" id="generate-close" type="button" aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
     <div class="import-body" style="gap:13px">
       <label class="generate-option">
         <input type="radio" name="generate-method" value="auto" checked>
@@ -408,19 +567,117 @@
         </label>
         {% endif %}
       </div>
+      <div class="ws-gen-boundary">{{ privacy_badge(f.notes_boundary) }}<span class="sub">{{ privacy_note(f.notes_boundary) }}</span></div>
       <div class="sub" style="font-size:11.5px">{{ t('Generation runs with your configured providers. The original audio and your edits are never replaced.') }}</div>
       <div style="display:flex;justify-content:flex-end;gap:8px">
         <button class="btn sec" type="button" id="generate-cancel">{{ t('Cancel') }}</button>
-        <button class="btn" type="button" id="generate-start"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Start generation') }}</button>
+        <button class="btn" type="button" id="generate-start">{{ icon('sparkles') }}{{ t('Start generation') }}</button>
       </div>
       <span id="generate-result" class="sub" aria-live="polite" style="font-size:12px"></span>
     </div>
   </section>
 </div>
 {% endif %}
+<dialog class="dialog sheet-on-phone ws-note-dialog" id="note-generate-backdrop" aria-labelledby="note-generate-title">
+  <div class="sheet-grabber" aria-hidden="true"></div>
+  <div class="dialog-head"><h2 class="dialog-title" id="note-generate-title">{{ t('Generate notes') }}</h2><button class="icon-btn" id="note-generate-close" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+  <div class="dialog-body ws-note-dialog-body">
+      <div class="ws-gen-modes" role="radiogroup" aria-label="{{ t('Generation method') }}">
+        <label class="ws-gen-mode"><input type="radio" name="note-generate-mode" value="auto" {% if f.note_template_key == 'auto' %}checked{% endif %}><span><strong class="ws-ai-text">{{ t('Auto generation') }}</strong><span class="sub">{{ t('Chooses a template from the recording content with your resolved profile. No setup needed.') }}</span></span></label>
+        <label class="ws-gen-mode"><input type="radio" name="note-generate-mode" value="custom" {% if f.note_template_key != 'auto' %}checked{% endif %}><span><strong>{{ t('Custom generation') }}</strong><span class="sub">{{ t('Choose the template and AI profile.') }}</span></span></label>
+      </div>
+      <div class="ws-gen-custom" data-gen-custom>
+      <h3 class="ws-gen-heading">{{ t('Select a template') }}</h3>
+      <input class="search-input" type="search" id="note-template-filter" placeholder="{{ t('Search templates') }}" aria-label="{{ t('Search templates') }}" autocomplete="off">
+      {% set template_categories = f.note_templates | map(attribute='category') | select | unique | list %}
+      {% if template_categories %}<div class="ws-template-cats" role="group" aria-label="{{ t('Categories') }}"><button type="button" class="ws-chip" data-template-category="" aria-pressed="true">{{ t('All') }}</button>{% for category in template_categories %}<button type="button" class="ws-chip" data-template-category="{{ category }}" aria-pressed="false">{{ category }}</button>{% endfor %}</div>{% endif %}
+      <div class="ws-template-list" role="radiogroup" aria-label="{{ t('Note template') }}" id="note-template-cards">
+        <label class="ws-template-card" data-template-card data-search="auto {{ t('Auto · choose from recording')|lower }}"><input type="radio" name="note-template-card" value="auto" {% if f.note_template_key == 'auto' %}checked{% endif %}><span><strong>{{ t('Auto') }}</strong><span class="sub">{{ t('Chooses a template from the recording content.') }}</span></span></label>
+        {% for template in f.note_templates %}<label class="ws-template-card" data-template-card data-category="{{ template.category or '' }}" data-search="{{ (template.name ~ ' ' ~ (template.description or '') ~ ' ' ~ (template.category or ''))|lower }}"><input type="radio" name="note-template-card" value="{{ template.key }}" {% if template.key == f.note_template_key %}checked{% endif %}><span><strong>{{ template.name }}</strong> <span class="chip">v{{ template.version }}</span>{% if template.category %} <span class="chip">{{ template.category }}</span>{% endif %}{% if template.description %}<span class="sub">{{ template.description }}</span>{% endif %}</span></label>{% endfor %}
+        <p class="sub" data-template-empty hidden>{{ t('No templates match.') }}</p>
+      </div>
+      <div class="notes-template-control" hidden>
+        <label for="note-template-select">{{ t('Note template') }}</label>
+        <select id="note-template-select" class="search-input">
+          <option value="auto" {% if f.note_template_key == 'auto' %}selected{% endif %}>{{ t('Auto · choose from recording') }}</option>
+          {% for template in f.note_templates %}<option value="{{ template.key }}" {% if template.key == f.note_template_key %}selected{% endif %}>{{ template.name }} · v{{ template.version }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="ws-gen-rows">
+        <div class="ws-gen-row"><span>{{ t('Language') }}</span><span class="sub">{{ t('Auto · follows the recording (Taiwan Traditional Chinese for Chinese audio)') }}</span></div>
+        <div class="notes-template-control ws-gen-row">
+          <label for="note-profile-select">{{ t('AI model') }}</label>
+          <select id="note-profile-select" class="search-input" name="profile_id">
+            <option value="" selected data-privacy="{{ f.notes_boundary.privacy }}" data-model="{{ f.notes_boundary.connection or '' }}{% if f.notes_boundary.model %}:{{ f.notes_boundary.model }}{% endif %}">{{ t('Automatic (from resolved profile)') }}{% if f.resolved_profile_label %} · {{ f.resolved_profile_label }}{% endif %}</option>
+            {% for profile in f.profiles %}<option value="{{ profile.id }}" data-privacy="{{ profile.notes_boundary.privacy }}" data-model="{{ profile.notes_boundary.connection or '' }}{% if profile.notes_boundary.model %}:{{ profile.notes_boundary.model }}{% endif %}">{{ profile.label }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      </div>
+      <div class="ws-gen-boundary" data-gen-boundary role="status" aria-live="polite">
+        {{ privacy_badge(f.notes_boundary) }}<span class="ws-gen-model" data-gen-model>{{ f.notes_boundary.connection or '' }}{% if f.notes_boundary.model %}:{{ f.notes_boundary.model }}{% endif %}</span>
+        <span class="sub" data-gen-note>{{ privacy_note(f.notes_boundary) }}</span>
+        <template data-privacy-labels><span data-label="local">{{ t('Local') }}</span><span data-label="remote">{{ t('Remote worker') }}</span><span data-label="cloud">{{ t('Cloud') }}</span><span data-label="unknown">{{ t('Provider not configured') }}</span><span data-note="local">{{ t('Runs on this host. The transcript does not leave it.') }}</span><span data-note="remote">{{ t('Runs on your remote worker. The transcript is sent to that worker.') }}</span><span data-note="cloud">{{ t('Runs with a cloud provider. The transcript text is sent to it.') }}</span><span data-note="unknown">{{ t('No notes provider is configured for this profile.') }}</span></template>
+      </div>
+      <div class="sub">{{ t('Notes are generated from the full corrected local transcript. Existing notes are kept in version history.') }}</div>
+      <span id="note-template-result" class="notes-status sub" role="status" aria-live="polite">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% endif %}</span>
+  </div>
+  <div class="dialog-foot"><button class="btn sec" type="button" id="note-generate-cancel">{{ t('Cancel') }}</button><button class="btn" type="button" id="generate-notes" {% if not f.has_local_transcript %}disabled{% endif %}>{{ icon('sparkles') }}{{ t('Generate now') }}</button></div>
+</dialog>
+{% if f.speakers %}
+<dialog class="dialog sheet-on-phone dialog-lg ws-name-speakers" id="name-speakers-backdrop" aria-labelledby="name-speakers-title">
+  <div class="sheet-grabber" aria-hidden="true"></div>
+  <div class="dialog-head"><h2 class="dialog-title" id="name-speakers-title">{{ t('Name speakers') }}</h2><button class="icon-btn" id="name-speakers-close" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+    <form class="dialog-body ws-name-speakers-body" id="name-speakers-form">
+      {% for sp in f.speakers %}
+      <div class="ws-name-row" data-speaker-row="{{ sp.key }}">
+        <div class="ws-name-head"><span class="swatch" data-spk="{{ sp.key }}"></span><input class="search-input" name="{{ sp.key }}" value="{{ sp.name or '' }}" placeholder="{{ sp.name or anonymous_label(sp.display_label or sp.key) }}" maxlength="128" autocomplete="off" aria-label="{{ t('Display name for') }} {{ sp.name or anonymous_label(sp.display_label or sp.key) }}"><span class="sub">{{ t('Total duration') }} {{ ((sp.seconds or 0) * 1000) | dur }}</span></div>
+        {% if sp.suggestion and not sp.name %}<div class="ws-name-suggestion" data-suggestion-for="{{ sp.key }}" data-suggestion-name="{{ sp.suggestion.name }}"><div class="ws-name-suggestion-text"><span>{{ t('Possibly {name}').replace('{name}', sp.suggestion.name) }} · {{ t('voice similarity {percent}%').replace('{percent}', (sp.suggestion.score * 100) | round | int | string) }}</span><span class="sub">{{ t('Below the auto-naming confidence threshold') if sp.suggestion.reason == 'below_threshold' else t('Not distinct enough from other voices to name automatically') }}</span></div><button type="button" class="btn sec btn-sm" data-use-suggestion="{{ sp.key }}" aria-label="{{ t('Use suggested name {name}').replace('{name}', sp.suggestion.name) }}">{{ t('Use') }}</button></div>{% endif %}
+        {% for clip in sp.samples %}<div class="ws-clip"><button type="button" class="ws-clip-play" data-seek="{{ clip.start }}" aria-label="{{ t('Play from') }} {{ clip.start | mmss }}">{{ icon('play') }}</button><div><span class="sub">{{ clip.start | mmss }} – {{ clip.end | mmss }}</span><p>{{ clip.text }}</p></div></div>{% endfor %}
+      </div>
+      {% endfor %}
+      {% if f.speakers | selectattr('suggestion') | list %}<p class="sub ws-hint" data-suggestion-note>{{ t('Suggestions compare voices with speakers named in other recordings. They are not confirmed identities, and nothing is applied until you save.') }}</p>{% endif %}
+      <p class="sub ws-hint">{{ t('Names update this recording’s transcript and existing generated notes immediately. No note regeneration is needed. Your edited notes are preserved.') }}</p>
+      <div class="ws-dialog-actions"><span class="sub" id="name-speakers-status" role="status" aria-live="polite"></span><button class="btn sec" type="button" id="name-speakers-cancel">{{ t('Cancel') }}</button><button class="btn" type="submit">{{ t('Save') }}</button></div>
+    </form>
+</dialog>
+{% endif %}
+{% if f.has_audio or f.audio_on_demand %}{% set so = f.speech_overrides %}{% set speaker_mode = 'exact' if so.num_speakers else ('range' if (so.min_speakers or so.max_speakers) else 'default') %}
+<dialog class="dialog sheet-on-phone ws-speech-dialog" id="speech-settings-dialog" aria-labelledby="speech-settings-title" aria-describedby="speech-settings-explainer">
+  <div class="sheet-grabber" aria-hidden="true"></div>
+  <div class="dialog-head"><h2 class="dialog-title" id="speech-settings-title">{{ t('Speech settings') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+  <form class="dialog-body ws-speech-form" id="speech-settings-form" data-file-id="{{ f.id }}">
+    <p class="sub" id="speech-settings-explainer">{{ t('Custom settings for this recording only. Saving changes nothing yet: they apply the next time you rebuild, which re-runs speech recognition and speaker detection. Your transcript edits stay in revision history.') }}</p>
+    <label class="ws-speech-field"><strong>{{ t('Transcription language') }}</strong>
+      <select class="search-input" name="language">
+        <option value="" {% if not so.language %}selected{% endif %}>{{ t('Default (from AI profile)') }}</option>
+        <option value="auto" {% if so.language == 'auto' %}selected{% endif %}>{{ t('Auto-detect') }}</option>
+        <option value="zh" {% if so.language == 'zh' %}selected{% endif %}>{{ t('Mandarin (Taiwan), including mixed Mandarin/English') }}</option>
+        <option value="en" {% if so.language == 'en' %}selected{% endif %}>{{ t('English') }}</option>
+        <option value="yue" {% if so.language == 'yue' %}selected{% endif %}>{{ t('Cantonese') }}</option>
+        <option value="ja" {% if so.language == 'ja' %}selected{% endif %}>{{ t('Japanese') }}</option>
+        <option value="ko" {% if so.language == 'ko' %}selected{% endif %}>{{ t('Korean') }}</option>
+      </select>
+      <span class="sub">{{ t('Pick Mandarin when auto-detect mislabels Mandarin speech or switches into English mid-sentence.') }}</span>
+    </label>
+    <fieldset class="ws-speech-field"><legend><strong>{{ t('Number of speakers') }}</strong></legend>
+      <label><input type="radio" name="speaker_mode" value="default" {% if speaker_mode == 'default' %}checked{% endif %}> {{ t('Detect automatically') }}</label>
+      <label><input type="radio" name="speaker_mode" value="exact" {% if speaker_mode == 'exact' %}checked{% endif %}> {{ t('Exactly') }} <input class="search-input ws-speech-count" type="number" name="num_speakers" min="1" max="20" inputmode="numeric" value="{{ so.num_speakers or '' }}" aria-label="{{ t('Exact number of speakers') }}"></label>
+      <label><input type="radio" name="speaker_mode" value="range" {% if speaker_mode == 'range' %}checked{% endif %}> {{ t('Between') }} <input class="search-input ws-speech-count" type="number" name="min_speakers" min="1" max="20" inputmode="numeric" value="{{ so.min_speakers or '' }}" aria-label="{{ t('Minimum speakers') }}"> {{ t('and') }} <input class="search-input ws-speech-count" type="number" name="max_speakers" min="1" max="20" inputmode="numeric" value="{{ so.max_speakers or '' }}" aria-label="{{ t('Maximum speakers') }}"></label>
+    </fieldset>
+    <span class="sub" id="speech-settings-status" role="status" aria-live="polite"></span>
+    <div class="ws-dialog-actions"><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn sec" type="submit" value="save">{{ t('Save') }}</button><button class="btn" type="submit" value="rebuild">{{ icon('rotate-ccw') }}{{ t('Save and rebuild') }}</button></div>
+  </form>
+</dialog>
+{% endif %}
+<dialog class="dialog sheet-on-phone" id="ws-merge-confirm" aria-labelledby="ws-merge-title" aria-describedby="ws-merge-explanation">
+  <div class="dialog-head"><h2 class="dialog-title" id="ws-merge-title">{{ t('Merge') }}</h2></div>
+  <div class="dialog-body"><p data-merge-message></p><p class="sub" id="ws-merge-explanation">{{ t('A new transcript revision is created; the previous one stays in history.') }}</p></div>
+  <form method="dialog" class="dialog-foot"><button class="btn sec" value="cancel" autofocus>{{ t('Cancel') }}</button><button class="btn" value="merge">{{ t('Merge') }}</button></form>
+</dialog>
 <div class="import-backdrop" id="metadata-backdrop" hidden>
   <section class="import-modal" style="width:min(520px,100%);min-height:0" role="dialog" aria-modal="true" aria-labelledby="metadata-title">
-    <div class="import-head"><span id="metadata-title">{{ t('Folder and tags') }}</span><button class="import-close" id="metadata-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="import-head"><span id="metadata-title">{{ t('Folder and tags') }}</span><button class="import-close" id="metadata-close" type="button" aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
     <form id="metadata-form" class="import-body" style="gap:14px">
       <label><strong>{{ t('Folder') }}</strong><select class="search-input" name="folder_id" style="width:100%;margin-top:6px"><option value="">{{ t('No folder') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}" {% if f.folder and f.folder.id==folder.id %}selected{% endif %}>{{ folder.name }} · {{ folder.count }} {{ t('recordings') }}</option>{% endfor %}</select></label>
       <fieldset style="border:1px solid var(--border);border-radius:8px;padding:11px"><legend><strong>{{ t('Tags') }}</strong></legend><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">{% for tag in organization.tags %}<label style="font-size:13px"><input type="checkbox" name="tag_ids" value="{{ tag.id }}" {% if tag.id in (f.tags|map(attribute='id')|list) %}checked{% endif %}> {{ tag.name }} <span class="sub">({{ tag.count }})</span></label>{% else %}<span class="sub">{{ t('No tags yet. Create tags from the Library organization panel.') }}</span>{% endfor %}</div></fieldset>
@@ -429,87 +686,11 @@
     </form>
   </section>
 </div>
-<div class="import-backdrop" id="share-backdrop" hidden>
-  <section class="import-modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title">
-    <div class="import-head"><span id="share-title">{{ t('Share recording') }}</span><button class="import-close" id="share-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
-    <div class="import-body share-body">
-      <div class="share-icon"><span class="nav-icon" style="--nav-icon:url('/static/lucide/link.svg')"></span></div>
-      <div><strong>{{ t('Workspace link') }}</strong><div class="sub" style="font-size:12px;margin-top:2px">{{ t('Available only to people who can sign in to this localplaud workspace.') }}</div></div>
-      <div class="share-link-row"><input id="share-link" class="search-input" readonly value=""><button class="btn" id="copy-share-link" type="button">{{ t('Copy link') }}</button></div>
-      <button class="btn sec" id="system-share" type="button" hidden><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span>{{ t('Share with…') }}</button>
-      <div id="share-result" class="sub" role="status"></div>
-      <section class="public-share-section" aria-labelledby="public-share-title">
-        <div><strong id="public-share-title">{{ t('Public share link') }}</strong><div class="sub" style="font-size:12px;margin-top:2px">{{ t('Anyone with this link can view this recording without signing in.') }}</div></div>
-        <div class="share-options" role="group" aria-labelledby="share-options-title">
-          <span class="share-options-title" id="share-options-title">{{ t('Shared content') }}</span>
-          <label><input type="checkbox" id="share-opt-audio" data-share-option="audio" checked>{{ t('Audio') }}</label>
-          <label><input type="checkbox" id="share-opt-transcript" data-share-option="transcript" checked>{{ t('Transcript') }}</label>
-          <label><input type="checkbox" id="share-opt-notes" data-share-option="notes" checked>{{ t('Notes and mind map') }}</label>
-          <label><input type="checkbox" id="share-opt-plaud" data-share-option="plaud_artifacts">{{ t('Plaud-imported content') }}</label>
-          <span class="sub share-options-note">{{ t('Plaud-imported content is published only when enabled, and is always clearly labelled on the public page.') }}</span>
-        </div>
-        <div id="public-share-empty" hidden><button class="btn" id="create-public-share" type="button">{{ t('Create public link') }}</button></div>
-        <div id="public-share-active" style="display:grid;gap:8px" hidden>
-          <div class="share-link-row"><input id="public-share-link" class="search-input" readonly value="" aria-label="{{ t('Public share link') }}"><button class="btn" id="copy-public-share" type="button">{{ t('Copy') }}</button></div>
-          <div class="public-share-actions"><button class="btn danger" id="revoke-public-share" type="button">{{ t('Disable link') }}</button><span id="public-share-created" class="sub" style="font-size:12px"></span></div>
-        </div>
-        <div id="public-share-result" class="sub" role="status" aria-live="polite"></div>
-      </section>
-    </div>
-  </section>
-</div>
-{% if f.transcript or f.summaries or f.user_notes or f.has_audio %}
-<div class="import-backdrop" id="export-backdrop" hidden>
-  <section class="import-modal" style="min-height:0;width:min(560px,100%)" role="dialog" aria-modal="true" aria-labelledby="export-title">
-    <div class="import-head"><span id="export-title">{{ t('Export recording') }}</span><button class="import-close" id="export-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
-    <div class="import-body" style="gap:18px">
-      {% if f.transcript %}
-      <section>
-        <strong>{{ t('Transcript') }}</strong>
-        <div class="sub" style="font-size:12px;margin:3px 0 9px">{{ t('Canonical corrected transcript when available') }}</div>
-        <div style="display:flex;gap:14px;margin-bottom:10px;font-size:13px">
-          <label><input id="export-timestamps" type="checkbox" checked> {{ t('Timestamps') }}</label>
-          <label><input id="export-speakers" type="checkbox" checked> {{ t('Speaker labels') }}</label>
-        </div>
-        <div style="display:flex;gap:7px;flex-wrap:wrap" data-export-group="transcript">
-          <button class="btn sec" id="copy-transcript" type="button" style="padding:7px 11px"><span class="nav-icon" style="--nav-icon:url('/static/lucide/copy.svg')"></span>{{ t('Copy transcript') }}</button>
-          {% for fmt in ['txt','srt','vtt','docx','pdf'] %}<a class="btn sec" data-fmt="{{ fmt }}" href="#" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
-        </div>
-      </section>
-      {% endif %}
-      {% if f.summaries or f.user_notes %}
-      <section>
-        <strong>{{ t('Notes') }}</strong>
-        <div class="sub" style="font-size:12px;margin:3px 0 9px">{{ t('Generated notes and saved notes, without transcript') }}</div>
-        <div style="display:flex;gap:7px;flex-wrap:wrap">
-          <button class="btn sec" id="copy-notes" type="button" style="padding:7px 11px"><span class="nav-icon" style="--nav-icon:url('/static/lucide/copy.svg')"></span>{{ t('Copy all notes') }}</button>
-          {% for fmt in ['md','txt','docx','pdf'] %}<a class="btn sec" href="/file/{{ f.id }}/export/notes.{{ fmt }}" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
-        </div>
-      </section>
-      {% endif %}
-      {% if mindmaps %}
-      <section>
-        <strong>{{ t('Mind map') }}</strong>
-        <div class="sub" style="font-size:12px;margin:3px 0 9px">{{ t('Complete tree rendered from the latest local mind map') }}</div>
-        <a class="btn sec" href="/file/{{ f.id }}/export/mind-map.png" style="padding:7px 11px">PNG</a>
-      </section>
-      {% endif %}
-      <section>
-        <strong>{{ t('Combined archive') }}</strong>
-        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
-          {% if f.transcript or f.summaries or f.user_notes %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:7px 11px">{{ t('Markdown archive') }}</a>{% endif %}
-          {% if f.has_audio or f.audio_on_demand %}<a class="btn sec" href="/file/{{ f.id }}/export/audio" style="padding:7px 11px">{{ t('Original audio') }}</a>{% endif %}
-        </div>
-      </section>
-      <div id="export-result" class="sub" role="status" aria-live="polite" style="font-size:12px;min-height:17px"></div>
-    </div>
-  </section>
-</div>
-{% endif %}
+{% include "_recording_share.html" %}
 {% if not f.is_trash %}
 <div class="import-backdrop" id="manual-note-backdrop" data-dirty="false" hidden>
   <section class="import-modal manual-note-modal" role="dialog" aria-modal="true" aria-labelledby="manual-note-title">
-    <div class="import-head"><span id="manual-note-title">{{ t('New note') }}</span><button class="import-close" id="manual-note-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="import-head"><span id="manual-note-title">{{ t('New note') }}</span><button class="import-close" id="manual-note-close" type="button" aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
     <form class="import-body manual-note-form" id="manual-note-form">
       <label>{{ t('Title') }}<input class="search-input" id="manual-note-name" name="title" maxlength="200" autocomplete="off" required placeholder="{{ t('Decision log') }}"></label>
       <label>{{ t('Note') }}<textarea class="search-input" name="content_md" maxlength="200000" required placeholder="{{ t('Write in Markdown…') }}"></textarea></label>
@@ -526,6 +707,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/recording-share.js?v=3"></script>
 <script>
 (()=>{
   const cleanupController=new AbortController(),appView=document.getElementById('app-view');
@@ -542,7 +724,7 @@
   function closeDialog(backdrop,{restoreFocus=true}={}){if(!backdrop)return;backdrop.hidden=true;recordingShell.inert=false;dialogChromeInert.forEach((wasInert,region)=>{region.inert=wasInert;});dialogChromeInert.clear();document.body.classList.remove('dialog-open');if(activeDialog===backdrop)activeDialog=null;if(restoreFocus)dialogOpener?.focus();dialogOpener=null;}
   document.addEventListener('keydown',event=>{if(!activeDialog)return;if(event.key==='Escape'){event.preventDefault();closeDialog(activeDialog);return;}if(event.key!=='Tab')return;const items=dialogFocusables(activeDialog);if(!items.length){event.preventDefault();return;}const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}},{signal:cleanupController.signal});
   cleanupController.signal.addEventListener('abort',()=>{if(activeDialog)closeDialog(activeDialog,{restoreFocus:false});},{once:true});
-  const workspacePopovers=[...document.querySelectorAll('.transcript-tool,.speaker-pill,.note-add-menu')];
+  const workspacePopovers=[...document.querySelectorAll('.transcript-tool,.speaker-pill,.note-add-menu,.recording-more')];
   function closeWorkspacePopover(details,{restoreFocus=true}={}){if(!details?.open)return;details.open=false;details.querySelector('form.speaker-editor')?.reset();if(restoreFocus)details.querySelector(':scope>summary')?.focus();}
   workspacePopovers.forEach(details=>{details.addEventListener('toggle',()=>{if(!details.open)return;workspacePopovers.forEach(other=>{if(other!==details)closeWorkspacePopover(other,{restoreFocus:false});});const panel=details.querySelector('.transcript-popover,.speaker-editor,.note-add-popover');requestAnimationFrame(()=>{(panel?.querySelector('input:not([type="hidden"]),textarea,select,button:not([data-close-popover]),a[href]')||panel?.querySelector('[data-close-popover]'))?.focus();});});details.querySelector('[data-close-popover]')?.addEventListener('click',()=>closeWorkspacePopover(details));});
   document.addEventListener('pointerdown',event=>{workspacePopovers.forEach(details=>{if(details.open&&!details.contains(event.target))closeWorkspacePopover(details,{restoreFocus:false});});},{signal:cleanupController.signal});
@@ -556,8 +738,10 @@
   document.getElementById('metadata-form').addEventListener('submit',event=>{event.preventDefault();const data=new FormData(event.currentTarget),folder=data.get('folder_id');saveMetadata(folder?+folder:null,data.getAll('tag_ids').map(Number));});document.getElementById('clear-recording-metadata').onclick=()=>saveMetadata(null,[]);
   const titleDisplayRow=document.getElementById('recording-title-display-row'),titleForm=document.getElementById('recording-title-form'),titleInput=document.getElementById('recording-title');
   const editTitle=()=>{titleDisplayRow.hidden=true;titleForm.hidden=false;titleInput.focus();titleInput.select();};
-  const cancelTitle=()=>{titleInput.value={{ f.filename|tojson }};titleForm.hidden=true;titleDisplayRow.hidden=false;};
+  const cancelTitle=()=>{titleInput.value=titleInput.defaultValue;titleForm.hidden=true;titleDisplayRow.hidden=false;};
   document.getElementById('edit-recording-title')?.addEventListener('click',editTitle);
+  document.getElementById('menu-edit-title')?.addEventListener('click',event=>{event.currentTarget.closest('details').open=false;editTitle();});
+  document.getElementById('menu-find-transcript')?.addEventListener('click',event=>{event.currentTarget.closest('details').open=false;activatePanel('transcript',true);const search=document.querySelector('.transcript-tool');if(search)search.open=true;const row=document.getElementById('replace-row');if(row)row.hidden=false;requestAnimationFrame(()=>document.getElementById('transcript-find')?.focus());});
   document.getElementById('cancel-recording-title')?.addEventListener('click',cancelTitle);
   titleInput?.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();cancelTitle();}});
   titleForm?.addEventListener('submit',async event=>{event.preventDefault();const button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:titleInput.value})}),data=await response.json();if(response.ok)location.reload();else{button.disabled=false;document.getElementById('reprocess-msg').textContent=data.detail||tr('Save failed');}});
@@ -568,8 +752,8 @@
   if(findInput){
     const transcript=document.getElementById('transcript'),transcriptSegments=()=>[...transcript.querySelectorAll('.seg')],count=document.getElementById('find-count');
     let matches=[],position=-1,lastQuery='',focusPending=false,drainController=null,drainPromise=null;
-    const focusMatch=next=>{if(!matches.length)return;position=(position+next+matches.length)%matches.length;matches.forEach((segment,index)=>segment.style.outline=index===position?'2px solid var(--blue)':'');matches[position].scrollIntoView({behavior:'smooth',block:'center'});count.textContent=`${position+1} / ${matches.length}`;};
-    const updateMatches=()=>{const segments=transcriptSegments(),query=findInput.value.trim().toLocaleLowerCase(),previous=matches[position];segments.forEach(segment=>segment.style.outline='');if(query!==lastQuery){position=-1;lastQuery=query;}matches=query?segments.filter(segment=>segment.querySelector('.txt')?.textContent.toLocaleLowerCase().includes(query)):[];if(previous&&matches.includes(previous))position=matches.indexOf(previous);count.textContent=`${matches.length} ${tr('results')}`;if(position>=0){matches[position].style.outline='2px solid var(--blue)';count.textContent=`${position+1} / ${matches.length}`;}else if(focusPending&&matches.length){focusPending=false;focusMatch(1);}};
+    const focusMatch=next=>{if(!matches.length)return;position=(position+next+matches.length)%matches.length;matches.forEach((segment,index)=>segment.style.outline=index===position?'2px solid #FFA64D':'');matches[position].scrollIntoView({behavior:'smooth',block:'center'});count.textContent=`${position+1} / ${matches.length}`;};
+    const updateMatches=()=>{const segments=transcriptSegments(),query=findInput.value.trim().toLocaleLowerCase(),previous=matches[position];segments.forEach(segment=>segment.style.outline='');if(query!==lastQuery){position=-1;lastQuery=query;}matches=query?segments.filter(segment=>segment.querySelector('.txt')?.textContent.toLocaleLowerCase().includes(query)):[];if(previous&&matches.includes(previous))position=matches.indexOf(previous);count.textContent=`${matches.length} ${tr('results')}`;if(position>=0){matches[position].style.outline='2px solid #FFA64D';count.textContent=`${position+1} / ${matches.length}`;}else if(focusPending&&matches.length){focusPending=false;focusMatch(1);}};
     const restoreLazyLoader=loader=>{if(loader?.isConnected&&loader.hasAttribute('hx-get')&&!loader.classList.contains('htmx-request'))window.htmx.process(loader);};
     const drainTranscript=()=>{
       if(drainPromise||!findInput.value.trim())return drainPromise;
@@ -615,12 +799,8 @@
     cleanupController.signal.addEventListener('abort',()=>drainController?.abort(),{once:true});
     findInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();focusMatch(event.shiftKey?-1:1);}});
     document.getElementById('toggle-replace')?.addEventListener('click',()=>{const row=document.getElementById('replace-row');row.hidden=!row.hidden;if(!row.hidden)document.getElementById('transcript-replace').focus();});
-    document.getElementById('replace-all')?.addEventListener('click',async()=>{const output=document.getElementById('replace-result'),button=document.getElementById('replace-all');if(!findInput.value.trim()){output.textContent=tr('Enter text to find');return;}button.disabled=true;output.textContent=tr('Replacing…');const body=new FormData();body.set('find',findInput.value);body.set('replace',document.getElementById('transcript-replace').value);body.set('base_revision','{{ f.transcript.revision if f.transcript else 0 }}');body.set('case_sensitive',document.getElementById('replace-case').checked?'true':'false');const response=await fetch('/file/{{ f.id }}/transcript/replace',{method:'POST',body}),data=await response.json();if(response.ok&&data.replacements){output.textContent=`${tr('Replaced')} ${data.replacements}. ${tr('Reloading…')}`;location.href='/file/{{ f.id }}?view=corrected';return;}output.textContent=response.ok?tr('No matches'):(data.error||tr('Replace failed'));button.disabled=false;});
+    document.getElementById('replace-all')?.addEventListener('click',async()=>{const output=document.getElementById('replace-result'),button=document.getElementById('replace-all');if(!findInput.value.trim()){output.textContent=tr('Enter text to find');return;}button.disabled=true;output.textContent=tr('Replacing…');const body=new FormData();body.set('find',findInput.value);body.set('replace',document.getElementById('transcript-replace').value);body.set('base_revision',String(window.localplaudWorkspaceState?.revision??'{{ f.transcript.revision if f.transcript else 0 }}'));body.set('case_sensitive',document.getElementById('replace-case').checked?'true':'false');const response=await fetch('/file/{{ f.id }}/transcript/replace',{method:'POST',body}),data=await response.json();if(response.ok&&data.replacements){output.textContent=`${tr('Replaced')} ${data.replacements}. ${tr('Reloading…')}`;location.href='/file/{{ f.id }}?view=corrected';return;}output.textContent=response.ok?tr('No matches'):(data.error||tr('Replace failed'));button.disabled=false;});
   }
-  const exportBackdrop=document.getElementById('export-backdrop');
-  const exportResult=document.getElementById('export-result');
-  document.getElementById('open-export')?.addEventListener('click',event=>{if(exportResult)exportResult.textContent='';openDialog(exportBackdrop,event.currentTarget);});
-  document.getElementById('export-close')?.addEventListener('click',()=>closeDialog(exportBackdrop));
   const generateBackdrop=document.getElementById('generate-backdrop');
   if(generateBackdrop){
     document.querySelectorAll('[data-open-generate]').forEach(button=>button.addEventListener('click',event=>openDialog(generateBackdrop,event.currentTarget)));
@@ -655,33 +835,8 @@
       }catch(_error){out.textContent=tr('Could not start generation');button.disabled=false;}
     });
   }
-  exportBackdrop?.addEventListener('click',event=>{if(event.target===exportBackdrop)closeDialog(exportBackdrop);});
-  const shareBackdrop=document.getElementById('share-backdrop'),shareInput=document.getElementById('share-link'),shareResult=document.getElementById('share-result'),systemShare=document.getElementById('system-share'),publicShareEmpty=document.getElementById('public-share-empty'),publicShareActive=document.getElementById('public-share-active'),publicShareInput=document.getElementById('public-share-link'),publicShareResult=document.getElementById('public-share-result'),publicShareCreated=document.getElementById('public-share-created');
-  const recordingUrl=()=>{const url=new URL(location.href);url.searchParams.delete('workspace');url.searchParams.delete('preserve_filelist');url.searchParams.delete('return_to');url.hash='';return url.href;};
-  async function shareRequestJson(options={}){let response;try{response=await fetch('/api/files/{{ f.id }}/share-link',{...options,signal:cleanupController.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr('Could not update public link'));}let data={};try{data=await response.json();}catch(_error){}if(!response.ok)throw new Error(tr(typeof data.detail==='string'?data.detail:'Could not update public link'));return data;}
-  const shareOptionInputs=[...document.querySelectorAll('[data-share-option]')];
-  const shareOptionValues=()=>Object.fromEntries(shareOptionInputs.map(input=>[input.dataset.shareOption,input.checked]));
-  let publicShareActiveState=false;
-  function renderPublicShare(data){publicShareActiveState=Boolean(data.active);publicShareEmpty.hidden=Boolean(data.active);publicShareActive.hidden=!data.active;publicShareInput.value=data.url||'';publicShareCreated.textContent=data.created_at?`${tr('Created')} · ${new Intl.DateTimeFormat(document.documentElement.lang||undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(data.created_at))}`:'';if(data.options)shareOptionInputs.forEach(input=>{input.checked=Boolean(data.options[input.dataset.shareOption]);});}
-  async function loadPublicShare(){publicShareEmpty.hidden=true;publicShareActive.hidden=true;publicShareResult.textContent=tr('Loading public link…');try{renderPublicShare(await shareRequestJson());publicShareResult.textContent='';}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not load public link');}}
-  shareOptionInputs.forEach(input=>input.addEventListener('change',async()=>{if(!publicShareActiveState)return;publicShareResult.textContent=tr('Updating…');try{renderPublicShare(await shareRequestJson({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:shareOptionValues()})}));publicShareResult.textContent=tr('Shared content updated');}catch(error){if(error.name!=='AbortError'){publicShareResult.textContent=error.message||tr('Could not update public link');loadPublicShare();}}}));
-  document.getElementById('open-share')?.addEventListener('click',event=>{shareInput.value=recordingUrl();systemShare.hidden=!navigator.share;openDialog(shareBackdrop,event.currentTarget);loadPublicShare();});
-  document.getElementById('share-close')?.addEventListener('click',()=>{closeDialog(shareBackdrop);shareResult.textContent='';publicShareResult.textContent='';});
-  shareBackdrop?.addEventListener('click',event=>{if(event.target===shareBackdrop)document.getElementById('share-close').click();});
   async function writeClipboard(text){try{await navigator.clipboard.writeText(text);return;}catch(_error){}const priorFocus=document.activeElement,area=document.createElement('textarea');area.value=text;area.setAttribute('readonly','');area.style.cssText='position:fixed;opacity:0;pointer-events:none';document.body.append(area);area.select();const copied=document.execCommand('copy');area.remove();priorFocus?.focus();if(!copied)throw new Error('clipboard unavailable');}
   function showNoteConflict(form,status){form.querySelector('[data-note-conflict]')?.remove();status.textContent=tr('This note changed elsewhere. Your text is still here. Reload before saving.');const recovery=document.createElement('button');recovery.className='btn sec';recovery.type='button';recovery.dataset.noteConflict='';recovery.textContent=tr('Copy draft and reload');recovery.addEventListener('click',async()=>{recovery.disabled=true;try{await writeClipboard(`# ${form.elements.title.value}\n\n${form.elements.content_md.value}`);location.reload();}catch(_error){status.textContent=tr('Could not copy draft');recovery.disabled=false;}});status.after(recovery);recovery.focus();}
-  document.getElementById('copy-share-link')?.addEventListener('click',async()=>{try{await writeClipboard(shareInput.value);shareResult.textContent=tr('Copied');}catch(_error){shareResult.textContent=tr('Copy failed');}});
-  document.getElementById('create-public-share')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;publicShareResult.textContent=tr('Creating public link…');try{renderPublicShare(await shareRequestJson({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:shareOptionValues()})}));publicShareResult.textContent='';}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not create public link');}finally{event.currentTarget.disabled=false;}});
-  document.getElementById('copy-public-share')?.addEventListener('click',async()=>{try{await writeClipboard(publicShareInput.value);publicShareResult.textContent=tr('Copied');}catch(_error){publicShareResult.textContent=tr('Copy failed');}});
-  document.getElementById('revoke-public-share')?.addEventListener('click',async event=>{if(!confirm(tr('Disable this public link? Anyone using it will immediately lose access.')))return;event.currentTarget.disabled=true;publicShareResult.textContent=tr('Disabling public link…');try{await shareRequestJson({method:'DELETE'});renderPublicShare({active:false});publicShareResult.textContent=tr('Public link disabled');}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not disable public link');}finally{event.currentTarget.disabled=false;}});
-  systemShare?.addEventListener('click',async()=>{try{await navigator.share({title:{{ f.filename|tojson }},url:shareInput.value});}catch(error){if(error.name!=='AbortError')shareResult.textContent=tr('Share failed');}});
-  document.querySelectorAll('[data-export-group="transcript"] a').forEach(link=>link.addEventListener('click',event=>{
-    event.preventDefault();const timestamps=document.getElementById('export-timestamps').checked;
-    const speakers=document.getElementById('export-speakers').checked;
-    location.href=`/file/{{ f.id }}/export/transcript.${link.dataset.fmt}?timestamps=${timestamps}&speakers=${speakers}`;
-  }));
-  document.getElementById('copy-transcript')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;exportResult.textContent=tr('Copying…');try{const timestamps=document.getElementById('export-timestamps').checked,speakers=document.getElementById('export-speakers').checked,response=await fetch(`/file/{{ f.id }}/export/transcript.txt?timestamps=${timestamps}&speakers=${speakers}`,{signal:cleanupController.signal});if(!response.ok)throw new Error();const text=await response.text();if(cleanupController.signal.aborted)return;await writeClipboard(text);exportResult.textContent=tr('Transcript copied');}catch(error){if(error.name!=='AbortError')exportResult.textContent=tr('Could not copy transcript');}finally{if(!cleanupController.signal.aborted)button.disabled=false;}});
-  document.getElementById('copy-notes')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;exportResult.textContent=tr('Copying…');try{const response=await fetch('/file/{{ f.id }}/export/notes.md',{signal:cleanupController.signal});if(!response.ok)throw new Error();const text=await response.text();if(cleanupController.signal.aborted)return;await writeClipboard(text);exportResult.textContent=tr('Notes copied');}catch(error){if(error.name!=='AbortError')exportResult.textContent=tr('Could not copy notes');}finally{if(!cleanupController.signal.aborted)button.disabled=false;}});
   document.querySelectorAll('[data-import-audio]').forEach(button=>button.addEventListener('click',async()=>{
     const label=button.querySelector('.action-label'),out=document.getElementById('reprocess-msg');button.disabled=true;if(label)label.textContent=tr('Importing…');
     let response,data;try{response=await fetch('/api/imports/plaud/files/{{ f.id }}/audio',{method:'POST',signal:cleanupController.signal});data=await response.json();}catch(error){if(error.name!=='AbortError'){out.textContent=tr('Could not start audio import');button.disabled=false;if(label)label.textContent=tr('Import audio');}return;}
@@ -692,10 +847,10 @@
       if(status.status==='error'){out.textContent=status.error||tr('Audio import failed');button.disabled=false;if(label)label.textContent=tr('Retry audio import');return;}
       out.textContent=tr('Downloading this recording from Plaud…');importTimer=setTimeout(poll,1000);};poll();
   }));
-  document.getElementById('refresh-plaud-cloud')?.addEventListener('click',async event=>{
-    const button=event.currentTarget,out=document.getElementById('reprocess-msg');button.disabled=true;out.textContent=tr('Refreshing Plaud cloud artifacts…');
-    try{const response=await fetch('/api/files/{{ f.id }}/refresh-cloud-artifacts',{method:'POST',signal:cleanupController.signal}),data=await response.json();if(!response.ok)throw new Error(data.detail||tr('Could not refresh Plaud cloud artifacts'));out.textContent=`${tr('Plaud cloud artifacts refreshed.')} ${data.notes} ${tr('notes')}`;setTimeout(()=>location.reload(),700);}catch(error){if(error.name!=='AbortError'){out.textContent=error.message||tr('Could not refresh Plaud cloud artifacts');button.disabled=false;}}
-  });
+  document.querySelectorAll('[data-refresh-plaud-cloud]').forEach(button=>button.addEventListener('click',async event=>{
+    const button=event.currentTarget,out=button.closest('.cloud-import-empty')?.querySelector('[data-cloud-import-status]')||document.getElementById('reprocess-msg');button.disabled=true;out.textContent=tr('Refreshing Plaud cloud artifacts…');
+    try{const response=await fetch('/api/files/{{ f.id }}/refresh-cloud-artifacts',{method:'POST',signal:cleanupController.signal}),data=await response.json();if(!response.ok)throw new Error(data.detail||tr('Could not refresh Plaud cloud artifacts'));if(!data.notes){out.textContent=tr('No Plaud notes are available for this recording yet.');button.disabled=false;return;}out.textContent=`${tr('Plaud cloud artifacts refreshed.')} ${data.notes} ${tr('notes')}`;setTimeout(()=>location.reload(),700);}catch(error){if(error.name!=='AbortError'){out.textContent=error.message||tr('Could not refresh Plaud cloud artifacts');button.disabled=false;}}
+  }));
   // Friendly generation progress: reuse the read-only per-recording status
   // endpoint. The empty state reloads once work reaches a terminal state;
   // when usable content is already on screen only the header label updates.
@@ -742,7 +897,7 @@
     statusTimer=setTimeout(tick,2500);
   })();
   const noteTemplateSelect=document.getElementById('note-template-select');
-  document.querySelectorAll('[data-open-note-generation]').forEach(button=>button.addEventListener('click',()=>{closeWorkspacePopover(button.closest('.note-add-menu'),{restoreFocus:false});document.querySelector('.notes-toolbar')?.scrollIntoView({behavior:'smooth',block:'nearest'});noteTemplateSelect?.focus();}));
+  document.querySelectorAll('[data-open-note-generation]').forEach(button=>button.addEventListener('click',()=>{closeWorkspacePopover(button.closest('.note-add-menu'),{restoreFocus:false});document.querySelector('[data-open-note-dialog]')?.click();}));
   function renderResolvedStages(resolved){const list=document.getElementById('resolved-stage-list');if(!list||!resolved?.stages)return;list.replaceChildren();for(const [stage,choice] of Object.entries(resolved.stages)){const chip=document.createElement('span');chip.className='chip';chip.textContent=`${tr(stage)} · ${choice.connection}:${choice.model}`;list.append(chip);}}
   async function previewTemplateResolution(key){const response=await fetch(`/api/providers/recordings/{{ f.id }}/resolution?template_key=${encodeURIComponent(key)}`),data=await response.json();if(response.ok)renderResolvedStages(data.resolved);}
   async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent=tr('Checking recording signals…');const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`${tr('Auto suggests')} ${data.template?.name||data.key} · ${data.confidence} ${tr('confidence')} · ${reason}`;previewTemplateResolution(data.key);}else out.textContent=data.detail||tr('Could not preview Auto selection');}
@@ -751,43 +906,19 @@
   // Mind-map-only rebuild from the out-of-date state: notes are never
   // touched; progress and results surface through the normal status flow.
   document.getElementById('rebuild-mindmap')?.addEventListener('click',async event=>{const button=event.currentTarget,out=document.getElementById('mindmap-rebuild-result');button.disabled=true;out.textContent=tr('Queueing mind map rebuild…');const response=await fetch('/file/{{ f.id }}/rebuild-mind-map',{method:'POST'});if(!response.ok){out.textContent=await response.text()||tr('Could not start the rebuild');button.disabled=false;return;}out.textContent=tr('Mind map rebuild is queued.');setTimeout(()=>location.href='/file/{{ f.id }}?tab=mindmap',900);});
-  // Mind map workspace: render the Markdown outline as a visual hierarchy.
-  const mmSrc = document.getElementById('mindmap-src');
-  if (mmSrc) {
-    let rootLabel = tr('Mind map');
-    const roots = [], stack = [];
-    for (const line of mmSrc.textContent.split('\n')) {
-      const h = line.match(/^#\s+(.*)$/);
-      if (h) { rootLabel = h[1].trim(); continue; }
-      const b = line.match(/^(\s*)[-*+]\s+(.*)$/);
-      if (!b || !b[2].trim()) continue;
-      const depth = Math.min(Math.floor(b[1].replace(/\t/g, '  ').length / 2), stack.length);
-      const node = { text: b[2].trim(), children: [] };
-      (depth === 0 ? roots : stack[depth - 1].children).push(node);
-      stack.length = depth; stack.push(node);
-    }
-    const render = (node,isRoot=false) => {const wrap=document.createElement('div');wrap.className=`mm-node${isRoot?' mm-root':''}`;const label=document.createElement('div');label.className='mm-label';label.textContent=node.text;wrap.appendChild(label);if(node.children.length){const children=document.createElement('div');children.className='mm-children';node.children.forEach(child=>{const item=document.createElement('div');item.className='mm-child';item.appendChild(render(child));children.appendChild(item);});wrap.appendChild(children);}return wrap;};
-    const tree = document.getElementById('mindmap-tree');
-    tree.appendChild(render({ text: rootLabel, children: roots },true));
-    const viewport=document.getElementById('mindmap-viewport'),zoom=document.getElementById('mm-zoom');
-    const setZoom=value=>{value=Math.max(+zoom.min,Math.min(+zoom.max,+value));zoom.value=value;tree.style.setProperty('--mm-scale',value/100);};
-    const naturalSize=()=>{const prior=zoom.value;setZoom(100);const size={width:Math.max(1,tree.scrollWidth),height:Math.max(1,tree.scrollHeight)};setZoom(prior);return size;};
-    zoom.addEventListener('input',()=>setZoom(zoom.value));document.getElementById('mm-zoom-out').onclick=()=>setZoom(+zoom.value-10);document.getElementById('mm-zoom-in').onclick=()=>setZoom(+zoom.value+10);document.getElementById('mm-fit').onclick=()=>{const natural=naturalSize(),availableWidth=Math.max(1,viewport.clientWidth-30),availableHeight=Math.max(1,viewport.clientHeight-30);setZoom(Math.min(100,availableWidth/natural.width*100,availableHeight/natural.height*100));viewport.scrollTo({left:0,top:0,behavior:'smooth'});};
-    let dragging=false,startX=0,startY=0,left=0,top=0;viewport.addEventListener('pointerdown',event=>{if(event.target.closest('button,a,input'))return;dragging=true;startX=event.clientX;startY=event.clientY;left=viewport.scrollLeft;top=viewport.scrollTop;viewport.classList.add('dragging');viewport.setPointerCapture(event.pointerId);});viewport.addEventListener('pointermove',event=>{if(dragging){viewport.scrollLeft=left-(event.clientX-startX);viewport.scrollTop=top-(event.clientY-startY);}});const stopDrag=()=>{dragging=false;viewport.classList.remove('dragging');};viewport.addEventListener('pointerup',stopDrag);viewport.addEventListener('pointercancel',stopDrag);
-  }
   // tabs
   const panels = document.querySelectorAll('.tabpanel');
   const askDock=document.getElementById('recording-panel-ask'),askDockLayout=document.querySelector('.recording-workspace-layout'),askDockButton=document.getElementById('open-ask-dock'),askDockMedia=window.matchMedia('(min-width:1200px)'),askDockStorageKey='localplaud:recording-ask-dock';
   const storedAskDockOpen=()=>{try{return localStorage.getItem(askDockStorageKey)==='open';}catch(_error){return false;}};
   const setAskDock=(open,{remember=true,focus=false}={})=>{if(!askDockMedia.matches)return false;askDockLayout.classList.toggle('ask-dock-open',open);askDock.hidden=!open;askDockButton.setAttribute('aria-expanded',String(open));if(remember){try{localStorage.setItem(askDockStorageKey,open?'open':'closed');}catch(_error){}}if(open&&focus)requestAnimationFrame(()=>document.getElementById('ask-q')?.focus());return open;};
-  const workspacePathForTab=(raw,name)=>{const url=new URL(raw,location.origin);if(name==='transcript')url.searchParams.delete('tab');else url.searchParams.set('tab',name);url.searchParams.delete('note');url.searchParams.delete('note_id');return `${url.pathname}${url.search}${url.hash}`;};
+  const workspacePathForTab=(raw,name)=>{const url=new URL(raw,location.origin);url.searchParams.set('tab',name);url.searchParams.delete('note');url.searchParams.delete('note_id');return `${url.pathname}${url.search}${url.hash}`;};
   const pushWorkspaceUrl=(url,state)=>{const next=`${url.pathname}${url.search}${url.hash}`,current=`${location.pathname}${location.search}${location.hash}`;if(next!==current)history.pushState(state,'',url);};
   const syncFilelistTab=name=>document.querySelectorAll('#recording-file-list [data-recording-id]').forEach(link=>{for(const attribute of ['href','hx-get']){const raw=link.getAttribute(attribute);if(raw)link.setAttribute(attribute,workspacePathForTab(raw,name));}});
   const activePanelName=()=>document.querySelector('.tabs>button.on')?.dataset.panel||'transcript';
-  const activatePanel=(requested,push=false)=>{const dockRequest=requested==='ask'&&askDockMedia.matches,name=dockRequest?'transcript':requested,button=document.querySelector(`.tabs>button[data-panel="${name}"]`);if(!button)return;if(dockRequest)setAskDock(true);document.querySelectorAll('.tabs>button').forEach(item=>{const active=item===button;item.classList.toggle('on',active);item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;});panels.forEach(panel=>{if(panel===askDock&&askDockMedia.matches)panel.hidden=!askDockLayout.classList.contains('ask-dock-open');else panel.hidden=panel.dataset.panel!==name;});syncFilelistTab(name);if(push){const url=new URL(location.href);if(requested==='transcript')url.searchParams.delete('tab');else url.searchParams.set('tab',requested);if(requested!=='notes'){url.searchParams.delete('note');url.searchParams.delete('note_id');}pushWorkspaceUrl(url,{localplaudTab:requested});}};
-  document.querySelectorAll('.tabs>button').forEach(button=>button.onclick=()=>activatePanel(button.dataset.panel,true));
+  const activatePanel=(requested,push=false)=>{const previous=activePanelName();if(requested==='ask'&&previous!=='ask')askDockLayout.dataset.previousPanel=previous;const dockRequest=requested==='ask'&&askDockMedia.matches,name=dockRequest?'transcript':requested,button=(name==='notes'&&document.querySelector('.tabs>button[data-note-target].on'))||document.querySelector(`.tabs>button[data-panel="${name}"]`);if(!button)return;recordingShell.dataset.activePanel=name;if(dockRequest)setAskDock(true);document.querySelectorAll('.tabs>button').forEach(item=>{const active=item===button;item.classList.toggle('on',active);item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;});panels.forEach(panel=>{if(panel===askDock&&askDockMedia.matches)panel.hidden=!askDockLayout.classList.contains('ask-dock-open');else panel.hidden=panel.dataset.panel!==name;});syncFilelistTab(name);if(push){const url=new URL(location.href);url.searchParams.set('tab',requested);if(requested!=='notes'){url.searchParams.delete('note');url.searchParams.delete('note_id');}pushWorkspaceUrl(url,{localplaudTab:requested});}};
+  document.querySelectorAll('.tabs>button').forEach(button=>button.onclick=()=>{if(!button.dataset.noteTarget)activatePanel(button.dataset.panel,true);});
   askDockButton.addEventListener('click',()=>{if(askDockMedia.matches){setAskDock(true,{focus:true});syncFilelistTab(activePanelName());}else activatePanel('ask',true);});
-  document.getElementById('close-ask-dock').addEventListener('click',()=>{setAskDock(false);const url=new URL(location.href);if(url.searchParams.get('tab')==='ask'){url.searchParams.delete('tab');history.replaceState({localplaudTab:'transcript'},'',url);}syncFilelistTab(document.querySelector('.tabs>button.on')?.dataset.panel||'transcript');askDockButton.focus();});
+  document.getElementById('close-ask-dock').addEventListener('click',()=>{if(!askDockMedia.matches){const back=askDockLayout.dataset.previousPanel||'notes';activatePanel(back,true);document.querySelector(`.tabs>button[data-panel="${back}"]`)?.focus();return;}setAskDock(false);const url=new URL(location.href);if(url.searchParams.get('tab')==='ask'){url.searchParams.delete('tab');history.replaceState({localplaudTab:'transcript'},'',url);}syncFilelistTab(document.querySelector('.tabs>button.on')?.dataset.panel||'transcript');askDockButton.focus();});
   document.addEventListener('htmx:configRequest',event=>{if(event.detail.elt?.closest?.('#recording-file-list [data-recording-id]'))event.detail.path=workspacePathForTab(event.detail.path,activePanelName());},{signal:cleanupController.signal});
   document.querySelector('details:has([data-imported-transcript-loader])')?.addEventListener('toggle',event=>{if(event.currentTarget.open){const loader=event.currentTarget.querySelector('[data-imported-transcript-loader]');if(loader)window.htmx.trigger(loader,'load-imported');}});
   const defaultNoteTarget=document.querySelector('[data-note-target].on')?.dataset.noteTarget||document.querySelector('[data-note-target]')?.dataset.noteTarget||null;
@@ -834,53 +965,22 @@
   document.addEventListener('htmx:afterSwap',event=>colorSegments(event.target),{signal:cleanupController.signal});
   document.querySelectorAll('.legend .swatch[data-spk]').forEach(sw=>{ const i=window.spkColor(sw.dataset.spk);
     sw.style.background=`var(${vars[i]})`; });
-  // click-to-seek + red active segment synced to audio (Plaud-style)
-  const player=document.getElementById('player'),playableSegments=()=>[...document.querySelectorAll('.seg[data-start]')];
-  document.addEventListener('click',event=>{const seg=event.target.closest('.seg[data-start]');if(!seg||event.target.closest('button,input,textarea,select,form'))return;if(player){player.currentTime=parseFloat(seg.dataset.start)||0;player.play();}},{signal:cleanupController.signal});
-  if(player){
-    const toggle=document.getElementById('player-toggle'),toggleIcon=document.getElementById('player-toggle-icon'),progress=document.getElementById('player-progress'),clock=document.getElementById('player-clock'),speed=document.getElementById('player-speed'),canvas=document.getElementById('waveform'),ctx=canvas.getContext('2d');let peaks=[];
-    const stamp=seconds=>{seconds=Math.max(0,Math.floor(seconds||0));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;};
-    const knownDuration={{ ((f.duration_ms or 0) / 1000) }};
-    const draw=()=>{const ratio=devicePixelRatio||1,width=Math.max(1,canvas.clientWidth),height=canvas.clientHeight;canvas.width=width*ratio;canvas.height=height*ratio;ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,width,height);const played=player.duration?player.currentTime/player.duration:0,bar=Math.max(1,width/(peaks.length||1)*.62);(peaks.length?peaks:Array(90).fill(.18)).forEach((peak,index)=>{const x=index*width/(peaks.length||90),h=Math.max(3,peak*(height-4));ctx.fillStyle=x/width<=played?'#2563eb':'#cbd5e1';ctx.fillRect(x,(height-h)/2,bar,h);});};
-    const sync=()=>{const t=player.currentTime,d=player.duration||knownDuration;progress.value=player.duration?Math.round(t/player.duration*1000):0;clock.textContent=`${stamp(t)} / ${stamp(d)}`;toggleIcon.style.setProperty('--nav-icon',`url('/static/lucide/${player.paused?'play':'pause'}.svg')`);toggle.setAttribute('aria-label',player.paused?tr('Play'):tr('Pause'));playableSegments().forEach(s=>s.classList.toggle('active',t>=parseFloat(s.dataset.start)&&t<parseFloat(s.dataset.end||1e9)));draw();};
-    toggle.onclick=()=>player.paused?player.play():player.pause();document.getElementById('player-back').onclick=()=>player.currentTime=Math.max(0,player.currentTime-15);document.getElementById('player-forward').onclick=()=>player.currentTime=Math.min(player.duration||Infinity,player.currentTime+15);speed.onchange=()=>player.playbackRate=+speed.value;progress.oninput=()=>{if(player.duration)player.currentTime=+progress.value/1000*player.duration;};canvas.onclick=event=>{if(player.duration)player.currentTime=event.offsetX/canvas.clientWidth*player.duration;};['loadedmetadata','timeupdate','play','pause','ratechange','ended'].forEach(name=>player.addEventListener(name,sync));const resizeObserver=new ResizeObserver(draw);resizeObserver.observe(canvas);let waveformTimer=null;cleanupController.signal.addEventListener('abort',()=>{resizeObserver.disconnect();if(waveformTimer)clearTimeout(waveformTimer);},{once:true});const loadWaveform=async()=>{if(cleanupController.signal.aborted)return;try{const response=await fetch('/audio/{{ f.id }}/waveform',{signal:cleanupController.signal});if(response.status===202){waveformTimer=setTimeout(loadWaveform,1000);return;}if(!response.ok)return;const data=await response.json();if(Array.isArray(data.peaks)){peaks=data.peaks;draw();}}catch(_error){}};loadWaveform();
-    document.addEventListener('keydown',event=>{const target=event.target;if(target.matches('input,textarea,select,button')||target.isContentEditable)return;if(event.code==='Space'){event.preventDefault();player.paused?player.play():player.pause();}else if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const direction=event.key==='ArrowRight'?1:-1,amount=event.shiftKey?30:5;player.currentTime=Math.max(0,Math.min(player.duration||Infinity,player.currentTime+direction*amount));}},{signal:cleanupController.signal});
-  }
   // single-file Ask: suggested-question chips fill the input (grounded, non-mutating)
   document.querySelectorAll('.ask-chip').forEach(chip=>chip.onclick=()=>{
-    const q=document.getElementById('ask-q'); if(q){ q.value=chip.dataset.q; q.focus(); }});
-  // delegated [data-seek] handler so HTMX-swapped Ask citations stay playable
-  document.addEventListener('click', e=>{ const el=e.target.closest('[data-seek]'); if(!el) return;
-    e.preventDefault(); if(player){ player.currentTime=parseFloat(el.dataset.seek)||0; player.play(); }},{signal:cleanupController.signal});
-  // deep-link: /file/{id}?t={seconds} seeks the player on load (no autoplay)
-  (function(){ const t=new URLSearchParams(location.search).get('t');
-    if(t!==null && player){ const s=parseFloat(t); if(Number.isFinite(s)&&s>=0){
-      const seek=()=>{ player.currentTime=s; }; if(player.readyState>=1) seek();
-      else { player.addEventListener('loadedmetadata', seek, {once:true,signal:cleanupController.signal}); player.load(); } }}})();
-  // Reloading mid-listen: persist the position per recording in sessionStorage
-  // (a pagehide replaceState is too late for the reload request itself) and
-  // restore it on load when the URL carries no explicit t= deep-link.
-  if(player){ const positionKey='localplaud:playback:{{ f.id }}'; let lastStored=-1;
-    player.addEventListener('timeupdate',()=>{ const second=Math.floor(player.currentTime);
-      if(second===lastStored) return; lastStored=second;
-      try{ if(second>0) sessionStorage.setItem(positionKey,String(second)); else sessionStorage.removeItem(positionKey); }catch(_e){} },{signal:cleanupController.signal});
-    if(new URLSearchParams(location.search).get('t')===null){
-      const stored=parseInt(sessionStorage.getItem(positionKey)||'',10);
-      if(Number.isFinite(stored)&&stored>0){ const seek=()=>{ player.currentTime=stored; };
-        if(player.readyState>=1) seek(); else player.addEventListener('loadedmetadata',seek,{once:true}); } } }
+    const q=document.getElementById('ask-q'); if(!q)return; q.value=chip.dataset.q; if(q.form?.dataset.askBusy==='true'){q.focus();return;} q.form?.requestSubmit(); });
   document.querySelector('[data-segment-edit-error]')?.focus();
-  // inline segment editing — never let the edit UI trigger click-to-seek
-  document.addEventListener('click',event=>{const button=event.target.closest('.seg .editbtn');if(!button)return;event.stopPropagation();const form=button.parentElement.querySelector('.segedit');form.hidden=!form.hidden;if(!form.hidden)form.querySelector('textarea').focus();},{signal:cleanupController.signal});
-  // Double-clicking segment text opens the same editor as the hover pencil —
-  // the pencil alone is a low-discoverability affordance.
-  document.addEventListener('dblclick',event=>{const seg=event.target.closest('.seg[data-start]');if(!seg||event.target.closest('button,input,textarea,select,form'))return;const form=seg.querySelector('.segedit');if(!form||!form.hidden)return;window.getSelection?.()?.removeAllRanges?.();seg.querySelector('.editbtn')?.click();},{signal:cleanupController.signal});
-  const resetSegmentEditor=form=>{form.reset();form.querySelector('[data-segment-status]').textContent='';form.querySelector('[type="submit"]').disabled=false;form.hidden=true;form.parentElement.querySelector('.editbtn')?.focus();};
-  // Speaker renames navigate; carry the playback position so the reloaded
-  // page seeks back instead of resetting to 0:00 mid-listen.
-  document.addEventListener('submit',event=>{const form=event.target.closest?.('.speaker-editor');if(!form||!player)return;const second=Math.floor(player.currentTime);const field=form.querySelector('input[name="t"]');if(field)field.value=second>0?String(second):'';},{signal:cleanupController.signal});
-  document.addEventListener('click',event=>{const cancel=event.target.closest('.seg .segedit [data-cancel]');if(!cancel)return;event.stopPropagation();resetSegmentEditor(cancel.closest('.segedit'));},{signal:cleanupController.signal});
-  document.addEventListener('keydown',event=>{const form=event.target.closest?.('.seg .segedit');if(!form||event.key!=='Escape')return;event.preventDefault();form.querySelector('[data-cancel]').click();},{signal:cleanupController.signal});
-  document.addEventListener('submit',async event=>{const form=event.target.closest?.('.seg .segedit');if(!form)return;event.preventDefault();const save=form.querySelector('[type="submit"]'),status=form.querySelector('[data-segment-status]'),body=new FormData(form);if(player){const second=Math.floor(player.currentTime);if(second>0)body.set('t',String(second));else body.set('t','');}save.disabled=true;status.textContent=tr('Saving…');try{const response=await fetch(form.action,{method:'POST',headers:{accept:'application/json'},body,signal:cleanupController.signal}),result=await response.json();if(!response.ok){const messages={stale_revision:'Transcript changed. Reload before saving.',recording_processing:'Recording is processing. Wait until it finishes before editing.'};throw new Error(tr(messages[result.code]||result.error||'Could not save'));}const url=new URL(location.href);url.searchParams.set('view','corrected');url.searchParams.set('tab','transcript');url.searchParams.delete('revision');if(player){const second=Math.floor(player.currentTime);if(second>0)url.searchParams.set('t',String(second));else url.searchParams.delete('t');}location.href=url;}catch(error){if(error.name!=='AbortError'){save.disabled=false;status.textContent=error.message||tr('Could not save');}}},{signal:cleanupController.signal});
 })();
 </script>
+<script type="application/json" id="ws-config">{{ {
+  "fileId": f.id,
+  "durationSeconds": (f.duration_ms or 0) / 1000,
+  "canEdit": f.can_edit,
+  "revision": f.corrected_revision or 0,
+  "view": ('raw' if f.transcript and f.transcript.kind == 'raw ASR' else 'corrected'),
+  "speakers": f.speakers,
+  "fallback_names": f.speaker_fallback_names | default({}),
+  "title": f.filename,
+} | tojson }}</script>
+<script src="/static/js/workspace.js?v={{ workspace_asset_version }}"></script>
+<script src="/static/js/speaker-suggestions.js?v={{ workspace_asset_version }}"></script>
 {% endblock %}

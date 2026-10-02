@@ -24,6 +24,8 @@ def candidate_snapshots(snapshot: dict, stage: str) -> list[dict]:
         .get(stage, [])
     )
     for index, selection in enumerate(candidates, start=1):
+        if selection.get("quality_resolution", {}).get("accepted") is False:
+            continue
         candidate = copy.deepcopy(snapshot)
         candidate["stages"][stage] = copy.deepcopy(selection)
         candidate["fallback"] = {"stage": stage, "index": index, "primary": False}

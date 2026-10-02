@@ -159,6 +159,7 @@ def migrate_legacy_provider_profile_schema(engine: Engine) -> list[str]:
                 privacy_policy VARCHAR(32) NOT NULL DEFAULT 'allow-egress',
                 no_egress BOOLEAN NOT NULL DEFAULT 0,
                 cost_ceiling FLOAT,
+                quality_floor JSON NOT NULL DEFAULT '{}',
                 fallback_policy JSON NOT NULL DEFAULT '{}',
                 created_at DATETIME NOT NULL,
                 CONSTRAINT uq_profile_key_version UNIQUE (key, version)
@@ -1518,6 +1519,21 @@ def migrate_profile_snapshot_columns(engine: Engine) -> list[str]:
     return migrated
 
 
+def migrate_speech_override_column(engine: Engine) -> list[str]:
+    """Add durable per-recording speech (language/speaker-count) overrides."""
+    if engine.dialect.name != "sqlite":
+        return []
+    inspector = inspect(engine)
+    if "plaud_files" not in set(inspector.get_table_names()):
+        return []
+    columns = {column["name"] for column in inspector.get_columns("plaud_files")}
+    if "speech_overrides" in columns:
+        return []
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE plaud_files ADD COLUMN speech_overrides JSON"))
+    return ["plaud_files.speech_overrides"]
+
+
 def migrate_stage_run_snapshot_column(engine: Engine) -> bool:
     """Backward-compatible wrapper for the original single-column migration."""
     return "stage_runs" in migrate_profile_snapshot_columns(engine)
@@ -1668,3 +1684,19 @@ def prepare_independent_mode(engine: Engine, *, force: bool = False) -> dict[str
             marker.value = counts.copy()
         session.commit()
     return counts
+
+
+def migrate_quality_floor_schema(engine: Engine) -> list[str]:
+    """Add stage quality policy without rewriting existing profiles."""
+    inspector = inspect(engine)
+    if "execution_profiles" not in inspector.get_table_names():
+        return []
+    if "quality_floor" in {c["name"] for c in inspector.get_columns("execution_profiles")}:
+        return []
+    rendered = JSON().compile(dialect=engine.dialect)
+    with engine.begin() as connection:
+        connection.execute(text(
+            f"ALTER TABLE execution_profiles ADD COLUMN quality_floor {rendered} "
+            "NOT NULL DEFAULT '{}'"
+        ))
+    return ["execution_profiles.quality_floor"]

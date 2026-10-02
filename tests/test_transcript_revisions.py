@@ -4,13 +4,17 @@ rerunning ASR."""
 
 from __future__ import annotations
 
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Barrier
 
 import pytest
 from sqlalchemy import create_engine, inspect, select, text
+
+from tests.assets import with_assets
 
 
 def test_local_transcript_uniqueness_migration_preserves_cloud_and_revision(tmp_path):
@@ -367,7 +371,7 @@ def test_segment_speaker_correction_preserves_timed_words_and_raw_asr(
     exported = c.get(
         "/file/r1/export/transcript.txt?timestamps=false&speakers=true"
     ).text
-    assert "SPEAKER_01: hello team" in exported
+    assert "Speaker 2: hello team" in exported
 
     deadline = time.monotonic() + 2
     while calls != ["r1"] and time.monotonic() < deadline:
@@ -631,22 +635,28 @@ def test_segment_editor_lists_stable_speakers_and_restores_focus_contract(
     assert 'aria-label="Edit segment text and speaker"' in transcript.text
     assert '<select class="search-input" name="speaker" aria-label="Speaker">' in transcript.text
     assert '<option value="__none__"' in transcript.text
-    assert '<option value="SPEAKER_00" selected>SPEAKER_00</option>' in transcript.text
+    assert '<option value="SPEAKER_00" selected>Speaker 1</option>' in transcript.text
     assert '<option value="SPEAKER_01" >Facilitator</option>' in transcript.text
     detail = c.get("/file/r1")
-    assert "form.parentElement.querySelector('.editbtn')?.focus()" in detail.text
-    assert "event.target.closest?.('.seg .segedit')" in detail.text
-    assert "const resetSegmentEditor=form=>{form.reset()" in detail.text
-    assert "form.querySelector('[data-segment-status]').textContent=''" in detail.text
-    assert "form.querySelector('[type=\"submit\"]').disabled=false" in detail.text
-    assert "headers:{accept:'application/json'}" in detail.text
-    assert "url.searchParams.set('tab','transcript')" in detail.text
-    assert "else url.searchParams.delete('t')" in detail.text
-    assert "recording_processing:'Recording is processing." in detail.text
-    assert "document.querySelector('[data-segment-edit-error]')?.focus()" in detail.text
-    assert ".seg:focus-within .editbtn" in detail.text
-    assert ".seg .editbtn:focus-visible" in detail.text
-    assert ".seg .editbtn { opacity:0" in detail.text
+    # Inline correction lives in the workspace script: optimistic save with
+    # rollback, focus restored to the pencil, structured conflict messages.
+    assert '<script src="/static/js/workspace.js?v=' in detail.text
+    workspace_js = (
+        Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    ).read_text()
+    assert "form.parentElement.querySelector('.editbtn')?.focus()" in workspace_js
+    assert "event.target.closest?.('.seg .segedit')" in workspace_js
+    assert "function resetSegmentEditor(form) {\n    form.reset();" in workspace_js
+    assert "form.querySelector('[data-segment-status]').textContent = '';" in workspace_js
+    assert "form.querySelector('[type=\"submit\"]').disabled = false;" in workspace_js
+    assert "headers: { accept: 'application/json' }" in workspace_js
+    assert "paragraph.innerHTML = before.html;" in workspace_js  # rollback on failure
+    assert "recording_processing: 'Recording is processing." in workspace_js
+    detail_assets = with_assets(c, detail)
+    assert "document.querySelector('[data-segment-edit-error]')?.focus()" in detail_assets
+    assert ".seg:focus-within .editbtn" in detail_assets
+    assert ".seg .editbtn:focus-visible" in detail_assets
+    assert ".seg .editbtn { opacity:0" in detail_assets
 
 
 def test_native_segment_form_preserves_workspace_and_has_accessible_error_recovery(
@@ -753,7 +763,11 @@ def test_non_finite_playback_offsets_are_discarded(monkeypatch, tmp_path, offset
     assert detail.status_code == 200
     assert partial.status_code == 200
     assert 'name="t" value=""' in partial.text
-    assert "Number.isFinite(s)&&s>=0" in detail.text
+    assert '<script src="/static/js/workspace.js?v=' in detail.text
+    workspace_js = (
+        Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    ).read_text()
+    assert "Number.isFinite(s) && s >= 0" in workspace_js
 
 
 def test_segment_conflicts_have_distinct_structured_codes_and_native_processing_recovery(
@@ -1299,7 +1313,8 @@ def test_detail_view_toggle_raw_vs_corrected(monkeypatch, tmp_path):
     # explicit raw view shows the untouched ASR output, read-only
     raw = c.get("/file/r1?view=raw")
     raw_transcript = c.get("/file/r1/transcript-page?view=raw").text
-    assert "hello team" in raw_transcript
+    # Timed words render as spans that losslessly rebuild the segment text.
+    assert "hello team" in re.sub(r"<[^>]+>", "", raw_transcript)
     assert "hello, team!" not in raw_transcript
     assert "?view=corrected" in raw.text
     assert 'class="editbtn"' not in raw_transcript  # no edits from the raw view
@@ -1498,7 +1513,7 @@ def test_stale_edit_is_rejected_without_losing_first_revision(monkeypatch, tmp_p
         assert revisions[0].segments[1]["text"] == "let's start"
 
 
-def test_edit_hides_stale_notes_and_marks_regeneration_pending(monkeypatch, tmp_path):
+def test_edit_keeps_stale_notes_readable_and_marks_regeneration_pending(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
     _mute_reindex(monkeypatch)
@@ -1532,7 +1547,10 @@ def test_edit_hides_stale_notes_and_marks_regeneration_pending(monkeypatch, tmp_
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert "STALE NOTE" not in c.get("/file/r1").text
+    page = c.get("/file/r1").text
+    assert "STALE NOTE" in page
+    assert "data-note-stale" in page
+    # Reading an explicitly stale artifact must not publish it as current evidence.
     assert "STALE NOTE" not in render_markdown("r1")
     assert "STALE MAP" not in render_markdown("r1")
     assert _has_summary("r1", "default") is False

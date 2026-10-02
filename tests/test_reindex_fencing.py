@@ -644,3 +644,26 @@ def test_pending_scanner_recovers_abandoned_running_reindex(monkeypatch, tmp_pat
             StageStatus.completed,
         ]
         assert all(attempt.completed_at is not None for attempt in attempts)
+
+
+@pytest.mark.parametrize("age_hours,expected", [(2, 1), (200, 0)])
+def test_restricted_reindex_resumes_recent_speaker_edits_only(monkeypatch, tmp_path, age_hours, expected):
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.db.models import StageName, StageRun, StageStatus
+    from localplaud.db.session import session_scope
+    from localplaud.worker import reindex
+
+    settings = _database(monkeypatch, tmp_path)
+    settings.pipeline.untranscribed_only_retry_hours = 72
+    _seed()
+    with session_scope() as session:
+        run = session.scalar(select(StageRun).where(StageRun.stage == StageName.index))
+        run.status = StageStatus.pending
+        run.detail = {"reindex_only": True, "stale": True, "reason": "canonical transcript changed"}
+        session.add(StageRun(file_id="race", stage=StageName.transcribe, status=StageStatus.completed,
+                             completed_at=datetime.now(UTC) - timedelta(hours=age_hours)))
+    called = []
+    monkeypatch.setattr(reindex, "reindex_file", lambda fid, _: called.append(fid) or True)
+    assert reindex.process_pending_reindexes(settings, recent_only=True) == expected
+    assert called == (["race"] if expected else [])

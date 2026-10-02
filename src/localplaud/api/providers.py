@@ -18,6 +18,7 @@ from ..providers.service import (
     list_models,
     list_profiles,
     preview_resolution,
+    preview_scope_resolution,
     resolve_recording_profile,
     save_connection,
     save_model,
@@ -74,6 +75,7 @@ class ProfileRequest(BaseModel):
     privacy_policy: str = "allow-egress"
     no_egress: bool = False
     cost_ceiling: float | None = None
+    quality_floor: dict = Field(default_factory=dict)
     fallback_policy: dict = Field(default_factory=dict)
     stages: dict = Field(default_factory=dict)
 
@@ -113,6 +115,37 @@ def install_recommendation(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (ProfileMutationBusyError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+class StartingProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    acknowledge_egress: bool = False
+    secret_env: str | None = Field(default=None, max_length=128)
+    base_url: str | None = Field(default=None, max_length=512)
+    model: str | None = Field(default=None, max_length=200)
+    worker_key: str | None = Field(default=None, max_length=128)
+
+
+@router.get("/starting-profiles")
+def starting_profiles():
+    from ..providers.starting_profiles import STARTING_PROFILES
+
+    return {"starting_profiles": STARTING_PROFILES}
+
+
+@router.post("/starting-profiles/{kind}", status_code=201)
+def install_starting_profile(kind: str, body: StartingProfileRequest):
+    from ..providers.starting_profiles import install_starting_profile as install
+
+    with session_scope() as session:
+        try:
+            return install(session, kind, **body.model_dump())
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProfileMutationBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/connections")
@@ -250,6 +283,34 @@ def resolve(body: PreviewRequest):
             result = preview_resolution(
                 session, body.rule_or_folder, body.template, body.recording
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"resolved": result.to_dict()}
+
+
+@router.get("/resolution-preview")
+def resolution_preview(
+    folder_id: int | None = None,
+    template_key: str | None = None,
+    file_id: str | None = None,
+):
+    """Explain the resolved provider per stage for a Settings-selected scope."""
+    with session_scope() as session:
+        try:
+            if file_id:
+                from ..db.models import PlaudFile
+
+                if session.get(PlaudFile, file_id) is None:
+                    raise LookupError("recording not found")
+                result = resolve_recording_profile(
+                    session, file_id, template_key=template_key or None
+                )
+            else:
+                result = preview_scope_resolution(
+                    session, folder_id=folder_id, template_key=template_key or None
+                )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"resolved": result.to_dict()}

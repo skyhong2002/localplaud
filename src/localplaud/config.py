@@ -115,6 +115,12 @@ class PipelineConfig(BaseModel):
     polish: bool = True  # AI correction after speakers, before notes/index
     summarize: bool = True
     mind_map: bool = True  # nested Markdown outline rendered as a tree
+    # Timestamped chapter outline ("Outline") from the canonical transcript.
+    outline: bool = False  # opt in; do not add paid calls to existing installations
+    # ``llm`` uses the text LLM selected for the mind-map stage. ``time_slices``
+    # is an explicit, clearly labelled deterministic alternative (fixed windows
+    # titled by their first salient sentence); it is never a silent fallback.
+    outline_method: Literal["llm", "time_slices"] = "llm"
     index: bool = True  # embeddings for Q&A / semantic search
     # Recordings at or above this length are treated as accidental (the Plaud
     # recorder stops at its 5-hour cap) and are left as metadata-only instead of
@@ -132,6 +138,13 @@ class PipelineConfig(BaseModel):
     # The daemon yields after a small newest-first batch so fresh recordings
     # are discovered promptly instead of sitting behind a months-long backlog.
     files_per_cycle: int = 1
+    # Admit only recordings without local transcription; manual resume is unaffected.
+    auto_process_untranscribed_only: bool = False
+    # In that mode, a recording whose local transcription completed within this
+    # window keeps its bounded automatic retries, so a new recording whose
+    # correction or notes failed still finishes. Older transcripts remain
+    # manual-resume only. 0 disables the exception.
+    untranscribed_only_retry_hours: int = Field(default=72, ge=0, le=720)
     # Consecutive daemon retries for pipeline failures. A failed/partial recording
     # becomes eligible after exponential backoff; manual Resume resets the budget.
     retry_max_attempts: int = Field(default=5, ge=0, le=50)
@@ -267,8 +280,10 @@ class DiarizeConfig(BaseModel):
     model: str = "pyannote/speaker-diarization-community-1"
     device: Literal["auto", "cpu", "cuda"] = "auto"
     hf_token: str | None = None
-    # Optional hints; leave 0/None to auto-detect.
+    # Optional hints; leave 0/None to auto-detect. An exact count wins over a range.
     num_speakers: int | None = None
+    min_speakers: int | None = None
+    max_speakers: int | None = None
 
 
 # ---- LLM (summaries + Q&A) ----------------------------------------------- #
@@ -341,10 +356,12 @@ class CodexLocalLlmConfig(BaseModel):
     codex_home: str = "~/.localplaud/codex"
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] = "high"
     timeout_seconds: int = Field(default=900, ge=30, le=1800)
-    # Codex has enough context for large transcript maps. Structural output
-    # failures are bisected by the correction stage, while transport failures
-    # fail immediately instead of multiplying calls.
-    polish_chunk_chars: int = Field(default=48_000, ge=1_000, le=60_000)
+    # Codex has enough context for large maps, but a correction response is
+    # about as long as its input and high-effort turns on ~19k CJK characters
+    # exceed the per-call timeout. Keep each request well inside it; structural
+    # failures and timeouts are bisected by the correction stage, while
+    # transport failures fail immediately instead of multiplying calls.
+    polish_chunk_chars: int = Field(default=8_000, ge=1_000, le=60_000)
     # GPT-6 Sol has a large context window. Larger full-coverage map chunks
     # preserve more discourse structure while spending far fewer subscription
     # turns than the 6k local-model default.

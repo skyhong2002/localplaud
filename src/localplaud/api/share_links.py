@@ -19,7 +19,7 @@ from ..db.session import session_scope
 from ..i18n import catalog, translator
 from ..markdown import render_markdown
 from ..preferences import get_workspace_preferences
-from ..store.speakers import display_names
+from ..store.speakers import speaker_labels
 from .media import audio_file_response
 
 router = APIRouter()
@@ -193,7 +193,7 @@ def public_share(request: Request, token: str):
                 corrected_imported = recording.corrected_transcript_for_source(imported.source)
                 segments = list((corrected_imported or imported).segments)
                 transcript_imported = True
-        names = display_names(session, recording.id)
+        names = speaker_labels(session, recording.id)
         speaker_colors: dict[str, str] = {}
         for segment in segments:
             speaker = segment.get("speaker")

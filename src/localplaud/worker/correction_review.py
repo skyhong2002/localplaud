@@ -20,29 +20,49 @@ ASR nonsense. Do not reject all edits merely because audio is unavailable.
 Reject invented replies, removed substantive words/questions, completed fragments,
 merged distinct names/titles, changed numbers/negation/commitments, or corrections
 of factual claims based only on world knowledge. Ambiguous names remain unchanged.
-Return exactly one decision per proposal: id, approve (boolean), reason.
-Do not rewrite text. Reasons identify contextual evidence or the unsupported
-change. This is text-evidence review, not acoustic verification."""
+Return two arrays: approved_ids (integer IDs) and rejected (objects with id and
+reason). Every proposal ID must appear exactly once across both arrays. Review
+each edit independently, including punctuation; do not approve a batch blindly.
+For supported edits return only the ID, without restating the edit or its rationale.
+For rejected edits give a brief reason identifying unsupported changes.
+Do not rewrite text. This is text-evidence review, not acoustic verification."""
 SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "decisions": {
+        "approved_ids": {"type": "array", "items": {"type": "integer"}},
+        "rejected": {
             "type": "array",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "properties": {
-                    "id": {"type": "integer"},
-                    "approve": {"type": "boolean"},
-                    "reason": {"type": "string"},
-                },
-                "required": ["id", "approve", "reason"],
+                "properties": {"id": {"type": "integer"}, "reason": {"type": "string"}},
+                "required": ["id", "reason"],
             },
-        }
+        },
     },
-    "required": ["decisions"],
+    "required": ["approved_ids", "rejected"],
 }
+
+
+def _expand_decisions(response):
+    """Normalize compact decisions; keep strict legacy validation for older providers."""
+    if set(response) == {"decisions"}:
+        return response["decisions"]
+    if set(response) != {"approved_ids", "rejected"}:
+        raise LLMOutputInvalid("correction review omitted decisions")
+    approved, rejected = response["approved_ids"], response["rejected"]
+    if not isinstance(approved, list) or not isinstance(rejected, list):
+        raise LLMOutputInvalid("correction review returned invalid decisions")
+    decisions = [
+        {"id": item, "approve": True, "reason": "Approved by source review (compact response)."}
+        for item in approved
+    ]
+    for item in rejected:
+        if not isinstance(item, dict) or set(item) != {"id", "reason"}:
+            raise LLMOutputInvalid("correction review returned invalid decisions")
+        decisions.append({**item, "approve": False})
+    return decisions
 
 
 def _segment_edits(before: str, after: str) -> list[dict]:
@@ -124,14 +144,14 @@ def review_corrections(source, candidate, provider, *, budget: int, progress=Non
             prompt,
             system=SYSTEM,
             temperature=0,
-            max_tokens=max(2048, len(batch) * 200),
+            max_tokens=max(2048, len(batch) * 80),
             json_schema=SCHEMA,
         )
         input_chars += len(SYSTEM) + len(prompt)
         output_chars += len(response)
         from .polish import _json_completion
 
-        items = _json_completion(response).get("decisions")
+        items = _expand_decisions(_json_completion(response))
         expected = {edit["id"] for edit in batch}
         seen = set()
         if not isinstance(items, list):
@@ -163,6 +183,7 @@ def review_corrections(source, candidate, provider, *, budget: int, progress=Non
         segment.text = value
     return {
         "strategy": "individual-edits",
+        "response_format": "compact-decisions/v1",
         "proposals": edits,
         "decisions": decisions,
         "calls": len(batches),

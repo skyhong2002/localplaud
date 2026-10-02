@@ -289,7 +289,10 @@ def run():
             if scheduler.running:
                 scheduler.shutdown(wait=True)
         finally:
-            release_daemon_owner(daemon_owner)
+            try:
+                jobs.shutdown()
+            finally:
+                release_daemon_owner(daemon_owner)
 
 
 def run_processing_cycle(settings, *, daemon_owner: str | None = None) -> int:
@@ -319,6 +322,14 @@ def process_automatic_pending(settings=None, *, daemon_owner: str | None = None)
         return 0
     with processing_owner(daemon_owner):
         count = process_pending(settings, limit=settings.pipeline.files_per_cycle)
+        if settings.pipeline.auto_process_untranscribed_only:
+            # Speaker matching can invalidate a new recording after its main
+            # pipeline finished. Resume that index without draining old backfills
+            # or regenerating notes after a name edit.
+            process_pending_reindexes(
+                settings, limit=settings.pipeline.files_per_cycle, recent_only=True
+            )
+            return count
         process_pending_reindexes(settings, limit=settings.pipeline.files_per_cycle)
         process_pending_documents(
             settings, limit=settings.pipeline.files_per_cycle * 4, reconcile=False
@@ -428,9 +439,7 @@ def reprocess(
 
 @app.command(name="reprocess-all")
 def reprocess_all(
-    mode: str = typer.Option(
-        "resume", "--mode", help="resume | force | derived_only"
-    ),
+    mode: str = typer.Option("resume", "--mode", help="resume | force | derived_only"),
     status: list[str] = typer.Option(  # noqa: B008
         None, "--status", help="Only recordings in this status (repeatable)."
     ),
@@ -466,12 +475,8 @@ def reprocess_all(
 
 @app.command(name="backfill-titles")
 def backfill_titles(
-    force: bool = typer.Option(
-        False, "--force", help="Overwrite existing generated titles too."
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Show what would change; write nothing."
-    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing generated titles too."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change; write nothing."),
     limit: int | None = typer.Option(
         None, "--limit", help="Cap the number of recordings changed (newest first)."
     ),
@@ -583,9 +588,7 @@ def backfill_tags(
     template = settings.pipeline.summary_template
     processed = tagged = 0
     with session_scope() as session:
-        rows = session.scalars(
-            select(PlaudFile).order_by(PlaudFile.created_at.desc())
-        ).all()
+        rows = session.scalars(select(PlaudFile).order_by(PlaudFile.created_at.desc())).all()
         for r in rows:
             if limit is not None and processed >= limit:
                 break
@@ -602,9 +605,7 @@ def backfill_tags(
             )
             if summary is None or not (summary.content_md or "").strip():
                 continue
-            result = apply_auto_tags(
-                session, r.id, summary.content_md, settings, force=force
-            )
+            result = apply_auto_tags(session, r.id, summary.content_md, settings, force=force)
             processed += 1
             if result.get("applied"):
                 tagged += 1
@@ -723,9 +724,7 @@ def serve():
     _serve(get_settings())
 
 
-def _serve(
-    settings, *, database_initialized: bool = False, managed_daemon: bool = False
-):
+def _serve(settings, *, database_initialized: bool = False, managed_daemon: bool = False):
     import logging
 
     import uvicorn
@@ -751,6 +750,76 @@ def _serve(
         port=settings.api.port,
         log_level="info",
     )
+
+
+@app.command("benchmark-speech")
+def benchmark_speech_command(
+    manifest: str = typer.Argument(help="Version-1 JSON manifest of user-owned audio and references."),
+    profile_id: int | None = typer.Option(None, "--profile-id", help="Local execution-profile database ID."),
+    speech_config: str | None = typer.Option(None, "--speech-config", help="JSON ASR/VAD/align/diarize configuration."),
+    output: str | None = typer.Option(None, "--output", help="Save complete JSON report (private)."),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON instead of the readable table."),
+):
+    """Evaluate speech locally, without uploading audio or modifying library artifacts."""
+    from pathlib import Path
+
+    from .benchmark_speech import benchmark, configuration
+
+    try:
+        explicit = json.loads(Path(speech_config).read_text()) if speech_config else None
+        settings, alignment, provenance = configuration(
+            get_settings(), profile_id=profile_id, explicit=explicit
+        )
+        report = benchmark(Path(manifest), settings, alignment, provenance)
+    except (ValueError, OSError, KeyError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
+    if output:
+        destination = Path(output)
+        # Reference inputs are never valid report destinations.
+        from .benchmark_speech import load_manifest
+
+        protected = {Path(manifest).resolve()}
+        if speech_config:
+            protected.add(Path(speech_config).resolve())
+        for item in load_manifest(Path(manifest)):
+            protected.add(item["audio"].resolve())
+        original = json.loads(Path(manifest).read_text())
+        for item in original["recordings"]:
+            for key in ("text_file", "rttm"):
+                if key in item["reference"]:
+                    protected.add((Path(manifest).parent / item["reference"][key]).resolve())
+        if destination.resolve() in protected:
+            raise typer.BadParameter("report output must not overwrite audio or reference inputs")
+        destination.write_text(serialized + "\n")
+    if json_output:
+        print(serialized)
+    else:
+        table = Table(title="Local speech benchmark")
+        for column in ("Recording", "CER", "Mixed WER/MER", "DER", "Time MAE (s)", "RTF", "Peak CPU MiB", "Indicators"):
+            table.add_column(column, overflow="fold", min_width=9 if column == "Recording" else None)
+
+        def number(value, percent=False):
+            return "—" if value is None else f"{value * (100 if percent else 1):.3f}" + ("%" if percent else "")
+
+        for row in report["recordings"] + [{"id": "Aggregate", "metrics": report["aggregate"],
+                                            "execution": report["aggregate"], **report["aggregate"]}]:
+            if "error" in row:
+                table.add_row(row["id"], "FAILED", "", "", "", "", "", row["error"])
+                continue
+            metrics = row["metrics"]
+            hallucination = metrics["hallucination"]
+            loops = hallucination.get("recordings_with_loops", len(hallucination.get("repeated_ngram_loops", [])))
+            silence = hallucination.get("recordings_with_non_speech_text", len(hallucination.get("text_in_non_speech") or []))
+            memory = row["execution"].get("peak_memory_bytes")
+            table.add_row(row["id"], number(metrics["cer"]["rate"], True), number(metrics["mer"]["rate"], True),
+                          number((metrics.get("der") or {}).get("rate"), True),
+                          number((metrics.get("timestamps") or {}).get("mean_absolute_seconds")),
+                          number(row.get("real_time_factor")), number(memory / 2**20 if memory is not None else None),
+                          f"loops={loops}, non-speech={silence}")
+        console.print(table)
+    if report["aggregate"]["failed"]:
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

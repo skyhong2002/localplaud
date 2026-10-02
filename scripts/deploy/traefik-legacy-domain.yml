@@ -1,0 +1,26 @@
+# Reference deployment: install in /etc/dokploy/traefik/dynamic/ on Oracle.
+# The retired domain keeps bookmarks working against the production controller.
+http:
+  routers:
+    localplaud-legacy-http:
+      rule: Host(`plaud.skyhong.tw`)
+      entryPoints:
+        - web
+      middlewares:
+        - localplaud-canonical-domain
+      service: noop@internal
+    localplaud-legacy-https:
+      rule: Host(`plaud.skyhong.tw`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - localplaud-canonical-domain
+      service: noop@internal
+      tls:
+        certResolver: letsencrypt
+  middlewares:
+    localplaud-canonical-domain:
+      redirectRegex:
+        regex: '^https?://plaud\.skyhong\.tw(?::[0-9]+)?/(.*)$'
+        replacement: 'https://plaud.observe.tw/${1}'
+        permanent: true

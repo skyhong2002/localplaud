@@ -1,0 +1,7 @@
+<nav class="m-tabbar" aria-label="{{ t('Primary') }}">
+  <a class="m-tab" href="/" {% if active in ('home', 'recordings') %}aria-current="page"{% endif %}>{{ icon('folder') }}<span>{{ t('Files') }}</span></a>
+  <div class="m-plus-wrap">
+    <button class="m-plus" type="button" data-dialog-open="add-sheet" aria-haspopup="dialog" aria-label="{{ t('Add audio') }}">{{ icon('plus') }}</button>
+  </div>
+  <a class="m-tab" href="/explore" {% if active in ('explore', 'discover') %}aria-current="page"{% endif %}>{{ icon('grid') }}<span>{{ t('Explore') }}</span></a>
+</nav>

@@ -76,8 +76,8 @@ def test_render_markdown_contains_everything(seeded_db):
     assert "The team decided to ship." in md
     assert "- A Chat @ 01:05" in md
     assert "## Transcript" in md
-    assert "**[00:00] SPEAKER_00:** hello there" in md
-    assert "**[01:05] SPEAKER_01:** general kenobi" in md
+    assert "**[00:00] Speaker 1:** hello there" in md
+    assert "**[01:05] Speaker 2:** general kenobi" in md
 
 
 def test_render_markdown_missing_file_raises(seeded_db):
@@ -114,7 +114,7 @@ def test_transcript_portable_formats_and_options(seeded_db):
 
     srt, _ = render_transcript(FILE_ID, "srt")
     assert b"00:00:00,000 --> 00:00:01,500" in srt
-    assert b"SPEAKER_00: hello there" in srt
+    assert b"Speaker 1: hello there" in srt
     vtt, _ = render_transcript(FILE_ID, "vtt")
     assert vtt.startswith(b"WEBVTT\n") and b"00:01:05.200" in vtt
 
@@ -135,7 +135,7 @@ def test_transcript_document_formats_and_options(seeded_db):
     reader = PdfReader(BytesIO(pdf_bytes))
     assert len(reader.pages) >= 1
     pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    assert "SPEAKER_00" in pdf_text and "00:00" in pdf_text
+    assert "Speaker 1" in pdf_text and "00:00" in pdf_text
     assert "繁體中文" in pdf_text
 
 

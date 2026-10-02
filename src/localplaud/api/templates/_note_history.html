@@ -41,4 +41,7 @@
     {% endif %}
   </div>
 </details>
+{% else %}
+{# Keep a hidden controller-owned node ready for the first archived version. #}
+<details class="transcript-tool note-history-tool" hidden></details>
 {% endif %}

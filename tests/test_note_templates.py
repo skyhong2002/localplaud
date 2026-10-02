@@ -226,10 +226,12 @@ def test_templates_workspace_search_and_tabs(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     page = client.get("/templates")
     assert page.status_code == 200
-    assert "My Space" in page.text and "Explore" in page.text
-    assert "Copy to My Space" in page.text
-    assert "重構會議為紀要、行動事項與決策" in page.text
+    assert "My templates" in page.text and "Discover" in page.text
+    assert 'data-sf-template-create' in page.text
     assert 'id="template-form"' in page.text
+    explore = client.get("/templates?tab=explore")
+    assert "Add to My templates" in explore.text
+    assert "重構會議為紀要、行動事項與決策" in explore.text
     education = client.get("/templates?tab=explore&category=Education")
     assert "深度詳盡的演講細節、引言與概念" in education.text
     assert "會議紀要" not in education.text
@@ -554,3 +556,31 @@ def test_summarize_persists_exact_template_snapshot(monkeypatch, tmp_path):
     assert result["template"] == "worker-safe"
     assert result["template_version"] == 3
     assert result["template_snapshot"]["system_prompt"] == "Do not invent."
+
+
+def test_template_authorship_is_truthful_without_plaud_branding(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    builtins = client.get("/api/note-templates").json()["templates"]
+    # Bundled prompts are Plaud Web snapshots: provenance stays explicit,
+    # but they are never presented as authored by Plaud itself.
+    assert {row["author"] for row in builtins} == {"Adapted from Plaud"}
+    created = client.post(
+        "/api/note-templates",
+        json={"key": "mine", "name": "Mine", "system_prompt": "", "instructions": "Summary"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["author"] == "Local workspace"
+    html = client.get("/templates?tab=explore").text
+    assert 'sf-tcard-author">Plaud<' not in html
+    assert 'sf-tcard-author">Adapted from Plaud<' in html
+
+
+def test_rule_sentence_never_shows_raw_template_keys():
+    from localplaud.automations import rule_sentence
+
+    rule = {"trigger": {}, "actions": {"note_template_key": "plaud-research-interview"}}
+    sentence = rule_sentence(rule, names={"template": {}})
+    assert "plaud-research-interview" not in sentence
+    assert "研究訪談" in sentence
+    unknown = rule_sentence({"trigger": {}, "actions": {"note_template_key": "plaud-team-sync"}})
+    assert "plaud-" not in unknown and "Team sync" in unknown

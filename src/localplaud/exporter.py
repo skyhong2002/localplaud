@@ -15,7 +15,7 @@ from pathlib import Path
 from .config import get_settings
 from .db.models import PlaudFile, StageName
 from .db.session import session_scope
-from .store.speakers import display_names
+from .store.speakers import speaker_labels
 
 log = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ def render_markdown(file_id: str) -> str:
         else:
             segments = raw.segments if raw is not None else None
         if segments:
-            names = display_names(session, file.id)
+            names = speaker_labels(session, file.id)
             parts += ["## Transcript", ""]
             for seg in segments:
                 stamp = _format_timestamp(seg.get("start") or 0.0)

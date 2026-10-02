@@ -1,0 +1,7 @@
+<li class="nav-tags-all" data-sidebar-tags-all>
+  <div class="nav-tags-filter search-field">{{ icon('search', 'sm') }}<input class="input input-sm" type="search" data-sidebar-tag-filter placeholder="{{ t('Filter tags') }}" aria-label="{{ t('Filter tags') }}" aria-controls="sidebar-tags-all-list" autocomplete="off"></div>
+  <ul class="nav-list" id="sidebar-tags-all-list">
+    {% for tag in tags %}<li data-tag-name="{{ tag.name | lower }}"><a class="nav-item" href="/?tag={{ tag.id }}" title="{{ tag.name }}"><span class="tag-glyph"{% if tag.color %} style="--tag-color:{{ tag.color }}"{% endif %}>{{ icon('tag') }}</span><span class="nav-label">{{ tag.name }}</span><span class="nav-count">({{ tag.count }})</span></a></li>{% endfor %}
+  </ul>
+  <p class="nav-tags-empty t-meta" data-sidebar-tag-empty hidden>{{ t('No tags match.') }}</p>
+</li>

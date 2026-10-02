@@ -376,12 +376,13 @@ def test_remote_diarization_artifact_reports_its_model(monkeypatch):
     assert payload["model"] == "pyannote-requested"
 
 
-def test_client_verifies_artifact_checksum():
+@pytest.mark.parametrize("stage", [JobStage.summarize, JobStage.outline])
+def test_client_verifies_artifact_checksum(stage):
     expected = hashlib.sha256(b"expected").hexdigest()
     job = JobResponse(
         job_id="job",
         idempotency_key="key",
-        stage=JobStage.summarize,
+        stage=stage,
         status=JobStatus.succeeded,
         progress=1,
         artifacts=[
@@ -1020,3 +1021,182 @@ def test_remote_invalid_model_output_allows_only_configured_fallback(monkeypatch
     assert result['status'] == 'failed'
     assert result['error']['retryable'] is True
     assert not result['artifacts']
+
+
+def test_handshake_runtime_is_optional_for_older_workers():
+    from localplaud.remote.protocol import HandshakeResponse
+
+    legacy = HandshakeResponse.model_validate(
+        {
+            "protocol": "localplaud-worker",
+            "version": "1",
+            "worker_id": "wsl-old",
+            "capabilities": [{"stage": "transcribe", "models": ["turbo"]}],
+        }
+    )
+    assert legacy.runtime is None
+    newer = HandshakeResponse.model_validate(
+        {
+            "worker_id": "wsl-new",
+            "capabilities": [],
+            "runtime": {"device": "RTX 5060", "queued_jobs": 2, "future_field": "ignored"},
+        }
+    )
+    assert newer.runtime.device == "RTX 5060"
+    assert newer.runtime.queued_jobs == 2
+    assert newer.runtime.memory_total_mb is None
+
+
+def test_worker_handshake_reports_runtime_queue_depth(monkeypatch, tmp_path):
+    import localplaud.remote.server as server
+
+    monkeypatch.setattr(
+        server,
+        "_static_runtime",
+        lambda: {"software_version": "9.9", "device": "Test GPU", "memory_total_mb": 8192},
+    )
+    client = _client(monkeypatch, tmp_path)
+    headers = {"authorization": "Bearer worker-secret"}
+    runtime = client.get("/api/worker/v1/capabilities", headers=headers).json()["runtime"]
+    assert runtime == {
+        "software_version": "9.9",
+        "device": "Test GPU",
+        "memory_total_mb": 8192,
+        "memory_available_mb": None,
+        "queued_jobs": 0,
+        "running_jobs": 0,
+    }
+
+
+def test_settings_renders_worker_runtime_and_not_reported_for_legacy(monkeypatch, tmp_path):
+    from localplaud.remote.protocol import HandshakeResponse, StageCapability, WorkerRuntime
+
+    client = _client(monkeypatch, tmp_path)
+    headers = {"authorization": "Bearer worker-secret"}
+    replies = iter(
+        [
+            HandshakeResponse(
+                worker_id="gpu-new",
+                capabilities=[StageCapability(stage="transcribe", models=["turbo"])],
+                runtime=WorkerRuntime(
+                    device="RTX 5060 (8151 MB)", memory_total_mb=32768,
+                    queued_jobs=3, running_jobs=1, software_version="0.9.0",
+                ),
+            ),
+            HandshakeResponse(
+                worker_id="gpu-old",
+                capabilities=[StageCapability(stage="diarize", models=["pyannote"])],
+            ),
+        ]
+    )
+
+    class FakeClient:
+        def handshake(self):
+            reply = next(replies)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "localplaud.remote.registry.RemoteWorkerClient.from_config",
+        lambda config: FakeClient(),
+    )
+    ids = []
+    for key in ("gpu-new", "gpu-old"):
+        created = client.post(
+            "/api/providers/workers",
+            headers=headers,
+            json={"key": key, "name": key.upper(), "base_url": f"https://{key}.example/"},
+        )
+        assert created.status_code == 201
+        ids.append(created.json()["id"])
+        health = client.post(f"/api/providers/workers/{ids[-1]}/health", headers=headers)
+        assert health.json()["status"] == "healthy"
+        assert health.json()["checked_at"]
+
+    workers = client.get("/api/providers/workers", headers=headers).json()["workers"]
+    assert workers[0]["health"]["runtime"]["queued_jobs"] == 3
+    assert workers[1]["health"]["runtime"] is None
+
+    # A failed check keeps the last reported runtime and last healthy time.
+    replies = iter([RuntimeError("connection refused")])
+    failed = client.post(f"/api/providers/workers/{ids[0]}/health", headers=headers).json()
+    assert failed["status"] == "unavailable"
+    assert failed["runtime"]["device"] == "RTX 5060 (8151 MB)"
+    assert failed["last_healthy_at"]
+
+    page = client.get("/settings", headers=headers)
+    assert page.status_code == 200
+    assert "RTX 5060 (8151 MB)" in page.text
+    assert "32.0 GB" in page.text
+    assert "3 queued · 1 running" in page.text
+    assert "not reported" in page.text
+    assert f'id="worker-checked-{ids[0]}"><time datetime=' in page.text
+    assert "transcribe · turbo" in page.text
+
+
+@pytest.mark.parametrize("advertised", [False, True])
+def test_outline_dispatch_requires_capability_and_has_stable_job_id(monkeypatch, advertised):
+    from localplaud.remote.protocol import HandshakeResponse, StageCapability
+    from localplaud.worker import pipeline
+
+    requests = []
+
+    class Client:
+        def handshake(self):
+            return HandshakeResponse(worker_id="old-or-new", capabilities=[
+                StageCapability(stage="outline" if advertised else "mind_map", models=["model"])
+            ])
+
+        def submit_and_wait(self, request, **kwargs):
+            requests.append(request)
+            return SimpleNamespace(artifacts={"result.json": b'{"model":"model"}'})
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(pipeline.RemoteWorkerClient, "from_config", lambda cfg: Client())
+    snapshot = {"stages": {"outline": {
+        "execution_target": "remote_worker", "model": "model", "configuration": {}
+    }}}
+    inputs = [pipeline._remote_json_input("transcript", {"segments": []})]
+    if not advertised:
+        with pytest.raises(RemoteWorkerError, match="outline capability unavailable") as error:
+            pipeline._run_remote_stage("owned", snapshot, "outline", inputs)
+        assert error.value.retryable and requests == []
+    else:
+        for _ in range(2):
+            assert pipeline._run_remote_stage("owned", snapshot, "outline", inputs)["model"] == "model"
+        assert requests[0].idempotency_key == requests[1].idempotency_key
+        assert requests[0].stage == JobStage.outline
+
+
+def test_outline_worker_handler_and_checksums(monkeypatch, tmp_path):
+    from localplaud.worker import outline
+
+    client = _client(monkeypatch, tmp_path)
+    monkeypatch.setattr(outline, "generate_outline", lambda transcript, settings, **kw: {
+        "chapters": [{"start_ms": 0, "end_ms": kw["duration_ms"], "title": "Tail"}],
+        "model": "test", "provider": "test-provider", "method": "llm",
+        "prompt_version": outline.PROMPT_VERSION,
+    })
+    request = _request("outline-idempotent") | {
+        "stage": "outline", "options": {"duration_ms": 1000, "prompt_version": outline.PROMPT_VERSION}
+    }
+    headers = {"authorization": "Bearer worker-secret"}
+    response = client.post("/api/worker/v1/jobs", json=request, headers=headers)
+    assert response.status_code == 200
+    job = client.get("/api/worker/v1/jobs/" + response.json()["job_id"], headers=headers).json()
+    assert job["status"] == "succeeded"
+    artifact = job["artifacts"][0]
+    result = client.get(artifact["download_url"], headers=headers).content
+    assert hashlib.sha256(result).hexdigest() == artifact["sha256"]
+    assert json.loads(result)["chapters"][-1]["end_ms"] == 1000
+    repeat = client.post("/api/worker/v1/jobs", json=request, headers=headers).json()
+    assert repeat["job_id"] == job["job_id"]
+    assert any(c["stage"] == "outline" for c in client.get("/api/worker/v1/capabilities", headers=headers).json()["capabilities"])
+    request["options"]["prompt_version"] = "future"
+    assert client.post("/api/worker/v1/jobs", json=request, headers=headers).status_code == 409

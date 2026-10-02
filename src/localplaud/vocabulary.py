@@ -98,7 +98,7 @@ def _mark_derived_stale(session, file_id: str, *, reason: str = "vocabulary") ->
 
     invalidate_generated_documents(session, file_id)
     stale_generation = secrets.token_hex(16)
-    for stage in (StageName.summarize, StageName.mind_map, StageName.index):
+    for stage in (StageName.summarize, StageName.mind_map, StageName.outline, StageName.index):
         run = session.scalar(
             select(StageRun).where(StageRun.file_id == file_id, StageRun.stage == stage)
         )

@@ -102,7 +102,7 @@ def test_rule_dry_run_execution_history_and_versioning(monkeypatch, tmp_path):
     assert created.status_code == 201
     rule = created.json()
     assert "title contains" in rule["sentence"]
-    assert "use plaud-meeting-minutes notes" in rule["sentence"]
+    assert "use 會議紀要 notes" in rule["sentence"]
 
     dry = client.post(f"/api/automations/rules/{rule['id']}/dry-run").json()
     assert dry["mutated"] is False
@@ -184,7 +184,7 @@ def test_autoflow_defaults_to_smart_template(monkeypatch, tmp_path):
     assert response.status_code == 201
     rule = response.json()
     assert rule["actions"]["note_template_key"] == "plaud-autopilot"
-    assert "use plaud-autopilot notes" in rule["sentence"]
+    assert "use 智能總結 notes" in rule["sentence"]
 
     assert client.post("/api/automations/run").json()["recordings_changed"] == 1
     from localplaud.db.models import PlaudFile
@@ -448,8 +448,8 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     # residue is asserted against the visible region rather than the whole page.
     visible = translated.text.split('<main class="main">', 1)[1].split("</main>", 1)[0]
     assert "When a recording arrives" not in visible
-    assert "使用 plaud-autopilot 筆記" in visible
-    assert f"移至資料夾 #{folder_id}" in visible
+    assert "使用 智能總結 筆記" in visible
+    assert "移至資料夾 Meetings" in visible
     assert "Local workspace" not in visible
     assert "本機工作區" in visible
     assert "Rules created and fully editable in this Web App." not in visible
@@ -466,10 +466,10 @@ def test_rule_validation_and_discover_ui(monkeypatch, tmp_path):
     api_rules = client.get("/api/automations/rules").json()["rules"]
     by_name = {rule["name"]: rule for rule in api_rules}
     assert by_name[long_name]["sentence"] == (
-        f"When a recording arrives, then use plaud-autopilot notes, move to folder #{folder_id}."
+        f"When a recording arrives, then use 智能總結 notes, move to folder #{folder_id}."
     )
     assert by_name["Origin display"]["sentence"] == (
-        f"When source is Local import, then use plaud-autopilot notes, move to folder #{folder_id}."
+        f"When source is Local import, then use 智能總結 notes, move to folder #{folder_id}."
     )
 
 

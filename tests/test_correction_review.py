@@ -184,3 +184,93 @@ def test_review_offsets_handle_insertion_deletion_and_repeated_words():
     review_corrections(original, candidate, ApproveAll(), budget=1000)
     assert candidate.segments[0].text == "嗯社團迎新，銀心是天文名詞。"
     assert original.segments[0].text == "嗯嗯社團銀心，銀心是天文名詞"
+
+
+def test_compact_review_keeps_rejections_and_requires_every_id(monkeypatch):
+    class Compact(Reviewer):
+        def complete(self, prompt, **kw):
+            if "target_segments" in json.loads(prompt):
+                return super().complete(prompt, **kw)
+            assert set(kw["json_schema"]["properties"]) == {"approved_ids", "rejected"}
+            return json.dumps(
+                {"approved_ids": [0], "rejected": [{"id": 1, "reason": "preserve fragment"}]}
+            )
+
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _: Compact())
+    result = polish_transcript(source(), Settings())
+    assert [s.text for s in result["transcript"].segments] == [
+        "社團迎新派對",
+        "一下",
+        "新生下週報到",
+    ]
+    assert result["detail"]["review"]["response_format"] == "compact-decisions/v1"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"approved_ids": [0], "rejected": []},
+        {"approved_ids": [0, 1, 1], "rejected": []},
+        {"approved_ids": [0, 1], "rejected": [{"id": 1, "reason": "conflict"}]},
+        {"approved_ids": [True, 0], "rejected": []},
+        {"approved_ids": [0, 99], "rejected": []},
+        {"approved_ids": [0], "rejected": [{"id": 1, "reason": ""}]},
+    ],
+)
+def test_invalid_compact_decisions_never_publish(monkeypatch, response):
+    class Compact(Reviewer):
+        def complete(self, prompt, **kw):
+            if "target_segments" in json.loads(prompt):
+                return super().complete(prompt, **kw)
+            return json.dumps(response)
+
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _: Compact())
+    with pytest.raises(LLMOutputInvalid):
+        polish_transcript(source(), Settings())
+
+
+class Echo(Reviewer):
+    def complete(self, prompt, **kw):
+        body = json.loads(prompt)
+        self.calls.append(body)
+        assert "target_segments" in body, "unchanged text must not need review"
+        return json.dumps({"segments": body["target_segments"]}, ensure_ascii=False)
+
+
+def test_script_is_normalized_to_taiwan_traditional_without_review(monkeypatch):
+    from localplaud.asr.base import Word
+
+    provider = Echo()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _: provider)
+    original = Transcript(
+        language="zh",
+        segments=[
+            Segment(
+                text="对，等等这样子，權限設定好了",
+                start=0,
+                end=1,
+                words=[Word(text="这样子", start=0, end=1)],
+            ),
+            Segment(text="OK meeting 一下", start=1, end=2),
+        ],
+    )
+    result = polish_transcript(original, Settings())
+    segments = result["transcript"].segments
+    assert segments[0].text == "對，等等這樣子，權限設定好了"
+    assert segments[0].words[0].text == "這樣子"
+    assert segments[1].text == "OK meeting 一下"
+    assert original.segments[0].text == "对，等等这样子，權限設定好了"
+    assert result["detail"]["script_normalized_segment_ids"] == [0]
+    assert result["detail"]["changed_segment_ids"] == [0]
+    assert result["detail"]["review"]["calls"] == 0
+    assert provider.calls[0]["target_segments"][0]["text"] == "對，等等這樣子，權限設定好了"
+
+
+@pytest.mark.parametrize("language,text", [("ja", "这样だ"), ("en", "这样"), (None, "これは这样")])
+def test_script_normalization_skips_non_chinese_text(monkeypatch, language, text):
+    provider = Echo()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _: provider)
+    result = polish_transcript(
+        Transcript(language=language, segments=[Segment(text=text, start=0, end=1)]), Settings()
+    )
+    assert result["transcript"].segments[0].text == text

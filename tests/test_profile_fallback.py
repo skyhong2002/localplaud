@@ -392,3 +392,36 @@ def test_diarization_can_fallback_to_remote_worker(monkeypatch, tmp_path):
         )
         assert [item.status.value for item in attempts] == ["failed", "completed"]
         assert attempts[1].provider == "remote-worker"
+
+
+def test_quality_rejection_is_retained_in_stage_attempt_without_execution(monkeypatch, tmp_path):
+    import pytest
+
+    from localplaud.asr.base import AsrUnavailable
+    from localplaud.db.models import ExecutionProfile, StageAttempt
+    from localplaud.db.session import session_scope
+    from localplaud.providers.contracts import ProviderStage
+    from localplaud.worker import pipeline
+
+    settings = _reset(monkeypatch, tmp_path, summarize=False, mind_map=False, index=False)
+    with session_scope() as session:
+        _seed_file(session, tmp_path, "quality")
+        _add_candidate(session, "low", "faster-whisper", "low-quality", (ProviderStage.transcribe,), target="local")
+        profile = session.scalar(select(ExecutionProfile).where(ExecutionProfile.is_system_default))
+        profile.quality_floor = {"transcribe": 0.8}
+        profile.fallback_policy = {"stages": {"transcribe": [{"connection": "low", "model": "low-quality"}]}}
+    calls = []
+
+    def unavailable(audio, candidate_settings):
+        calls.append(candidate_settings.asr.provider)
+        raise AsrUnavailable("primary unavailable")
+
+    monkeypatch.setattr(pipeline.transcribe, "run_asr", unavailable)
+    with pytest.raises(AsrUnavailable):
+        pipeline.process_file("quality", settings)
+    assert len(calls) == 1
+    with session_scope() as session:
+        attempts = list(session.scalars(select(StageAttempt).where(StageAttempt.file_id == "quality")))
+        assert len(attempts) == 1
+        check = attempts[0].resolved_profile_snapshot["policy"]["fallback_policy"]["stages"]["transcribe"][0]["quality_resolution"]
+        assert not check["accepted"] and "transcribe fallback 1 rejected" in check["reason"]

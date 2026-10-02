@@ -14,6 +14,7 @@ from .db.models import (
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeIndexAttempt,
+    Outline,
     PlaudFile,
     ProviderCostReservation,
     StageAttempt,
@@ -297,6 +298,9 @@ def delete_local_processing_many(file_ids: list[str]) -> dict:
                         SummaryRevision.file_id.in_(unique_ids),
                         SummaryRevision.source == "local",
                     )
+                ).rowcount,
+                "outlines": session.execute(
+                    delete(Outline).where(Outline.file_id.in_(unique_ids), Outline.source == "local")
                 ).rowcount,
                 "chunks": session.execute(
                     delete(Chunk).where(Chunk.file_id.in_(unique_ids))

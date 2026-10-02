@@ -16,6 +16,7 @@ class JobStage(enum.StrEnum):
     diarize = "diarize"
     summarize = "summarize"
     mind_map = "mind_map"
+    outline = "outline"
     embed = "embed"
 
 
@@ -56,11 +57,28 @@ class StageCapability(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkerRuntime(BaseModel):
+    """Optional self-reported worker runtime facts.
+
+    Every field is optional so controllers accept older workers (which omit the
+    whole object) and newer workers that report more than this version knows.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    software_version: str | None = None
+    device: str | None = None
+    memory_total_mb: int | None = Field(default=None, ge=0)
+    memory_available_mb: int | None = Field(default=None, ge=0)
+    queued_jobs: int | None = Field(default=None, ge=0)
+    running_jobs: int | None = Field(default=None, ge=0)
+
+
 class HandshakeResponse(BaseModel):
     protocol: Literal["localplaud-worker"] = PROTOCOL_NAME
     version: Literal["1"] = PROTOCOL_VERSION
     worker_id: str
     capabilities: list[StageCapability]
+    runtime: WorkerRuntime | None = None
 
 
 _FORBIDDEN = {

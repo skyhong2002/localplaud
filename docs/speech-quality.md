@@ -23,6 +23,28 @@ native VAD. Install `localplaud[vad]` to avoid these degraded paths. VAD cannot
 guarantee perfect recognition: quiet speech, music, and background voices remain
 difficult cases.
 
+For confirmed missed quiet speech, Qwen supports explicitly disabling VAD for
+one transcription stage with profile options `{"vad": {"enabled": false}}`.
+The remote worker validates and applies these options to that job only. Qwen then
+decodes bounded, contiguous windows covering the entire recording, including its
+tail; token-limit retries still bisect windows without dropping either half.
+Artifact metadata records VAD as disabled and zero skipped seconds. This increases
+work and can expose the decoder to silence/noise, so it is an explicit recovery
+choice, not a global default or a guarantee that every utterance is recognized.
+Merely cleaning or polishing an old transcript cannot recover missing speech.
+
+Operators can also persist this choice in a new execution-profile version for
+future Qwen recordings after checking their own audio. Existing profile versions
+and per-recording selections remain traceable. This is a coverage/compute tradeoff,
+not a change of ASR provider or a promise of verbatim accuracy; validate quiet
+speech and hallucinations on representative recordings before selecting it.
+
+Nemotron recordings longer than ten minutes compute full-recording acoustic
+features on CPU before transferring features to CUDA. This avoids a large CUDA
+STFT allocation while retaining one continuous speaker cache; it does not split
+the recording into independently numbered speaker groups. Host memory must still
+accommodate the full-recording feature calculation.
+
 ## Recovering old output
 
 `python -m localplaud.silence_repair plan RECORDING_ID --output private.jsonl`
@@ -87,16 +109,25 @@ not automatically enqueue the whole library for rewriting.
 
 ## Automatic correction and edit review
 
-`transcript-polish/v4` runs before notes for both normal ingestion and notes-only
+`transcript-polish/v5` runs before notes for both normal ingestion and notes-only
 resume/regeneration. It proposes contextual edits, then makes a separate model
 call to review individual edits against the original dialogue and nearby speaker
 context. Latin words and numbers stay atomic during edit extraction. Accepted
 nonoverlapping edits are applied to the original text only after every review
 batch validates. Rejecting one uncertain edit in a long segment does not discard
-unrelated supported corrections. Each edit, decision and reason is recorded in
-the correction stage. Adjacent replacements without an unchanged boundary remain
+unrelated supported corrections. Each edit and decision is recorded in the
+correction stage. Review responses list approved IDs and brief rejection reasons;
+approved entries store a generic approval marker, not a model-written rationale.
+Every ID must still appear exactly once, including punctuation edits. Accepted v4
+revisions remain reusable because v5 changes the output protocol, not the review
+policy. Adjacent replacements without an unchanged boundary remain
 one review unit; accepting an edit requires support for the complete span.
 There is no manual approval step and no library-wide homophone replacement list.
+
+Proposal requests are bounded by the provider's `polish_chunk_chars`. A request
+that exceeds the per-call timeout is retried as two smaller requests covering the
+same segments; a single segment that still times out fails the stage for durable
+retry. Transport and quota failures are not split.
 
 Malformed, incomplete, or unavailable review fails the correction stage before a
 new revision or dependent notes are saved. Durable retry runs correction again
@@ -110,3 +141,129 @@ fallback. The usage ledger includes review calls.
 
 A separate model review can still share the proposing model's mistakes; this is
 not an audio-verified transcript or a guarantee of zero missed corrections.
+
+## Offline speech benchmark harness
+
+`localplaud benchmark-speech` evaluates user-owned recordings without uploading
+any audio. It runs conversion, configured VAD/ASR, alignment and diarization locally,
+without writing transcripts, stage runs or edits into the library. Model weights may
+be downloaded by the selected local runtimes; audio is never sent to a cloud API
+or remote worker. Evaluation rejects non-local speech selections before reading
+recording inputs and does not execute profile or provider fallbacks. Failures remain
+visible per recording and cause exit status 1, while other recordings continue.
+This harness exists; **no real-recording quality benchmark has been run as part of
+its implementation**, and production defaults have not changed.
+
+Create a private JSON manifest, with paths relative to the manifest directory:
+
+```json
+{
+  "version": 1,
+  "recordings": [
+    {
+      "id": "meeting-a",
+      "owned": true,
+      "audio": "meeting-a.wav",
+      "reference": {
+        "text_file": "meeting-a.txt",
+        "rttm": "meeting-a.rttm",
+        "rttm_recording_id": "meeting-a",
+        "words": [{"text": "你好", "start": 0.5, "end": 1.0}],
+        "non_speech": [{"start": 10.0, "end": 12.0}]
+      }
+    }
+  ]
+}
+```
+
+Use full reference text for the complete recording, either `text` or `text_file`.
+`words`, `segments` (same text/start/end shape), RTTM speaker turns and `non_speech`
+are optional. All times are finite seconds. Inline `speaker_turns` accept
+`{start, end, speaker}` objects. Multi-recording RTTM files require
+`rttm_recording_id`. `owned: true` is required on every manifest recording.
+Do not use a partial reference as if it covered the full recording.
+
+Choose a durable profile by database ID, or pass an explicit speech JSON file:
+
+```sh
+localplaud benchmark-speech private/manifest.json --profile-id 3 \
+  --output private/profile-3-report.json
+localplaud benchmark-speech private/manifest.json \
+  --speech-config private/speech.json --json --output private/report.json
+```
+
+Example `speech.json`:
+
+```json
+{
+  "asr": {
+    "provider": "faster-whisper",
+    "language": "zh",
+    "faster_whisper": {"model": "large-v3-turbo", "device": "cpu", "compute_type": "int8"}
+  },
+  "vad": {"enabled": true},
+  "align": {"provider": "whisperx", "model": "wav2vec2-auto", "options": {"device": "cpu"}},
+  "diarize": {"provider": "pyannote", "device": "cpu", "model": "pyannote/speaker-diarization-community-1"}
+}
+```
+
+Unspecified speech values inherit local installation settings. Alignment runs for
+benchmark execution; use `provider-word-timestamps` to validate the ASR's timings
+instead of forced alignment. Select `diarize.provider = "none"` to evaluate an ASR
+without an additional speaker stage; absent speaker predictions still score as
+missed speech when RTTM references exist. The profile mode reads an existing profile
+without bootstrapping or editing it; all three speech selections must be local.
+Cloud/remote text stages in that profile are not executed. A full local benchmark
+requires the optional ASR, VAD, alignment and diarization dependencies and ffmpeg.
+
+The default output is a readable table; `--json` prints the full versioned report.
+`--output` saves the same JSON in either mode. Reports contain recording IDs,
+configuration/provenance, errors and reference-derived diagnostic positions; keep
+manifests and reports private. Output cannot overwrite the manifest, audio, reference
+text, RTTM or selected speech-config file. Original audio and references are read-only.
+
+### Metric definitions and limits
+
+- **CER** uses Unicode NFKC, case folding and alphanumeric characters; whitespace
+  and punctuation are ignored. Traditional/Simplified distinctions remain scored,
+  so use consistent Taiwan Mandarin references and inspect script differences.
+  Rates are `(substitutions + deletions + insertions) / reference units` and may
+  exceed 100%. Empty references with hypothesis text have an undefined (`null`)
+  rate and retain insertion counts; both empty yields zero.
+- **Mixed WER/MER** uses one token per Mandarin Han character and one per English
+  word, with case-insensitive Unicode normalization, apostrophes within English
+  words, and contiguous digit runs. Chinese/English boundaries work without spaces.
+  WER uses this mixed token convention; MER means **mixed error rate** here and
+  has the same denominator. Neither claims linguistically segmented Chinese-word
+  WER or match-error-rate. Edit counts are exact Levenshtein counts. Aggregate
+  CER/WER/MER sum errors and denominators rather than averaging recording rates.
+- **DER** uses optimal global speaker-label assignment, continuous-time intervals,
+  zero collar and scored overlap. Missed speech, false alarms and confusion are
+  reported separately; aggregate DER is weighted by reference speaker-seconds.
+  Predictions use word speakers when available (inheriting segment speakers),
+  otherwise transcript segment speakers. This evaluates the exported attribution,
+  rather than claiming access to the diarizer's unpublished raw timeline.
+- **Hallucination indicators** flag consecutive n-gram loops (1–8 mixed tokens,
+  at least three repetitions) and textual segments overlapping annotated non-speech
+  regions. Overlapping annotations are merged. These are inspection cues, not
+  acoustic proof: repetition can be legitimate and coarse segment timing can
+  overlap silence. Missing non-speech references yield `null`, not a clean result.
+- **Timestamp deviation** compares matched lexical units in monotonic matching
+  blocks; insertions/deletions remain unmatched. JSON includes matched/reference
+  coverage, mean and maximum absolute start/end deviation. Word references use
+  predicted words; segment references use predicted segments. Multi-token segment
+  boundaries apply to each token and are not inferred word times. Aggregate MAE
+  weights matched boundaries. Missing timing references yield `null`.
+- **RTF** is conversion plus VAD/ASR/alignment/diarization wall time divided by actual
+  decoded audio duration. Model loading is included; spawn startup and scoring are
+  excluded. Each recording runs in a fresh process to isolate memory measurements.
+- **Peak memory** is process-tree CPU RSS sampled every 100 ms, with the largest
+  process high-water RSS as a lower bound. RSS can double-count shared pages and
+  sampling can miss brief peaks. GPU VRAM is excluded; it is not a GPU memory claim.
+  Aggregate peak is the maximum observed recording peak, and aggregate RTF uses
+  total elapsed time divided by total audio duration.
+
+Pure metric tests use synthetic text, turns and timings, and harness tests use fake
+execution. They download no models and do not establish real speech quality. Run a
+private, reviewed cohort of Taiwan Mandarin and mixed Mandarin/English recordings
+before changing production speech defaults or assigning catalog quality ratings.

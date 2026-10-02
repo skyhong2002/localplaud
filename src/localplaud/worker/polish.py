@@ -10,9 +10,9 @@ from dataclasses import asdict
 
 from ..asr.base import Segment, Transcript, Word
 from ..config import Settings
-from ..llm.base import LLMError, LLMOutputInvalid, build_llm
+from ..llm.base import LLMError, LLMOutputInvalid, LLMTimeout, build_llm
 
-PROMPT_VERSION = "transcript-polish/v4"
+PROMPT_VERSION = "transcript-polish/v5"
 SYSTEM_PROMPT = """You polish ASR transcript segments for downstream notes.
 Actively correct recognition errors using dialogue context and speaker continuity.
 ASR spelling is not authoritative: preserving a name means preserving its intended
@@ -257,6 +257,18 @@ def _propose_corrections(
                     by_id[index] = str(source[index].get("text") or "").strip()
                 kept_source += len(emptied)
                 kept_emptied += len(emptied)
+        except LLMTimeout as exc:
+            # A timeout on a multi-segment request is usually its size. Retry the
+            # same coverage as two smaller requests; a single segment that still
+            # times out is a provider failure and fails the stage for retry.
+            if end - start <= 1:
+                raise
+            midpoint = start + (end - start) // 2
+            pending[0:0] = [(start, midpoint), (midpoint, end)]
+            split_retries += 1
+            last_split_reason = str(exc)
+            report_progress()
+            continue
         except LLMOutputInvalid as exc:
             if end - start <= 1:
                 if single_segment_retries.get(start, 0) < 1:
@@ -339,11 +351,34 @@ def _propose_corrections(
     }
 
 
+def _normalize_script(transcript: Transcript) -> Transcript:
+    """Deterministically render Chinese segments in Taiwan Traditional characters.
+
+    ASR output often mixes Simplified and Traditional script. Script is not a
+    contextual judgement, so it is fixed before the model proposes edits; the
+    model and its reviewer then only spend effort on wording.
+    """
+    from ..zh import to_taiwan_script
+
+    language = (transcript.language or "").lower()
+    if language and not language.startswith("zh"):
+        return transcript
+    result = copy.deepcopy(transcript)
+    for segment in result.segments:
+        segment.text = to_taiwan_script(segment.text)
+        for word in segment.words or []:
+            word.text = to_taiwan_script(word.text)
+    return result
+
+
 def polish_transcript(
     transcript: Transcript, settings: Settings, *, progress=None, dispatch_guard=None
 ) -> dict:
     """Generate, independently review, and publish only approved contextual edits."""
     from .correction_review import review_corrections
+
+    original = transcript
+    transcript = _normalize_script(transcript)
 
     provider = build_llm(settings.llm)
     if dispatch_guard is not None:
@@ -379,10 +414,17 @@ def polish_transcript(
     detail["attempts"] += review["calls"]
     detail["request_input_chars"] += review["input_chars"]
     detail["response_output_chars"] += review["output_chars"]
+    detail["script_normalized_segment_ids"] = [
+        i
+        for i, (before, after) in enumerate(
+            zip(original.segments, transcript.segments, strict=True)
+        )
+        if before.text != after.text
+    ]
     detail["changed_segment_ids"] = [
         i
         for i, (before, after) in enumerate(
-            zip(transcript.segments, result["transcript"].segments, strict=True)
+            zip(original.segments, result["transcript"].segments, strict=True)
         )
         if before.text != after.text
     ]

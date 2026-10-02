@@ -1,4 +1,10 @@
 absl-py==2.5.0
+# Qwen forced alignment's Korean/Japanese tokenizers and their extra dependencies.
+Cython==3.3.0
+DyNet38==2.2
+nagisa==0.3.0
+psutil==7.2.2
+soynlp==0.0.493
 aistore==1.26.0
 antlr4-python3-runtime==4.9.3
 audioread==3.1.0

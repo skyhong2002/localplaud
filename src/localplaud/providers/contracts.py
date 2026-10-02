@@ -37,6 +37,7 @@ class StageCapabilities(BaseModel):
     prompt_limit: int | None = Field(default=None, ge=1)
     input_limit: int | None = Field(default=None, ge=1)
     hardware_requirement: str | None = None
+    quality: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
 
 
 class Capability(BaseModel):

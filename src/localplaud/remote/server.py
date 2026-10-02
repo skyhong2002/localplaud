@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import hmac
 import json
@@ -38,6 +39,7 @@ from .protocol import (
     JobSubmitRequest,
     StageCapability,
     WorkerError,
+    WorkerRuntime,
 )
 
 # This host has a single GPU. Serialize stage execution so concurrent job
@@ -145,7 +147,7 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
             elif request.model.startswith("pyannote/"):
                 settings.diarize.provider = "pyannote"
             settings.diarize.model = request.model
-        elif request.stage in {JobStage.summarize, JobStage.mind_map}:
+        elif request.stage in {JobStage.summarize, JobStage.mind_map, JobStage.outline}:
             cfg = getattr(settings.llm, settings.llm.provider.replace("-", "_"))
             if hasattr(cfg, "model"):
                 cfg.model = request.model
@@ -156,6 +158,19 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
     if request.stage == JobStage.transcribe:
         from ..worker.transcribe import run_asr, segments_to_json
 
+        if "vad" in request.options:
+            # A stage-scoped speech recovery choice, captured by the durable
+            # request/profile and its idempotency key; never change host defaults.
+            from ..config import VadConfig
+
+            settings.asr.vad = VadConfig.model_validate(
+                settings.asr.vad.model_dump() | request.options["vad"]
+            )
+        applied_speech: dict = {}
+        if request.options.get("language"):
+            # Per-recording Custom language; part of the idempotency key.
+            settings.asr.language = str(request.options["language"])
+            applied_speech["language"] = settings.asr.language
         suffix = request.options.get("suffix", ".wav")
         with tempfile.NamedTemporaryFile(suffix=suffix) as audio:
             audio.write(inputs["audio"])
@@ -169,6 +184,7 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
             "model": transcript.model,
             "has_speakers": transcript.has_speakers,
             "processing_metadata": transcript.processing_metadata,
+            "applied_speech_overrides": applied_speech,
         }
         return [_artifact("transcript.json", "application/json", json.dumps(payload).encode())]
     transcript = _transcript(inputs["transcript"])
@@ -176,6 +192,13 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
         from ..worker.diarize import diarize
         from ..worker.transcribe import segments_to_json
 
+        applied_speech = {
+            key: request.options[key]
+            for key in ("num_speakers", "min_speakers", "max_speakers")
+            if key in request.options
+        }
+        for key, value in applied_speech.items():
+            setattr(settings.diarize, key, int(value) if value else None)
         with tempfile.NamedTemporaryFile(suffix=".wav") as audio:
             audio.write(inputs["audio"])
             audio.flush()
@@ -184,6 +207,7 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
             "segments": segments_to_json(result),
             "has_speakers": result.has_speakers,
             "model": settings.diarize.model,
+            "applied_speech_overrides": applied_speech,
         }
     elif request.stage == JobStage.summarize:
         from ..worker.summarize import _llm_provider_model, generate_recording_title, summarize
@@ -222,6 +246,12 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
         from ..worker.mindmap import generate_mind_map
 
         payload = generate_mind_map(transcript, settings, request.options.get("summary_md"))
+    elif request.stage == JobStage.outline:
+        from ..worker.outline import generate_outline
+
+        payload = generate_outline(
+            transcript, settings, duration_ms=request.options.get("duration_ms")
+        )
     elif request.stage == JobStage.embed:
         from ..worker.index import build_chunks, embed_chunks
 
@@ -314,11 +344,56 @@ def resume_pending_jobs() -> None:
         execute_job(job_id)
 
 
+@functools.lru_cache(maxsize=1)
+def _static_runtime() -> dict:
+    """Device facts that do not change while the worker process runs."""
+    import platform
+
+    from ..providers.hardware import _memory_bytes, _nvidia_gpus
+    from ..system_info import package_version
+
+    system = platform.system()
+    gpus = _nvidia_gpus()
+    if gpus:
+        device = ", ".join(
+            f"{gpu['name']} ({gpu['memory_mb']} MB)" if gpu.get("memory_mb") else gpu["name"]
+            for gpu in gpus
+        )
+    else:
+        device = f"{system} {platform.machine()}".strip() or None
+    memory = _memory_bytes(system)
+    return {
+        "software_version": package_version(),
+        "device": os.environ.get("LOCALPLAUD_WORKER_DEVICE") or device,
+        "memory_total_mb": memory // (1024 * 1024) if memory else None,
+    }
+
+
+def _worker_runtime() -> WorkerRuntime:
+    counts = {JobStatus.queued: 0, JobStatus.running: 0}
+    try:
+        with session_scope() as session:
+            for status in session.scalars(
+                select(RemoteJob.status).where(
+                    RemoteJob.status.in_([JobStatus.queued, JobStatus.running])
+                )
+            ):
+                counts[JobStatus(status)] += 1
+    except Exception:  # noqa: BLE001 - runtime facts are advisory
+        return WorkerRuntime(**_static_runtime())
+    return WorkerRuntime(
+        **_static_runtime(),
+        queued_jobs=counts[JobStatus.queued],
+        running_jobs=counts[JobStatus.running],
+    )
+
+
 @router.get("/capabilities", response_model=HandshakeResponse, dependencies=[Depends(_authorize)])
 def capabilities():
     settings = get_settings()
     return HandshakeResponse(
         worker_id=os.environ.get("LOCALPLAUD_WORKER_ID", "local-worker"),
+        runtime=_worker_runtime(),
         capabilities=[
             StageCapability(
                 stage="transcribe",
@@ -348,6 +423,13 @@ def capabilities():
                 ],
             ),
             StageCapability(
+                stage="outline",
+                models=[getattr(
+                    getattr(settings.llm, settings.llm.provider.replace("-", "_")),
+                    "model", settings.llm.provider,
+                )],
+            ),
+            StageCapability(
                 stage="embed",
                 models=[
                     getattr(
@@ -366,6 +448,11 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
     from ..worker.note_policy import NOTE_PROMPT_VERSION
     from ..worker.title_policy import TITLE_PROMPT_VERSION
 
+    if request.stage == JobStage.outline:
+        from ..worker.outline import PROMPT_VERSION
+
+        if request.options.get("prompt_version", PROMPT_VERSION) != PROMPT_VERSION:
+            raise HTTPException(status_code=409, detail="outline prompt version is unsupported")
     title_only = request.stage == JobStage.summarize and request.options.get("title_only")
     if (
         request.stage == JobStage.summarize

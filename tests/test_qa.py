@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import base64
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
+
+from tests.assets import with_assets
 
 
 def _fresh_db(monkeypatch, tmp_path, name="qa.db"):
@@ -1518,31 +1521,36 @@ def test_detail_page_has_ask_tab_and_deeplink(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed_file()
     r = c.get("/file/r1")
+    r_assets = with_assets(c, r)
     assert r.status_code == 200
     # Ask tab + panel wired to the single-file endpoint.
-    assert 'data-panel="ask"' in r.text
-    assert 'hx-post="/file/r1/ask"' in r.text
-    assert 'id="file-answer"' in r.text
-    assert 'data-ask-request data-ask-status="file-ask-status"' in r.text
-    assert 'hx-sync="#file-answer:drop"' in r.text
+    assert 'data-panel="ask"' in r_assets
+    assert 'hx-post="/file/r1/ask"' in r_assets
+    assert 'id="file-answer"' in r_assets
+    assert 'data-ask-request data-ask-status="file-ask-status"' in r_assets
+    assert 'hx-sync="#file-answer:drop"' in r_assets
     assert r.text.count('hx-sync="#file-answer:drop"') >= 2
     assert (
-        'id="file-ask-status" class="ask-request-status" role="status" aria-live="polite"' in r.text
+        'id="file-ask-status" class="ask-request-status" role="status" aria-live="polite"' in r_assets
     )
-    assert 'id="file-answer" role="region" aria-label="Answer"' in r.text
-    assert "forms.some(candidate=>candidate.dataset.askBusy==='true')" in r.text
-    assert "control.disabled=true" in r.text
-    assert "window.localplaudT('Getting answer…')" in r.text
-    assert "window.localplaudT('Answer ready')" in r.text
-    assert "const askRequests=new WeakMap()" in r.text
-    assert "askRequests.set(xhr,{forms,controls,status,target,question,focusTarget})" in r.text
-    assert "Check History before retrying to avoid a duplicate conversation." in r.text
-    assert "requestAnimationFrame(()=>{(question?.isConnected?question" in r.text
+    assert 'id="file-answer" role="region" aria-label="Answer"' in r_assets
+    assert "forms.some(candidate=>candidate.dataset.askBusy==='true')" in r_assets
+    assert "control.disabled=true" in r_assets
+    assert "window.localplaudT('Getting answer…')" in r_assets
+    assert "window.localplaudT('Answer ready')" in r_assets
+    assert "const askRequests=new WeakMap()" in r_assets
+    assert "askRequests.set(xhr,{forms,controls,status,target,question,focusTarget})" in r_assets
+    assert "Check History before retrying to avoid a duplicate conversation." in r_assets
+    assert "requestAnimationFrame(()=>{(question?.isConnected?question" in r_assets
     # Suggested, grounded, non-mutating chips.
-    assert "What was decided?" in r.text
-    # Delegated seek handler + ?t= deep-link support.
-    assert "data-seek" in r.text
-    assert "URLSearchParams" in r.text
+    assert "What was decided?" in r_assets
+    # Delegated seek handler + ?t= deep-link support live in the workspace script.
+    workspace_js = (
+        Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    ).read_text()
+    assert '<script src="/static/js/workspace.js?v=' in r_assets
+    assert "event.target.closest('[data-seek]')" in workspace_js
+    assert "deepLinkSeconds(location.search)" in workspace_js
 
 
 @pytest.mark.parametrize('file_id', ['r1', None])

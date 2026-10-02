@@ -124,14 +124,26 @@ def check_worker(session: Session, worker_id: int) -> dict:
             client.close()
         row.protocol_version = handshake.version
         row.capabilities = handshake.model_dump(mode="json")["capabilities"]
-        row.health = {"status": "healthy", "checked_at": checked_at, "detail": handshake.worker_id}
+        row.health = {
+            "status": "healthy",
+            "checked_at": checked_at,
+            "last_healthy_at": checked_at,
+            "detail": handshake.worker_id,
+            # Older workers omit runtime facts; the UI renders "not reported".
+            "runtime": (
+                handshake.runtime.model_dump(mode="json") if handshake.runtime else None
+            ),
+        }
         connection = session.scalar(
             select(ProviderConnection).where(ProviderConnection.key == f"worker:{row.key}")
         )
         stages_by_model: dict[str, list] = {}
         for stage in handshake.capabilities:
             for model_name in stage.models:
-                stages_by_model.setdefault(model_name, []).append(stage.stage)
+                # Outlines intentionally share the durable mind-map profile slot.
+                profile_stage = "mind_map" if stage.stage == "outline" else stage.stage
+                if profile_stage not in stages_by_model.setdefault(model_name, []):
+                    stages_by_model[model_name].append(profile_stage)
         for model_name, stages in stages_by_model.items():
             model = session.scalar(
                 select(ModelCatalogEntry).where(
@@ -157,7 +169,14 @@ def check_worker(session: Session, worker_id: int) -> dict:
             else:
                 model.capabilities = capability
     except Exception as exc:  # noqa: BLE001
-        row.health = {"status": "unavailable", "checked_at": checked_at, "detail": str(exc)}
+        previous = row.health or {}
+        row.health = {
+            "status": "unavailable",
+            "checked_at": checked_at,
+            "detail": str(exc),
+            "last_healthy_at": previous.get("last_healthy_at"),
+            "runtime": previous.get("runtime"),
+        }
     session.flush()
     return row.health
 

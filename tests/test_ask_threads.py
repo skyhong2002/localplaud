@@ -9,6 +9,8 @@ from threading import Event
 import pytest
 from sqlalchemy import create_engine, inspect, select, text
 
+from tests.assets import with_assets
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -253,7 +255,8 @@ def test_ask_history_api_and_accessible_drawer_contract(monkeypatch, tmp_path):
 
     library_page = client.get("/?ask=true&ask_thread=library-history")
     detail_page = client.get("/file/r1?tab=ask&ask_thread=recording-history")
-    for page in (library_page, detail_page):
+    for response in (library_page, detail_page):
+        page = type("Page", (), {"text": with_assets(client, response)})
         assert "data-open-ask-history" in page.text
         assert 'id="ask-history-backdrop" hidden' in page.text
         assert 'role="dialog" aria-modal="true" aria-labelledby="ask-history-title"' in page.text
@@ -999,9 +1002,10 @@ def test_library_quick_action_is_grounded_durable_and_non_mutating(monkeypatch, 
         in page.text
     )
     assert 'id="answer" role="region" aria-label="Answer"' in page.text
-    assert "askErrorMessage" in page.text
-    assert "if(question?.isConnected)question.value=''" in page.text
-    assert "text.length<=300&&!text.includes('<')" in page.text
+    page_and_assets = with_assets(client, page)
+    assert "askErrorMessage" in page_and_assets
+    assert "if(question?.isConnected)question.value=''" in page_and_assets
+    assert "text.length<=300&&!text.includes('<')" in page_and_assets
     assert "What decisions were made recently?" in page.text
     assert "creates an Ask thread; recordings and notes stay unchanged" in page.text
 

@@ -10,6 +10,17 @@ from localplaud.config import AsrConfig, DiarizeConfig
 from localplaud.worker.diarize import diarize
 
 
+def test_runtime_dependency_errors_are_actionable_without_private_logs():
+    from localplaud.asr.speech_runtime import runtime_error
+
+    known = ImportError("Korean forced alignment requires the `soynlp` package. Install it")
+    assert "requires soynlp for Korean" in runtime_error("qwen", known)
+    assert "rebuild" in runtime_error("qwen", known)
+    assert "nagisa" in runtime_error("qwen", ModuleNotFoundError(name="nagisa"))
+    assert runtime_error("qwen", ImportError("private transcript")) == "qwen runtime failed: ImportError"
+    assert runtime_error("qwen", ValueError("secret/path")) == "qwen runtime failed: ValueError"
+
+
 def test_alignment_preserves_point_words_and_original_timeline():
     words = aligned_words(
         [
@@ -49,6 +60,7 @@ def test_vad_skips_silence_and_bounds_chunks(monkeypatch):
         ),
     )
     cfg = AsrConfig(provider="qwen").model_dump()
+    cfg["vad"]["enabled"] = True
     spans = speech_regions(Path("unused"), cfg, 450)
     assert spans[0][0] > 9
     assert spans[1][0] > 99

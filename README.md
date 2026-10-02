@@ -38,6 +38,18 @@ and pinned checksum, so normal Web App interaction does not depend on a CDN.
 
 ## Status
 
+The October 2 Mini integration adds a shared desktop/mobile shell, persistent
+playback across navigation, streamed Ask controls, editable Templates/AutoFlow,
+and [timestamped chapter outlines](docs/chapter-outline.md). Chapters use the
+corrected local transcript and preserve revisions; model-free time sections are
+an explicit alternative to AI topic chapters. Automatic generation is off by
+default. Speaker naming now updates bound speaker mentions in existing generated
+notes and mind maps without a model rerun, preserving previous versions. Unknown
+voices have friendly Speaker 1/2 labels. Older unlinked personal names remain
+unchanged with a review notice; stale notes stay readable with an explicit status.
+The UI is staged, not deployed. See [integration and rollout notes](docs/mini-integration-20261002.md).
+No private-content service worker cache is enabled.
+
 The core skeleton works: OAuth polling through **Plaud's official Open API or MCP**,
 a safe metadata-only first catalog sync followed by automatic download of new raw
 audio, pluggable local ASR, diarization, LLM notes, embeddings/Q&A, audio
@@ -54,7 +66,11 @@ revisions, editable per-recording speaker names,
 single-file Ask with playable citations, richer library filters, and Plaud-style
 Add audio / Import from Plaud flows are implemented. A Plaud import refreshes the
 entire metadata catalog plus any existing Plaud transcript/summary while leaving raw
-audio remote until the user requests one recording. After that baseline, scheduled
+audio remote until the user requests one recording. Imports also resolve link-backed
+note/transcript bodies, retain Plaud note names and stable links, and mirror supported
+images. An empty Notes workspace offers a direct import action; app-only summary
+cards without a downloadable image are explicitly labelled as unavailable.
+After that baseline, scheduled
 polling automatically downloads recordings first observed as new uploads. The
 optional `store.evict_plaud_audio_after_processing` policy releases completed
 Plaud-backed audio while retaining every local artifact, then restores the raw
@@ -89,6 +105,14 @@ The remaining work centers on broader integrations and Plaud-level Web App polis
 Plaud-produced
 transcripts and summaries may be imported for
 migration or comparison, but are not part of the target primary workflow.
+
+To share a recording, open **Share → Public share link → Create public link → Copy**. Choose which
+content to include before creating the link; recipients can read it without signing
+in. **Disable link** revokes access. The separate workspace link requires login.
+The same Share sheet groups clipboard actions and audio, transcript, note, and
+mind-map exports; selecting a row opens its options inside the sheet.
+On mobile, the recording player stays at the bottom while you read notes; generation
+settings expand from **Generate notes** or the notes **+** menu.
 
 ## How it works
 
@@ -312,6 +336,8 @@ on very different hardware:
 
 A bundled Caddy reverse proxy terminates HTTPS for your domain automatically.
 See [`docs/deploy.md`](docs/deploy.md).
+For explicitly requested recovery of failed recordings or model migrations, see
+[`docs/processing-repair.md`](docs/processing-repair.md).
 
 ## Development
 
@@ -361,3 +387,9 @@ variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
 
 For the evaluated CUDA speech alternative and safe unfinished-recording rollout,
 see [Qwen + Nemotron production profile](docs/qwen-nemotron-production.md).
+
+In restricted new-recording mode, the configured recent-transcription retry window
+also admits queued reindexing after automatic speaker naming or transcript edits.
+Historical index backfills stay paused; name edits retain notes and mind maps as
+stale until explicit regeneration. Recovery closes orphaned running stage records
+without discarding artifacts or resetting retry budgets.

@@ -542,6 +542,55 @@ def test_reset_download_errors_retries_only_audioless_rows(monkeypatch, tmp_path
         assert s.get(PlaudFile, "pipe-err").status == FileStatus.error
 
 
+def test_reset_download_errors_backs_off_long_failing_downloads(monkeypatch, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import reset_download_errors
+
+    init_db()
+    now = datetime.now(UTC)
+    with session_scope() as s:
+        # Failing for months, last tried 5 minutes ago -> wait (6h cap).
+        s.add(
+            PlaudFile(
+                id="stale",
+                status=FileStatus.error,
+                error="empty body",
+                created_at=now - timedelta(days=80),
+                updated_at=now - timedelta(minutes=5),
+            )
+        )
+        # Same streak, last tried 7 hours ago -> due again.
+        s.add(
+            PlaudFile(
+                id="stale-due",
+                status=FileStatus.error,
+                error="empty body",
+                created_at=now - timedelta(days=80),
+                updated_at=now - timedelta(hours=7),
+            )
+        )
+        # Fresh transient failure -> next cycle.
+        s.add(
+            PlaudFile(
+                id="fresh",
+                status=FileStatus.error,
+                error="429",
+                created_at=now - timedelta(minutes=2),
+                updated_at=now - timedelta(minutes=1),
+            )
+        )
+
+    assert reset_download_errors(now) == 2
+    with session_scope() as s:
+        assert s.get(PlaudFile, "stale").status == FileStatus.error
+        assert s.get(PlaudFile, "stale-due").status == FileStatus.discovered
+        assert s.get(PlaudFile, "fresh").status == FileStatus.discovered
+
+
 def test_catalog_sync_claim_serializes_concurrent_first_listing(monkeypatch, tmp_path):
     settings = _reset_db(monkeypatch, tmp_path)
     from localplaud.db.models import FileStatus, KeyValue, PlaudFile
@@ -986,3 +1035,67 @@ def test_overlong_new_recording_stays_metadata_only(monkeypatch, tmp_path):
     with session_scope() as session:
         assert session.get(PlaudFile, "normal").status == FileStatus.discovered
         assert session.get(PlaudFile, "at-cap").status == FileStatus.metadata_only
+
+
+def test_download_queue_takes_new_recordings_first(monkeypatch, tmp_path):
+    settings = _reset_db(monkeypatch, tmp_path)
+    settings.poller.max_concurrent_downloads = 1
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller import poll
+
+    init_db()
+    with session_scope() as s:
+        s.add_all(
+            [
+                PlaudFile(id="old", status=FileStatus.discovered, start_time_ms=1),
+                PlaudFile(id="new", status=FileStatus.discovered, start_time_ms=2),
+            ]
+        )
+    seen = []
+
+    def download(client, fid, *args):
+        seen.append(fid)
+        return True
+
+    monkeypatch.setattr(poll, "_download_one", download)
+    assert poll.download_pending(object(), settings) == 2
+    assert seen == ["new", "old"]
+
+
+@pytest.mark.parametrize("stage,reindex_only,expected", [
+    ("summarize", False, "failed"), ("index", True, "pending"),
+])
+def test_recovery_closes_orphan_rollup_preserving_live_claim_and_artifacts(
+    monkeypatch, tmp_path, stage, reindex_only, expected
+):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import (
+        FileStatus,
+        PlaudFile,
+        StageName,
+        StageRun,
+        StageStatus,
+        Transcript,
+    )
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import reset_inflight
+
+    init_db()
+    with session_scope() as session:
+        for fid in ("orphan", "live"):
+            session.add(PlaudFile(
+                id=fid, status=FileStatus.partial, pipeline_retry_count=5,
+                processing_token="owner" if fid == "live" else None,
+                processing_lease_until=datetime.now(UTC) + timedelta(hours=1) if fid == "live" else None,
+            ))
+            session.add(StageRun(file_id=fid, stage=StageName(stage), status=StageStatus.running,
+                                 detail={"reindex_only": reindex_only, "provenance": "retained"}))
+            session.add(Transcript(file_id=fid, source="local", provider="test", text="immutable source"))
+    assert reset_inflight() == 0
+    with session_scope() as session:
+        for run in session.query(StageRun):
+            assert run.status.value == (expected if run.file_id == "orphan" else "running")
+            assert run.detail["provenance"] == "retained"
+        assert all(r.text == "immutable source" for r in session.query(Transcript))
+        assert all(r.pipeline_retry_count == 5 for r in session.query(PlaudFile))

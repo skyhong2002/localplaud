@@ -279,9 +279,29 @@ def propose(sample, refs, *, threshold=0.75, margin=0.12):
     )
 
 
+def _prepare_note_name_change(session, file_id):
+    """Fence every generated note before changing any name or assignment evidence."""
+    from .db.models import Summary
+    from .worker.knowledge_index import lock_summary_for_mutation
+
+    previous_names = {
+        row.key: row.display_name
+        for row in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
+    }
+    summary_ids = list(session.scalars(
+        select(Summary.id)
+        .where(Summary.file_id == file_id, Summary.source == "local")
+        .order_by(Summary.id)
+    ))
+    for summary_id in summary_ids:
+        lock_summary_for_mutation(session, summary_id, file_id)
+    return previous_names
+
+
 def apply_match(session, sample, decision, *, threshold=0.75, margin=0.12):
     """Transactionally preserve claims, manual names, revisions, and provenance."""
     from .api.app import _queue_transcript_reindex, _serialize_transcript_mutation
+    from .note_speakers import refresh_generated_note_speaker_names
     from .worker.pipeline import processing_claim_active
 
     _serialize_transcript_mutation(session, sample.file_id)
@@ -308,6 +328,9 @@ def apply_match(session, sample, decision, *, threshold=0.75, margin=0.12):
             if prior and prior.status == "applied" and speaker.display_name == prior.applied_name
             else "manual"
         )
+    previous_names = (
+        _prepare_note_name_change(session, row.id) if decision["status"] == "matched" else None
+    )
     evidence = {
         **decision,
         "sample_id": sample.id,
@@ -334,15 +357,18 @@ def apply_match(session, sample, decision, *, threshold=0.75, margin=0.12):
     prior.applied_name = decision["name"]
     prior.status = "applied"
     speaker.display_name = decision["name"]
+    session.flush()
+    refresh_generated_note_speaker_names(session, row.id, previous_names=previous_names)
     session.add(VoiceEvent(speaker_id=speaker.id, action="auto_assign", detail=evidence))
     session.execute(__import__("sqlalchemy").delete(Chunk).where(Chunk.file_id == row.id))
-    _queue_transcript_reindex(session, row.id)
+    _queue_transcript_reindex(session, row.id, names_only=True)
     return "applied"
 
 
 def undo_assignment(session, speaker_id):
     """Undo only our unchanged assignment; keep later human edits and audio intact."""
     from .api.app import _queue_transcript_reindex, _serialize_transcript_mutation
+    from .note_speakers import refresh_generated_note_speaker_names
     from .worker.pipeline import processing_claim_active
 
     prior = session.get(VoiceAssignment, speaker_id)
@@ -354,12 +380,15 @@ def undo_assignment(session, speaker_id):
     if processing_claim_active(row):
         return False
     if prior.status == "applied" and speaker.display_name == prior.applied_name:
+        previous_names = _prepare_note_name_change(session, row.id)
         speaker.display_name = prior.previous_name
         prior.status = "overridden"
+        session.flush()
+        refresh_generated_note_speaker_names(session, row.id, previous_names=previous_names)
         session.add(
             VoiceEvent(speaker_id=speaker_id, action="undo", detail={"name": prior.applied_name})
         )
         session.execute(__import__("sqlalchemy").delete(Chunk).where(Chunk.file_id == row.id))
-        _queue_transcript_reindex(session, row.id)
+        _queue_transcript_reindex(session, row.id, names_only=True)
         return True
     return False

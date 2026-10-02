@@ -305,7 +305,7 @@ def test_speaker_rename_keeps_durable_reindex_queue_when_thread_start_fails(
         )
         assert run.status == StageStatus.pending
         assert run.detail["reindex_only"] is True
-        assert run.detail["reason"] == "canonical transcript changed"
+        assert run.detail["reason"] == "speaker names changed"
 
 
 def test_speaker_rename_does_not_eagerly_index_when_stage_is_disabled(
@@ -340,7 +340,7 @@ def test_speaker_rename_does_not_eagerly_index_when_stage_is_disabled(
         assert run.detail["reindex_only"] is True
 
 
-def test_detail_page_shows_display_name_and_falls_back_to_key(monkeypatch, tmp_path):
+def test_detail_page_shows_display_name_and_friendly_anonymous_label(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _mute_reindex(monkeypatch)
     _seed()
@@ -349,9 +349,8 @@ def test_detail_page_shows_display_name_and_falls_back_to_key(monkeypatch, tmp_p
     page = c.get("/file/r1")
     assert page.status_code == 200
     assert "Alice" in page.text  # renamed speaker label
-    assert "SPEAKER_01" in page.text  # unnamed speaker falls back to the key
-    # the legend keeps the stable key visible as the input placeholder
-    assert 'placeholder="SPEAKER_00"' in page.text
+    assert 'data-spk="SPEAKER_01"' in page.text  # stable identity remains internal
+    assert 'placeholder="Speaker 2"' in page.text
     assert 'value="Alice"' in page.text
     # swatches keep stable coloring hooks
     assert 'swatch" data-spk="SPEAKER_00"' in page.text
@@ -365,11 +364,11 @@ def test_export_uses_display_names(monkeypatch, tmp_path):
            follow_redirects=False)
     md = c.get("/file/r1/export.md").text
     assert "**[00:01] Alice:** hello team" in md
-    assert "**[00:02] SPEAKER_01:** hi there" in md  # unnamed key unchanged
+    assert "**[00:02] Speaker 2:** hi there" in md
     assert "SPEAKER_00" not in md
 
 
-def test_rename_invalidates_derived_artifacts_and_names_canonical(monkeypatch, tmp_path):
+def test_rename_preserves_notes_and_reindexes_canonical(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     calls = _mute_reindex(monkeypatch)
     _seed()
@@ -402,12 +401,118 @@ def test_rename_invalidates_derived_artifacts_and_names_canonical(monkeypatch, t
         row = s.get(PlaudFile, "r1")
         assert row.chunks == []
         runs = {run.stage: run for run in row.stage_runs}
-        for stage in (StageName.summarize, StageName.mind_map, StageName.index):
-            assert runs[stage].status == StageStatus.pending
-            assert runs[stage].detail["stale"] is True
+        assert runs[StageName.index].status == StageStatus.pending
+        assert runs[StageName.index].detail["stale"] is True
+        assert StageName.summarize not in runs
+        assert StageName.mind_map not in runs
 
     deadline = time.monotonic() + 2
     while not calls and time.monotonic() < deadline:
         time.sleep(0.01)
     assert calls and calls[0][0] == "r1"
     assert calls[0][1]["expected_speaker_names"] == {"SPEAKER_00": "Alice"}
+
+
+def test_batch_names_update_existing_notes_atomically_and_preserve_history(monkeypatch, tmp_path):
+    import json
+
+    c = _client(monkeypatch, tmp_path)
+    calls = _mute_reindex(monkeypatch)
+    _seed()
+    from localplaud.db.models import (
+        PlaudFile,
+        StageName,
+        StageRun,
+        StageStatus,
+        Summary,
+        SummaryRevision,
+        UserNote,
+    )
+    from localplaud.db.session import session_scope
+
+    original = "Speaker 1: approves the plan.\n\nSpeaker 2: owns the next step."
+    with session_scope() as session:
+        session.add(Summary(file_id="r1", template="default", source="local",
+                            content_md=original, input_transcript_source="local"))
+        session.add(UserNote(file_id="r1", title="My draft", content_md="Speaker 1: my words"))
+        for stage in (StageName.summarize, StageName.mind_map, StageName.outline):
+            session.add(StageRun(file_id="r1", stage=stage, status=StageStatus.completed))
+    response = c.post("/file/r1/speakers", data={
+        "names": json.dumps({"SPEAKER_00": "Sky", "SPEAKER_01": "Alex"}),
+    }, headers={"accept": "application/json"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["names"] == {"SPEAKER_00": "Sky", "SPEAKER_01": "Alex"}
+    assert "Sky: approves" in data["note_projection"]["notes"][0]["content_html"]
+    assert "Alex: owns" in data["note_projection"]["notes"][0]["content_html"]
+    assert data["note_projection"]["notes"][0]["stale"] is False
+    assert "note-history-tool" in data["note_projection"]["notes"][0]["history_html"]
+    with session_scope() as session:
+        row = session.get(PlaudFile, "r1")
+        assert row.user_notes[0].content_md == "Speaker 1: my words"
+        assert row.local_transcript.segments == SEGMENTS
+        assert all(run.status == StageStatus.completed for run in row.stage_runs
+                   if run.stage != StageName.index)
+        archived = session.scalar(select(SummaryRevision).where(SummaryRevision.file_id == "r1"))
+        assert archived.content_md == original
+        assert archived.archive_reason == "speaker_rename"
+    exported = c.get("/file/r1/export.md").text
+    assert "Sky: approves" in exported and "Alex: owns" in exported
+    deadline = time.monotonic() + 2
+    while not calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(calls) == 1
+    # An invalid second key must not leave the first speaker partially renamed.
+    rejected = c.post("/file/r1/speakers", data={
+        "names": json.dumps({"SPEAKER_00": "Wrong", "missing": "Nobody"}),
+    })
+    assert rejected.status_code == 400
+    assert "Sky: approves" in c.get("/file/r1/export.md").text
+    # A no-op submission creates neither another archive nor another reindex.
+    assert c.post("/file/r1/speakers", data={"key": "SPEAKER_00", "name": "Sky"},
+                  headers={"accept": "application/json"}).status_code == 200
+    assert len(calls) == 1
+
+
+def test_rename_keeps_preexisting_stale_notes_readable(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _mute_reindex(monkeypatch)
+    _seed()
+    from localplaud.db.models import StageName, StageRun, StageStatus, Summary
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add(Summary(file_id="r1", template="default", source="local",
+                            content_md="Speaker 1: preserve this older note."))
+        session.add(StageRun(file_id="r1", stage=StageName.summarize,
+                            status=StageStatus.pending, detail={"stale": True}))
+    result = c.post("/file/r1/speakers", data={"key": "SPEAKER_00", "name": "Sky"},
+                    headers={"accept": "application/json"})
+    assert result.status_code == 200
+    note = result.json()["note_projection"]["notes"][0]
+    assert note["stale"] is True
+    assert "Sky: preserve this older note" in note["content_html"]
+    page = c.get("/file/r1?tab=notes").text
+    assert "Sky: preserve this older note" in page
+    assert "data-note-stale" in page
+
+
+def test_busy_note_index_rolls_back_all_speaker_names(monkeypatch, tmp_path):
+    import json
+
+    c = _client(monkeypatch, tmp_path)
+    _mute_reindex(monkeypatch)
+    Speaker = _seed()
+    from localplaud.db.session import session_scope
+    from localplaud.worker.knowledge_index import KnowledgeIndexBusyError
+
+    def busy(*args, **kwargs):
+        raise KnowledgeIndexBusyError("note is currently indexing; try again when it finishes")
+
+    monkeypatch.setattr("localplaud.note_speakers.refresh_generated_note_speaker_names", busy)
+    response = c.post("/file/r1/speakers", data={
+        "names": json.dumps({"SPEAKER_00": "Sky", "SPEAKER_01": "Alex"}),
+    }, headers={"accept": "application/json"})
+    assert response.status_code == 409
+    with session_scope() as session:
+        assert all(row.display_name is None for row in session.scalars(select(Speaker)))

@@ -23,7 +23,13 @@ from .common import (
     _ext_from_url,
 )
 from .models import PlaudFileDTO
-from .official import _cloud_notes, _parse_iso_ms, _transcript_from_source_list
+from .official import (
+    _cloud_notes,
+    _parse_iso_ms,
+    _resolve_artifact_blocks,
+    _resolved_note_detail,
+    _transcript_from_source_list,
+)
 
 log = logging.getLogger(__name__)
 
@@ -289,7 +295,7 @@ class PlaudMcpClient:
     def get_cloud_notes(self, file_id: str, detail: dict | None = None) -> list[dict]:
         detail = detail if detail is not None else self.get_detail(file_id)
         if "note_list" in detail:
-            return _cloud_notes(detail)
+            return _cloud_notes(_resolved_note_detail(detail))
         result = self._call_file_tool("get_note", file_id)
         # The MCP get_note tool answers with raw note_list entries.
         if isinstance(result, list):
@@ -323,7 +329,11 @@ class PlaudMcpClient:
     ) -> list[dict] | None:
         detail = detail if detail is not None else self.get_detail(file_id)
         if isinstance(detail, dict) and detail.get("source_list"):
-            return _transcript_from_source_list(detail["source_list"], context=file_id)
+            return _transcript_from_source_list(
+                _resolve_artifact_blocks([item for item in detail["source_list"]
+                                          if item.get("data_type") == "transaction"]),
+                context=file_id,
+            )
         # The MCP get_transcript tool answers with the raw source_list entries.
         result = self._call_file_tool("get_transcript", file_id)
         if isinstance(result, list):

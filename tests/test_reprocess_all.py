@@ -84,6 +84,7 @@ def test_derived_only_targets_transcribed_and_marks_stale(monkeypatch, tmp_path)
         assert {run.stage for run in runs} == {
             StageName.summarize,
             StageName.mind_map,
+            StageName.outline,
             StageName.index,
         }
         assert all(run.detail.get("derived_only") is True for run in runs)

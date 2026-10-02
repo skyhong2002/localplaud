@@ -66,9 +66,13 @@ convert = true                   # opus -> 16kHz mono wav (needs ffmpeg)
 polish = true                    # contextual AI cleanup; raw ASR stays immutable
 summarize = true
 mind_map = true                  # nested Markdown outline rendered as a tree in the Web App
+outline = false                 # opt in to automatic timestamped chapters
+outline_method = "llm"           # mind-map profile text model; or explicit "time_slices" (no model)
 index = true                     # build embeddings for Q&A / search
-concurrency = 1                  # files processed in parallel by the worker
-files_per_cycle = 1              # daemon batch; newest first so fresh files stay responsive
+concurrency = 1                  # recording slots; text overlaps, speech stages serialize
+files_per_cycle = 1              # serial/CLI batch; parallel daemon selects one file per slot
+auto_process_untranscribed_only = false # true skips existing local transcripts and background backfills; manual resume remains available
+untranscribed_only_retry_hours = 72     # with the above, recordings transcribed this recently keep automatic retries (0 = off)
 # Recordings at/over this length (the Plaud recorder stops at its 5-hour cap)
 # are treated as accidental: kept metadata-only, never auto-downloaded or
 # processed. "Import audio" / "Resume processing" in the Web App still work.
@@ -191,7 +195,7 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   codex_home = "~/.localplaud/codex" # dedicated login; localplaud never reads its tokens
   reasoning_effort = "high"
   timeout_seconds = 900
-  polish_chunk_chars = 48000      # large-context first; invalid structured output is bisected
+  polish_chunk_chars = 8000       # stays inside the per-call timeout; invalid output and timeouts are bisected
   require_chatgpt_login = true   # reject API-key auth when subscription usage is intended
   quota_reserve_percent = 5      # hard floor above the requested 3% remaining usage
   quota_call_headroom_percent = 2 # do not start a turn too close to that floor

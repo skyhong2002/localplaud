@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -463,6 +464,7 @@ def _upgrade_default_profile(
         privacy_policy=previous.privacy_policy,
         no_egress=previous.no_egress,
         cost_ceiling=previous.cost_ceiling,
+        quality_floor=previous.quality_floor,
         fallback_policy=previous.fallback_policy,
     )
     session.add(upgraded)
@@ -534,7 +536,9 @@ def _profile_layer(profile: ExecutionProfile) -> dict[str, Any]:
             "no_egress": profile.no_egress,
             "cost_ceiling": profile.cost_ceiling,
             "fallback_policy": profile.fallback_policy,
-        },
+        }
+        # Omitted when unset so snapshots and digests match pre-floor releases.
+        | ({"quality_floor": profile.quality_floor} if profile.quality_floor else {}),
         "stages": {
             row.stage: {
                 "connection": row.connection.key,
@@ -767,7 +771,155 @@ def resolve_recording_profile(
                 source={"file_id": file_id},
             )
         )
+    layers.append(_speech_override_layer(recording, layers))
     return resolve_profile(layers, _capability_catalog(session), _connection_catalog(session))
+
+
+def preview_scope_resolution(
+    session: Session,
+    *,
+    folder_id: int | None = None,
+    template_key: str | None = None,
+) -> ResolvedProfile:
+    """Resolve system -> folder -> template layers without a recording.
+
+    Settings uses this to explain which provider each stage would use for new
+    recordings in a folder and/or with a note template.
+    """
+    system = session.scalar(
+        _profile_query()
+        .where(ExecutionProfile.is_system_default)
+        .order_by(ExecutionProfile.version.desc(), ExecutionProfile.id.desc())
+    )
+    if system is None:
+        raise ValueError("no system default execution profile")
+    system_layer = _profile_layer(system)
+    system_layer["key"] = f"system:{system.key}@{system.version}"
+    system_layer["provenance"] = {
+        "kind": "system",
+        "profile_id": system.id,
+        "profile_key": system.key,
+        "profile_version": system.version,
+    }
+    layers: list[dict | None] = [system_layer]
+    if folder_id is not None:
+        folder = session.get(Folder, folder_id)
+        if folder is None:
+            raise LookupError(f"folder {folder_id} not found")
+        layers.append(
+            _profile_resolution_layer(
+                session,
+                folder.execution_profile_id,
+                f"folder:{folder.id}",
+                kind="folder",
+                source={"folder_id": folder.id, "folder_name": folder.name},
+            )
+        )
+    if template_key and template_key != "auto":
+        template = session.scalar(
+            select(NoteTemplate)
+            .where(NoteTemplate.key == template_key, NoteTemplate.is_active.is_(True))
+            .order_by(NoteTemplate.version.desc())
+        )
+        if template is None:
+            raise LookupError(f"template {template_key} not found")
+        layers.append(
+            _profile_resolution_layer(
+                session,
+                template.execution_profile_id,
+                f"template:{template.key}@{template.version}",
+                kind="template",
+                source={"template_key": template.key, "template_version": template.version},
+            )
+        )
+    return resolve_profile(layers, _capability_catalog(session), _connection_catalog(session))
+
+
+SPEECH_LANGUAGES = ("auto", "zh", "en", "ja", "ko", "yue")
+SPEECH_MAX_SPEAKERS = 20
+
+
+def normalize_speech_overrides(data: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Validate a per-recording Custom speech choice; empty means inherit."""
+    data = dict(data or {})
+    unknown = set(data) - {"language", "num_speakers", "min_speakers", "max_speakers"}
+    if unknown:
+        raise ValueError(f"unknown speech override: {', '.join(sorted(unknown))}")
+    result: dict[str, Any] = {}
+    language = data.get("language")
+    if language not in (None, ""):
+        if language not in SPEECH_LANGUAGES:
+            raise ValueError(f"unsupported transcription language: {language}")
+        result["language"] = language
+
+    def count(key: str) -> int | None:
+        value = data.get(key)
+        if value in (None, ""):
+            return None
+        try:
+            number = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} must be a whole number") from exc
+        if not 1 <= number <= SPEECH_MAX_SPEAKERS:
+            raise ValueError(f"{key} must be between 1 and {SPEECH_MAX_SPEAKERS}")
+        return number
+
+    exact, low, high = count("num_speakers"), count("min_speakers"), count("max_speakers")
+    if exact is not None:
+        if low is not None or high is not None:
+            raise ValueError("choose an exact speaker count or a range, not both")
+        result["num_speakers"] = exact
+    elif low is not None or high is not None:
+        if low is not None and high is not None and low > high:
+            raise ValueError("minimum speakers cannot exceed maximum speakers")
+        if low is not None:
+            result["min_speakers"] = low
+        if high is not None:
+            result["max_speakers"] = high
+    return result
+
+
+def _speech_override_layer(recording: PlaudFile, layers: Sequence[dict | None]) -> dict | None:
+    """Top-most recording layer for Custom ASR language and speaker count.
+
+    Only stages already selected by a lower layer are patched, so an override can
+    never invent a provider selection; the values land in the resolved snapshot
+    (stage options and layer provenance) that every stage run records.
+    """
+    overrides = normalize_speech_overrides(recording.speech_overrides)
+    if not overrides:
+        return None
+    selected = {stage for layer in layers if layer for stage in (layer.get("stages") or {})}
+    stages: dict[str, Any] = {}
+    if "language" in overrides and "transcribe" in selected:
+        stages["transcribe"] = {"options": {"language": overrides["language"]}}
+    speaker_keys = {"num_speakers", "min_speakers", "max_speakers"}
+    if speaker_keys & set(overrides) and "diarize" in selected:
+        stages["diarize"] = {
+            "options": {key: overrides.get(key) for key in sorted(speaker_keys)}
+        }
+    return {
+        "key": f"recording-speech:{recording.id}",
+        "stages": stages,
+        "provenance": {
+            "kind": "recording_speech",
+            "file_id": recording.id,
+            "speech_overrides": overrides,
+        },
+    }
+
+
+def set_recording_speech_overrides(
+    session: Session, file_id: str, data: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """Persist Custom speech settings. Never mutates transcripts or stage runs."""
+    overrides = normalize_speech_overrides(data)
+    recording = session.get(PlaudFile, file_id)
+    if recording is None:
+        raise LookupError("recording not found")
+    recording.speech_overrides = overrides or None
+    session.flush()
+    return {"file_id": file_id, "speech_overrides": overrides}
 
 
 def lock_recording_profile_change(
@@ -1287,6 +1439,7 @@ def create_profile_version(session: Session, data: dict) -> dict:
         privacy_policy=data.get("privacy_policy", "allow-egress"),
         no_egress=bool(data.get("no_egress")),
         cost_ceiling=data.get("cost_ceiling"),
+        quality_floor=data.get("quality_floor", {}),
         fallback_policy=data.get("fallback_policy", {}),
     )
     session.add(row)
@@ -1475,6 +1628,7 @@ def install_hardware_recommendation(
             "privacy_policy": policy["privacy_policy"],
             "no_egress": policy["no_egress"],
             "cost_ceiling": policy["cost_ceiling"],
+            "quality_floor": policy.get("quality_floor") or {},
             "fallback_policy": policy["fallback_policy"],
             "stages": stages,
         },

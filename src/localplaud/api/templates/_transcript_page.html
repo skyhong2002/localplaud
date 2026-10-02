@@ -2,12 +2,12 @@
 <div class="empty" role="status"><strong>{{ t('No recognizable speech') }}</strong><p>{{ t('No transcript text is available. The original audio is unchanged and can still be played.') }}</p></div>
 {% endif %}
 {% for seg in segments %}
-<div class="seg {% if seg.speaker %}spk{% endif %}" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
-  <div class="seg-meta"><span class="ts">{{ (seg.start or 0) | mmss }}</span>{% if seg.speaker %}{% set who_name = speaker_names.get(seg.speaker, seg.speaker) %}<span class="who" title="{{ who_name }}"><span class="dot"></span><span class="who-name">{{ who_name }}</span></span>{% endif %}</div>
+<div class="seg {% if seg.speaker %}spk{% endif %}" data-idx="{{ offset + loop.index0 }}" data-start="{{ seg.start or 0 }}" data-end="{{ seg.end or 0 }}" {% if seg.speaker %}data-spk="{{ seg.speaker }}"{% endif %}>
+  <div class="seg-meta"><button class="ts" type="button" data-seek="{{ seg.start or 0 }}" aria-label="{{ t('Play from') }} {{ (seg.start or 0) | mmss }}">{{ (seg.start or 0) | mmss }}</button>{% if seg.speaker %}{% set who_name = speaker_names.get(seg.speaker, seg.speaker) %}<button class="who" type="button" title="{{ who_name }}" data-speaker-menu aria-haspopup="dialog"><span class="dot"></span><span class="who-name">{{ who_name }}</span></button>{% elif can_edit and speaker_options %}<button class="who who-none" type="button" data-speaker-menu aria-haspopup="dialog"><span class="dot"></span><span class="who-name">{{ t('No speaker') }}</span></button>{% endif %}<span class="seg-actions"><button class="seg-copy" type="button" data-copy-segment aria-label="{{ t('Copy paragraph') }}" title="{{ t('Copy paragraph') }}">{{ icon('copy') }}</button></span></div>
   <div class="txt">
-    <p class="seg-text">{{ seg.text }}</p>
+    <p class="seg-text">{% if seg.word_spans %}{% for w in seg.word_spans %}<span class="w" data-s="{{ w.start }}" data-e="{{ w.end }}">{{ w.text }}</span>{% endfor %}{% else %}{{ seg.text }}{% endif %}</p>
     {% if can_edit %}
-    <button class="editbtn" type="button" title="{{ t('Edit this segment') }}" aria-label="{{ t('Edit segment text and speaker') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span></button>
+    <button class="editbtn" type="button" title="{{ t('Edit this segment') }}" aria-label="{{ t('Edit segment text and speaker') }}">{{ icon('pencil') }}</button>
     <form class="segedit" method="post" action="/file/{{ file_id }}/transcript/segments/{{ offset + loop.index0 }}" hidden>
       <input type="hidden" name="base_revision" value="{{ transcript_revision or 0 }}">
       <input type="hidden" name="return_to" value="{{ return_to }}">

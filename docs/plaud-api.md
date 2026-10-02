@@ -52,3 +52,13 @@ acceptance. OAuth state lives in `~/.plaud/tokens-mcp.json` and is never copied 
 ordinary database rows, logs, diagnostics, or repository files.
 
 Official documentation: <https://docs.plaud.ai/plaud-mcp-cli/mcp>
+
+### Link-backed migration bodies
+
+Official detail responses may include empty `data_content` plus `data_link` for
+notes, transcripts, and outlines. Explicit artifact imports resolve those bodies
+with a separate unauthenticated HTTPS client, existing SSRF validation, no
+redirects, a 16 MiB limit, and a timeout. Failed retrieval is an import failure,
+not evidence that the recording has no generated artifacts. Original note IDs and
+tab names are retained in cloud provenance. App-only summary-card URIs are not
+image downloads; without a supplied image asset the UI labels that limitation.

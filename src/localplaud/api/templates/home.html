@@ -1,64 +1,75 @@
 {% extends "base.html" %}
-{% block title %}Home — localplaud{% endblock %}
+{% from "_library.html" import file_row with context %}
+{% block title %}{{ t('Home') }} — localplaud{% endblock %}
+{% block mobile_topbar %}
+{% include "_m_root_topbar.html" %}
+{% endblock %}
 {% block body %}
-<main class="main"><div class="content" style="max-width:1180px">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
-    <div><h1 class="page">{{ t('Welcome back') }}</h1><p class="sub" style="margin:5px 0 0">{{ t('Your private recording library, mirrored and processed locally.') }}</p></div>
-    <div style="display:flex;gap:8px"><button class="btn sec" id="home-import-plaud" data-open-import="plaud" type="button" style="display:inline-flex;align-items:center;gap:7px"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Import from Plaud') }}</button><button class="btn" id="home-add-audio" data-open-import="device" type="button" style="display:inline-flex;align-items:center;gap:7px"><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span>{{ t('Add audio') }}</button></div>
-  </div>
-  <div class="stats" style="margin-top:20px">
-    <a class="tile" href="/" style="text-decoration:none;color:inherit"><div class="k">{{ t('Recordings') }}</div><div class="v">{{ stats.total }}</div><div class="sub" style="font-size:11px">{{ stats.hours }} {{ t('hours mirrored') }}</div></a>
-    <a class="tile" href="/?state=metadata_only" style="text-decoration:none;color:inherit"><div class="k">{{ t('Metadata only') }}</div><div class="v">{{ metadata_only }}</div><div class="sub" style="font-size:11px">{{ t('Audio stays in Plaud') }}</div></a>
-    <a class="tile" href="/?origin=local" style="text-decoration:none;color:inherit"><div class="k">{{ t('Audio on this host') }}</div><div class="v">{{ audio_local }}</div><div class="sub" style="font-size:11px">{{ t('Available for local processing') }}</div></a>
-    <a class="tile" href="/?state=generating" style="text-decoration:none;color:inherit"><div class="k">{{ t('Generating') }}</div><div class="v">{{ stats.processing }}</div><div class="sub" style="font-size:11px">{{ t('Queued and working now') }}</div></a>
-  </div>
-
-  <section style="margin-top:26px"><div style="display:flex;justify-content:space-between;align-items:center"><h2 style="font-size:18px;margin:0">{{ t('Recent recordings') }}</h2><a href="/" class="sub" style="font-size:12px">{{ t('View all files →') }}</a></div>
-    <div class="panel home-recent" style="margin-top:11px;padding:0">
-      {% for f in recent_files %}
-      <a class="home-row" href="/file/{{ f.id }}">
-        <span class="home-row-main">
-          <strong class="home-row-title">{{ f.filename }}</strong>
-          <span class="home-row-meta">{{ f.duration_ms|dur }} · {{ f.start_time_ms|dt }}{% if f.folder %} · {{ f.folder.name }}{% endif %}</span>
-        </span>
-        {% if f.status != 'done' %}<span class="st {{ f.status }}">{{ t('Generating…') if f.status == 'processing' else t(f.status) }}</span>{% endif %}
-      </a>
-      {% else %}
-      <div class="empty"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/audio-lines.svg')"></span>{{ t('No recordings yet. Import from Plaud or add an audio file.') }}</div>
-      {% endfor %}
+<div class="library-page home-page"><div class="page-frame">
+  <section class="home-section" aria-labelledby="home-recent-title">
+    <div class="section-head">
+      <h1 class="page-title" id="home-recent-title">{{ t('Recent files') }}</h1>
+      <a class="view-all" href="/">{{ t('View all') }}{{ icon('chevron-right') }}</a>
     </div>
+    {% if recent_files %}
+    <ul class="file-list file-list-plain" aria-label="{{ t('Recent files') }}">
+      {% for f in recent_files %}{{ file_row(f, selectable=false) }}{% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state">
+      {{ icon('waveform') }}
+      <p class="empty-title">{{ t('No recordings yet') }}</p>
+      <p class="empty-body">{{ t('Record with your Plaud device as usual. New uploads appear here and are processed locally. You can also add an audio file.') }}</p>
+      <div class="empty-actions"><button class="btn" id="home-add-audio" data-open-import="device" type="button">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button><button class="btn sec" id="home-import-plaud" data-open-import="plaud" type="button">{{ icon('cloud', 'sm') }}{{ t('Import from Plaud') }}</button></div>
+    </div>
+    {% endif %}
   </section>
 
-  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:26px" class="home-status-grid">
-    <section class="panel" style="padding:15px"><div style="display:flex;justify-content:space-between"><strong>{{ t('Plaud mirror') }}</strong><a href="/status" class="sub" style="font-size:11px">{{ t('Status') }} →</a></div>{% if import_run %}<div style="font-size:22px;font-weight:700;margin-top:13px">{{ import_run.processed }} / {{ import_run.total }}</div><div class="sub" style="font-size:12px;margin-top:3px">{{ t(import_run.status) }} · {{ import_run.transcripts }} {{ t('transcripts') }} · {{ import_run.summaries }} {{ t('summaries') }}{% if import_run.failed %} · {{ import_run.failed }} {{ t('failed') }}{% endif %}</div>{% else %}<div class="sub" style="margin-top:13px">{{ t('No Plaud import has run yet.') }}</div>{% endif %}</section>
-    <section class="panel" style="padding:15px"><div style="display:flex;justify-content:space-between"><strong>{{ t('AutoFlow activity') }}</strong><a href="/discover" class="sub" style="font-size:11px">{{ t('Discover') }} →</a></div><div style="font-size:22px;font-weight:700;margin-top:13px">{{ automation_count }}</div><div class="sub" style="font-size:12px;margin-top:3px">{{ t('automation runs') }}{% if automation_run %} · {{ t('last') }} {{ t(automation_run.status) }} · <a href="/file/{{ automation_run.file_id }}">{{ automation_run.created_at }}</a>{% endif %}</div></section>
-  </div>
+  <section class="home-section" aria-labelledby="home-glance-title">
+    <div class="section-head"><h2 class="page-title" id="home-glance-title">{{ t('At a glance') }}</h2><a class="view-all" href="/status">{{ t('System status') }}{{ icon('chevron-right') }}</a></div>
+    <div class="home-cards">
+      <a class="home-card" href="/?state=generating" data-home-card="generating">
+        <span class="home-card-icon">{{ icon('loader', cls='i-spin' if stats.processing else '') }}</span>
+        <span class="home-card-title">{{ t('Generating') }}</span>
+        <span class="home-card-count"><span class="home-count" data-count>{{ stats.processing }}</span> <span class="t-meta">{{ t('Queued and working now') }}</span></span>
+        {% if processing_files %}<ul class="mini-list">{% for f in processing_files %}{% set state = recording_state(f) %}<li><span>{{ f.filename }}</span>{% if state %}<span class="state state-{{ state.kind }}">{{ t(state.label) }}</span>{% endif %}</li>{% endfor %}</ul>
+        {% else %}<span class="home-card-body">{{ t('Nothing is processing right now. New Plaud uploads start automatically.') }}</span>{% endif %}
+      </a>
+      <a class="home-card" href="/?state=attention" data-home-card="attention">
+        <span class="home-card-icon" style="color:{{ 'var(--c-danger)' if attention_files else 'var(--c-ok)' }}">{{ icon('alert' if attention_files else 'circle-check') }}</span>
+        <span class="home-card-title">{{ t('Needs attention') }}</span>
+        {% if attention_files %}<ul class="mini-list">{% for f in attention_files[:3] %}{% set stage = attention_stages.get(f.id) %}<li><span>{{ f.filename }}</span><span class="state state-{{ 'degraded' if f.status == 'partial' else 'attention' }}">{% if stage %}{{ t(stage.split(':')[0]) }} · {{ t(stage.split(':')[1]) }}{% else %}{{ t(f.status) }}{% endif %}</span></li>{% endfor %}</ul>
+        <span class="home-card-foot">{{ t('Open a recording to retry the failed stage. Everything else stays usable.') }}</span>
+        {% else %}<span class="home-card-body">{{ t('All recordings processed cleanly.') }}</span>{% endif %}
+      </a>
+      <a class="home-card home-card-ask" href="/ask" data-home-card="ask">
+        <span class="home-card-icon">{{ icon('sparkles') }}</span>
+        <span class="home-card-title">{{ t('Ask your library') }}</span>
+        <span class="home-card-body">{{ t('Answers grounded in your corrected transcripts, with playable citations.') }}</span>
+        <span class="home-card-foot"><span class="chip">{{ t('What decisions were made recently?') }}</span></span>
+      </a>
+    </div>
+    <p class="home-meta t-meta">
+      <span>{{ icon('cloud', 'xs') }} {{ t('Plaud mirror') }}: {% if import_run %}{{ import_run.processed }} / {{ import_run.total }} · {{ t(import_run.status) }}{% if import_run.failed %} · {{ import_run.failed }} {{ t('failed') }}{% endif %}{% else %}{{ t('No Plaud import has run yet.') }}{% endif %}</span>
+      <span>{{ icon('zap', 'xs') }} <a href="/discover">{{ t('AutoFlow activity') }}</a>: {{ automation_count }} {{ t('automation runs') }}{% if automation_run %} · {{ t('last') }} {{ t(automation_run.status) }}{% endif %}</span>
+      <span>{{ icon('drive', 'xs') }} {{ stats.total }} {{ t('recordings') }} · {{ stats.hours }} {{ t('hours mirrored') }} · {{ audio_local }} {{ t('with local audio') }}{% if metadata_only %} · <a href="/?state=metadata_only">{{ metadata_only }} {{ t('metadata only') }}</a>{% endif %}</span>
+    </p>
+  </section>
 
-  {% if attention_files %}
-  <section style="margin-top:26px">
-    <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="font-size:18px;margin:0">{{ t('Needs attention') }}</h2><a href="/?state=attention" class="sub" style="font-size:12px">{{ t('View all →') }}</a></div>
-    <div class="panel home-recent" style="margin-top:11px;padding:0">
-      {% for f in attention_files %}
-      <a class="home-row" href="/file/{{ f.id }}">
-        <span class="home-row-main">
-          <strong class="home-row-title">{{ f.filename }}</strong>
-          <span class="home-row-meta">{{ f.duration_ms|dur }} · {{ f.start_time_ms|dt }}{% if f.retry.exhausted %} · {{ t('retry exhausted') }}{% elif f.retry.next_at %} · {{ t('retry scheduled') }}{% endif %}</span>
-        </span>
-        <span class="st {{ f.status }}">{{ t(f.status) }}</span>
+  {% if home_templates %}
+  <section class="home-section" aria-labelledby="home-templates-title">
+    <div class="section-head"><h2 class="page-title" id="home-templates-title">{{ t('Templates') }}</h2><a class="view-all" href="/templates">{{ t('View all') }}{{ icon('chevron-right') }}</a></div>
+    <div class="template-strip">
+      {% for tpl in home_templates %}
+      <a class="template-card" href="/templates?q={{ tpl.name | urlencode }}" style="--tc-color:{{ ['#4C8EFF','#22A06B','#C149EB','#F9A251'][loop.index0 % 4] }}">
+        {{ icon('template', cls='tc-icon') }}
+        <h3 class="tc-title clamp-2">{{ tpl.name }}</h3>
+        <span class="tc-desc clamp-2">{{ tpl.description }}</span>
+        <span class="tc-foot"><span class="truncate">{{ t(tpl.category) }} · {{ tpl.author if tpl.provenance != 'plaud-web-readonly' else t('Built-in') }}</span><span style="margin-left:auto">v{{ tpl.version }}</span></span>
       </a>
       {% endfor %}
     </div>
   </section>
   {% endif %}
-</div></main>
+</div></div>
 {% endblock %}
-{% block scripts %}<style>
-@media(max-width:720px){.home-status-grid{grid-template-columns:1fr!important}}
-.home-recent .home-row { display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 13px;border-top:1px solid var(--border);text-decoration:none;color:inherit;min-width:0; }
-.home-recent .home-row:first-child { border-top:0; }
-.home-recent .home-row:hover,.home-recent .home-row:focus-visible { background:var(--panel2); }
-.home-row-main { min-width:0;display:grid;gap:2px; }
-.home-row-title { font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
-.home-row-meta { font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
-.home-recent .home-row .st { flex:none; }
-</style>{% endblock %}

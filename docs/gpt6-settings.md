@@ -59,3 +59,15 @@ Codex inference and the provider health probe passed, nine profile versions
 summary, mind map and Ask to `gpt-6.1-sol`. The earlier profile versions, the
 `gpt-6-sol` catalog entry and all historical model attribution are unchanged.
 Pre-migration backup: `data/backups/localplaud-pre-gpt61-20261001.db`.
+
+## gpt-6.1-sol operating limits (2026-10-02)
+
+With high reasoning effort, `gpt-6.1-sol` calls take several times longer than
+`gpt-6-sol`. A correction request near 19k CJK characters and evidence-note
+extraction batches near 14k transcript characters exceeded the 900-second
+per-call limit, so no note completed. The production Codex connection therefore
+uses `timeout_seconds = 1800`, `polish_chunk_chars = 8000`, and
+`summary_chunk_chars = 32000` (about 3.5k transcript characters per extraction
+batch after prompt and context overhead). Correction requests that still time out
+are split and retried. Changing timeout or quota settings does not invalidate
+completed stages; changing a chunk budget re-runs only the stage that uses it.

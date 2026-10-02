@@ -1,5 +1,7 @@
 """Safe Markdown rendering shared by Web pages and JSON preview APIs."""
 
+import re
+
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
 from markupsafe import Markup
@@ -26,4 +28,7 @@ _MARKDOWN.add_render_rule("image", _render_image)
 
 def render_markdown(value: str | None) -> Markup:
     """Render Markdown with raw HTML and unsafe link schemes disabled."""
-    return Markup(_MARKDOWN.render(value or ""))
+    # Plaud embeds an app-only summary-card marker, not a retrievable image.
+    # The cloud note panel explains the missing asset; never render a dead URI.
+    value = re.sub(r"(?m)^\[\]\(plaud://image\?[^)\n]*\)[ \t]*$", "", value or "")
+    return Markup(_MARKDOWN.render(value))

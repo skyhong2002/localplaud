@@ -194,6 +194,13 @@ setting.
 - Profiles explicitly declare whether data may leave the host. Local-only/no-egress
   mode cannot fall back to a cloud or rented worker. Every other fallback is visible,
   ordered, and constrained by capability, quality, timeout, and cost policy.
+- `quality_floor` is a durable profile policy mapping stage names to scores in
+  `[0, 1]`. Model stage capabilities may declare `quality` on the same scale;
+  these are operator-assessed ratings, not automatically measured accuracy.
+  A configured floor excludes fallback candidates with lower or unknown quality.
+  The immutable snapshot and `POST /api/providers/resolve` retain each candidate's
+  `quality_resolution` (stage, quality, floor, acceptance and rejection reason).
+  Rejected candidates never execute; absence of a floor preserves legacy behavior.
 - Each stage run and artifact stores the resolved profile snapshot plus actual
   provider, model, version, execution target, configuration/prompt version, timing,
   and usage/cost data where available. Later profile edits never alter old
@@ -704,3 +711,51 @@ When a Profile sets a cost ceiling, cloud and remote stages must have explicit m
 pricing (or an explicit free declaration). A conservative pre-egress reservation is
 checked against all prior attempt cost; an over-budget or unknown-cost stage fails
 before provider invocation and can Resume after the user changes Profile policy.
+
+
+### Recording reading and sharing repair (2026-09-25)
+
+The Notes workspace leads with the complete recording title and keeps generation
+settings collapsed when notes exist; the + menu reopens those settings. On mobile,
+the player stays at the bottom and the More menu stays inside the viewport. The
+Share sheet now has one grouped menu for public links, clipboard actions, and
+audio/transcript/note/mind-map exports. Each row opens its options inside the same
+sheet, with a Back action; the header has one Share button. Notes can be copied
+individually or together. Public-link options retain explicit create/copy/disable
+controls and a secondary authenticated workspace link. Native sharing uses the
+public URL. An independent delegated controller handles full loads, progressive
+workspace swaps, and restored history, even if transcript/player initialization
+fails; failed link requests expose Retry.
+Public-link creation remains a deliberate action and imported Plaud content remains
+opt-in. Transcript tab URLs now preserve the tab through refresh and Back.
+
+The share sheet ships its own stylesheet with each recording fragment, so a tab
+that retains an older shell after HTMX navigation still receives the current panel
+layout. Its height is explicitly bounded to the viewport, with an independently
+scrolling body, rather than relying on intrinsic flex sizing for the content area.
+
+### Plaud note migration completeness (2026-09-26)
+
+Explicit imports resolve official `data_link` bodies when a note, transcript, or
+outline has no inline content. These bounded, SSRF-checked reads send no account
+credentials to storage hosts; a failed body fetch fails the refresh instead of
+silently reporting no notes. Imported notes retain Plaud tab names and stable
+cloud identities across refreshes, including repeated note types and reordered
+responses. Refresh is additive: missing cloud entries do not erase a previous
+mirror, and local notes are preserved. Empty Notes workspaces offer a direct
+Import Plaud notes action with in-place progress, errors, and retry.
+
+Some official replies contain only an app-specific `plaud://image` summary-card
+marker without an image download. The workspace explains this limitation and
+renders the original text without a dead marker; it does not claim the card was
+imported. Images supplied with supported download maps or direct HTTPS image URLs are
+mirrored through the same bounded storage fetch. Mobile generation selectors
+are constrained to their grid width to prevent WebKit horizontal overflow.
+These migration improvements do not change the independent generation pipeline
+or make existing local summaries equivalent to Plaud-generated summaries.
+
+
+When Resume reuses an already forced-aligned raw transcript and the new profile
+only validates its unchanged word timestamps, the stage retains the original
+aligner provenance and records the new validation separately. A fresh ASR run
+never inherits forced-alignment evidence from the displaced transcript.

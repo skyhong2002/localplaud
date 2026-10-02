@@ -28,7 +28,8 @@ log = logging.getLogger(__name__)
 _SYSTEM = (
     "You turn a transcript into a faithful topic hierarchy. Never invent "
     "facts not present in the source. Reply in the transcript's dominant "
-    "language."
+    "language. Preserve exact Speaker N labels when attributing speech or ownership; "
+    "never infer identities, rename labels or replace them with generic roles."
 )
 
 _MAP_PROMPT = """\

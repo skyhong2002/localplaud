@@ -39,9 +39,7 @@ def sync_speakers(session: Session, file_id: str, keys: list[str]) -> None:
     """Insert ``Speaker`` rows for any new keys. Never deletes rows and never
     touches an existing ``display_name`` — user renames must survive re-ASR
     and re-diarization."""
-    existing = set(
-        session.scalars(select(Speaker.key).where(Speaker.file_id == file_id))
-    )
+    existing = set(session.scalars(select(Speaker.key).where(Speaker.file_id == file_id)))
     for key in keys:
         if key not in existing:
             session.add(Speaker(file_id=file_id, key=key))
@@ -82,16 +80,13 @@ def _overlap(left: list[list[float]], right: list[list[float]]) -> float:
     return total
 
 
-def capture_speaker_evidence(
-    session: Session, file_id: str, segments: list[dict]
-) -> None:
+def capture_speaker_evidence(session: Session, file_id: str, segments: list[dict]) -> None:
     """Backfill missing evidence before a prior diarized transcript is replaced."""
     timelines = _speaker_intervals(segments)
     if not timelines:
         return
     rows = {
-        row.key: row
-        for row in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
+        row.key: row for row in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
     }
     for key, intervals in timelines.items():
         row = rows.get(key)
@@ -114,9 +109,7 @@ def reconcile_speaker_labels(
     if not current:
         return {}
     rows = list(session.scalars(select(Speaker).where(Speaker.file_id == file_id)))
-    previous = {
-        row.key: (row.timeline or {}).get("intervals", []) for row in rows if row.timeline
-    }
+    previous = {row.key: (row.timeline or {}).get("intervals", []) for row in rows if row.timeline}
     candidates: list[tuple[float, float, str, str]] = []
     for emitted, new_intervals in current.items():
         ranked: list[tuple[float, float, str]] = []
@@ -165,9 +158,7 @@ def reconcile_speaker_labels(
             row = next(
                 item
                 for item in session.new
-                if isinstance(item, Speaker)
-                and item.file_id == file_id
-                and item.key == stable
+                if isinstance(item, Speaker) and item.file_id == file_id and item.key == stable
             )
         row.timeline = {"intervals": current[emitted]}
     for segment in segments:
@@ -183,3 +174,43 @@ def display_names(session: Session, file_id: str) -> dict[str, str]:
     """Map speaker key -> user display name, only for renamed speakers."""
     rows = session.scalars(select(Speaker).where(Speaker.file_id == file_id))
     return {row.key: row.display_name for row in rows if row.display_name}
+
+
+def anonymous_speaker_labels(keys: list[str]) -> dict[str, str]:
+    """Stable friendly labels; numeric diarization keys retain their ordinal."""
+    import re
+
+    keys = list(dict.fromkeys(keys))
+    numbers: dict[str, int] = {}
+    for key in keys:
+        match = re.fullmatch(r"SPEAKER_(\d+)", key, re.IGNORECASE)
+        if match and int(match.group(1)) + 1 not in numbers.values():
+            numbers[key] = int(match.group(1)) + 1
+    for key in keys:
+        if key not in numbers:
+            number = 1
+            while number in numbers.values():
+                number += 1
+            numbers[key] = number
+    return {key: f"Speaker {numbers[key]}" for key in keys}
+
+
+def speaker_labels(session: Session, file_id: str, *, anonymous: bool = False) -> dict[str, str]:
+    """Friendly labels for every known identity without changing explicit names."""
+    from ..db.models import PlaudFile
+
+    row = session.get(PlaudFile, file_id)
+    if row is None:
+        return {}
+    keys = [speaker.key for speaker in row.speakers]
+    raw = row.local_transcript
+    canonical = row.corrected_transcript_for_source("local")
+    keys.extend(
+        speaker_keys_from_segments(canonical.segments if canonical else raw.segments if raw else [])
+    )
+    labels = anonymous_speaker_labels(keys)
+    if not anonymous:
+        labels.update(
+            {speaker.key: speaker.display_name for speaker in row.speakers if speaker.display_name}
+        )
+    return labels

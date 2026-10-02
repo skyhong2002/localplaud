@@ -78,6 +78,65 @@ def _before_provider_dispatch() -> None:
         state["before_dispatch"]()
 
 
+class AskCancelled(RuntimeError):
+    """Raised when an interactive Ask is stopped by the user mid-generation."""
+
+
+_ask_stream_hooks: ContextVar[dict | None] = ContextVar("localplaud_ask_stream_hooks", default=None)
+
+
+@contextmanager
+def ask_stream_hooks(
+    *,
+    on_delta: Callable[[str], None] | None = None,
+    on_sources: Callable[[list[dict]], None] | None = None,
+    on_reset: Callable[[], None] | None = None,
+    cancel=None,
+) -> Iterator[None]:
+    """Opt one Ask call into incremental output without changing ``answer``'s API.
+
+    ``on_sources`` receives the public retrieval hits before generation,
+    ``on_delta`` each text piece (the whole answer at once for providers without
+    ``stream``), ``on_reset`` fires before a fallback candidate replaces a failed
+    partial answer, and a set ``cancel`` event (``threading.Event``) stops the
+    request with :class:`AskCancelled` so nothing is persisted.
+    """
+    token = _ask_stream_hooks.set(
+        {"on_delta": on_delta, "on_sources": on_sources, "on_reset": on_reset, "cancel": cancel}
+    )
+    try:
+        yield
+    finally:
+        _ask_stream_hooks.reset(token)
+
+
+def _check_cancelled(hooks: dict | None) -> None:
+    cancel = (hooks or {}).get("cancel")
+    if cancel is not None and cancel.is_set():
+        raise AskCancelled("Ask was stopped")
+
+
+def _complete_answer(llm, prompt: str, system: str, temperature: float, max_tokens: int) -> str:
+    hooks = _ask_stream_hooks.get()
+    if hooks is None:
+        return llm.complete(prompt, system=system, temperature=temperature, max_tokens=max_tokens)
+    _check_cancelled(hooks)
+    on_delta = hooks.get("on_delta") or (lambda _piece: None)
+    stream = getattr(llm, "stream", None)
+    if callable(stream):
+        parts: list[str] = []
+        for piece in stream(prompt, system=system, temperature=temperature, max_tokens=max_tokens):
+            _check_cancelled(hooks)
+            if piece:
+                parts.append(piece)
+                on_delta(piece)
+        return "".join(parts)
+    text = llm.complete(prompt, system=system, temperature=temperature, max_tokens=max_tokens)
+    _check_cancelled(hooks)
+    on_delta(text)
+    return text
+
+
 def _user_note_evidence_fingerprint(note: UserNote) -> str:
     payload = {
         "title": note.title,
@@ -942,7 +1001,8 @@ def _ordered_artifact_lock_query(model, artifact_ids: list[int]):
 _QA_SYSTEM = (
     "You answer questions using only the provided transcript and note excerpts "
     "from the user's own library. Cite the recording or note titles you used. If the excerpts do "
-    "not contain the answer, say so plainly."
+    "not contain the answer, say so plainly. Excerpts are numbered like [1]; cite "
+    "the excerpts that support each statement inline with those bracketed numbers."
 )
 
 _QA_SYSTEM_SINGLE = (
@@ -950,20 +1010,21 @@ _QA_SYSTEM_SINGLE = (
     "only the provided transcript and note excerpts from it. Reference transcript "
     "moments by timestamp, but cite note evidence by its note title without inventing "
     "a timestamp. If the excerpts do not contain the "
-    "answer, say so plainly rather than guessing."
+    "answer, say so plainly rather than guessing. Excerpts are numbered like [1]; "
+    "cite the excerpts that support each statement inline with those bracketed numbers."
 )
 
 
 def _format_context(hits: list[dict]) -> str:
     blocks = []
-    for h in hits:
+    for number, h in enumerate(hits, start=1):
         stamp = f" @ {h['start']:.0f}s" if h.get("start") is not None else ""
         speaker = f" · {h['speaker']}" if h.get("speaker") else ""
         if h.get("target") in {"generated_note", "saved_note"}:
             evidence = h.get("label") or "Note"
-            blocks.append(f"[{h['filename']} · {evidence}] {h['text']}")
+            blocks.append(f"[{number}] [{h['filename']} · {evidence}] {h['text']}")
         else:
-            blocks.append(f"[{h['filename']}{stamp}{speaker}] {h['text']}")
+            blocks.append(f"[{number}] [{h['filename']}{stamp}{speaker}] {h['text']}")
     return "\n\n".join(blocks)
 
 
@@ -1276,6 +1337,9 @@ def answer(
             "provenance": {"profile": embed_snapshot},
             "_cost_reservation_ids": reservation_ids,
         }
+    stream_hooks = _ask_stream_hooks.get()
+    if stream_hooks and stream_hooks.get("on_sources"):
+        stream_hooks["on_sources"](_public_hits(hits))
     system = _QA_SYSTEM_SINGLE if file_id is not None else _QA_SYSTEM
     prior = ""
     if history:
@@ -1308,9 +1372,12 @@ def answer(
                 reservation_ids[1],
                 file_id,
             )
+            if index and stream_hooks and stream_hooks.get("on_reset"):
+                stream_hooks["on_reset"]()
+
             def dispatch(candidate_settings=candidate_settings) -> str:
                 llm = build_llm(candidate_settings.llm)
-                return llm.complete(prompt, system=system, temperature=0.2, max_tokens=800)
+                return _complete_answer(llm, prompt, system, 0.2, 800)
 
             text = _dispatch_with_current_evidence(hits, dispatch)
             actual_usage = normalize_usage(

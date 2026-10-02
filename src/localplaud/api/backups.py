@@ -46,11 +46,19 @@ def list_backups() -> dict:
 @router.post("", status_code=201)
 def create_backup(include_media: bool = False) -> dict:
     try:
-        return create_workspace_backup(include_media=include_media)
+        created = create_workspace_backup(include_media=include_media)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # The user-configured "keep the newest N backups" policy (Settings > Storage)
+    # only ever removes older backup archives, never audio or the database.
+    from ..db.session import session_scope
+    from ..storage_usage import enforce_retention_after_backup
+
+    with session_scope() as session:
+        created["retention_deleted"] = enforce_retention_after_backup(session)
+    return created
 
 
 @router.get("/{name}/download")

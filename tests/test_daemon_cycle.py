@@ -6,6 +6,12 @@ from localplaud import cli
 from localplaud.config import Settings
 
 
+@pytest.fixture(autouse=True)
+def isolated_daemon_concurrency(monkeypatch):
+    # Serial tests must not inherit the deployed worker count from config.toml.
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONCURRENCY", "1")
+
+
 @pytest.mark.parametrize("sync_fails", [False, True])
 def test_daemon_processes_local_queue_after_sync(monkeypatch, sync_fails):
     settings = Settings(_env_file=None)
@@ -145,3 +151,108 @@ def test_disabled_sync_still_schedules_local_recovery(monkeypatch):
     monkeypatch.setattr(cli, "process_automatic_pending", lambda *a, **k: 1)
     assert jobs.sync() is None
     assert jobs.work() == 1
+
+
+def test_parallel_slots_refill_without_waiting_for_slow_sibling(monkeypatch):
+    import threading
+    import time
+
+    from localplaud.worker.claims import current_processing_owner
+    from localplaud.worker.daemon import DaemonJobs
+
+    settings = Settings(_env_file=None)
+    settings.pipeline.concurrency = 2
+    jobs = DaemonJobs(settings, "parallel-owner", Scheduler())
+    monkeypatch.setattr(jobs, "active_recordings", lambda: 0)
+    releases = [threading.Event() for _ in range(3)]
+    entered = [threading.Event() for _ in range(3)]
+    calls = []
+    lock = threading.Lock()
+
+    def work(actual, *, daemon_owner):
+        assert actual.pipeline.concurrency == actual.pipeline.files_per_cycle == 1
+        assert current_processing_owner() == daemon_owner == "parallel-owner"
+        with lock:
+            i = len(calls)
+            calls.append(i)
+        entered[i].set()
+        assert releases[i].wait(5)
+
+    monkeypatch.setattr(cli, "process_automatic_pending", work)
+    try:
+        assert jobs.work() == 2
+        assert entered[0].wait(2) and entered[1].wait(2)
+        assert jobs.work() == 0
+        releases[0].set()
+        deadline = time.monotonic() + 2
+        while not any(f.done() for f in jobs.inflight) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert jobs.work() == 1
+        assert entered[2].wait(2)
+        assert not releases[1].is_set()
+        assert len(calls) == 3
+    finally:
+        for event in releases:
+            event.set()
+        jobs.shutdown()
+    assert jobs.work() is None
+
+
+def test_parallel_dispatch_counts_existing_web_or_maintenance_work(monkeypatch):
+    from localplaud.worker.daemon import DaemonJobs
+
+    settings = Settings(_env_file=None)
+    settings.pipeline.concurrency = 3
+    jobs = DaemonJobs(settings, "owner", Scheduler())
+    monkeypatch.setattr(jobs, "active_recordings", lambda: 3)
+    monkeypatch.setattr(
+        cli, "process_automatic_pending", lambda *a, **kw: pytest.fail("already full")
+    )
+    try:
+        assert jobs.work() == 0
+    finally:
+        jobs.shutdown()
+
+
+def test_speech_stage_gate_does_not_block_external_text(monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from localplaud.db.models import StageName
+    from localplaud.worker import pipeline
+
+    monkeypatch.setattr(pipeline, 'candidate_snapshots', lambda *_: [{'fallback': {}}])
+    monkeypatch.setattr(pipeline, '_begin_stage', lambda *_: None)
+    monkeypatch.setattr(pipeline, '_renew_processing_claim', lambda *_: None)
+    monkeypatch.setattr(pipeline, '_finish_stage', lambda *a, **kw: None)
+    speech_started = threading.Event()
+    speech_release = threading.Event()
+    second_speech = threading.Event()
+    text_started = threading.Event()
+
+    def first(_):
+        speech_started.set()
+        speech_release.wait(5)
+        return {}
+
+    def second(_):
+        second_speech.set()
+        return {}
+
+    def text_work(_):
+        text_started.set()
+        return {}
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        first_job = pool.submit(pipeline._run_fallback_stage, 'a', 'transcribe', StageName.transcribe, {}, first)
+        try:
+            assert speech_started.wait(2)
+            second_job = pool.submit(pipeline._run_fallback_stage, 'b', 'diarize', StageName.diarize, {}, second)
+            text_job = pool.submit(pipeline._run_fallback_stage, 'c', 'correct', StageName.correct, {}, text_work)
+            assert text_started.wait(2)
+            assert not second_speech.is_set()
+        finally:
+            speech_release.set()
+        for job in (first_job, second_job, text_job):
+            job.result(timeout=2)
+        assert second_speech.is_set()

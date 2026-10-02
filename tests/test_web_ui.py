@@ -8,8 +8,15 @@ import json
 import re
 import zipfile
 from io import BytesIO
+from pathlib import Path
 
 import pytest
+
+from tests.assets import with_assets
+
+WORKSPACE_JS = (
+    Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+).read_text()
 
 
 def _client(monkeypatch, tmp_path):
@@ -101,7 +108,7 @@ def test_dashboard_renders(monkeypatch, tmp_path):
     assert r.status_code == 200
     assert "Weekly Sync" in r.text
     assert "All files" in r.text
-    assert "rectable" in r.text
+    assert 'class="file-list"' in r.text and 'class="file-table-head"' in r.text
     assert "Total audio" not in r.text  # one dense library surface, not a dashboard
 
 
@@ -168,7 +175,7 @@ def test_real_browser_navigation_gets_progressive_library_and_recording_shells(
     assert "preserve_filelist=true" in htmx_navigation.text
     assert "<!doctype html>" not in htmx_navigation.text
     assert '<aside class="sidebar">' not in htmx_navigation.text
-    assert htmx_navigation.text.count('<div id="app-view" hx-history-elt>') == 1
+    assert htmx_navigation.text.count('<div id="app-view" hx-history-elt') == 1
     assert "<title>Weekly Sync — localplaud</title>" in htmx_navigation.text
 
     htmx_workspace = c.get(
@@ -185,7 +192,7 @@ def test_real_browser_navigation_gets_progressive_library_and_recording_shells(
         headers={"HX-Request": "true", "HX-History-Restore-Request": "true"},
     )
     assert "<!doctype html>" not in history_restore.text
-    assert '<div id="app-view" hx-history-elt>' in history_restore.text
+    assert '<div id="app-view" hx-history-elt data-tabbar="off">' in history_restore.text
 
 
 def test_long_transcript_is_loaded_in_bounded_pages(monkeypatch, tmp_path):
@@ -298,40 +305,41 @@ def test_transcript_pagination_rejects_empty_and_unknown_continuations(
 def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     response = c.get("/")
+    response_assets = with_assets(c, response)
     assert response.status_code == 200
-    assert '[hidden] { display:none !important; }' in response.text
-    assert 'id="import-backdrop" hidden' in response.text
-    assert 'aria-expanded="false" aria-haspopup="menu" aria-controls="add-audio-menu"' in response.text
-    assert 'id="add-audio-menu" role="menu" hidden' in response.text
-    assert 'role="tablist" aria-label="Audio source"' in response.text
-    assert 'role="tab" aria-selected="true" aria-controls="device-import-panel"' in response.text
-    assert 'role="tabpanel" aria-labelledby="device-import-tab"' in response.text
-    assert 'id="audio-drop-zone" role="button" tabindex="0"' in response.text
-    assert 'id="local-import-status" role="status" aria-live="polite"' in response.text
-    assert 'role="progressbar" aria-labelledby="plaud-import-progress-label"' in response.text
-    assert "const importModal=window.localplaudModal" in response.text
-    assert "typeof background==='function'?background():background" in response.text
-    assert "background:()=>[document.getElementById('app-view')" in response.text
-    assert "importModal.open(trigger,tabs.find" in response.text
-    assert "event.key==='Enter'||event.key===' '" in response.text
-    assert "event.key==='ArrowRight'" in response.text
-    assert "else if(event.key==='Home')" in response.text
-    assert "menuItems[0]?.focus()" in response.text
-    assert "['ArrowDown','Enter',' '].includes(event.key)" in response.text
-    assert "menu.addEventListener('focusout'" in response.text
-    assert "choose(item.dataset.importMode,button)" in response.text
-    assert "requestController?.abort()" in response.text
-    assert "if(error.name==='AbortError')throw error" in response.text
-    assert "'Could not start Plaud import',[409]" in response.text
-    assert "setDialogBusy(true)" in response.text
-    assert "input.value=''" in response.text
-    assert "event.stopPropagation();if(!busy)closeImport()" in response.text
-    assert "if(busy)return false" in response.text
-    assert "closeButton.disabled=value" in response.text
-    assert "event.target===backdrop&&!backdrop.hidden&&!busy" in response.text
-    assert "setMenu(false,{restoreFocus:true})" in response.text
-    assert "progress.setAttribute('aria-valuenow',String(pct))" in response.text
-    assert "if(running)progressTimer=setTimeout(pollPlaudImport,1000)" in response.text
+    assert '[hidden] { display: none !important; }' in response_assets
+    assert 'id="import-backdrop" hidden' in response_assets
+    assert 'aria-expanded="false" aria-haspopup="menu" aria-controls="add-audio-menu"' in response_assets
+    assert 'id="add-audio-menu" role="menu" hidden' in response_assets
+    assert 'role="tablist" aria-label="Audio source"' in response_assets
+    assert 'role="tab" aria-selected="true" aria-controls="device-import-panel"' in response_assets
+    assert 'role="tabpanel" aria-labelledby="device-import-tab"' in response_assets
+    assert 'id="audio-drop-zone" role="button" tabindex="0"' in response_assets
+    assert 'id="local-import-status" role="status" aria-live="polite"' in response_assets
+    assert 'role="progressbar" aria-labelledby="plaud-import-progress-label"' in response_assets
+    assert "const importModal=window.localplaudModal" in response_assets
+    assert "typeof background==='function'?background():background" in response_assets
+    assert "background:()=>[document.getElementById('app-view')" in response_assets
+    assert "importModal.open(trigger,tabs.find" in response_assets
+    assert "event.key==='Enter'||event.key===' '" in response_assets
+    assert "event.key==='ArrowRight'" in response_assets
+    assert "else if(event.key==='Home')" in response_assets
+    assert "menuItems[0]?.focus()" in response_assets
+    assert "['ArrowDown','Enter',' '].includes(event.key)" in response_assets
+    assert "menu.addEventListener('focusout'" in response_assets
+    assert "choose(item.dataset.importMode,button)" in response_assets
+    assert "requestController?.abort()" in response_assets
+    assert "if(error.name==='AbortError')throw error" in response_assets
+    assert "'Could not start Plaud import',[409]" in response_assets
+    assert "setDialogBusy(true)" in response_assets
+    assert "input.value=''" in response_assets
+    assert "event.stopPropagation();if(!busy)closeImport()" in response_assets
+    assert "if(busy)return false" in response_assets
+    assert "closeButton.disabled=value" in response_assets
+    assert "event.target===backdrop&&!backdrop.hidden&&!busy" in response_assets
+    assert "setMenu(false,{restoreFocus:true})" in response_assets
+    assert "progress.setAttribute('aria-valuenow',String(pct))" in response_assets
+    assert "if(running)progressTimer=setTimeout(pollPlaudImport,1000)" in response_assets
 
     from localplaud.i18n import catalog
 
@@ -345,13 +353,16 @@ def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
 
 def test_product_pages_use_centered_responsive_layout(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
-    for path in ("/home", "/templates", "/discover", "/notifications"):
+    home = c.get("/home")
+    assert '<div class="library-page home-page"><div class="page-frame">' in home.text
+    for path in ("/templates", "/discover", "/notifications"):
         response = c.get(path)
         assert response.status_code == 200
         assert '<main class="main"><div class="content"' in response.text
-        assert ".main { flex:1; min-width:0; overflow-y:auto; }" in response.text
-        assert "width:100%; margin:0 auto; padding:26px 30px 80px" in response.text
-        assert ".main > .content{ padding:20px 16px 60px; }" in response.text
+        page = with_assets(c, response)
+        assert ".main { flex: 1; min-width: 0; overflow-y: auto; background: var(--c-bg); }" in page
+        assert ".main > .content { width: 100%; margin: 0 auto; padding: 48px 40px 80px; }" in page
+        assert ".main > .content, .page-frame, .library-inner { padding: 20px 16px 40px; }" in page
 
 
 def test_browser_runtime_is_vendored_and_checksum_pinned(monkeypatch, tmp_path):
@@ -394,11 +405,11 @@ def test_home_renders_recent_recordings_and_operational_cards(monkeypatch, tmp_p
         )
     response = c.get("/home")
     assert response.status_code == 200
-    assert "Welcome back" in response.text
-    assert "Recent recordings" in response.text and "Weekly Sync" in response.text
+    assert "Recent files" in response.text and "Weekly Sync" in response.text
     assert "Plaud mirror" in response.text and "754 / 754" in response.text
     assert "AutoFlow activity" in response.text
-    assert 'id="home-import-plaud"' in response.text
+    # Add audio (device upload and Plaud import) stays one click away.
+    assert 'data-import-mode="plaud"' in response.text and 'data-import-mode="device"' in response.text
     assert 'href="/home"' in response.text and 'href="/"' in response.text
 
 
@@ -416,7 +427,10 @@ def test_transcript_page_wraps_speaker_name_for_one_line_clamp(monkeypatch, tmp_
     assert page.status_code == 200
     # The name is wrapped in .who-name (CSS clamps it to one ellipsized line)
     # and duplicated into title= so the full identity stays reachable.
-    assert f'<span class="who" title="{long_name}">' in page.text
+    assert (
+        f'<button class="who" type="button" title="{long_name}" data-speaker-menu'
+        in page.text
+    )
     assert f'<span class="who-name">{long_name}</span>' in page.text
 
 
@@ -539,7 +553,7 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert 'class="note-tab saved-note-tab' in r.text
     assert f'title="Editable note · {long_title}"' in r.text
     saved_tab = r.text.split('class="note-tab saved-note-tab', 1)[1].split("</button>", 1)[0]
-    assert "pencil.svg" in saved_tab
+    assert "#i-pencil" in saved_tab
     # The "+" affordance offers AI generation first and preserves blank notes.
     assert "data-open-manual-note" in r.text
     assert 'aria-label="New note"' in r.text
@@ -554,7 +568,11 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert "workspaceNoteDirty" in r.text and "beforeunload" in r.text
     assert "Discard unsaved note changes?" in r.text
     # Generated-note provenance now carries version and creation time.
-    assert _re.search(r"v3 · [A-Z][a-z]{2} \d{2}, \d{4} · \d{2}:\d{2} · Generated from", r.text)
+    assert _re.search(
+        r" · v3</span>(?:<span[^>]*>.*?</span>)?<span>[A-Z][a-z]{2} \d{2}, \d{4} · \d{2}:\d{2}"
+        r"</span><span>Generated from",
+        r.text,
+    )
     # Lockstep invariant: the highlighted tab's target is exactly the one
     # panel rendered visible, independent of either list's ordering.
     active_target = _re.search(
@@ -685,38 +703,39 @@ def test_processing_recording_shows_friendly_progress(monkeypatch, tmp_path):
                         audio_path=str(audio)))
 
     r = c.get("/file/r7")
+    r_assets = with_assets(c, r)
     assert r.status_code == 200
     # Friendly in-progress state without stage jargon, updating politely.
-    assert '<div class="empty generate-empty" data-generation-progress>' in r.text
-    assert 'id="generation-progress-title">Generating…' in r.text
-    assert 'aria-live="polite" id="generation-progress-note"' in r.text
-    assert "This page updates automatically when results are ready." in r.text
+    assert '<div class="empty generate-empty" data-generation-progress>' in r_assets
+    assert 'id="generation-progress-title">Generating…' in r_assets
+    assert 'aria-live="polite" id="generation-progress-note"' in r_assets
+    assert "This page updates automatically when results are ready." in r_assets
     progress_block = r.text.split(
         '<div class="empty generate-empty" data-generation-progress>', 1
     )[1].split("</div>", 1)[0]
     for term in ("diarize", "align", "embed", "ASR", "pipeline", "stage"):
         assert term not in progress_block
     # No Generate CTA while work is pending, and the header label is live.
-    assert 'data-open-generate><span' not in r.text
-    assert 'id="recording-state-label" aria-live="polite">Generating…' in r.text
+    assert 'data-open-generate><svg' not in r.text
+    assert 'id="recording-state-label" aria-live="polite">Generating…' in r_assets
     # The poller reuses the existing read-only status endpoint with cleanup.
-    assert "/api/imports/plaud/files/r7/audio/status" in r.text
-    assert "if(statusTimer)clearTimeout(statusTimer)" in r.text
+    assert "/api/imports/plaud/files/r7/audio/status" in r_assets
+    assert "if(statusTimer)clearTimeout(statusTimer)" in r_assets
     # Hardened terminal detection: only a 2xx body with a recognized string
     # status may refresh the view; anything else retries calmly, never reloads.
-    assert "if(response.ok)data=await response.json();" in r.text
-    assert "if(cleanupController.signal.aborted)return;" in r.text
-    assert "const status=typeof data?.status==='string'?data.status:null;" in r.text
-    assert "const terminalStates=['done','partial','error'];" in r.text
-    assert "statusTimer=setTimeout(tick,7000);" in r.text
+    assert "if(response.ok)data=await response.json();" in r_assets
+    assert "if(cleanupController.signal.aborted)return;" in r_assets
+    assert "const status=typeof data?.status==='string'?data.status:null;" in r_assets
+    assert "const terminalStates=['done','partial','error'];" in r_assets
+    assert "statusTimer=setTimeout(tick,7000);" in r_assets
     # Terminal refresh is a one-time hard reload issued only after the abort
     # re-check: it cannot race an HTMX navigation that detached #app-view the
     # way an in-flight htmx.ajax swap could, and the URL keeps tab context.
     assert "htmx.ajax" not in r.text.split("terminalStates.includes(status)", 1)[1].split("}", 3)[0]
     assert r.text.index("if(cleanupController.signal.aborted)return;") < r.text.index("terminalStates.includes(status)")
     assert "location.reload();" in r.text.split("terminalStates.includes(status)", 1)[1][:400]
-    assert ".generate-progress-icon { animation:generate-spin" in r.text
-    assert "@media (prefers-reduced-motion: no-preference)" in r.text
+    assert ".generate-progress-icon { animation: generate-spin" in r_assets
+    assert "@media (prefers-reduced-motion: no-preference)" in r_assets
 
 
 def test_queued_flag_shows_queued_state_only_when_pending(monkeypatch, tmp_path):
@@ -737,7 +756,7 @@ def test_queued_flag_shows_queued_state_only_when_pending(monkeypatch, tmp_path)
     plain = c.get("/file/r8")
     assert '<div class="empty generate-empty" data-generation-progress>' not in plain.text
     assert "Ready to generate" in plain.text
-    assert 'data-open-generate><span' in plain.text
+    assert 'data-open-generate><svg' in plain.text
 
 
 def test_error_recording_keeps_usable_content_visible(monkeypatch, tmp_path):
@@ -777,7 +796,8 @@ def test_sidebar_ops_card_summarizes_workspace(monkeypatch, tmp_path):
                         duration_ms=1000, start_time_ms=0, audio_path=str(audio)))
 
     r = c.get("/")
-    assert "Workspace status" in r.text
+    r_assets = with_assets(c, r)
+    assert "Workspace status" in r_assets
     card = r.text.split('data-testid="ops-card"', 1)[1].split("</div>", 1)[0]
     # Each count is an individually reachable link into the Library filters,
     # plus a single System status destination.
@@ -785,7 +805,8 @@ def test_sidebar_ops_card_summarizes_workspace(monkeypatch, tmp_path):
     assert '<a class="ops-stat" href="/?state=attention"><strong class="ops-attn">1</strong> need attention</a>' in card
     assert '<a class="ops-stat" href="/?state=done"><strong>1</strong> ready</a>' in card
     assert '<a class="ops-sub" href="/status">View system status</a>' in card
-    assert ".ops-stat:focus-visible,.ops-card .ops-sub:focus-visible { outline:2px solid var(--blue)" in r.text
+    # Status links rely on the global visible focus ring.
+    assert ":focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px;" in r_assets
 
 
 def test_sidebar_folder_link_exposes_full_name_via_title(monkeypatch, tmp_path):
@@ -843,13 +864,17 @@ def test_detail_page_renders(monkeypatch, tmp_path):
             )
         )
     r = c.get("/file/r1")
+    r_assets = with_assets(c, r)
     assert r.status_code == 200
     assert (
         'id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" '
         'aria-selected="true"'
-    ) in r.text
-    assert '>Meeting notes</button>' in r.text
-    assert 'id="recording-panel-notes" role="tabpanel"' in r.text
+    ) in r_assets
+    # Flat Plaud tab row: each note output is its own workspace tab, labelled
+    # with its template; the first carries the stable notes-tab id.
+    assert 'data-panel="notes" data-note-target="sum-' in r_assets
+    assert 'class="note-add-menu ws-tab-add"' in r_assets
+    assert 'id="recording-panel-notes" role="tabpanel"' in r_assets
     assert (
         'id="recording-panel-notes" role="tabpanel" '
         'aria-labelledby="recording-tab-notes" data-panel="notes" hidden'
@@ -859,141 +884,144 @@ def test_detail_page_renders(monkeypatch, tmp_path):
         'id="recording-tab-transcript" role="tab" '
         'aria-controls="recording-panel-transcript" aria-selected="true"'
     ) in transcript_view.text
-    assert "SPEAKER_00" in r.text
-    assert 'id="app-view" hx-history-elt' in r.text
-    assert '<aside class="sidebar" id="workspace-sidebar">' in r.text
+    assert "SPEAKER_00" in r_assets
+    assert 'id="app-view" hx-history-elt' in r_assets
+    assert '<aside class="sidebar" id="workspace-sidebar">' in r_assets
     assert "product-rail" not in r.text
     assert "data-sidebar-toggle" not in r.text
     assert "localplaud:sidebar-collapsed" not in r.text
-    assert ".mm-label" in r.text and "overflow-wrap:anywhere" in r.text
-    assert "body.nav-open { overflow:hidden; }" in r.text
-    assert ".title-edit { width:36px;height:36px;opacity:1; }" in r.text
-    assert ".seg .editbtn { min-width:36px;min-height:36px;opacity:1; }" in r.text
+    assert ".mm-label" in r_assets and "overflow-wrap:anywhere" in r_assets
+    assert "body.app.nav-open, body.app.dialog-open { overflow: hidden; }" in r_assets
+    assert ".title-edit { width:36px;height:36px;opacity:1; }" in r_assets
+    assert ".seg .editbtn { min-width:36px;min-height:36px;opacity:1; }" in r_assets
     # Desktop pencil keeps a 28px hit area; double-clicking segment text opens
     # the same editor because the hover pencil alone is hard to discover.
-    assert "min-width:28px;min-height:28px" in r.text
-    assert "document.addEventListener('dblclick'" in r.text
-    assert "max-height:calc(100dvh - 24px);overflow:hidden" in r.text
-    assert ".import-body { min-height:0;" in r.text and "overflow-y:auto" in r.text
-    assert ".ask-user-message" in r.text and ".saved-note-actions" in r.text
+    assert "min-width:28px;min-height:28px" in r_assets
+    assert "on(document, 'dblclick'" in WORKSPACE_JS
+    assert "max-height: calc(100dvh - 24px); overflow: hidden" in r_assets
+    assert ".import-body { min-height: 0;" in r_assets and "overflow-y:auto" in r_assets
+    assert ".ask-user-message" in r_assets and ".saved-note-actions" in r_assets
     assert ".sidebar{display:none}" not in r.text
     assert r.text.index('<aside class="sidebar"') < r.text.index('id="app-view"')
     sidebar_nav = r.text.split('<div class="sidebar-scroll">', 1)[1].split("</aside>", 1)[0]
     assert sidebar_nav.index('href="/search"') < sidebar_nav.index('href="/home"')
     assert sidebar_nav.index('href="/home"') < sidebar_nav.index(
-        'href="/?ask=true#library-ask"'
+        'href="/ask"'
     )
-    assert sidebar_nav.index('href="/?ask=true#library-ask"') < sidebar_nav.index(
+    assert sidebar_nav.index('href="/ask"') < sidebar_nav.index(
         'href="/templates"'
     )
-    assert 'aria-controls="workspace-sidebar" aria-expanded="false"' in r.text
-    assert 'class="nav-scrim" type="button" data-nav-close aria-label="Close menu" hidden' in r.text
-    assert "event.target.closest('a.navi[href]')" in r.text
-    assert "document.activeElement===last" in r.text
-    assert 'data-open-import="device" aria-label="Add audio"' in r.text
-    assert "event.target.closest('[data-open-import]')" in r.text
+    assert 'aria-controls="workspace-sidebar" aria-expanded="false"' in r_assets
+    assert 'class="nav-scrim" type="button" data-nav-close aria-label="Close menu" hidden' in r_assets
+    assert "event.target.closest('a.nav-item[href]" in r_assets
+    assert "document.activeElement===last" in r_assets
+    # The recording is a pushed screen on phones (no app top bar); Add audio stays in the shell.
+    assert 'data-import-mode="device"' in r_assets
+    assert "event.target.closest('[data-open-import]')" in r_assets
     assert "getElementById('add-audio-button')?.click()" not in r.text
-    assert 'id="recording-file-list" hx-preserve' in r.text
-    assert 'class="recording-crumb-link" href="/" hx-get="/" hx-target="#app-view"' in r.text
-    assert "link.setAttribute('hx-target','#app-view')" in r.text
-    assert "(?:api|audio|static|login|logout|oauth)" in r.text
-    assert "link.setAttribute('hx-boost','false')" in r.text
-    assert "sessionStorage.setItem(storageKey()" in r.text
-    assert "if(event.target===appView)cleanupController.abort()" in r.text
-    assert "const drainTranscript=()=>" in r.text
-    assert ".tabs::-webkit-scrollbar { display:none; }" in r.text
-    assert ".sidebar-scroll" in r.text
-    assert 'data-start' in r.text  # seekable segments
-    assert "meeting" in r.text.lower()  # summary tab
-    assert "Processing details" in r.text
-    assert ".recording-advanced:not([open]) { display:none; }" in r.text
-    assert "event.currentTarget.closest('details')?.removeAttribute('open')" in r.text
-    assert "details.open=true;details.scrollIntoView" in r.text
-    assert "#reprocess-msg:empty { display:none; }" in r.text
-    assert 'id="reprocess-msg" class="sub" aria-live="polite"' in r.text
-    assert 'class="pane recording-pane has-player"' in r.text
-    assert ".recording-pane.has-player .tabs { top:0; }" in r.text
-    assert ".tabs { position:sticky;top:0;" in r.text
-    assert "Provider word timestamps validated" in r.text
-    assert "42 timed words" in r.text
-    assert "Forced alignment was not used" in r.text
-    assert "AI-polished transcript" in r.text
-    assert "revision 2" in r.text
-    assert "107 segments / 3 chunks" in r.text
-    assert "prompt transcript-polish/v1" in r.text
-    assert "embedding model unavailable" in r.text
-    assert "Resume" in r.text and "Rebuild all" in r.text
-    assert "Execution profile" in r.text and "Current Settings" in r.text
-    assert "Find in transcript" in r.text and "Replace all" in r.text
-    assert 'id="persistent-player"' in r.text and 'id="waveform"' in r.text
+    assert 'id="recording-file-list" hx-preserve' in r_assets
+    assert 'class="recording-crumb-link" href="/" hx-get="/" hx-target="#app-view"' in r_assets
+    assert "link.setAttribute('hx-target','#app-view')" in r_assets
+    assert "(?:api|audio|static|login|logout|oauth)" in r_assets
+    assert "link.setAttribute('hx-boost','false')" in r_assets
+    assert "sessionStorage.setItem(storageKey()" in r_assets
+    assert "if(event.target===appView)cleanupController.abort()" in r_assets
+    assert "const drainTranscript=()=>" in r_assets
+    assert ".tabs::-webkit-scrollbar { display:none; }" in r_assets
+    assert ".sidebar-scroll" in r_assets
+    assert 'data-start' in c.get("/file/r1/transcript-page").text  # seekable segments
+    assert "meeting" in r_assets.lower()  # summary tab
+    assert "Processing details" in r_assets
+    assert ".recording-advanced:not([open]) { display:none; }" in r_assets
+    assert "event.currentTarget.closest('details')?.removeAttribute('open')" in r_assets
+    assert "details.open=true;details.scrollIntoView" in r_assets
+    assert "#reprocess-msg:empty { display:none; }" in r_assets
+    assert 'id="reprocess-msg" class="sub" aria-live="polite"' in r_assets
+    assert 'class="pane recording-pane has-player"' in r_assets
+    assert ".recording-pane.has-player .tabs { top:0; }" in r_assets
+    assert ".tabs { position:sticky;top:0;" in r_assets
+    assert "Provider word timestamps validated" in r_assets
+    assert "42 timed words" in r_assets
+    assert "Forced alignment was not used" in r_assets
+    assert "AI-polished transcript" in r_assets
+    assert "revision 2" in r_assets
+    assert "107 segments / 3 chunks" in r_assets
+    assert "prompt transcript-polish/v1" in r_assets
+    assert "embedding model unavailable" in r_assets
+    assert "Resume" in r_assets and "Rebuild all" in r_assets
+    assert "Execution profile" in r_assets and "Current Settings" in r_assets
+    assert "Find in transcript" in r_assets and "Replace all" in r_assets
+    assert 'id="persistent-player"' in r_assets and 'id="waveform"' in r_assets
     assert r.text.index('class="tabs" role="tablist"') < r.text.index('id="persistent-player"')
-    assert 'aria-label="Back 15 seconds" title="Back 15 seconds"' in r.text
-    assert 'aria-label="Forward 15 seconds" title="Forward 15 seconds"' in r.text
-    assert "player.currentTime-15" in r.text and "player.currentTime+15" in r.text
-    assert 'id="open-share" type="button" aria-label="Share" title="Share"' in r.text
-    assert 'id="open-export" type="button" aria-label="Export" title="Export"' in r.text
-    header = r.text.split('<div class="recording-actions">', 1)[1].split("</details>", 1)[0]
-    assert header.index('id="open-ask-dock"') < header.index('id="open-share"')
-    assert header.index('id="open-share"') < header.index('id="open-export"')
-    assert header.index('id="open-export"') < header.index('class="recording-more"')
-    assert 'class="tabs" role="tablist"' in r.text
-    assert 'id="recording-tab-transcript" role="tab"' in r.text
-    assert 'id="recording-panel-transcript" role="tabpanel"' in r.text
-    assert 'class="tabpanel ask-dock" id="recording-panel-ask"' in r.text
-    assert 'id="open-ask-dock" type="button" aria-controls="recording-panel-ask"' in r.text
-    assert "localplaud:recording-ask-dock" in r.text
-    assert "window.matchMedia('(min-width:1200px)')" in r.text
-    assert ".recording-workspace-layout.ask-dock-open { grid-template-columns:minmax(0,1fr) minmax(280px,360px); }" in r.text
-    assert "if(dockRequest)setAskDock(true)" in r.text
-    assert "params.get('tab')||'notes'" in r.text
+    assert 'aria-label="Back 15 seconds" title="Back 15 seconds"' in r_assets
+    assert 'aria-label="Forward 15 seconds" title="Forward 15 seconds"' in r_assets
+    assert "skip(-15)" in WORKSPACE_JS and "skip(15)" in WORKSPACE_JS
+    assert 'id="open-share" type="button" data-recording-share aria-label="Share" title="Share"' in r_assets
+    # Share opens the one share sheet (link, copy, exports): no separate Export.
+    assert 'id="open-export"' not in r.text
+    # Plaud Web order: Share · Find · More · | · Ask.
+    header = r.text.split('<div class="recording-actions">', 1)[1].split("</header>", 1)[0]
+    assert header.index('id="open-share"') < header.index('id="open-find"')
+    assert header.index('id="open-find"') < header.index('class="recording-more"')
+    assert header.index('class="recording-more"') < header.index('id="open-ask-dock"')
+    assert 'class="tabs" role="tablist"' in r_assets
+    assert 'id="recording-tab-transcript" role="tab"' in r_assets
+    assert 'id="recording-panel-transcript" role="tabpanel"' in r_assets
+    assert 'class="tabpanel ask-dock" id="recording-panel-ask"' in r_assets
+    assert 'id="open-ask-dock" type="button" aria-controls="recording-panel-ask"' in r_assets
+    assert "localplaud:recording-ask-dock" in r_assets
+    assert "window.matchMedia('(min-width:1200px)')" in r_assets
+    assert ".recording-workspace-layout.ask-dock-open { grid-template-columns:minmax(0,1fr) minmax(280px,360px); }" in r_assets
+    assert "if(dockRequest)setAskDock(true)" in r_assets
+    assert "params.get('tab')||'notes'" in r_assets
     assert "get('tab')||'transcript'" not in r.text
-    assert "item.setAttribute('aria-selected',String(active))" in r.text
-    assert "item.tabIndex=active?0:-1" in r.text
-    assert "function openDialog(backdrop,opener)" in r.text
-    assert "recordingShell.inert=true" in r.text
-    assert "dialogChromeRegions.forEach(region=>{region.inert=true;})" in r.text
-    assert "event.key==='Escape'" in r.text
-    assert "event.key!=='Tab'" in r.text
-    assert "dialogOpener?.focus()" in r.text
-    assert "body.dialog-open { overflow:hidden; }" in r.text
-    assert 'data-close-popover aria-label="Close"' in r.text
-    assert "const workspacePopovers=" in r.text
-    assert "closeWorkspacePopover(open)" in r.text
-    assert ".md table { display:block;max-width:100%;overflow-x:auto; }" in r.text
+    assert "item.setAttribute('aria-selected',String(active))" in r_assets
+    assert "item.tabIndex=active?0:-1" in r_assets
+    assert "function openDialog(backdrop,opener)" in r_assets
+    assert "recordingShell.inert=true" in r_assets
+    assert "dialogChromeRegions.forEach(region=>{region.inert=true;})" in r_assets
+    assert "event.key==='Escape'" in r_assets
+    assert "event.key!=='Tab'" in r_assets
+    assert "dialogOpener?.focus()" in r_assets
+    assert "body.dialog-open { overflow: hidden; }" in r_assets
+    assert 'data-close-popover aria-label="Close"' in r_assets
+    assert "const workspacePopovers=" in r_assets
+    assert "closeWorkspacePopover(open)" in r_assets
+    assert ".md table { display: block; width: 100%; max-width: 100%; margin: .8em 0; border-collapse: collapse; font-size: 13px; overflow-x: auto; }" in r_assets
     # Mirrored note images must never exceed the note column or the viewport.
-    assert ".md img { display:block;max-width:min(100%,560px);height:auto;" in r.text
+    assert ".md img { display: block; max-width: min(100%, 560px); height: auto;" in r_assets
     # Cells must opt out of the .md overflow-wrap:anywhere default: anywhere
     # collapses every column's min-content width to one character on narrow
     # viewports, so wide tables squeeze into vertical letter stacks instead of
     # engaging the horizontal table scroll asserted above.
-    assert "vertical-align:top;overflow-wrap:break-word; }" in r.text
+    assert "vertical-align: top; overflow-wrap: break-word; }" in r_assets
     # The clock shows the recording's stored duration before the browser has
     # loaded audio metadata; playback sync falls back to the same value.
-    assert ">0:00 / 10:00</span>" in r.text
-    assert "const knownDuration=600.0;" in r.text
-    assert "d=player.duration||knownDuration" in r.text
+    assert ">0:00 / 10:00</span>" in r_assets
+    assert '"durationSeconds": 600.0' in r_assets
+    assert "const knownDuration = Number(cfg.durationSeconds || 0);" in WORKSPACE_JS
+    assert "player.duration > 0 ? player.duration : knownDuration" in WORKSPACE_JS
     # Speaker labels clamp to one visual line; the full name stays in the
     # legend, hover title, and exports.
     assert (
         ".seg .who .who-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }"
-        in r.text
+        in r_assets
     )
-    assert ".speaker-pill>summary{max-width:min(200px,58vw)}" in r.text
-    assert "availableHeight=Math.max(1,viewport.clientHeight-30)" in r.text
-    assert "availableHeight/natural.height*100" in r.text
-    assert "zoom:var(--mm-scale)" in r.text
-    assert 'id="subscription-independence"' in r.text
-    assert "Subscription independence" in r.text
-    assert 'data-summary-edit=' in r.text
-    assert 'id="open-share"' in r.text and 'id="share-backdrop" hidden' in r.text
-    assert 'id="generate-notes"' in r.text
+    assert ".speaker-pill>summary{max-width:min(200px,58vw)}" in r_assets
+    assert "((viewport.clientHeight - 24) / natural.height) * 100" in WORKSPACE_JS
+    assert "zoom:var(--mm-scale)" in r_assets
+    assert 'id="subscription-independence"' in r_assets
+    assert "Subscription independence" in r_assets
+    assert 'data-summary-edit=' in r_assets
+    assert 'id="open-share"' in r_assets and 'id="share-backdrop" data-file-id="r1" hidden' in r_assets
+    assert 'id="generate-notes"' in r_assets
     assert "Choose a template, then generate notes and mind map." not in r.text
     assert 'id="generate-backdrop"' not in r.text  # transcript exists — no pre-generation dialog
-    assert '<details class="speaker-pill">' in r.text
-    assert '<form class="speaker-editor" method="post" action="/file/r1/speakers">' in r.text
-    assert '<h1 id="recording-title-display" title="Weekly Sync">Weekly Sync</h1>' in r.text
-    assert 'id="recording-title-display"' in r.text and 'id="edit-recording-title"' in r.text
-    assert "Transcript polished." in r.text and "View raw transcript" in r.text
+    assert '<details class="speaker-pill">' in r_assets
+    assert '<form class="speaker-editor" method="post" action="/file/r1/speakers">' in r_assets
+    assert '<h1 id="recording-title-display" title="Weekly Sync">Weekly Sync</h1>' in r_assets
+    assert 'id="recording-title-display"' in r_assets and 'id="edit-recording-title"' in r_assets
+    assert "Transcript polished." in r_assets and "View raw transcript" in r_assets
     assert '<p class="seg-text">' in c.get("/file/r1/transcript-page").text
     raw = c.get("/file/r1?view=raw")
     assert "Viewing the raw transcript." in raw.text and "Back to polished view" in raw.text
@@ -1016,7 +1044,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     )
     assert '<div class="fl-title">Search results</div>' in searched.text
     assert '<input class="fl-search" name="q" value="Weekly"' in searched.text
-    assert 'data-panel="notes" class="on"' in searched.text
+    assert re.search(r'data-panel="notes" data-note-target="sum-\d+" class="note-tab on"', searched.text)
     assert 'data-panel="notes" >' in searched.text
     notes_workspace = c.get("/file/r1?tab=notes")
     assert '/file/r1?return_to=%2F&amp;tab=notes' in notes_workspace.text
@@ -1118,7 +1146,7 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         "失敗",
         "逐字稿",
         "在逐字稿中尋找",
-        "匯出錄音",
+        "分享",
         "時間戳記",
         "訂閱獨立性",
             "處理已暫停",
@@ -1369,7 +1397,8 @@ def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_pat
     assert "Object.assign(window,{editVocabulary" in r.text
     templates = c.get("/templates")
     assert templates.status_code == 200
-    assert "<script>\n(()=>{\nconst tr=window.localplaudT" in templates.text
+    assert 'data-surface="templates"' in templates.text
+    assert 'id="sf-template-data"' in templates.text
     status = c.get("/api/plaud/auth/status").json()
     assert status == {
         "ok": False,
@@ -1395,14 +1424,15 @@ def test_export_menu_and_format_endpoints(monkeypatch, tmp_path):
     audio.write_bytes(b"audio")
     _seed(str(audio))
     page = c.get("/file/r1")
-    assert "Export recording" in page.text
+    assert 'data-share-panel="menu"' in page.text
+    assert 'id="export-backdrop"' not in page.text
     assert "Speaker labels" in page.text and "Original audio" in page.text
     assert 'id="copy-transcript"' in page.text and 'id="copy-notes"' in page.text
     assert "navigator.clipboard.writeText(text)" in page.text
     assert "document.execCommand('copy')" in page.text
     assert "priorFocus?.focus()" in page.text
-    assert "export/transcript.txt?timestamps=${timestamps}&speakers=${speakers}" in page.text
-    assert "fetch('/file/r1/export/notes.md',{signal:cleanupController.signal})" in page.text
+    assert "export/transcript.txt?timestamps=true&amp;speakers=true" in page.text
+    assert 'href="/file/r1/export/notes.md"' in page.text
     assert 'data-fmt="docx"' in page.text and 'data-fmt="pdf"' in page.text
     txt = c.get("/file/r1/export/transcript.txt?timestamps=false&speakers=false")
     assert txt.status_code == 200 and "hello team" in txt.text
@@ -1527,9 +1557,10 @@ def test_saved_note_only_recording_can_open_export_and_copy_notes(monkeypatch, t
 
     page = c.get("/file/notes-only")
     assert page.status_code == 200
-    assert 'id="open-export"' in page.text
+    assert 'data-recording-share' in page.text
+    assert 'data-share-view="notes"' in page.text
     assert 'id="copy-notes"' in page.text
-    assert 'id="copy-transcript"' not in page.text
+    assert re.search(r'<button[^>]+id="copy-transcript"[^>]+disabled', page.text)
     assert 'href="/file/notes-only/export.md"' in page.text
     exported = c.get("/file/notes-only/export/notes.md")
     assert exported.status_code == 200 and "Local content" in exported.text
@@ -1766,23 +1797,23 @@ def test_home_modules_use_shell_language_and_direct_routes(monkeypatch, tmp_path
     r = c.get("/home")
     assert r.status_code == 200
     # Ops vocabulary and the aggregate filter route replace the old tile.
-    assert ">Generating</div>" in r.text
-    assert 'href="/?state=generating"' in r.text
-    assert "Processing now" not in r.text and "Durable local stages" not in r.text
+    assert '<span class="home-card-title">Generating</span>' in r.text
+    assert 'class="home-card" href="/?state=generating"' in r.text
     # Title-first rows with one muted meta line and direct recording routes.
-    assert 'class="home-row" href="/file/h-gen"' in r.text
-    assert f'<strong class="home-row-title">{long_title}</strong>' in r.text
-    assert ".home-row-title { font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }" in r.text
+    assert 'class="row-title" href="/file/h-gen"' in r.text
+    assert f'title="{long_title}">{long_title}</a>' in r.text
+    page = with_assets(c, r)
+    assert ".file-row .row-title { min-width: 0; color: var(--c-text); font-size: 14px; line-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }" in page
     # Friendly status chips: quiet done rows, Generating… while working.
-    row_gen = r.text.split('href="/file/h-gen"', 1)[1].split("</a>", 1)[0]
-    assert "Generating…" in row_gen
-    row_done = r.text.split('href="/file/r1"', 1)[1].split("</a>", 1)[0]
-    assert '<span class="st' not in row_done
+    row_gen = r.text.split('data-file-id="h-gen"', 1)[1].split("</li>", 1)[0]
+    assert '<span class="state state-processing">Generating…</span>' in row_gen
+    row_done = r.text.split('data-file-id="r1"', 1)[1].split("</li>", 1)[0]
+    assert 'class="state' not in row_done
     # Needs attention: translated heading, aggregate route, friendly chip.
     assert "Needs attention" in r.text
-    assert 'href="/?state=attention"' in r.text and "View all →" in r.text
-    row_err = r.text.split('href="/file/h-err"', 1)[1].split("</a>", 1)[0]
-    assert '<span class="st error">' in row_err
+    assert 'class="home-card" href="/?state=attention"' in r.text
+    row_err = r.text.split('data-file-id="h-err"', 1)[1].split("</li>", 1)[0]
+    assert '<span class="state state-attention">Needs attention</span>' in row_err
 
 
 def test_search_results_are_title_first_with_quiet_kind_labels(monkeypatch, tmp_path):
@@ -1805,8 +1836,10 @@ def test_search_results_are_title_first_with_quiet_kind_labels(monkeypatch, tmp_
     # search styling with a stable two-line clamp, full text on title=.
     assert '<strong class="search-group-title">Weekly Sync</strong>' in r.text
     assert 'title="Weekly Sync"' in r.text
-    assert "-webkit-line-clamp:2" in r.text
-    assert "@media (max-width:700px){ .search-hit-text { display:-webkit-box;-webkit-line-clamp:3" in r.text
+    surfaces_css = c.get("/static/css/surfaces.css").text
+    assert ".sf-search-page .search-group-title { display:-webkit-box;-webkit-line-clamp:2" in surfaces_css
+    assert ".sf-search-page .search-hit-text { display:-webkit-box;-webkit-line-clamp:3" in surfaces_css
+    assert "<style>" not in r.text.split('data-surface="search"', 1)[1]
     head = r.text.split('class="search-group-head"', 1)[1].split("</a>", 1)[0]
     assert "10:00 ·" in head and "跨部門產品營運與客戶成功長期追蹤資料夾" in head
     # Transcript match: the playable timestamp is the label — no jargon chips.
@@ -1829,7 +1862,7 @@ def test_search_results_are_title_first_with_quiet_kind_labels(monkeypatch, tmp_
     empty = c.get("/search")
     assert "Search your whole library" in empty.text
     for href, label in (("/", "All files"), ("/notes", "Saved notes"),
-                        ("/?ask=true#library-ask", "Ask the library")):
+                        ("/ask", "Ask the library")):
         assert f'href="{href}"' in empty.text and label in empty.text
     missing = c.get("/search?q=zzznotfoundzzz")
     assert "No matches for" in missing.text and "Ask the library" in missing.text
@@ -1873,3 +1906,192 @@ def test_acoustic_revision_notice_describes_shown_history_and_preserves_tab(monk
     current = c.get('/file/history?tab=transcript')
     assert 'Transcript rechecked against audio.' in current.text
     assert '?view=raw&amp;tab=transcript&amp;return_to=' in current.text
+
+
+def test_recording_reading_and_share_entrypoints(monkeypatch, tmp_path):
+    """Local-only notes open for reading; public sharing is explicit, never automatic."""
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    page = client.get("/file/r1")
+    assert page.status_code == 200
+    html = page.text
+    assert re.search(r'<h2 class="recording-reading-title"[^>]*>Weekly Sync</h2>', html)
+    assert 'class="recording-reading-title" title="Weekly Sync"' in html
+    disclosure = re.search(r'<details[^>]+id="note-generation-settings"[^>]*>', html)
+    assert disclosure and 'open' not in disclosure.group()
+    assert 'id="menu-edit-title"' in html
+    assert 'id="menu-find-transcript"' in html
+    share = html.split('id="share-backdrop"', 1)[1].split('{% endblock', 1)[0]
+    assert share.index('id="public-share-title"') < share.index('class="workspace-share"')
+    assert 'id="create-public-share"' in share
+    assert 'data-share-view="transcript"' in share
+    assert 'data-share-view="notes"' in share
+    assert 'id="export-backdrop"' not in html
+    assert client.get('/api/files/r1/share-link').json()['active'] is False
+    assert 'src="/static/recording-share.js?v=3"' in html
+    assert "url.searchParams.set('tab',requested)" in html
+    assert "if(requested==='transcript')url.searchParams.delete('tab')" not in html
+
+
+def test_empty_recording_exposes_note_generation_settings(monkeypatch, tmp_path):
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+
+    client = _client(monkeypatch, tmp_path)
+    with session_scope() as session:
+        session.add(PlaudFile(id='empty-reader', filename='Empty recording', origin='upload'))
+    html = client.get('/file/empty-reader').text
+    disclosure = re.search(r'<details[^>]+id="note-generation-settings"[^>]*>', html)
+    assert disclosure and 'open' in disclosure.group()
+    assert 'A local transcript is required first.' in html
+
+
+def test_share_sheet_is_available_in_progressive_workspace(monkeypatch, tmp_path):
+    """Library navigation receives the complete share UI and its independent initializer."""
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    page = client.get('/file/r1?workspace=true', headers={'HX-Request': 'true'})
+    assert page.status_code == 200
+    assert 'data-recording-share' in page.text
+    assert 'id="share-backdrop" data-file-id="r1" hidden' in page.text
+    assert 'data-share-panel="menu"' in page.text
+    assert 'data-share-panel="link"' in page.text
+    assert 'data-share-panel="transcript"' in page.text
+    assert 'data-share-panel="notes"' in page.text
+    assert 'id="export-backdrop"' not in page.text
+    assert '/static/recording-share.js?v=3' in page.text
+    # HTMX retains the outer shell: its old CSS must not size the new sheet.
+    assert '<link rel="stylesheet" href="/static/recording-share.css?v=2">' in page.text
+    stylesheet = client.get('/static/recording-share.css?v=2')
+    assert stylesheet.status_code == 200
+    assert stylesheet.headers['content-type'].startswith('text/css')
+    # Fanboy Social's generic ##.share-body rule hides essential app controls.
+    # Keep our dialog body out of that generic social-widget namespace.
+    assert 'class="import-body lp-recording-actions-body"' in page.text
+    assert not re.search(r'class="[^"]*(?<![\w-])share-body(?![\w-])', page.text)
+    assert '.lp-recording-actions-body' in stylesheet.text
+    assert client.get('/static/recording-share.js?v=3').status_code == 200
+    assert client.get('/api/files/r1/share-link').json()['active'] is False
+
+
+def test_share_note_clipboard_payload_is_local_and_script_safe(monkeypatch, tmp_path):
+    from localplaud.db.models import PlaudFile, UserNote
+    from localplaud.db.session import session_scope
+
+    client = _client(monkeypatch, tmp_path)
+    content = '</script><script>alert("note")</script>\n\nLocal manual note'
+    with session_scope() as session:
+        session.add(PlaudFile(id='clipboard-note', filename='Notes', origin='upload'))
+        session.add(UserNote(file_id='clipboard-note', title='My note', content_md=content, source_type='manual'))
+    html = client.get('/file/clipboard-note').text
+    payload = re.search(r'<script type="application/json" data-copy-note-text="saved-\d+">(.*?)</script>', html, re.S)
+    assert payload is not None
+    assert '</script>' not in payload.group(1)
+    assert json.loads(payload.group(1)) == content
+    assert re.search(r'<button[^>]+id="copy-transcript"[^>]+disabled', html)
+    assert 'data-share-view="copy-notes"' in html
+
+
+def test_cloud_note_uses_imported_tab_name_and_explains_unavailable_card(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile, Summary
+    from localplaud.db.session import session_scope
+    with session_scope() as session:
+        session.add(PlaudFile(id="cloud-card", filename="Recording", origin="plaud", error="Local stage paused"))
+        session.add(Summary(file_id="cloud-card", template="auto_sum_note", source="cloud",
+                            template_snapshot={"name": "Project review", "source": "plaud"},
+                            content_md="[](plaud://image?type=summaryCard&id=synthetic)\n\n## Topic\n\nOriginal ending"))
+        session.add(PlaudFile(id="cloud-empty", filename="Empty", origin="plaud"))
+        session.add(PlaudFile(id="cloud-expired", filename="Expired image", origin="plaud"))
+        session.add(Summary(file_id="cloud-expired", template="auto_sum_note", source="cloud",
+                            template_snapshot={"name": "Summary", "unavailable_images": 1},
+                            content_md="Original text with unavailable image"))
+    expired = c.get("/file/cloud-expired?tab=notes")
+    assert 'class="sub cloud-image-notice"' in expired.text
+    assert 'Original text with unavailable image' in expired.text
+    page = c.get("/file/cloud-card?tab=notes")
+    assert "Project review" in page.text
+    recovery = re.search(r'<details class="recording-recovery"([^>]*)>', page.text)
+    assert recovery and "open" not in recovery.group(1)
+    assert "Auto_Sum_Note" not in page.text
+    assert 'class="sub cloud-image-notice"' in page.text
+    assert "<h2>Topic</h2>" in page.text
+    assert "<p>Original ending</p>" in page.text
+    empty = c.get("/file/cloud-empty?tab=notes")
+    assert "Import Plaud notes" in empty.text
+    assert 'data-cloud-import-status role="status"' in empty.text
+
+
+def _seed_tags(count: int):
+    from localplaud.db.models import FileStatus, PlaudFile, Tag
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="tagged", filename="Tagged file", status=FileStatus.done))
+        s.flush()
+        rec = s.get(PlaudFile, "tagged")
+        tags = [Tag(name=f"Topic {i:03d}") for i in range(count)]
+        s.add_all(tags)
+        s.flush()
+        rec.tags = tags[-3:]
+        return [t.id for t in tags]
+
+
+def test_sidebar_tags_group_is_bounded_and_lazy(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    ids = _seed_tags(40)
+    html = c.get("/home").text
+    group = html.split('id="sidebar-tags"', 1)[1].split("</nav>", 1)[0]
+    # Most used first, bounded, with a lazy route to the rest.
+    assert group.count('href="/?tag=') == 8
+    assert f'href="/?tag={ids[-1]}"' in group
+    assert 'hx-get="/ui/sidebar-tags"' in group
+    assert "(40)" in group
+    assert "Topic 020" not in html
+
+    fragment = c.get("/ui/sidebar-tags").text
+    assert fragment.count('href="/?tag=') == 40
+    assert "data-sidebar-tag-filter" in fragment
+
+
+def test_sidebar_tags_marks_active_tag_even_outside_top_set(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    ids = _seed_tags(20)
+    rare = ids[10]  # unused and alphabetically outside the top eight
+    html = c.get(f"/?tag={rare}").text
+    group = html.split('id="sidebar-tags"', 1)[1].split("</nav>", 1)[0]
+    assert "data-transient-tag" in group
+    assert re.search(rf'class="nav-item on" href="/\?tag={rare}"', group)
+    assert 'data-active-tag-name="Topic 010"' in html
+    # "All files" is not active while a tag filter is applied.
+    assert not re.search(r'class="nav-item on" href="/"', html)
+
+
+def test_sidebar_hides_tags_group_without_tags(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    assert 'id="sidebar-tags"' not in c.get("/home").text
+
+
+def test_home_lists_five_recent_files(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        for i in range(8):
+            s.add(PlaudFile(id=f"h{i}", filename=f"Home file {i}", status=FileStatus.done,
+                            start_time_ms=1_700_000_000_000 + i))
+    html = c.get("/home").text
+    recent = html.split('id="home-recent-title"', 1)[1].split("</section>", 1)[0]
+    assert sorted(set(re.findall(r"Home file (\d)", recent))) == ["3", "4", "5", "6", "7"]
+
+
+def test_library_checkbox_gutter_reveals_on_hover_focus_selection_and_touch():
+    css = (Path(__file__).parents[1] / "src/localplaud/api/static/css/app.css").read_text()
+    assert ".file-table-head .head-check { position: absolute; left: 12px; opacity: 0;" in css
+    assert ".is-selecting .file-table-head .head-check, .file-table-head .head-check:focus-visible" in css
+    assert ".file-row:focus-within .row-check" in css
+    touch = css.index("@media (hover: none) { .file-row .row-check, .file-table-head .head-check")
+    # The touch override must come after the hidden-by-default row rule to win.
+    assert touch > css.index(".file-row .row-check { position: absolute;")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -71,6 +72,18 @@ def resolve_profile(
             provenance.append(
                 dict(layer.get("provenance") or {"kind": "partial", "key": layer["key"]})
             )
+
+    floors = merged["policy"].get("quality_floor") or {}
+    if not isinstance(floors, Mapping):
+        raise ResolutionError("quality_floor must be a stage-to-score object")
+    for name, floor in floors.items():
+        try:
+            ProviderStage(name)
+        except ValueError as exc:
+            raise ResolutionError(f"unknown quality-floor stage: {name}") from exc
+        if (isinstance(floor, bool) or not isinstance(floor, int | float)
+                or not math.isfinite(floor) or not 0 <= floor <= 1):
+            raise ResolutionError(f"quality floor for {name} must be between 0 and 1")
 
     no_egress = bool(merged["policy"].get("no_egress"))
 
@@ -151,6 +164,23 @@ def resolve_profile(
                 raise ResolutionError(f"duplicate fallback for {stage_name}: {key[0]}/{key[1]}")
             seen.add(key)
             validate_selection(stage, candidate, f"{stage_name} fallback {index + 1}")
+            raw = capabilities[(str(key[0]), str(key[1]))]
+            capability = raw if isinstance(raw, Capability) else Capability.model_validate(raw)
+            quality = capability.for_stage(stage).quality
+            floor = floors.get(stage_name)
+            if floor is None:
+                continue
+            candidate["quality_resolution"] = {
+                "stage": stage_name, "quality": quality, "floor": floor,
+                "accepted": floor is None or (quality is not None and quality >= floor),
+            }
+            if not candidate["quality_resolution"]["accepted"]:
+                reason = (
+                    f"{stage_name} fallback {index + 1} rejected: quality "
+                    f"{quality if quality is not None else 'unknown'} below configured floor {floor}"
+                )
+                candidate["quality_resolution"]["reason"] = reason
+
 
     merged["schema"] = "localplaud-resolved-profile/v2"
     merged["layers"] = applied

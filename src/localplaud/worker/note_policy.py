@@ -11,6 +11,9 @@ Preserve concrete details: context, reasons, alternatives, constraints, examples
 numbers with their units, unresolved questions, and next steps. Distinguish a
 suggestion from an agreed decision, and a planned action from a completed action.
 Never invent participant roles, identities, dates, deadlines, owners, or consensus.
+When attributing speech, decisions or ownership, preserve the exact Speaker N label
+from the source. These labels identify stable voices, not inferred personal names.
+Do not translate, renumber or replace them with guessed names or generic roles.
 Keep relative dates as spoken unless the evidence itself gives an absolute date.
 Mark consequential ambiguities briefly instead of guessing. Repeated ASR fragments,
 subtitle credits and incoherent text are not facts or playful conversation; if the

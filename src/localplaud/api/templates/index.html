@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_library.html" import file_row, file_table_head with context %}
 
 {%- macro liburl(sort='__keep__', dir='__keep__', state='__keep__', scene='__keep__', view='__keep__', folder='__keep__', tag='__keep__', origin='__keep__', ranges=true) -%}
 {%- set sort_value = lib.sort if sort == '__keep__' else sort -%}
@@ -30,205 +31,19 @@
   </a>
 {%- endmacro -%}
 
+{% block mobile_topbar %}{% if active == 'ask' %}{{ super() }}{% else %}
+{% include "_m_root_topbar.html" %}
+{% endif %}{% endblock %}
+
 {% block body %}
+{% if active == 'ask' %}
 <style>
-  .libbar { display:flex; flex-direction:column; gap:10px; margin:14px 0 12px; }
-  .filtrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .filtrow .lbl { font-size:11px; font-weight:700; letter-spacing:0; text-transform:uppercase; color:var(--faint); margin-right:2px; }
-  .fchip { font-size:11.5px; font-weight:600; border-radius:5px; padding:3px 10px; border:1px solid var(--border2);
-           max-width:100%;overflow:hidden;text-overflow:ellipsis;color:var(--muted); background:var(--panel); cursor:pointer; white-space:nowrap; }
-  .fchip:hover { border-color:var(--blue-br); }
-  .fchip.on { color:var(--blue); border-color:var(--blue-br); background:var(--blue-soft); }
-  .fchip.trash.on { color:var(--red); border-color:var(--red); background:var(--red-soft); }
-  .fchip .n { color:var(--faint); font-weight:600; }
-  /* Typed auto-tags: a small colour dot marks topic/person/org at a glance. */
-  .tag-chip[style*="--tag-color"]::before { content:""; display:inline-block; width:6px; height:6px;
-           border-radius:50%; margin-right:5px; vertical-align:middle; background:var(--tag-color); }
-  .tag-group { align-items:baseline; }
-  .tag-group .lbl.sub { font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--faint); }
-
-  .rectable { width:100%; border-collapse:collapse; margin-top:4px; }
-  .rectable thead th { text-align:left; padding:6px 10px; border-bottom:1px solid var(--border);
-    font-size:11px; font-weight:500; letter-spacing:0; color:var(--faint); white-space:nowrap; }
-  .rectable thead th.num { text-align:right; }
-  .sorth { display:inline-flex; align-items:center; gap:4px; color:var(--faint); }
-  .sorth.on { color:var(--fg); }
-  .sorth:hover { color:var(--blue); }
-  .sorth .arr { font-size:9px; }
-  .rectable tbody td { padding:12px 10px; border-bottom:1px solid #F4F4F5; vertical-align:middle; }
-  .rectable tbody tr:hover { background:var(--panel2); }
-  .rectable tbody tr.attn td { box-shadow:none; }
-  .rectable .nm { font-weight:500; letter-spacing:0; color:var(--fg); display:block;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:340px; }
-  .rectable .src, .rectable .num { color:var(--muted); font-size:12.5px; white-space:nowrap; }
-  .rectable .num { text-align:right; font-variant-numeric:tabular-nums; }
-  .file-subline { display:flex;align-items:center;gap:5px;margin-top:3px;color:var(--faint);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
-  .file-subline .nav-icon { width:12px;height:12px; }
-  .attn-dot { display:inline-block;width:6px;height:6px;margin-left:7px;border-radius:50%;background:var(--warn);vertical-align:middle; }
-  .select-cell { width:0!important;padding:0!important;text-align:center!important;position:relative;overflow:visible; }
-  .select-cell input { position:absolute;left:-24px;top:50%;width:15px;height:15px;margin:0;transform:translateY(-50%);accent-color:var(--blue);cursor:pointer;opacity:0;transition:opacity .12s; }
-  .rectable:hover thead .select-cell input,.rectable tbody tr:hover .select-cell input,.select-cell input:checked,.select-cell input:focus-visible { opacity:1; }
-  .name-cell { padding-left:0!important; }
-  .row-menu-cell { width:42px;text-align:right;position:relative; }
-  .row-menu { position:relative;display:inline-block; }
-  .row-menu>summary { list-style:none;width:28px;height:28px;display:grid;place-items:center;border-radius:5px;color:var(--muted);cursor:pointer; }
-  .row-menu>summary::-webkit-details-marker { display:none; }
-  .row-menu>summary:hover,.row-menu[open]>summary { background:var(--panel2);color:var(--fg); }
-  .row-menu-popover { position:absolute;right:0;top:32px;z-index:15;width:160px;padding:5px;border:1px solid var(--border2);border-radius:7px;background:var(--panel);box-shadow:var(--shadow);text-align:left; }
-  .row-menu-popover a { display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:5px;font-size:12px;font-weight:600; }
-  .row-menu-popover a:hover { background:var(--panel2); }
-  .orgline { display:flex; gap:5px; flex-wrap:wrap; margin-top:5px; }
-  .orgpill { display:inline-flex; align-items:center; gap:4px; max-width:150px; padding:1px 6px; border-radius:5px;
-    border:1px solid var(--border2); color:var(--muted); font-size:10.5px; font-weight:600; }
-  .orgpill.folder::before { content:'▰'; color:var(--c,var(--blue)); }
-  .orgpill.tag::before { content:'•'; color:var(--c,var(--purple)); font-size:16px; line-height:8px; }
-  .orgbox { margin:14px 0 4px; padding:12px 13px; border:1px solid var(--border); border-radius:var(--radius); background:var(--panel2); }
-  .orgrow { display:flex; min-width:0;gap:7px; align-items:center; flex-wrap:wrap; margin-top:8px; }
-  .orgrow:first-child { margin-top:0; }
-  .orgrow .lbl { width:52px; flex:none; }
-  .tag-filter-select { display:flex;align-items:center;gap:7px;margin-top:8px; }
-  .tag-filter-select .lbl { width:52px;flex:none; }
-  .tag-filter-select select { width:min(340px,calc(100% - 59px)); }
-  .org-manage { display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:6px 8px;border:0;border-radius:5px;background:transparent;color:var(--blue);font-size:11.5px;font-weight:650;cursor:pointer; }
-  .org-manage:hover { background:var(--panel); }
-  .org-manage .nav-icon { width:14px;height:14px; }
-  .organization-manager-modal { width:min(640px,100%);min-height:0;max-height:min(760px,calc(100dvh - 40px)); }
-  .organization-manager-body { gap:17px;overflow-y:auto; }
-  .organization-manager-section { min-width:0; }
-  .organization-manager-section h3 { margin:0 0 5px;font-size:14px; }
-  .organization-manager-create { display:flex;gap:7px;align-items:center;margin:7px 0 10px;min-width:0; }
-  .organization-manager-create label { flex:1;min-width:0; }
-  .organization-manager-create input { width:100%; }
-  .organization-manager-create .btn { display:inline-flex;align-items:center;gap:6px;flex:none; }
-  .organization-manager-create .nav-icon { width:14px;height:14px; }
-  .organization-manager-list { border-top:1px solid var(--border); }
-  .organization-manager-row { min-width:0;padding:10px 0;border-bottom:1px solid var(--border); }
-  .organization-manager-view { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center; }
-  .organization-manager-name { min-width:0;overflow-wrap:anywhere;font-size:12.5px;font-weight:600; }
-  .organization-manager-count { display:block;margin-top:2px;color:var(--faint);font-size:10.5px;font-weight:400; }
-  .organization-manager-actions { display:flex;gap:3px; }
-  .organization-manager-action { width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer; }
-  .organization-manager-action:hover { background:var(--panel2);color:var(--fg); }
-  .organization-manager-action.delete { color:var(--red); }
-  .organization-manager-action .nav-icon { width:14px;height:14px; }
-  .organization-manager-edit { display:flex;gap:7px;align-items:center;min-width:0; }
-  .organization-manager-edit input { min-width:0;flex:1; }
-  .organization-manager-confirm { display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:9px;border-radius:6px;background:var(--red-soft);font-size:11.5px; }
-  .organization-manager-confirm span { min-width:0;flex:1 1 240px;overflow-wrap:anywhere; }
-  /* Cancel/Delete stay one visual group: they wrap as a pair, never apart. */
-  .organization-manager-confirm-actions { display:flex;gap:7px;flex:0 0 auto;margin-left:auto; }
-  .organization-manager-status { position:sticky;bottom:0;min-height:18px;padding-top:7px;background:var(--panel);overflow-wrap:anywhere; }
-  .quickadd { margin-left:auto; position:relative; }
-  .quickadd summary { list-style:none; cursor:pointer; color:var(--blue); font-size:11.5px; font-weight:650; }
-  .quickadd summary::-webkit-details-marker { display:none; }
-  .quickadd form { position:absolute; right:0; top:24px; z-index:5; display:flex; gap:6px; width:260px; padding:9px;
-    border:1px solid var(--border2); border-radius:8px; background:var(--panel); box-shadow:var(--shadow); }
-  .quickadd input { min-width:0; flex:1; border:1px solid var(--border2); border-radius:7px; padding:7px 9px;
-    background:var(--panel); color:var(--fg); }
-  .quickadd button { padding:7px 10px; border:0; border-radius:7px; background:var(--blue); color:white; font-weight:650; cursor:pointer; }
-  .bulkbar { position:sticky; top:-1px; z-index:4; display:none; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; margin:12px 0 8px;
-    padding:9px 11px; border:1px solid var(--blue-br); border-radius:8px; background:var(--blue-soft); box-shadow:var(--shadow); }
-  .bulkbar.on { display:flex; }
-  .bulkbar strong { color:var(--blue); margin-right:auto; }
-  .bulkbar select { max-width:180px; border:1px solid var(--border2); border-radius:7px; padding:7px 9px;
-    background:var(--panel); color:var(--fg); }
-  .bulkbar button { border:0; border-radius:7px; padding:7px 11px; background:var(--blue); color:#fff; font-weight:650; cursor:pointer; }
-  .bulkbar .bulk-export { display:inline-flex;align-items:center;gap:6px;background:var(--panel);color:var(--blue);border:1px solid var(--blue-br); }
-  .bulkbar .bulk-export .nav-icon { width:14px;height:14px; }
-  .bulkbar .bulk-separator { width:1px;height:24px;background:var(--border2); }
-  .bulkbar .bulk-delete-processing { display:inline-flex;align-items:center;gap:6px;background:var(--panel);color:var(--red);border:1px solid color-mix(in srgb,var(--red) 45%,var(--border)); }
-  .bulkbar .bulk-delete-processing:hover { background:var(--red-soft); }
-  .bulkbar .bulk-delete-processing .nav-icon { width:14px;height:14px; }
-  .bulkbar .clear { background:transparent; color:var(--muted); padding-inline:5px; }
-  .bulkmsg { width:100%; color:var(--muted); font-size:11.5px; display:none; }
-  .bulkmsg.on { display:block; }
-  .bulk-danger-confirm { flex:1 0 100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px;border:1px solid color-mix(in srgb,var(--red) 45%,var(--border));border-radius:7px;background:var(--red-soft); }
-  .bulk-danger-confirm[hidden] { display:none; }
-  .bulk-danger-copy { display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 10px;align-items:start;min-width:0; }
-  .bulk-danger-copy>.nav-icon { grid-row:1/3;width:17px;height:17px;margin-top:1px;color:var(--red); }
-  .bulk-danger-copy strong { margin:0;color:var(--fg); }
-  .bulk-danger-copy p { margin:3px 0 0;color:var(--muted);font-size:11.5px;line-height:1.45;overflow-wrap:anywhere; }
-  .bulk-danger-preserved { display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 0;padding:0;list-style:none; }
-  .bulk-danger-preserved li { display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border:1px solid color-mix(in srgb,var(--green) 35%,var(--border));border-radius:5px;background:var(--panel);color:var(--muted);font-size:10.5px;font-weight:600; }
-  .bulk-danger-preserved .nav-icon { width:11px;height:11px;color:var(--green); }
-  .bulk-danger-actions { display:flex;align-items:center;gap:7px; }
-  .bulk-danger-actions .bulk-delete-confirm { background:var(--red); }
-  .bulk-danger-status { grid-column:1/-1;min-height:0;color:var(--red);font-size:11.5px; }
-  .bulk-export-options { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; }
-  .bulk-export-option { display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid var(--border);border-radius:8px;min-width:0; }
-  .bulk-export-choice { display:flex;align-items:center;gap:8px;font-weight:650; }
-  .bulk-export-controls { display:flex;flex-direction:column;gap:8px; }
-  .bulk-export-controls select { width:100%; }
-
-  .banner { border:1px solid var(--border2); background:var(--panel2); border-radius:var(--radius);
-    padding:11px 14px; margin:12px 0; font-size:13px; color:var(--muted); }
-  .banner.trash { border-color:var(--red); background:var(--red-soft); color:var(--fg); }
-  .banner strong { color:var(--fg); }
-  .library-page { flex:1;min-width:0;background:var(--panel);overflow-y:auto; }
-  .library-inner { position:relative;width:min(100%,760px);margin:0 auto;padding:30px 32px 72px; }
-  .library-head { display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px; }
-  .library-head h1 { margin:0;font-size:22px;letter-spacing:0; }
-  .library-actions { display:flex;align-items:center;gap:8px; }
-  .library-toolbar { position:absolute;top:30px;right:32px;display:flex;align-items:center;gap:8px; }
-  .library-search { position:relative;display:flex;align-items:center;margin:0 0 14px; }
-  .library-search .nav-icon { position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--faint);pointer-events:none; }
-  .library-search input { width:100%;height:38px;padding:0 12px 0 36px;border:1px solid var(--border2);border-radius:7px;background:var(--panel);font:inherit;outline:none; }
-  .library-search input::-webkit-search-cancel-button { cursor:pointer; }
-  .library-search input:focus { border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft); }
-  .filter-menu { position:relative; }
-  .filter-menu>summary { list-style:none;width:36px;height:36px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--border2);border-radius:6px;background:var(--panel);font-size:0;cursor:pointer; }
-  .filter-menu>summary::-webkit-details-marker { display:none; }
-  .filter-menu[open]>summary { background:var(--panel2); }
-  .filter-count { position:absolute;right:-5px;top:-5px;display:grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border:2px solid var(--panel);border-radius:9px;background:var(--blue);color:#fff;font-size:9px;font-weight:700;line-height:1; }
-  .filtered-empty { display:flex;flex-direction:column;align-items:center;gap:9px; }
-  .filtered-empty .empty-icon { margin-bottom:3px; }
-  .filtered-empty-title { color:var(--fg);font-size:15px; }
-  .active-filter-list { display:flex;justify-content:center;flex-wrap:wrap;gap:6px;max-width:620px;margin:4px 0 7px;padding:0;list-style:none; }
-  .active-filter-list li { max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 8px;border:1px solid var(--blue-br);border-radius:5px;background:var(--blue-soft);color:var(--blue);font-size:11.5px;font-weight:600; }
-  .filtered-empty-reset { display:inline-flex;align-items:center;gap:6px; }
-  .filtered-empty-reset .nav-icon { width:14px;height:14px; }
-  .filter-popover { position:absolute;right:0;top:45px;z-index:20;width:min(680px,calc(100vw - 40px));max-height:70vh;overflow:auto;padding:14px;background:var(--panel);border:1px solid var(--border2);border-radius:8px;box-shadow:var(--shadow); }
-  .filter-popover .orgbox { margin:0;border:0;padding:0;background:transparent; }
-  .filter-head { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px; }
-  .filter-head strong { font-size:13px; }
-  .filter-close { width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer; }
-  .filter-close:hover { background:var(--panel2);color:var(--fg); }
-  .range-filter { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border); }
-  .range-filter fieldset { min-width:0;margin:0;padding:0;border:0; }
-  .range-filter legend { margin-bottom:7px;color:var(--fg);font-size:11px;font-weight:700;text-transform:uppercase; }
-  .range-inputs { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px; }
-  .range-inputs label { min-width:0;color:var(--muted);font-size:11px; }
-  .range-inputs input { width:100%;min-width:0;margin-top:4px;padding:7px 8px;border:1px solid var(--border2);border-radius:6px;background:var(--panel);color:var(--fg);font:inherit; }
-  .range-inputs input:focus { border-color:var(--blue);outline:2px solid var(--blue-soft); }
-  .range-actions { grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap; }
-  .range-error { margin-right:auto;color:var(--red);font-size:11.5px; }
-  .range-clear { color:var(--muted);font-size:11.5px;font-weight:600; }
-  .range-submit { display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:0;border-radius:6px;background:var(--fg);color:var(--panel);font:inherit;font-size:11.5px;font-weight:650;cursor:pointer; }
-  .table-wrap { border:0;overflow:visible; }
-  .table-wrap .rectable { margin:0; }
-  .table-wrap .rectable tbody tr:last-child td { border-bottom:0; }
-  .mobile-library-controls { display:none; }
-  .library-pagination { display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:14px; }
-  .pagination-summary { margin-right:auto;font-size:12px;white-space:nowrap; }
-  .pagination-pages { display:flex;align-items:center;gap:4px; }
-  .pagination-link,.pagination-current,.pagination-ellipsis { width:32px;height:32px;display:grid;place-items:center;border-radius:6px;font-size:12px;font-weight:650;font-variant-numeric:tabular-nums; }
-  .pagination-link { border:1px solid var(--border2);background:var(--panel);color:var(--muted); }
-  .pagination-link:hover { border-color:var(--blue-br);color:var(--blue);background:var(--blue-soft); }
-  .pagination-link:focus-visible { outline:2px solid var(--blue);outline-offset:2px; }
-  .pagination-current { border:1px solid var(--blue);background:var(--blue);color:#fff; }
-  .pagination-ellipsis { width:20px;color:var(--faint); }
-  .pagination-edge { width:36px; }
-  .pagination-edge[aria-disabled="true"] { opacity:.4; }
-  .page-change-modal { width:min(420px,100%);min-height:0; }
-  .page-change-body { gap:16px; }
-  .page-change-body p { margin:0;color:var(--muted); }
-  .page-change-actions { display:flex;align-items:center;justify-content:flex-end;gap:8px; }
   .ask-surface { max-width:900px;margin:0 auto;padding:8px 0 60px; }
   .ask-hero { padding:20px 0 18px;border-bottom:1px solid var(--border);margin-bottom:18px; }
   .ask-hero h1 { display:flex;align-items:center;gap:9px;margin:0 0 5px;font-size:22px;letter-spacing:0; }
   .ask-hero .nav-icon { width:21px;height:21px;color:var(--red); }
-  .ask-scope { border:1px solid var(--border);border-radius:8px;padding:14px;margin:0 0 14px;background:#FCFCFC; }
-  .ask-scope-details { border:1px solid var(--border);border-radius:8px;margin:0 0 12px;background:#FCFCFC; }
+  .ask-scope { border:1px solid var(--border);border-radius:8px;padding:14px;margin:0 0 14px;background:var(--c-surface-2); }
+  .ask-scope-details { border:1px solid var(--border);border-radius:8px;margin:0 0 12px;background:var(--c-surface-2); }
   .ask-scope-details>summary { display:flex;align-items:center;gap:7px;padding:11px 14px;cursor:pointer;list-style:none;font-size:12.5px;min-width:0;flex-wrap:wrap; }
   .ask-scope-details>summary::-webkit-details-marker { display:none; }
   .ask-scope-details>summary:hover { background:var(--panel2); }
@@ -236,58 +51,9 @@
   .ask-scope-details[open]>summary { border-bottom:1px solid var(--border); }
   .ask-scope-details .ask-scope { border:0;margin:0;background:none; }
   .ask-row-label { font-size:11px;font-weight:700;margin-bottom:6px; }
-
-  @media (max-width:820px){
-    .library-inner { padding:18px 14px 56px; }
-    .library-head { min-width:0;align-items:flex-start;margin-bottom:15px;padding-right:48px; }
-    .library-head h1 { overflow-wrap:anywhere; }
-    .library-actions .btn.sec { display:none; }
-    .library-toolbar { top:18px;right:14px; }
-    .filter-popover { position:fixed;left:10px;right:10px;top:64px;width:auto;max-height:calc(100vh - 74px); }
-    .range-filter { grid-template-columns:1fr; }
-    .range-actions { grid-column:1; }
-    .table-wrap { border:0;overflow:visible; }
-    .mobile-library-controls { display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 8px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--panel2); }
-    .mobile-select-all { display:inline-flex;align-items:center;gap:7px;min-width:0;color:var(--muted);font-size:12px;font-weight:650; }
-    .mobile-select-all input { width:16px;height:16px;margin:0;accent-color:var(--blue); }
-    .mobile-sort { min-width:0;max-width:160px;padding:6px 28px 6px 8px;border:1px solid var(--border2);border-radius:6px;background:var(--panel);color:var(--fg);font:inherit;font-size:12px; }
-    .rectable thead { display:none; }
-    .rectable, .rectable tbody, .rectable tr, .rectable td { display:block; width:100%; }
-    /* Title-first mobile cards: the recording title is the hierarchy, so rows
-       carry no repeated column labels — duration and recorded date collapse
-       into one muted meta line under the title. */
-    .rectable tbody tr { position:relative; border:1px solid var(--border); border-radius:var(--radius); margin-bottom:8px; padding:10px 2px 9px; }
-    .rectable tbody td { border:0; padding:0 12px; }
-    .rectable .nm { max-width:none; text-align:left; font-size:14.5px; line-height:1.4; }
-    .rectable tbody td.name-cell { padding:0 44px 3px 12px!important; }
-    .rectable tbody td.dur-cell, .rectable tbody td.rec-cell { display:inline-block; width:auto; text-align:left; color:var(--faint); font-size:12px; }
-    .rectable tbody td.rec-cell { padding-left:0; }
-    .rectable tbody td.rec-cell::before { content:'· '; }
-    .rectable tbody tr.attn td:first-child { box-shadow:none; }
-    .rectable tbody td.select-cell { position:absolute;left:6px;top:9px;width:auto!important;padding:3px!important; }
-    .select-cell input { position:static;transform:none;opacity:1; }
-    .rectable tbody td.select-cell ~ td.name-cell { padding-left:40px!important; }
-    .rectable tbody td.select-cell ~ td.dur-cell { padding-left:40px; }
-    .rectable tbody td.row-menu-cell { position:absolute;right:7px;top:5px;width:auto;padding:0; }
-    .quickadd { min-width:0;flex-basis:100%;margin-left:0; }
-    .quickadd form { left:0;right:auto;width:min(260px,100%); }
-    .bulkbar .bulk-separator { display:none; }
-    .bulk-danger-confirm { grid-template-columns:1fr; }
-    .bulk-danger-actions { justify-content:flex-end;flex-wrap:wrap; }
-    .bulk-export-options { grid-template-columns:1fr; }
-    .organization-manager-modal { max-height:calc(100dvh - 24px); }
-    .organization-manager-create { align-items:stretch;flex-wrap:wrap; }
-    .organization-manager-create label { flex-basis:100%; }
-    .organization-manager-create .btn { justify-content:center; }
-    .organization-manager-view { align-items:start; }
-    .organization-manager-edit { align-items:stretch;flex-wrap:wrap; }
-    .organization-manager-edit input { flex-basis:100%; }
-    .library-pagination { justify-content:center;flex-wrap:wrap;gap:8px; }
-    .pagination-summary { flex-basis:100%;margin:0;text-align:center; }
-    .pagination-pages { flex:1;min-width:0;max-width:100%;overflow-x:auto; }
-  }
 </style>
-<div class="library-page"><div class="library-inner">
+{% endif %}
+<div class="library-page"><div class="page-frame">
   {% if active == 'ask' %}
   <section class="ask-surface" id="library-ask">
     <div class="ask-hero"><div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px"><div><h1><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Ask localplaud') }}</h1><div class="sub">{{ t('Ask across your library. Answers stay grounded in indexed recordings and cite their sources.') }}</div></div><button class="btn sec" type="button" data-open-ask-history><span class="nav-icon" style="--nav-icon:url('/static/lucide/history.svg')"></span>{{ t('History') }}</button></div></div>
@@ -326,195 +92,224 @@
   {% set active_scene = facets.scenes | selectattr('active') | first %}
   {% set active_origin = facets.origins | selectattr('active') | first %}
   {% set filter_count = (1 if q else 0) + (1 if lib.state else 0) + (1 if lib.scene is not none else 0) + (1 if lib.folder is not none else 0) + (1 if lib.tag is not none else 0) + (1 if lib.origin else 0) + (1 if lib.date_from else 0) + (1 if lib.date_to else 0) + (1 if lib.min_duration_minutes is not none else 0) + (1 if lib.max_duration_minutes is not none else 0) %}
-  <div class="library-head">
-    <div><h1>{% if lib.view == 'trash' %}{{ t('Trash') }}{% elif lib.view == 'uncategorized' %}{{ t('Uncategorized') }}{% elif active_folder %}{{ active_folder.name }}{% elif lib.origin == 'plaud' %}{{ t('Plaud recordings') }}{% elif lib.origin == 'local' %}{{ t('Local uploads') }}{% else %}{{ t('All files') }}{% endif %}</h1></div>
-    <div class="library-actions"></div>
-  </div>
-  <form class="library-search" method="get" action="/" role="search"><span class="nav-icon" style="--nav-icon:url('/static/lucide/search.svg')"></span><input type="search" name="q" value="{{ q }}" placeholder="{{ t('Search files') }}" aria-label="{{ t('Search files') }}"><input type="hidden" name="view" value="{{ lib.view }}">{% for name, value in [('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin), ('state', lib.state), ('scene', lib.scene), ('sort', lib.sort), ('dir', lib.dir), ('date_from', lib.date_from), ('date_to', lib.date_to), ('min_duration_minutes', lib.min_duration_minutes), ('max_duration_minutes', lib.max_duration_minutes)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}</form>
-  <div class="library-toolbar">
-    <details class="filter-menu" {% if lib.invalid_date_range or lib.invalid_duration_range %}open{% endif %}><summary aria-label="{{ t('Filter and organize') }}" title="{{ t('Filter and organize') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/list-filter.svg')"></span>{{ t('Filter and organize') }}{% if filter_count %}<span class="filter-count" aria-hidden="true">{{ filter_count }}</span><span class="visually-hidden">{{ filter_count }} {{ t('active filters') }}</span>{% endif %}</summary><div class="filter-popover">
-    <div class="filter-head"><strong>{{ t('Filter and organize') }}</strong><button class="filter-close" type="button" aria-label="{{ t('Close filters') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
-    <div class="orgbox" aria-label="{{ t('Library organization') }}">
-      <div class="orgrow">
-        <span class="lbl">{{ t('Folders') }}</span>
-        <a class="fchip {% if lib.folder is none %}on{% endif %}" href="{{ liburl(view='all', folder='', tag='') }}">{{ t('All') }}</a>
-        {% for folder in organization.folders %}
-        <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="{{ liburl(view='all', folder=folder.id, tag='') }}" title="{{ folder.name }}">
-          {{ folder.name }} <span class="n">{{ folder.count }}</span>
-        </a>
-        {% endfor %}
-        <details class="quickadd"><summary>+ {{ t('Folder') }}</summary>
-          <form data-create-kind="folders"><input name="name" maxlength="80" placeholder="{{ t('Folder name') }}" required><button>{{ t('Add') }}</button></form>
-        </details>
+  {% if lib.view == 'trash' %}{% set view_title = t('Trash') %}{% elif lib.view == 'uncategorized' %}{% set view_title = t('Unfiled') %}{% elif active_folder %}{% set view_title = active_folder.name %}{% elif active_tag %}{% set view_title = active_tag.name %}{% elif active_scene %}{% set view_title = t(active_scene.label) %}{% elif lib.origin == 'plaud' %}{% set view_title = t('Plaud recordings') %}{% elif lib.origin == 'local' %}{% set view_title = t('Local uploads') %}{% else %}{% set view_title = t('All files') %}{% endif %}
+  {% set selectable = lib.view != 'trash' %}
+  <div class="library-head"{% if active_tag %} data-active-tag-name="{{ active_tag.name }}"{% endif %}>
+    <h1 class="page-title"><span class="only-wide">{{ view_title }}</span><button class="title-switch only-compact" type="button" data-dialog-open="library-sheet" aria-haspopup="dialog">{{ view_title }}{{ icon('chevron-down') }}</button></h1>
+    <div class="library-tools">
+      <form class="library-search search-field" method="get" action="/" role="search">{{ icon('search') }}<input class="input" type="search" name="q" value="{{ q }}" placeholder="{{ t('Search files') }}" aria-label="{{ t('Search files') }}" enterkeyhint="search"><input type="hidden" name="view" value="{{ lib.view }}">{% for name, value in [('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin), ('state', lib.state), ('scene', lib.scene), ('sort', lib.sort), ('dir', lib.dir), ('date_from', lib.date_from), ('date_to', lib.date_to), ('min_duration_minutes', lib.min_duration_minutes), ('max_duration_minutes', lib.max_duration_minutes)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}</form>
+      <details class="filter-menu" {% if lib.invalid_date_range or lib.invalid_duration_range %}open{% endif %}><summary class="icon-btn" aria-label="{{ t('Filter and organize') }}" data-tooltip="{{ t('Filter and organize') }}">{{ icon('filter') }}{% if filter_count %}<span class="filter-count" aria-hidden="true">{{ filter_count }}</span><span class="visually-hidden">{{ filter_count }} {{ t('active filters') }}</span>{% endif %}</summary><div class="filter-popover">
+      <div class="filter-head"><strong>{{ t('Filter and organize') }}</strong><button class="icon-btn filter-close" type="button" aria-label="{{ t('Close filters') }}">{{ icon('x') }}</button></div>
+      <div class="orgbox" aria-label="{{ t('Library organization') }}">
+        <div class="orgrow">
+          <span class="lbl">{{ t('Folders') }}</span>
+          <a class="fchip {% if lib.folder is none %}on{% endif %}" href="{{ liburl(view='all', folder='', tag='') }}">{{ t('All') }}</a>
+          {% for folder in organization.folders %}
+          <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="{{ liburl(view='all', folder=folder.id, tag='') }}" title="{{ folder.name }}"><span class="folder-glyph" style="--folder-color:{{ folder.color or 'var(--c-text-2)' }}">{{ icon('folder', 'xs') }}</span>{{ folder.name }} <span class="n">{{ folder.count }}</span></a>
+          {% endfor %}
+          <details class="quickadd"><summary>+ {{ t('Folder') }}</summary>
+            <form data-create-kind="folders"><input class="input" name="name" maxlength="80" placeholder="{{ t('Folder name') }}" required><button class="btn btn-sm">{{ t('Add') }}</button></form>
+          </details>
+        </div>
+        {% set tag_kinds = [('topic', t('Topics')), ('person', t('People')), ('org', t('Organizations')), ('custom', t('Other'))] %}
+        <label class="tag-filter-select"><span class="lbl">{{ t('Tags') }}</span><select class="select" id="library-tag-filter" aria-label="{{ t('Tags') }}" onchange="window.location.href=this.value">
+          <option value="{{ liburl(view='all', folder='', tag='') }}"{% if lib.tag is none %} selected{% endif %}>{{ t('All') }}</option>
+          {% for kind, kind_label in tag_kinds %}{% set kind_tags = organization.tags | selectattr('kind', 'equalto', kind) | list %}{% if kind_tags %}<optgroup label="{{ kind_label }}">{% for tag in kind_tags %}<option value="{{ liburl(view='all', folder='', tag=tag.id) }}"{% if lib.tag == tag.id %} selected{% endif %}>{{ tag.name }} · {{ tag.count }}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}
+        </select></label>
+        <div class="orgrow">
+          <details class="quickadd"><summary>+ {{ t('Tag') }}</summary>
+            <form data-create-kind="tags"><input class="input" name="name" maxlength="80" placeholder="{{ t('Tag name') }}" required><button class="btn btn-sm">{{ t('Add') }}</button></form>
+          </details>
+        </div>
+        <button class="org-manage" id="organization-manager-open" type="button">{{ icon('pencil', 'xs') }}{{ t('Manage folders and tags') }}</button>
+        <div id="organization-create-status" class="sub" role="status" aria-live="polite" style="min-height:16px;font-size:11px"></div>
       </div>
-      {% set tag_kinds = [('topic', t('Topics')), ('person', t('People')), ('org', t('Organizations')), ('custom', t('Other'))] %}
-      <label class="tag-filter-select"><span class="lbl">{{ t('Tags') }}</span><select class="search-input" id="library-tag-filter" aria-label="{{ t('Tags') }}" onchange="window.location.href=this.value">
-        <option value="{{ liburl(view='all', folder='', tag='') }}"{% if lib.tag is none %} selected{% endif %}>{{ t('All') }}</option>
-        {% for kind, kind_label in tag_kinds %}{% set kind_tags = organization.tags | selectattr('kind', 'equalto', kind) | list %}{% if kind_tags %}<optgroup label="{{ kind_label }}">{% for tag in kind_tags %}<option value="{{ liburl(view='all', folder='', tag=tag.id) }}"{% if lib.tag == tag.id %} selected{% endif %}>{{ tag.name }} · {{ tag.count }}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}
-      </select></label>
-      <div class="orgrow">
-        <details class="quickadd"><summary>+ {{ t('Tag') }}</summary>
-          <form data-create-kind="tags"><input name="name" maxlength="80" placeholder="{{ t('Tag name') }}" required><button>{{ t('Add') }}</button></form>
-        </details>
+      <div class="libbar">
+        <div class="filtrow">
+          <span class="lbl">{{ t('State') }}</span>
+          <a class="fchip {% if not lib.state %}on{% endif %}" href="{{ liburl(lib.sort, lib.dir, '', lib.scene, lib.view) }}">{{ t('All') }}</a>
+          {% for s in states %}<a class="fchip {% if lib.state == s %}on{% endif %}" href="{{ liburl(lib.sort, lib.dir, s, lib.scene, lib.view) }}">{{ t(s) }}</a>{% endfor %}
+        </div>
+        {% if facets.scenes %}
+        <div class="filtrow">
+          <span class="lbl">{{ t('Source') }}</span>
+          <a class="fchip {% if lib.scene is none %}on{% endif %}" href="{{ liburl(lib.sort, lib.dir, lib.state, '', lib.view) }}">{{ t('All') }}</a>
+          {% for sc in facets.scenes %}<a class="fchip {% if sc.active %}on{% endif %}" href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{{ t(sc.label) }} <span class="n">{{ sc.count }}</span></a>{% endfor %}
+        </div>
+        {% endif %}
+        {% if facets.origins %}
+        <div class="filtrow">
+          <span class="lbl">{{ t('Comes from') }}</span>
+          <a class="fchip {% if not lib.origin %}on{% endif %}" href="{{ liburl(origin='') }}">{{ t('All') }}</a>
+          {% for source in facets.origins %}<a class="fchip {% if source.active %}on{% endif %}" href="{{ liburl(origin=source.value) }}">{{ t(source.label) }} <span class="n">{{ source.count }}</span></a>{% endfor %}
+        </div>
+        {% endif %}
+        <div class="filtrow">
+          <span class="lbl">{{ t('View') }}</span>
+          <a class="fchip {% if lib.view == 'all' %}on{% endif %}" href="{{ liburl(view='all') }}">{{ t('All files') }}</a>
+          <a class="fchip {% if lib.view == 'uncategorized' %}on{% endif %}" href="{{ liburl(view='uncategorized', folder='', tag='') }}">{{ t('Unfiled') }}</a>
+          <a class="fchip trash {% if lib.view == 'trash' %}on{% endif %}" href="{{ liburl(view='trash', folder='', tag='') }}">{{ t('Trash') }} <span class="n">{{ facets.trash_count }}</span></a>
+        </div>
+        <form class="range-filter" method="get" action="/">
+          {% for name, value in [('q', q), ('sort', lib.sort), ('dir', lib.dir), ('state', lib.state), ('scene', lib.scene), ('view', lib.view), ('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
+          <fieldset><legend>{{ t('Recorded date') }}</legend><div class="range-inputs"><label>{{ t('From') }}<input class="input" type="date" name="date_from" value="{{ lib.date_from or '' }}"></label><label>{{ t('To') }}<input class="input" type="date" name="date_to" value="{{ lib.date_to or '' }}"></label></div></fieldset>
+          <fieldset><legend>{{ t('Duration in minutes') }}</legend><div class="range-inputs"><label>{{ t('Minimum') }}<input class="input" type="number" name="min_duration_minutes" value="{{ lib.min_duration_minutes if lib.min_duration_minutes is not none else '' }}" min="0" max="1000000" step="0.1" inputmode="decimal"></label><label>{{ t('Maximum') }}<input class="input" type="number" name="max_duration_minutes" value="{{ lib.max_duration_minutes if lib.max_duration_minutes is not none else '' }}" min="0" max="1000000" step="0.1" inputmode="decimal"></label></div></fieldset>
+          <div class="range-actions">{% if lib.invalid_date_range %}<span class="range-error" role="alert">{{ t('Start date must not follow end date.') }}</span>{% elif lib.invalid_duration_range %}<span class="range-error" role="alert">{{ t('Minimum duration must not exceed maximum duration.') }}</span>{% endif %}<a class="range-clear" href="{{ liburl(ranges=false) }}">{{ t('Clear date and duration') }}</a><button class="btn btn-sm range-submit" type="submit">{{ icon('check', 'xs') }}{{ t('Apply filters') }}</button></div>
+        </form>
       </div>
-      <button class="org-manage" id="organization-manager-open" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/pencil.svg')"></span>{{ t('Manage folders and tags') }}</button>
-      <div id="organization-create-status" class="sub" role="status" aria-live="polite" style="min-height:16px;font-size:11px"></div>
+      </div></details>
+      <div class="menu-wrap">
+        <button class="icon-btn" type="button" data-menu="library-more-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="library-more-menu" aria-label="{{ t('More options') }}" data-tooltip="{{ t('More options') }}">{{ icon('more') }}</button>
+        <div class="menu" id="library-more-menu" role="menu" data-placement="bottom-end" hidden>
+          {% if selectable and files %}<button class="menu-item" role="menuitem" type="button" data-select-mode>{{ icon('check-square') }}{{ t('Select recordings') }}</button>{% endif %}
+          <button class="menu-item" role="menuitem" type="button" data-open-filters>{{ icon('filter') }}{{ t('Filter and organize') }}</button>
+          <button class="menu-item" role="menuitem" type="button" data-folder-create>{{ icon('folder-plus') }}{{ t('New folder') }}</button>
+          <button class="menu-item" role="menuitem" type="button" data-proxy-click="organization-manager-open">{{ icon('tag') }}{{ t('Manage folders and tags') }}</button>
+          <div class="menu-sep"></div>
+          <button class="menu-item" role="menuitem" type="button" data-open-import="device">{{ icon('upload') }}{{ t('Import audio') }}</button>
+          <button class="menu-item" role="menuitem" type="button" data-open-import="plaud">{{ icon('refresh') }}{{ t('Sync from Plaud now') }}</button>
+        </div>
+      </div>
     </div>
-    <div class="libbar">
-      <div class="filtrow">
-        <span class="lbl">{{ t('State') }}</span>
-        <a class="fchip {% if not lib.state %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, '', lib.scene, lib.view) }}">{{ t('All') }}</a>
-        {% for s in states %}
-        <a class="fchip {% if lib.state == s %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, s, lib.scene, lib.view) }}">{{ t(s) }}</a>
-        {% endfor %}
-      </div>
-      {% if facets.scenes %}
-      <div class="filtrow">
-        <span class="lbl">{{ t('Source') }}</span>
-        <a class="fchip {% if lib.scene is none %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, '', lib.view) }}">{{ t('All') }}</a>
-        {% for sc in facets.scenes %}
-        <a class="fchip {% if sc.active %}on{% endif %}"
-           href="{{ liburl(lib.sort, lib.dir, lib.state, sc.value, lib.view) }}">{{ t(sc.label) }} <span class="n">{{ sc.count }}</span></a>
-        {% endfor %}
-      </div>
-      {% endif %}
-      {% if facets.origins %}
-      <div class="filtrow">
-        <span class="lbl">{{ t('Comes from') }}</span>
-        <a class="fchip {% if not lib.origin %}on{% endif %}" href="{{ liburl(origin='') }}">{{ t('All') }}</a>
-        {% for source in facets.origins %}<a class="fchip {% if source.active %}on{% endif %}" href="{{ liburl(origin=source.value) }}">{{ t(source.label) }} <span class="n">{{ source.count }}</span></a>{% endfor %}
-      </div>
-      {% endif %}
-      <div class="filtrow">
-        <span class="lbl">{{ t('View') }}</span>
-        <a class="fchip {% if lib.view == 'all' %}on{% endif %}"
-           href="{{ liburl(view='all') }}">{{ t('All files') }}</a>
-        <a class="fchip {% if lib.view == 'uncategorized' %}on{% endif %}"
-           href="{{ liburl(view='uncategorized', folder='', tag='') }}">{{ t('Uncategorized') }}</a>
-        <a class="fchip trash {% if lib.view == 'trash' %}on{% endif %}"
-           href="{{ liburl(view='trash', folder='', tag='') }}">{{ t('Trash') }} <span class="n">{{ facets.trash_count }}</span></a>
-      </div>
-      <form class="range-filter" method="get" action="/">
-        {% for name, value in [('q', q), ('sort', lib.sort), ('dir', lib.dir), ('state', lib.state), ('scene', lib.scene), ('view', lib.view), ('folder', lib.folder), ('tag', lib.tag), ('origin', lib.origin)] %}{% if value is not none and value != '' %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
-        <fieldset><legend>{{ t('Recorded date') }}</legend><div class="range-inputs"><label>{{ t('From') }}<input type="date" name="date_from" value="{{ lib.date_from or '' }}"></label><label>{{ t('To') }}<input type="date" name="date_to" value="{{ lib.date_to or '' }}"></label></div></fieldset>
-        <fieldset><legend>{{ t('Duration in minutes') }}</legend><div class="range-inputs"><label>{{ t('Minimum') }}<input type="number" name="min_duration_minutes" value="{{ lib.min_duration_minutes if lib.min_duration_minutes is not none else '' }}" min="0" max="1000000" step="0.1" inputmode="decimal"></label><label>{{ t('Maximum') }}<input type="number" name="max_duration_minutes" value="{{ lib.max_duration_minutes if lib.max_duration_minutes is not none else '' }}" min="0" max="1000000" step="0.1" inputmode="decimal"></label></div></fieldset>
-        <div class="range-actions">{% if lib.invalid_date_range %}<span class="range-error" role="alert">{{ t('Start date must not follow end date.') }}</span>{% elif lib.invalid_duration_range %}<span class="range-error" role="alert">{{ t('Minimum duration must not exceed maximum duration.') }}</span>{% endif %}<a class="range-clear" href="{{ liburl(ranges=false) }}">{{ t('Clear date and duration') }}</a><button class="range-submit" type="submit"><span class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></span>{{ t('Apply filters') }}</button></div>
-      </form>
-    </div>
-    </div></details>
   </div>
 
+  {% if filter_count and files %}
+  <ul class="active-filters" aria-label="{{ t('Active filters') }}">
+    {% if q %}<li><a class="chip" href="{{ liburl() | replace('&amp;q=' ~ (q | urlencode), '') }}">{{ t('Search') }}: {{ q }} {{ icon('x', 'xs') }}</a></li>{% endif %}
+    {% if lib.state %}<li><a class="chip" href="{{ liburl(state='') }}">{{ t('State') }}: {{ t(lib.state) }} {{ icon('x', 'xs') }}</a></li>{% endif %}
+    {% if active_scene %}<li><a class="chip" href="{{ liburl(scene='') }}">{{ t('Source') }}: {{ t(active_scene.label) }} {{ icon('x', 'xs') }}</a></li>{% endif %}
+    {% if active_folder %}<li><a class="chip" href="{{ liburl(folder='') }}">{{ t('Folder') }}: {{ active_folder.name }} {{ icon('x', 'xs') }}</a></li>{% endif %}
+    {% if active_tag %}<li><a class="chip" href="{{ liburl(tag='') }}">{{ t('Tag') }}: {{ active_tag.name }} {{ icon('x', 'xs') }}</a></li>{% endif %}
+    {% if active_origin %}<li><a class="chip" href="{{ liburl(origin='') }}">{{ t('Comes from') }}: {{ t(active_origin.label) }} {{ icon('x', 'xs') }}</a></li>{% endif %}
+    {% if lib.date_from or lib.date_to or lib.min_duration_minutes is not none or lib.max_duration_minutes is not none %}<li><a class="chip" href="{{ liburl(ranges=false) }}">{% if lib.date_from or lib.date_to %}{{ lib.date_from or '…' }} – {{ lib.date_to or '…' }}{% endif %}{% if lib.min_duration_minutes is not none or lib.max_duration_minutes is not none %} · {{ lib.min_duration_minutes if lib.min_duration_minutes is not none else 0 }}–{{ lib.max_duration_minutes if lib.max_duration_minutes is not none else '∞' }} {{ t('minutes') }}{% endif %} {{ icon('x', 'xs') }}</a></li>{% endif %}
+    <li><a class="text-btn" href="/?sort={{ lib.sort }}&amp;dir={{ lib.dir }}&amp;view={{ lib.view }}">{{ t('Clear all filters') }}</a></li>
+  </ul>
+  {% endif %}
+
+  {% if lib.view == 'trash' %}
+  <div class="library-banner trash">{{ icon('info') }}<span><strong>{{ t("Trash mirrors Plaud's cloud trash.") }}</strong> {{ t('This is a read-only recovery view — localplaud never deletes your cloud data. Restore a recording in the Plaud app to bring it back.') }}</span></div>
+  {% endif %}
+
+  {% if not files %}
+  <div class="empty-state{% if filter_count or lib.view == 'uncategorized' %} filtered-empty{% endif %}">
     {% if lib.view == 'trash' %}
-    <div class="banner trash">
-      <strong>{{ t("Trash mirrors Plaud's cloud trash.") }}</strong> {{ t('This is a read-only recovery view — localplaud never deletes your cloud data. Restore a recording in the Plaud app to bring it back.') }}
-    </div>
-    {% endif %}
-
-    {% if not files %}
-    <div class="empty{% if filter_count or lib.view == 'uncategorized' %} filtered-empty{% endif %}"><span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/audio-lines.svg')"></span>
-      {% if lib.view == 'trash' %}
-        {{ t('Nothing in trash.') }}
-      {% elif lib.q or lib.state or lib.scene is not none or lib.folder is not none or lib.tag is not none or lib.origin or lib.date_from or lib.date_to or lib.min_duration_minutes is not none or lib.max_duration_minutes is not none or lib.view == 'uncategorized' %}
-        <strong class="filtered-empty-title">{{ t('No recordings match these filters.') }}</strong>
-        <ul class="active-filter-list" aria-label="{{ t('Active filters') }}">
-          {% if q %}<li>{{ t('Search') }}: {{ q }}</li>{% endif %}
-          {% if lib.state %}<li>{{ t('State') }}: {{ t(lib.state) }}</li>{% endif %}
-          {% if active_scene %}<li>{{ t('Source') }}: {{ t(active_scene.label) }}</li>{% endif %}
-          {% if active_folder %}<li>{{ t('Folder') }}: {{ active_folder.name }}</li>{% endif %}
-          {% if active_tag %}<li>{{ t('Tag') }}: {{ active_tag.name }}</li>{% endif %}
-          {% if active_origin %}<li>{{ t('Comes from') }}: {{ t(active_origin.label) }}</li>{% endif %}
-          {% if lib.view == 'uncategorized' %}<li>{{ t('View') }}: {{ t('Uncategorized') }}</li>{% endif %}
-          {% if lib.date_from %}<li>{{ t('From') }}: {{ lib.date_from }}</li>{% endif %}
-          {% if lib.date_to %}<li>{{ t('To') }}: {{ lib.date_to }}</li>{% endif %}
-          {% if lib.min_duration_minutes is not none %}<li>{{ t('Minimum') }}: {{ lib.min_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
-          {% if lib.max_duration_minutes is not none %}<li>{{ t('Maximum') }}: {{ lib.max_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
-        </ul>
-        <a class="btn sec filtered-empty-reset" href="/?sort={{ lib.sort }}&amp;dir={{ lib.dir }}&amp;view=all"><span class="nav-icon" style="--nav-icon:url('/static/lucide/rotate-ccw.svg')"></span>{{ t('Clear all filters') }}</a>
-      {% else %}
-        {{ t('No recordings yet.') }}<br>{{ t('Connect the official Plaud API or MCP in Settings, then import your library.') }}
-      {% endif %}
-    </div>
+      {{ icon('trash') }}<p class="empty-title">{{ t('Nothing in trash.') }}</p>
+      <p class="empty-body">{{ t('Recordings you delete in the Plaud app show up here until Plaud removes them.') }}</p>
+    {% elif filter_count or lib.view == 'uncategorized' %}
+      {{ icon('filter') }}<p class="empty-title filtered-empty-title">{{ t('No recordings match these filters.') }}</p>
+      {% if lib.view == 'uncategorized' and not filter_count %}<p class="empty-body">{{ t('Every recording is in a folder or tagged.') }}</p>{% endif %}
+      <ul class="active-filter-list" aria-label="{{ t('Active filters') }}">
+        {% if q %}<li>{{ t('Search') }}: {{ q }}</li>{% endif %}
+        {% if lib.state %}<li>{{ t('State') }}: {{ t(lib.state) }}</li>{% endif %}
+        {% if active_scene %}<li>{{ t('Source') }}: {{ t(active_scene.label) }}</li>{% endif %}
+        {% if active_folder %}<li>{{ t('Folder') }}: {{ active_folder.name }}</li>{% endif %}
+        {% if active_tag %}<li>{{ t('Tag') }}: {{ active_tag.name }}</li>{% endif %}
+        {% if active_origin %}<li>{{ t('Comes from') }}: {{ t(active_origin.label) }}</li>{% endif %}
+        {% if lib.view == 'uncategorized' %}<li>{{ t('View') }}: {{ t('Unfiled') }}</li>{% endif %}
+        {% if lib.date_from %}<li>{{ t('From') }}: {{ lib.date_from }}</li>{% endif %}
+        {% if lib.date_to %}<li>{{ t('To') }}: {{ lib.date_to }}</li>{% endif %}
+        {% if lib.min_duration_minutes is not none %}<li>{{ t('Minimum') }}: {{ lib.min_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
+        {% if lib.max_duration_minutes is not none %}<li>{{ t('Maximum') }}: {{ lib.max_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
+      </ul>
+      <div class="empty-actions"><a class="btn sec filtered-empty-reset" href="/?sort={{ lib.sort }}&amp;dir={{ lib.dir }}&amp;view=all">{{ icon('undo', 'sm') }}{{ t('Clear all filters') }}</a></div>
     {% else %}
-    {% if lib.view != 'trash' %}
-    <div class="bulkbar" id="bulkbar">
-      <strong><span id="selected-count">0</span> {{ t('selected on this page') }}</strong>
-      <select id="bulk-action" aria-label="{{ t('Organization action') }}">
+      {{ icon('waveform') }}<p class="empty-title">{{ t('No recordings yet.') }}</p>
+      <p class="empty-body">{{ t('Connect the official Plaud API or MCP in Settings, then import your library.') }}</p>
+      <div class="empty-actions"><button class="btn" type="button" data-open-import="device">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button><button class="btn sec" type="button" data-open-import="plaud">{{ icon('cloud', 'sm') }}{{ t('Import from Plaud') }}</button></div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="file-table" id="library-table">
+    {% if selectable %}
+    <div class="bulkbar batch-bar" id="bulkbar">
+      <span class="batch-count"><input class="checkbox" id="select-all-batch" type="checkbox" aria-label="{{ t('Select all visible recordings') }}" checked><span>{{ t('Selected') }} (<span id="selected-count">0</span>)</span></span>
+      <select class="select" id="bulk-action" aria-label="{{ t('Organization action') }}">
         <option value="folder">{{ t('Move to folder') }}</option>
         <option value="add-tag">{{ t('Add tag') }}</option>
         <option value="remove-tag">{{ t('Remove tag') }}</option>
         <option value="resume">{{ t('Resume processing') }}</option>
       </select>
-      <select id="bulk-target" aria-label="{{ t('Folder or tag') }}"></select>
-      <button type="button" id="bulk-apply">{{ t('Apply') }}</button>
-      <button type="button" class="bulk-export" id="bulk-export-open"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>{{ t('Export selected') }}</button>
-      <span class="bulk-separator" aria-hidden="true"></span>
-      <button type="button" class="bulk-delete-processing" id="bulk-delete-processing" aria-expanded="false" aria-controls="bulk-delete-confirm"><span class="nav-icon" style="--nav-icon:url('/static/lucide/trash-2.svg')"></span>{{ t('Delete local processing') }}</button>
-      <button type="button" class="clear" id="bulk-clear">{{ t('Clear') }}</button>
+      <select class="select" id="bulk-target" aria-label="{{ t('Folder or tag') }}"></select>
+      <button class="btn" type="button" id="bulk-apply">{{ t('Apply') }}</button>
+      <button class="btn bulk-export" type="button" id="bulk-export-open">{{ icon('download', 'sm') }}{{ t('Export selected') }}</button>
+      <button class="btn danger bulk-delete-processing" type="button" id="bulk-delete-processing" aria-expanded="false" aria-controls="bulk-delete-confirm">{{ icon('trash', 'sm') }}{{ t('Delete local processing') }}</button>
+      <button class="text-btn batch-cancel" type="button" id="bulk-clear">{{ t('Cancel') }}</button>
       <div class="bulkmsg" id="bulk-message" role="status"></div>
       <div class="bulk-danger-confirm" id="bulk-delete-confirm" role="alertdialog" aria-labelledby="bulk-delete-title" aria-describedby="bulk-delete-description" hidden>
-        <div class="bulk-danger-copy"><span class="nav-icon" style="--nav-icon:url('/static/lucide/triangle-alert.svg')"></span><div><strong id="bulk-delete-title">{{ t('Delete local processing') }}</strong><p id="bulk-delete-description">{{ t('Delete local transcript, corrections, generated notes, mind map, search index, and processing history?') }}</p><ul class="bulk-danger-preserved" role="list"><li><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Original audio') }}</li><li><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Folders') }}</li><li><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Tags') }}</li><li><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Ask history') }}</li><li><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Saved notes') }}</li><li><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Editable note') }}</li><li><i class="nav-icon" style="--nav-icon:url('/static/lucide/check.svg')"></i>{{ t('Plaud imports') }}</li></ul></div></div>
-        <div class="bulk-danger-actions"><button type="button" class="clear" id="bulk-delete-cancel">{{ t('Cancel') }}</button><button type="button" class="bulk-delete-confirm" id="bulk-delete-confirm-button">{{ t('Delete local processing') }}</button></div>
+        <div class="bulk-danger-copy">{{ icon('alert') }}<div><strong id="bulk-delete-title">{{ t('Delete local processing') }}</strong><p id="bulk-delete-description">{{ t('Delete local transcript, corrections, generated notes, mind map, search index, and processing history?') }}</p><ul class="bulk-danger-preserved" role="list">{% for kept in ['Original audio', 'Folders', 'Tags', 'Ask history', 'Saved notes', 'Editable note', 'Plaud imports'] %}<li>{{ icon('check', 'xs') }}{{ t(kept) }}</li>{% endfor %}</ul></div></div>
+        <div class="bulk-danger-actions"><button type="button" class="btn sec" id="bulk-delete-cancel">{{ t('Cancel') }}</button><button type="button" class="btn btn-danger-solid bulk-delete-confirm" id="bulk-delete-confirm-button">{{ t('Delete local processing') }}</button></div>
         <div class="bulk-danger-status" id="bulk-delete-status" role="status" aria-live="polite"></div>
       </div>
     </div>
     {% endif %}
     <div class="mobile-library-controls">
-      {% if lib.view != 'trash' %}<label class="mobile-select-all"><input id="select-all-mobile" type="checkbox">{{ t('Select visible') }}</label>{% endif %}
-      <select class="mobile-sort" id="mobile-sort" aria-label="{{ t('Sort recordings') }}">
-        <option value="{{ liburl(sort='recorded', dir='desc') }}"{% if lib.sort == 'recorded' and lib.dir == 'desc' %} selected{% endif %}>{{ t('Recorded') }} ↓</option>
-        <option value="{{ liburl(sort='recorded', dir='asc') }}"{% if lib.sort == 'recorded' and lib.dir == 'asc' %} selected{% endif %}>{{ t('Recorded') }} ↑</option>
+      <label class="mobile-sort-label">{{ icon('arrow-up-down', 'sm') }}<span class="visually-hidden">{{ t('Sort recordings') }}</span><select class="mobile-sort" id="mobile-sort" aria-label="{{ t('Sort recordings') }}">
+        <option value="{{ liburl(sort='recorded', dir='desc') }}"{% if lib.sort == 'recorded' and lib.dir == 'desc' %} selected{% endif %}>{{ t('Newest first') }}</option>
+        <option value="{{ liburl(sort='recorded', dir='asc') }}"{% if lib.sort == 'recorded' and lib.dir == 'asc' %} selected{% endif %}>{{ t('Oldest first') }}</option>
         <option value="{{ liburl(sort='name', dir='asc') }}"{% if lib.sort == 'name' and lib.dir == 'asc' %} selected{% endif %}>{{ t('Name') }} A–Z</option>
         <option value="{{ liburl(sort='name', dir='desc') }}"{% if lib.sort == 'name' and lib.dir == 'desc' %} selected{% endif %}>{{ t('Name') }} Z–A</option>
-        <option value="{{ liburl(sort='duration', dir='desc') }}"{% if lib.sort == 'duration' and lib.dir == 'desc' %} selected{% endif %}>{{ t('Duration') }} ↓</option>
-        <option value="{{ liburl(sort='duration', dir='asc') }}"{% if lib.sort == 'duration' and lib.dir == 'asc' %} selected{% endif %}>{{ t('Duration') }} ↑</option>
-      </select>
+        <option value="{{ liburl(sort='duration', dir='desc') }}"{% if lib.sort == 'duration' and lib.dir == 'desc' %} selected{% endif %}>{{ t('Longest first') }}</option>
+        <option value="{{ liburl(sort='duration', dir='asc') }}"{% if lib.sort == 'duration' and lib.dir == 'asc' %} selected{% endif %}>{{ t('Shortest first') }}</option>
+      </select></label>
+      <span class="t-meta">{{ pagination.total }} {{ t('recordings') }}</span>
+      {% if selectable %}<label class="mobile-select-all"><input class="checkbox" id="select-all-mobile" type="checkbox">{{ t('Select visible') }}</label>{% endif %}
     </div>
-    <div class="table-wrap"><table class="rectable">
-      <thead>
-        <tr>
-          {% if lib.view != 'trash' %}<th class="select-cell"><input id="select-all" type="checkbox" aria-label="{{ t('Select all visible recordings') }}"></th>{% endif %}
-          <th class="name-cell" aria-sort="{{ 'ascending' if lib.sort=='name' and lib.dir=='asc' else ('descending' if lib.sort=='name' else 'none') }}">{{ sorth('name', t('Name')) }}</th>
-          <th class="num" aria-sort="{{ 'ascending' if lib.sort=='duration' and lib.dir=='asc' else ('descending' if lib.sort=='duration' else 'none') }}">{{ sorth('duration', t('Duration')) }}</th>
-          <th class="num" aria-sort="{{ 'ascending' if lib.sort=='recorded' and lib.dir=='asc' else ('descending' if lib.sort=='recorded' else 'none') }}">{{ sorth('recorded', t('Recorded')) }}</th>
-          <th class="row-menu-cell"><span class="visually-hidden">{{ t('Actions') }}</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for f in files %}
-        <tr class="{% if f.needs_attention %}attn{% endif %}">
-          {% if lib.view != 'trash' %}<td class="select-cell"><input class="row-select" type="checkbox" value="{{ f.id }}" aria-label="{{ t('Select recording') }} {{ f.filename }}"></td>{% endif %}
-          <td class="name-cell">
-            <a class="nm" href="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-get="/file/{{ f.id }}?return_to={{ return_to_param }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ f.filename }}{% if f.needs_attention %}<span class="attn-dot" title="{{ t('Needs attention') }} — {{ t(f.status) }}" aria-label="{{ t('Needs attention') }}"></span>{% endif %}</a>
-            <span class="file-subline"><span>{{ t(f.status) }}</span><span>·</span><span>{{ t('Plaud cloud') if f.origin == 'plaud' else t('Local import') }}</span>{% if f.audio_on_demand %}<span>·</span><span>{{ t('Audio on demand') }}</span>{% endif %}{% if f.folder %}<span>·</span><span>{{ f.folder.name }}</span>{% endif %}</span>
-          </td>
-          <td class="num dur-cell">{{ f.duration_ms | dur }}</td>
-          <td class="num rec-cell">{{ f.start_time_ms | dt }}</td>
-          <td class="row-menu-cell"><details class="row-menu"><summary aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg');width:15px;height:15px"></span></summary><div class="row-menu-popover"><div class="sub" style="padding:5px 9px 7px;font-size:10.5px">{{ t('Plaud cloud') if f.origin == 'plaud' else t('Local import') }}{% if f.audio_on_demand %} · {{ t('Audio on demand') }}{% endif %}{% if f.folder %} · {{ f.folder.name }}{% endif %}{% if f.status != 'done' %} · {{ t(f.status) }}{% endif %}</div><a href="/file/{{ f.id }}?return_to={{ return_to_param }}">{{ t('Open recording') }}</a>{% if f.has_transcript or f.has_summary %}<a href="/file/{{ f.id }}/export.md" data-no-partial>{{ t('Export') }}</a>{% endif %}</div></details></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table></div>
-    {% if pagination.pages > 1 %}
-    {% set page_start = (pagination.page - 1) * pagination.page_size + 1 %}
-    {% set page_end = [pagination.page * pagination.page_size, pagination.total] | min %}
-    <nav class="library-pagination" aria-label="{{ t('Library pages') }}">
-      <span class="sub pagination-summary">{{ page_start }}–{{ page_end }} {{ t('of') }} {{ pagination.total }}</span>
-      {% if pagination.page > 1 %}<a class="pagination-link pagination-edge" data-page-nav href="{{ request.url.include_query_params(page=pagination.page - 1) }}" aria-label="{{ t('Previous') }}">‹</a>{% else %}<span class="pagination-link pagination-edge" aria-disabled="true" aria-label="{{ t('Previous') }}">‹</span>{% endif %}
-      <span class="pagination-pages">
-        {% for item in range(1, pagination.pages + 1) %}
-          {% if item == pagination.page %}<span class="pagination-current" aria-current="page" aria-label="{{ t('Page') }} {{ item }}">{{ item }}</span>
-          {% else %}<a class="pagination-link" data-page-nav href="{{ request.url.include_query_params(page=item) }}" aria-label="{{ t('Page') }} {{ item }}">{{ item }}</a>{% endif %}
-        {% endfor %}
-      </span>
-      {% if pagination.page < pagination.pages %}<a class="pagination-link pagination-edge" data-page-nav href="{{ request.url.include_query_params(page=pagination.page + 1) }}" aria-label="{{ t('Next') }}">›</a>{% else %}<span class="pagination-link pagination-edge" aria-disabled="true" aria-label="{{ t('Next') }}">›</span>{% endif %}
-    </nav>
-    {% endif %}
-    {% endif %}
+    {{ file_table_head(lib, liburl, selectable=selectable) }}
+    <ul class="file-list" aria-label="{{ view_title }}">
+      {% for f in files %}{{ file_row(f, return_to_param=return_to_param, selectable=selectable, show_folder=lib.folder is none) }}{% endfor %}
+    </ul>
+  </div>
+  {% if pagination.pages > 1 %}
+  {% set page_start = (pagination.page - 1) * pagination.page_size + 1 %}
+  {% set page_end = [pagination.page * pagination.page_size, pagination.total] | min %}
+  <nav class="pagination library-pagination" aria-label="{{ t('Library pages') }}">
+    <span class="sub pagination-summary">{{ page_start }}–{{ page_end }} {{ t('of') }} {{ pagination.total }}</span>
+    {% if pagination.page > 1 %}<a class="pagination-link pagination-edge" data-page-nav href="{{ request.url.include_query_params(page=pagination.page - 1) }}" aria-label="{{ t('Previous') }}">{{ icon('chevron-left', 'sm') }}</a>{% else %}<span class="pagination-link pagination-edge" aria-disabled="true" aria-label="{{ t('Previous') }}">{{ icon('chevron-left', 'sm') }}</span>{% endif %}
+    {% for item in range(1, pagination.pages + 1) %}
+      {% if item == pagination.page %}<span class="pagination-current" aria-current="page" aria-label="{{ t('Page') }} {{ item }}">{{ item }}</span>
+      {% else %}<a class="pagination-link" data-page-nav href="{{ request.url.include_query_params(page=item) }}" aria-label="{{ t('Page') }} {{ item }}">{{ item }}</a>{% endif %}
+    {% endfor %}
+    {% if pagination.page < pagination.pages %}<a class="pagination-link pagination-edge" data-page-nav href="{{ request.url.include_query_params(page=pagination.page + 1) }}" aria-label="{{ t('Next') }}">{{ icon('chevron-right', 'sm') }}</a>{% else %}<span class="pagination-link pagination-edge" aria-disabled="true" aria-label="{{ t('Next') }}">{{ icon('chevron-right', 'sm') }}</span>{% endif %}
+  </nav>
+  {% endif %}
+  {% endif %}
   {% endif %}
 </div></div>
+{% if active != 'ask' %}
+<dialog class="sheet" id="library-sheet" aria-labelledby="library-sheet-title">
+  <div class="sheet-grabber" aria-hidden="true"></div>
+  <div class="dialog-head"><h2 class="dialog-title" id="library-sheet-title">{{ t('Folders and filters') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+  <div class="dialog-body" style="padding:0 0 12px">
+    <div class="sheet-section">{{ t('Sort by') }}</div>
+    <div class="sheet-sort">
+      {% for key, label, dir in [('recorded', t('Date created'), 'desc'), ('name', t('Name'), 'asc'), ('duration', t('Duration'), 'desc')] %}
+      {% set on = lib.sort == key %}<a class="chip{% if on %} on{% endif %}" href="{{ liburl(sort=key, dir=(('asc' if lib.dir == 'desc' else 'desc') if on else dir)) }}"{% if on %} aria-current="true"{% endif %}>{{ label }}{% if on %}{{ icon('arrow-up' if lib.dir == 'asc' else 'arrow-down', 'xs') }}{% endif %}</a>
+      {% endfor %}
+    </div>
+    <ul class="sheet-list">
+      <li><a class="sheet-row" href="/" {% if lib.view == 'all' and filter_count == 0 %}aria-current="page"{% endif %}>{{ icon('files') }}<span>{{ t('All files') }}</span><span class="count">{{ sidebar.counts.all }}</span></a></li>
+      <li><a class="sheet-row" href="/?view=uncategorized" {% if lib.view == 'uncategorized' %}aria-current="page"{% endif %}>{{ icon('inbox') }}<span>{{ t('Unfiled') }}</span><span class="count">{{ sidebar.counts.uncategorized }}</span></a></li>
+      <li><a class="sheet-row" href="/?view=trash" {% if lib.view == 'trash' %}aria-current="page"{% endif %}>{{ icon('trash') }}<span>{{ t('Trash') }}</span><span class="count">{{ sidebar.counts.trash }}</span></a></li>
+    </ul>
+    <div class="sheet-section sheet-section-row"><span>{{ t('Folders') }}</span><button class="icon-btn" type="button" data-folder-create aria-label="{{ t('New folder') }}">{{ icon('plus', 'sm') }}</button></div>
+    <ul class="sheet-list">
+      {% for folder in organization.folders %}<li><a class="sheet-row" href="/?folder={{ folder.id }}" {% if lib.folder == folder.id %}aria-current="page"{% endif %}><span class="folder-glyph" style="--folder-color:{{ folder.color or 'var(--c-text-2)' }}">{{ icon('folder') }}</span><span class="truncate">{{ folder.name }}</span><span class="count">{{ folder.count }}</span></a></li>
+      {% else %}<li><button class="sheet-row" type="button" data-folder-create>{{ icon('folder-plus') }}<span>{{ t('Create a folder') }}</span></button></li>{% endfor %}
+    </ul>
+    <div class="sheet-section">{{ t('Comes from') }}</div>
+    <ul class="sheet-list">
+      {% for sc in facets.scenes %}<li><a class="sheet-row" href="/?scene={{ sc.value }}" {% if sc.active %}aria-current="page"{% endif %}>{{ icon('smartphone' if sc.value == 101 else ('upload' if sc.value == 102 else ('mic' if sc.value in (1, 7) else 'waveform'))) }}<span>{{ t(sc.label) }}</span><span class="count">{{ sc.count }}</span></a></li>{% endfor %}
+      {% for source in facets.origins %}<li><a class="sheet-row" href="/?origin={{ source.value }}" {% if source.active %}aria-current="page"{% endif %}>{{ icon('cloud' if source.value == 'plaud' else 'drive') }}<span>{{ t(source.label) }}</span><span class="count">{{ source.count }}</span></a></li>{% endfor %}
+    </ul>
+    <div class="sheet-section">{{ t('Status') }}</div>
+    <ul class="sheet-list">
+      <li><a class="sheet-row" href="/?state=active" {% if lib.state == 'active' %}aria-current="page"{% endif %}>{{ icon('loader') }}<span>{{ t('Processing') }}</span><span class="count">{{ sidebar.ops.processing }}</span></a></li>
+      <li><a class="sheet-row" href="/?state=attention" {% if lib.state == 'attention' %}aria-current="page"{% endif %}>{{ icon('alert') }}<span>{{ t('Needs attention') }}</span><span class="count">{{ sidebar.ops.attention }}</span></a></li>
+      <li><a class="sheet-row" href="/?state=done" {% if lib.state == 'done' %}aria-current="page"{% endif %}>{{ icon('circle-check') }}<span>{{ t('Ready') }}</span><span class="count">{{ sidebar.ops.ready }}</span></a></li>
+    </ul>
+  </div>
+</dialog>
+{% endif %}
 {% if files and lib.view != 'trash' and pagination.pages > 1 %}
 <div class="import-backdrop" id="page-change-backdrop" hidden>
   <section class="import-modal page-change-modal" role="alertdialog" aria-modal="true" aria-labelledby="page-change-title" aria-describedby="page-change-description">
@@ -632,7 +427,7 @@
   const organizationRowTemplate = document.getElementById('organization-manager-row-template');
   let organizationData = null;
   let organizationRequest = null;
-  const organizationModal = organizationBackdrop ? window.localplaudModal({backdrop:organizationBackdrop,background:()=>[document.querySelector('.library-page'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')],cleanupSignal:cleanupController.signal}) : null;
+  const organizationModal = organizationBackdrop ? window.localplaudModal({backdrop:organizationBackdrop,background:()=>[document.querySelector('.library-page'),document.querySelector('.sidebar'),document.querySelector('.m-topbar'),document.querySelector('.nav-scrim')],cleanupSignal:cleanupController.signal}) : null;
   document.addEventListener('keydown',event=>{if(event.key!=='Escape'||organizationBackdrop?.hidden)return;event.preventDefault();event.stopImmediatePropagation();organizationModal?.close();},{capture:true,signal:cleanupController.signal});
   const organizationDetail = (data, fallback) => { const detail=data?.detail,item=Array.isArray(detail)?detail[0]?.msg:detail;return tr(typeof item==='string'?item:fallback); };
   const getOrganization = async () => {
@@ -691,7 +486,7 @@
   const pageChangeCancel = document.getElementById('page-change-cancel');
   const pageChangeConfirm = document.getElementById('page-change-confirm');
   let targetRequestVersion = 0;
-  const pageChangeModal = pageChangeBackdrop ? window.localplaudModal({backdrop:pageChangeBackdrop,background:()=>[document.querySelector('.library-page'),document.querySelector('.sidebar'),document.querySelector('.mobile-bar'),document.querySelector('.nav-scrim')],cleanupSignal:cleanupController.signal}) : null;
+  const pageChangeModal = pageChangeBackdrop ? window.localplaudModal({backdrop:pageChangeBackdrop,background:()=>[document.querySelector('.library-page'),document.querySelector('.sidebar'),document.querySelector('.m-topbar'),document.querySelector('.nav-scrim')],cleanupSignal:cleanupController.signal}) : null;
   let pendingPageUrl = null;
   let exportOpener = null;
   let backgroundInert = new Map();
@@ -730,7 +525,29 @@
       control.indeterminate = n > 0 && n < checks.length;
     });
     if (!n) closeDeleteConfirm({restoreFocus:false});
+    const table = document.getElementById('library-table');
+    table?.classList.toggle('has-selection', n > 0);
+    if (n > 0) table?.classList.add('is-selecting');
+    checks.forEach(c => c.closest('.file-row')?.classList.toggle('is-selected', c.checked));
+    const batchAll = document.getElementById('select-all-batch');
+    if (batchAll) { batchAll.checked = n > 0 && n === checks.length; batchAll.indeterminate = n > 0 && n < checks.length; }
   }
+  document.getElementById('select-all-batch')?.addEventListener('change', event => {
+    const everything = event.currentTarget.checked;
+    checks.forEach(c => { c.checked = everything; });
+    sync();
+  }, {signal:cleanupController.signal});
+  document.addEventListener('click', event => {
+    if (event.target.closest('[data-select-mode]')) {
+      const table = document.getElementById('library-table');
+      table?.classList.toggle('is-selecting');
+      if (!table?.classList.contains('is-selecting')) { checks.forEach(c => { c.checked = false; }); sync(); }
+      return;
+    }
+    if (event.target.closest('[data-open-filters]') && filterMenu) { filterReturnFocus = document.activeElement; filterMenu.open = true; return; }
+    const proxy = event.target.closest('[data-proxy-click]');
+    if (proxy) document.getElementById(proxy.dataset.proxyClick)?.click();
+  }, {signal:cleanupController.signal});
   async function targets() {
     if (!target || !action) return;
     const requestVersion = ++targetRequestVersion;
@@ -791,7 +608,7 @@
     if (matching) mobileSort.value = matching.value;
   };
   window.addEventListener('pageshow', syncMobileSortFromLocation, {signal:cleanupController.signal});
-  clear?.addEventListener('click', () => { checks.forEach(c => c.checked = false); sync(); });
+  clear?.addEventListener('click', () => { checks.forEach(c => c.checked = false); document.getElementById('library-table')?.classList.remove('is-selecting'); sync(); });
   action?.addEventListener('change', () => { closeDeleteConfirm({restoreFocus:false}); targets(); });
   deleteProcessing?.addEventListener('click', () => {
     if (!selected().length) return;
@@ -811,7 +628,7 @@
 
   const exportFocusables = () => [...exportBackdrop.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])')].filter(item => !item.closest('[hidden]'));
   function setExportBackgroundInert(inert) {
-    const regions = [...document.querySelectorAll('.sidebar,.mobile-bar,.library-page')];
+    const regions = [...document.querySelectorAll('.sidebar,.m-topbar,.m-tabbar,.library-page')];
     if (inert) {
       backgroundInert = new Map(regions.map(region => [region, region.inert]));
       regions.forEach(region => { region.inert = true; });
