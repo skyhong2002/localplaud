@@ -14,6 +14,8 @@ from threading import Barrier
 import pytest
 from sqlalchemy import create_engine, inspect, select, text
 
+from tests.assets import with_assets
+
 
 def test_local_transcript_uniqueness_migration_preserves_cloud_and_revision(tmp_path):
     from localplaud.db.migrations import migrate_local_transcript_uniqueness
@@ -650,10 +652,11 @@ def test_segment_editor_lists_stable_speakers_and_restores_focus_contract(
     assert "headers: { accept: 'application/json' }" in workspace_js
     assert "paragraph.innerHTML = before.html;" in workspace_js  # rollback on failure
     assert "recording_processing: 'Recording is processing." in workspace_js
-    assert "document.querySelector('[data-segment-edit-error]')?.focus()" in detail.text
-    assert ".seg:focus-within .editbtn" in detail.text
-    assert ".seg .editbtn:focus-visible" in detail.text
-    assert ".seg .editbtn { opacity:0" in detail.text
+    detail_assets = with_assets(c, detail)
+    assert "document.querySelector('[data-segment-edit-error]')?.focus()" in detail_assets
+    assert ".seg:focus-within .editbtn" in detail_assets
+    assert ".seg .editbtn:focus-visible" in detail_assets
+    assert ".seg .editbtn { opacity:0" in detail_assets
 
 
 def test_native_segment_form_preserves_workspace_and_has_accessible_error_recovery(

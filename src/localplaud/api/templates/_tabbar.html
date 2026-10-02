@@ -1,0 +1,11 @@
+<nav class="m-tabbar" aria-label="{{ t('Primary') }}">
+  <a class="m-tab" href="/" {% if active in ('home', 'recordings') %}aria-current="page"{% endif %}>{{ icon('files') }}<span>{{ t('Files') }}</span></a>
+  <div class="m-plus-wrap menu-wrap">
+    <button class="m-plus" type="button" data-menu="m-plus-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="m-plus-menu" aria-label="{{ t('Add audio') }}">{{ icon('plus') }}</button>
+    <div class="menu m-plus-menu" id="m-plus-menu" role="menu" hidden>
+      <button class="menu-item" type="button" role="menuitem" data-open-import="device">{{ icon('upload') }}<span>{{ t('Import audio') }}<small>{{ t('From this device') }}</small></span></button>
+      <button class="menu-item" type="button" role="menuitem" data-open-import="plaud">{{ icon('refresh') }}<span>{{ t('Sync from Plaud now') }}<small>{{ t('Metadata first · audio on demand') }}</small></span></button>
+    </div>
+  </div>
+  <a class="m-tab" href="/discover" {% if active == 'discover' %}aria-current="page"{% endif %}>{{ icon('grid') }}<span>{{ t('Explore') }}</span></a>
+</nav>

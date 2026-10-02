@@ -156,8 +156,9 @@ def test_disabled_sync_still_schedules_local_recovery(monkeypatch):
 def test_parallel_slots_refill_without_waiting_for_slow_sibling(monkeypatch):
     import threading
     import time
-    from localplaud.worker.daemon import DaemonJobs
+
     from localplaud.worker.claims import current_processing_owner
+    from localplaud.worker.daemon import DaemonJobs
 
     settings = Settings(_env_file=None)
     settings.pipeline.concurrency = 2

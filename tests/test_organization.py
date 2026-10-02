@@ -215,7 +215,7 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert "Library organization" in page.text
     assert "Research" in page.text
     assert "Interview" in page.text
-    assert "Uncategorized" in page.text
+    assert "Unfiled" in page.text
     assert 'id="bulkbar"' in page.text
     assert 'id="organization-manager-open"' in page.text
     assert 'id="organization-manager-backdrop" hidden' in page.text
@@ -265,7 +265,7 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert 'aria-describedby="bulk-delete-description" hidden' in page.text
     assert "Delete local transcript, corrections, generated notes, mind map, search index, and processing history?" in page.text
     assert '<ul class="bulk-danger-preserved" role="list">' in page.text
-    assert page.text.count('<li><i class="nav-icon"') == 7
+    assert page.text.split('class="bulk-danger-preserved"', 1)[1].split('</ul>', 1)[0].count('<li>') == 7
     for preserved in (
         "Original audio",
         "Folders",

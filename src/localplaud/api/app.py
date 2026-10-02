@@ -94,10 +94,12 @@ from .notes import router as notes_router
 from .providers import router as providers_router
 from .share_links import router as share_links_router
 from .system import router as system_router
+from .ui import register as register_ui_helpers
 from .vocabulary import router as vocabulary_router
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
+register_ui_helpers(templates.env)
 _NOTE_SOURCE_LABELS = {
     "manual": "Created by you",
     "ask": "Saved from Ask",
@@ -1883,9 +1885,51 @@ def home(request: Request):
         stats = _stats(session)
         recent_files = _file_summaries(session, recent_rows)
         attention_files = _file_summaries(session, attention_rows)
+        processing_files = _file_summaries(
+            session,
+            list(
+                session.scalars(
+                    select(PlaudFile)
+                    .where(
+                        PlaudFile.is_trash.is_(False),
+                        PlaudFile.status.in_(_STATE_ALIASES["generating"]),
+                    )
+                    .order_by(PlaudFile.updated_at.desc())
+                    .limit(3)
+                )
+            ),
+        )
+        # The stage that needs the user, so Home can say *what* is wrong.
+        attention_ids = [item["id"] for item in attention_files]
+        attention_stages: dict[str, str] = {}
+        for file_id, stage, status in session.execute(
+            select(StageRun.file_id, StageRun.stage, StageRun.status)
+            .where(
+                StageRun.file_id.in_(attention_ids),
+                StageRun.status.in_([StageStatus.failed, StageStatus.degraded]),
+            )
+            .order_by(StageRun.id)
+        ):
+            attention_stages.setdefault(file_id, f"{stage.value}:{status.value}")
+        home_templates = [
+            note_template_item(row)
+            for row in session.scalars(
+                select(NoteTemplate)
+                .where(NoteTemplate.is_active.is_(True))
+                .order_by(
+                    NoteTemplate.is_builtin.asc(),
+                    NoteTemplate.created_at.desc(),
+                    NoteTemplate.name,
+                )
+                .limit(4)
+            )
+        ]
     ctx = _base_ctx(request, "home") | {
         "recent_files": recent_files,
         "attention_files": attention_files,
+        "attention_stages": attention_stages,
+        "processing_files": processing_files,
+        "home_templates": home_templates,
         "stats": stats,
         "metadata_only": metadata_only,
         "audio_local": audio_local,

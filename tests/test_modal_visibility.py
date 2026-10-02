@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.assets import with_assets
+
 
 def test_hidden_rule_wins_over_modal_display(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -21,6 +23,7 @@ def test_hidden_rule_wins_over_modal_display(monkeypatch, tmp_path):
 
     init_db()
     page = TestClient(app).get("/")
+    page_assets = with_assets(TestClient(app), page)
     assert page.status_code == 200
-    assert "[hidden] { display:none !important; }" in page.text
-    assert 'class="import-backdrop" id="import-backdrop" hidden' in page.text
+    assert "[hidden] { display: none !important; }" in page_assets
+    assert 'class="import-backdrop" id="import-backdrop" hidden' in page_assets
