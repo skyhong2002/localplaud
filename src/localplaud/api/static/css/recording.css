@@ -478,3 +478,4 @@ body.ws-mm-full-open { overflow: hidden; }
   .recording-shell .transcript-popover.search-popover { left: auto; right: 0; width: 360px; box-shadow: 0 0 32px rgba(0, 0, 0, .10); border-color: var(--c-border-ui, #E5E7EB); border-radius: 5px; }
 }
 .ws-template-card .chip { justify-self: start; }
+.recording-shell #reprocess-msg { margin-inline: auto !important; }
