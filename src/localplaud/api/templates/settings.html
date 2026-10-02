@@ -79,7 +79,7 @@
   <section class="sf-settings-group" id="group-account" data-sf-group="account" aria-labelledby="group-account-title">
   <h2 class="sf-settings-group-title" id="group-account-title">{{ t('Account & security') }}</h2>
   <div class="panel sf-settings-panel" id="plaud-account">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
       <div><strong>{{ t('Plaud account') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Read-only official Plaud MCP connection used for metadata and raw audio.') if plaud_provider == 'mcp' else t('Read-only Open API connection used for metadata and raw audio.') }}</div></div>
       <span class="st {{ 'healthy' if plaud_auth.ok else 'failed' }}">{{ t('connected') if plaud_auth.ok else t('sign-in required') }}</span>
     </div>
@@ -91,7 +91,7 @@
     {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">{% if plaud_provider == 'mcp' %}{{ t('Run the official Plaud MCP installer on this machine to sign in.') }} <code>npx -y @plaud-ai/mcp@latest install</code>{% else %}{{ t('On the machine running localplaud, run the following command. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.') }} <code>localplaud auth login</code>{% endif %}</div>{% endif %}
   </div>
   <div class="panel sf-settings-panel" id="access-security">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Access & security') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Truthful authentication boundaries for this deployment.') }}</div></div><span class="st {{ 'done' if about.access.browser_login_configured else 'degraded' }}">{{ t('Web login configured') if about.access.browser_login_configured else t('Web login not configured') }}</span></div>
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Access & security') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Truthful authentication boundaries for this deployment.') }}</div></div><span class="st {{ 'done' if about.access.browser_login_configured else 'degraded' }}">{{ t('Web login configured') if about.access.browser_login_configured else t('Web login not configured') }}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px;margin-top:12px">
       <div class="tile"><div class="k">{{ t('Application authentication') }}</div><div style="margin-top:4px">{{ t('Revocable browser session') if about.access.browser_login_configured else t('No Web login') }}</div></div>
       <div class="tile"><div class="k">{{ t('Reverse proxy') }}</div><div style="margin-top:4px">{{ t('External · not observable by localplaud') }}</div></div>
@@ -197,7 +197,7 @@
   <section class="sf-settings-group" id="group-processing" data-sf-group="processing" aria-labelledby="group-processing-title">
   <h2 class="sf-settings-group-title" id="group-processing-title">{{ t('Speech & AI providers') }}</h2>
   <div class="panel sf-settings-panel" id="hardware-profiles">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div><strong>{{ t('Recommended for this host') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Evidence-based local ASR profiles; no accelerator is claimed unless detected.') }}</div></div>
       <span class="chip">{{ hardware_recommendations.host.system }} · {{ hardware_recommendations.host.machine }}{% if hardware_recommendations.host.memory_gb %} · {{ hardware_recommendations.host.memory_gb }} GB{% endif %}</span>
     </div>
@@ -289,7 +289,7 @@
         </summary>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px">
           {% for stage, selection in p.stages.items() %}
-          <div class="tile"><div class="k">{{ stage }}</div><div style="font-weight:600;margin-top:3px">{{ selection.model }}</div><div class="sub" style="font-size:11px">{{ selection.connection }} · {{ selection.execution_target }}</div></div>
+          <div class="tile"><div class="k">{{ stage }}</div><div style="font-weight:600;margin-top:3px">{{ selection.model }}</div><div class="sub" style="font-size:11px">{{ selection.connection }}{% if selection.execution_target %} · {{ selection.execution_target }}{% endif %}</div></div>
           {% endfor %}
         </div>
         {% set fallbacks=(p.policy.fallback_policy or {}).stages or {} %}{% if fallbacks %}<div class="sub" style="font-size:11.5px;margin-top:10px"><strong>{{ t('Fallback order') }}</strong>{% for stage, candidates in fallbacks.items() %}{% if candidates %}<div style="margin-top:3px">{{ stage }} · {% for candidate in candidates %}{{ loop.index }}. {{ candidate.connection }}:{{ candidate.model }}{% if not loop.last %} → {% endif %}{% endfor %}</div>{% endif %}{% endfor %}</div>{% endif %}
@@ -334,7 +334,7 @@
       <select class="search-input select" name="connection_id" required>{% for c in connections %}<option value="{{ c.id }}" data-target="{{ c.execution_target }}" data-egress="{{ 'true' if c.data_egress else 'false' }}">{{ c.name }}</option>{% endfor %}</select>
       <input class="search-input" name="model_key" placeholder="{{ t('Model identifier') }}" required>
       <input class="search-input" name="display_name" placeholder="{{ t('Display name') }}" required>
-      <div class="sub" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">{% for stage in provider_stages %}<label><input type="checkbox" name="capability" value="{{ stage }}"> {{ stage }}</label>{% endfor %}</div>
+      <div class="sub settings-checks">{% for stage in provider_stages %}<label><input type="checkbox" name="capability" value="{{ stage }}"> {{ stage }}</label>{% endfor %}</div>
       <input class="search-input" type="number" min="0" step="0.000001" name="input_price" placeholder="{{ t('Input $ / 1M tokens (optional)') }}">
       <input class="search-input" type="number" min="0" step="0.000001" name="output_price" placeholder="{{ t('Output $ / 1M tokens (optional)') }}">
       <input class="search-input" type="number" min="0" step="0.000001" name="audio_price" placeholder="{{ t('Audio $ / minute (optional)') }}">
@@ -397,7 +397,7 @@
   <section class="sf-settings-group" id="group-data" data-sf-group="data" aria-labelledby="group-data-title">
   <h2 class="sf-settings-group-title" id="group-data-title">{{ t('Sync, backup & privacy') }}</h2>
   <div class="panel sf-settings-panel" id="private-backup">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><strong>{{ t('Private workspace backup') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Consistent SQLite snapshot with manifest and SHA-256. Secrets, config, and Plaud tokens are excluded.') }}</div></div><a class="sub" href="/api/docs" style="font-size:12px">{{ t('API documentation') }} ↗</a></div>
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><strong>{{ t('Private workspace backup') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Consistent SQLite snapshot with manifest and SHA-256. Secrets, config, and Plaud tokens are excluded.') }}</div></div><a class="sub" href="/api/docs" style="font-size:12px">{{ t('API documentation') }} ↗</a></div>
     {% if backup_error %}<div class="sub" style="color:var(--red);margin-top:12px">{{ backup_error }}</div>{% else %}
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:13px"><button class="btn backup-create" data-media="false" type="button">{{ t('Back up database') }}</button><button class="btn sec backup-create" data-media="true" type="button">{{ t('Back up database + media') }}</button><span id="backup-result" class="sub"></span></div>
     <p class="sub" style="font-size:11.5px;margin:9px 0 0">{{ t('Media archives may be very large. Keep every downloaded backup private: transcripts and notes can contain sensitive information.') }}</p>
@@ -514,7 +514,7 @@
   <section class="sf-settings-group" id="group-help" data-sf-group="help" aria-labelledby="group-help-title">
   <h2 class="sf-settings-group-title" id="group-help-title">{{ t('Help & about') }}</h2>
   <div class="panel sf-settings-panel" id="system-health">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('System health') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Processing queue and provider checks for this workspace.') }}</div></div><a class="btn sec" href="/status">{{ t('Open system status') }}</a></div>
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('System health') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Processing queue and provider checks for this workspace.') }}</div></div><a class="btn sec" href="/status">{{ t('Open system status') }}</a></div>
     <div class="sf-health-grid">
       <div class="tile"><div class="k">{{ t('ready') }}</div><div class="sf-health-n">{{ sidebar.ops.ready }}</div></div>
       <div class="tile"><div class="k">{{ t('generating') }}</div><div class="sf-health-n">{{ sidebar.ops.processing }}</div></div>
@@ -523,7 +523,7 @@
     </div>
   </div>
   <div class="panel sf-settings-panel" id="support-about">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Support & about') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Runtime identity and a deliberately redacted support bundle.') }}</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Support & about') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Runtime identity and a deliberately redacted support bundle.') }}</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;margin-top:12px"><div class="tile"><div class="k">{{ t('Runtime') }}</div><div style="margin-top:4px">Python {{ about.python }}</div></div><div class="tile"><div class="k">{{ t('Host') }}</div><div style="margin-top:4px">{{ about.system }} · {{ about.machine }}</div></div><div class="tile"><div class="k">{{ t('License') }}</div><div style="margin-top:4px">{{ about.license }}</div></div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px"><a class="btn" href="/api/system/diagnostics.json">{{ t('Download safe diagnostics') }}</a><a class="btn sec" href="/status">{{ t('System health') }}</a><a class="btn sec" href="/api/docs">{{ t('API documentation') }}</a><a class="btn sec" href="{{ about.support.repository }}" target="_blank" rel="noopener">{{ t('GitHub repository') }} ↗</a></div>
     <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t('Diagnostics contain aggregate counts and non-secret runtime switches only. Recording IDs, titles, content, paths, URLs, addresses, errors, environment variables, and credentials are excluded.') }}</p>
@@ -540,7 +540,7 @@
 .resolution-preview-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:9px;margin-top:12px;align-items:end}.resolution-preview-form .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--c-text-2);min-width:0}.resolution-preview-actions{display:flex;align-items:end}.resolution-preview-result{margin-top:12px;display:grid;gap:10px}.resolution-layers{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:6px 0 0;padding:0}.resolution-stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.resolution-stage{display:flex;flex-direction:column;gap:4px;min-width:0}.resolution-model{font-weight:600;overflow-wrap:anywhere}.resolution-stage .sub{font-size:11px;overflow-wrap:anywhere}.resolution-stage .chip{align-self:flex-start}.chip.resolution-egress{color:var(--c-warn);background:var(--c-warn-soft)}.resolution-error{color:var(--c-danger);font-size:12.5px}
 .worker-entry{border-top:1px solid var(--c-border);padding-top:9px}.worker-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px 14px;margin:8px 0 0;font-size:12px}.worker-facts>div{min-width:0}.worker-facts dt{color:var(--c-text-2);font-size:11px}.worker-facts dd{margin:2px 0 0;overflow-wrap:anywhere;color:var(--c-text-body)}.worker-facts .chip{margin:0 4px 4px 0}.chip.worker-revoked{color:var(--c-danger);background:var(--c-danger-soft)}
 .storage-usage{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin:12px 0 0}.storage-usage>div{background:var(--c-surface-2);border-radius:var(--radius-md);padding:10px 12px;min-width:0}.storage-usage dt{font-size:11.5px;color:var(--c-text-2)}.storage-usage dd{margin:3px 0 0;font-weight:600;color:var(--c-text)}.storage-usage dd.sub{font-weight:400;font-size:11px;color:var(--c-text-2)}.retention-form{display:flex;gap:9px;align-items:end;flex-wrap:wrap;margin-top:14px}.retention-form .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--c-text-2);min-width:min(240px,100%)}.retention-dialog-list{margin:8px 0 0;padding-left:18px;font-size:12.5px;overflow-wrap:anywhere;max-height:40vh;overflow:auto}
-.starter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;margin-top:12px;align-items:start}.starter-card summary{cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}.starter-card summary:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px}.starter-egress{font-size:12px;margin:8px 0}.starter-form{display:grid;gap:8px}.starter-form .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--c-text-2);min-width:0}.starter-help{font-size:11px;margin:0}.starter-ack{display:flex;gap:7px;align-items:flex-start;font-size:12px;color:var(--c-text-body)}.starter-result{font-size:12px;margin:0}
+.starter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;margin-top:12px;align-items:start}.starter-card summary{cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:6px}.starter-card summary:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px}.starter-egress{font-size:12px;margin:8px 0}.starter-form{display:grid;gap:8px}.starter-form .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--c-text-2);min-width:0}.starter-help{font-size:11px;margin:0}.starter-ack{display:flex;gap:7px;align-items:flex-start;font-size:12px;color:var(--c-text-body)}.starter-result{font-size:12px;margin:0}
 </style>
 <script>
 (()=>{

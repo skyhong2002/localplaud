@@ -547,14 +547,15 @@ a.sf-app-card:hover { border-color:var(--c-border-strong,var(--border2)); }
 .settings-actions { display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;flex:none;max-width:100%; }
 .settings-actions .btn { white-space:nowrap; }
 .settings-actions>.st { margin-right:2px; }
-.settings-row { display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--c-border);padding-top:10px; }
+.settings-row { display:flex;justify-content:space-between;align-items:center;gap:12px;min-width:0;border-top:1px solid var(--c-border);padding-top:10px; }
 .settings-row-plain { border-top:0;padding-top:0; }
 .settings-row[data-disabled]>.settings-row-main { opacity:.55; }
 .settings-row-main { flex:1 1 auto;min-width:0;overflow-wrap:anywhere; }
 .settings-row-main code,.settings-wrap code,.settings-model-name { overflow-wrap:anywhere; }
 .settings-panel-head { display:flex;justify-content:space-between;align-items:center;gap:8px 12px;flex-wrap:wrap; }
 .settings-panel-head>.sub { font-size:12px; }
-.settings-session { display:flex;justify-content:space-between;align-items:center;gap:12px; }
+.settings-panel-top>div:first-child { flex:1 1 220px;min-width:0; }
+.settings-session { display:flex;justify-content:space-between;align-items:center;gap:12px;min-width:0; }
 .settings-model { display:flex;flex-direction:column;min-width:0; }
 .settings-model-actions { justify-content:flex-start;margin-top:auto;padding-top:10px; }
 .settings-profile { border-top:1px solid var(--c-border);padding-top:11px; }
@@ -587,6 +588,7 @@ a.sf-app-card:hover { border-color:var(--c-border-strong,var(--border2)); }
   .settings-row>.settings-actions,.settings-session>.settings-actions { justify-content:flex-start; }
   .settings-profile-summary { flex-wrap:wrap; }
   .settings-profile-summary>.settings-actions { justify-content:flex-start; }
+  .settings-row>.settings-row-main,.settings-session>.settings-row-main,.settings-profile-summary>.settings-row-main { flex-basis:100%; }
   .settings-page .folder-profile-row { grid-template-columns:minmax(0,1fr); }
 }
 .sf-privacy-list { list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:13.5px;line-height:1.5; }
