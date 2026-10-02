@@ -29,6 +29,61 @@ _NEIGHBOURHOOD_PREFIX = re.compile(
 _NEIGHBOURHOOD_TOKEN = "__LOCALPLAUD_NEIGHBOURHOOD__"
 
 
+def fold_script(text: str) -> str:
+    """Fold Simplified characters to Traditional for script-insensitive matching.
+
+    Mixed-script ASR output (for example 「对，等等這樣子」) is legitimately quoted
+    by models in one script. This is a comparison key only and never replaces
+    stored text. Returns the input unchanged when OpenCC is not installed.
+    """
+    global _detect, _unavailable
+    if not text or _unavailable:
+        return text
+    if _detect is None:
+        try:
+            from opencc import OpenCC
+
+            _detect = OpenCC("s2t")
+        except Exception as exc:  # noqa: BLE001 - matching falls back to exact text
+            log.warning("OpenCC unavailable; leaving Chinese text unconverted: %s", exc)
+            _unavailable = True
+            return text
+    try:
+        return _detect.convert(text)
+    except Exception:  # noqa: BLE001
+        return text
+
+
+_KANA = re.compile(r"[\u3040-\u30ff]")
+_taiwan_chars = None
+
+
+def to_taiwan_script(text: str) -> str:
+    """Convert Simplified characters to Taiwan Traditional characters only.
+
+    Unlike :func:`to_traditional`, this uses OpenCC's character-level ``s2tw``
+    table without phrase rewriting, so already-Taiwan wording (權限, 軟體) and
+    mixed English stay untouched. Text containing Japanese kana is left alone.
+    Returns the input unchanged when OpenCC is not installed.
+    """
+    global _taiwan_chars, _unavailable
+    if not text or _unavailable or _KANA.search(text):
+        return text
+    if _taiwan_chars is None:
+        try:
+            from opencc import OpenCC
+
+            _taiwan_chars = OpenCC("s2tw")
+        except Exception as exc:  # noqa: BLE001 - normalisation must never break a stage
+            log.warning("OpenCC unavailable; leaving Chinese text unconverted: %s", exc)
+            _unavailable = True
+            return text
+    try:
+        return _taiwan_chars.convert(text)
+    except Exception:  # noqa: BLE001
+        return text
+
+
 def to_traditional(text: str | None) -> str | None:
     """Convert Simplified Chinese to Traditional (Taiwan phrasing).
 
@@ -45,7 +100,7 @@ def to_traditional(text: str | None) -> str | None:
         try:
             from opencc import OpenCC
 
-            _detect = OpenCC("s2t")
+            _detect = _detect or OpenCC("s2t")
             _convert = OpenCC("s2twp")
         except Exception as exc:  # noqa: BLE001 - normalisation must never break a stage
             log.warning("OpenCC unavailable; leaving Chinese text unconverted: %s", exc)

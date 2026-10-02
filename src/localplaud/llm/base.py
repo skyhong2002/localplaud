@@ -30,6 +30,14 @@ class LLMTransientError(LLMError):
     """Raised for transport, timeout, or temporary provider failures."""
 
 
+class LLMTimeout(LLMTransientError):
+    """Raised when one request exceeds the provider's per-call time limit.
+
+    Unlike transport or quota failures, a timeout is often caused by request
+    size, so chunked stages may retry the same content as smaller requests.
+    """
+
+
 class LLMQuotaExhausted(LLMTransientError):
     """Raised when a provider reports an explicit quota or usage limit."""
 

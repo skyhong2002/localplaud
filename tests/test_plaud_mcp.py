@@ -328,3 +328,49 @@ def test_mcp_download_audio_rejects_empty_body(monkeypatch, tmp_path):
     with pytest.raises(PlaudError, match="empty body"):
         client.download_audio(dto, tmp_path)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_link_backed_cloud_artifacts_are_read_without_account_headers(monkeypatch):
+    import httpx
+    import respx
+
+    from localplaud.plaud import official
+
+    client = _client_without_process(monkeypatch)
+    monkeypatch.setattr(official, "_assert_safe_fetch_url", lambda url: None)
+    detail = {
+        "note_list": [{"data_id": "n1", "data_type": "auto_sum_note",
+                       "data_tab_name": "Custom summary", "data_content": "",
+                       "data_link": "https://assets.example/note"}],
+        "source_list": [{"data_type": "transaction", "data_content": "",
+                         "data_link": "https://assets.example/transcript"}],
+    }
+    with respx.mock:
+        note = respx.get("https://assets.example/note").mock(
+            return_value=httpx.Response(200, text="## Topic\n\nFull note ending"))
+        transcript = respx.get("https://assets.example/transcript").mock(
+            return_value=httpx.Response(200, json=[{
+                "content": "Last words", "start_time": 1000, "end_time": 2000}]))
+        notes = client.get_cloud_notes("f", detail)
+        assert notes[0]["markdown"].endswith("Full note ending")
+        assert notes[0]["cloud_id"] == "n1"
+        assert notes[0]["tab_name"] == "Custom summary"
+        assert client.get_cloud_transcript_segments("f", detail)[0]["text"] == "Last words"
+        for route in (note, transcript):
+            assert "authorization" not in route.calls[0].request.headers
+            assert "cookie" not in route.calls[0].request.headers
+
+
+def test_link_backed_note_failure_is_not_reported_as_no_notes(monkeypatch):
+    import httpx
+    import respx
+
+    from localplaud.plaud import official
+
+    client = _client_without_process(monkeypatch)
+    monkeypatch.setattr(official, "_assert_safe_fetch_url", lambda url: None)
+    with respx.mock:
+        respx.get("https://assets.example/note").mock(return_value=httpx.Response(503))
+        with pytest.raises(httpx.HTTPStatusError):
+            client.get_cloud_notes("f", {"note_list": [{
+                "data_type": "auto_sum_note", "data_link": "https://assets.example/note"}]})

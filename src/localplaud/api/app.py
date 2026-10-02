@@ -2910,6 +2910,7 @@ def file_detail(
                     "title": s.title,
                     "content_md": s.content_md,
                     "template": s.template,
+                    "unavailable_images": (s.template_snapshot or {}).get("unavailable_images", 0),
                     "template_name": (s.template_snapshot or {}).get("name")
                     or s.template.replace("-", " ").title(),
                     "template_version": s.template_version,

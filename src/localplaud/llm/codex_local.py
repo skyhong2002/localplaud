@@ -16,9 +16,15 @@ from .base import (
     LLMError,
     LLMInputTooLarge,
     LLMQuotaExhausted,
+    LLMTimeout,
     LLMTransientError,
     LLMUnavailable,
 )
+
+
+class _QuotaCheckTimeout(LLMUnavailable):
+    """The local app-server did not report the subscription window in time."""
+
 
 _QUOTA_MARKERS = (
     "429",
@@ -161,7 +167,7 @@ class CodexLocalLLM:
                     raise LLMUnavailable("Codex subscription quota could not be read")
                 result = response.get("result") or {}
                 return self._remaining_from_rate_limit_result(result)
-            raise LLMUnavailable("Codex subscription quota check timed out")
+            raise _QuotaCheckTimeout("Codex subscription quota check timed out")
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise LLMUnavailable("Codex subscription quota check failed") from exc
         finally:
@@ -173,7 +179,12 @@ class CodexLocalLLM:
                     process.kill()
 
     def _ensure_quota_reserve(self) -> int:
-        remaining = self._remaining_quota_percent()
+        try:
+            remaining = self._remaining_quota_percent()
+        except _QuotaCheckTimeout:
+            # A slow app-server start occasionally misses the window. One fresh
+            # read is cheap; a second timeout still fails closed.
+            remaining = self._remaining_quota_percent()
         minimum = self.cfg.quota_reserve_percent + self.cfg.quota_call_headroom_percent
         if remaining <= minimum:
             raise LLMQuotaExhausted(
@@ -312,9 +323,7 @@ class CodexLocalLLM:
                     env=self._environment(),
                 )
             except subprocess.TimeoutExpired as exc:
-                raise LLMTransientError(
-                    f"Codex CLI timed out after {self.cfg.timeout_seconds}s"
-                ) from exc
+                raise LLMTimeout(f"Codex CLI timed out after {self.cfg.timeout_seconds}s") from exc
             except OSError as exc:
                 raise LLMUnavailable("could not start Codex CLI") from exc
 

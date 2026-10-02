@@ -858,7 +858,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
         'id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" '
         'aria-selected="true"'
     ) in r_assets
-    assert '>Meeting notes</button>' in r_assets
+    assert '>Notes</button>' in r_assets
     assert 'id="recording-panel-notes" role="tabpanel"' in r_assets
     assert (
         'id="recording-panel-notes" role="tabpanel" '
@@ -940,12 +940,11 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'aria-label="Back 15 seconds" title="Back 15 seconds"' in r_assets
     assert 'aria-label="Forward 15 seconds" title="Forward 15 seconds"' in r_assets
     assert "player.currentTime-15" in r_assets and "player.currentTime+15" in r_assets
-    assert 'id="open-share" type="button" aria-label="Share" title="Share"' in r_assets
-    assert 'id="open-export" type="button" aria-label="Export" title="Export"' in r_assets
+    assert 'id="open-share" type="button" data-recording-share aria-label="Share" title="Share"' in r_assets
+    assert 'id="open-export"' not in r.text
     header = r.text.split('<div class="recording-actions">', 1)[1].split("</details>", 1)[0]
     assert header.index('id="open-ask-dock"') < header.index('id="open-share"')
-    assert header.index('id="open-share"') < header.index('id="open-export"')
-    assert header.index('id="open-export"') < header.index('class="recording-more"')
+    assert header.index('id="open-share"') < header.index('class="recording-more"')
     assert 'class="tabs" role="tablist"' in r_assets
     assert 'id="recording-tab-transcript" role="tab"' in r_assets
     assert 'id="recording-panel-transcript" role="tabpanel"' in r_assets
@@ -995,7 +994,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'id="subscription-independence"' in r_assets
     assert "Subscription independence" in r_assets
     assert 'data-summary-edit=' in r_assets
-    assert 'id="open-share"' in r_assets and 'id="share-backdrop" hidden' in r_assets
+    assert 'id="open-share"' in r_assets and 'id="share-backdrop" data-file-id="r1" hidden' in r_assets
     assert 'id="generate-notes"' in r_assets
     assert "Choose a template, then generate notes and mind map." not in r.text
     assert 'id="generate-backdrop"' not in r.text  # transcript exists — no pre-generation dialog
@@ -1128,7 +1127,7 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         "失敗",
         "逐字稿",
         "在逐字稿中尋找",
-        "匯出錄音",
+        "分享",
         "時間戳記",
         "訂閱獨立性",
             "處理已暫停",
@@ -1405,14 +1404,15 @@ def test_export_menu_and_format_endpoints(monkeypatch, tmp_path):
     audio.write_bytes(b"audio")
     _seed(str(audio))
     page = c.get("/file/r1")
-    assert "Export recording" in page.text
+    assert 'data-share-panel="menu"' in page.text
+    assert 'id="export-backdrop"' not in page.text
     assert "Speaker labels" in page.text and "Original audio" in page.text
     assert 'id="copy-transcript"' in page.text and 'id="copy-notes"' in page.text
     assert "navigator.clipboard.writeText(text)" in page.text
     assert "document.execCommand('copy')" in page.text
     assert "priorFocus?.focus()" in page.text
-    assert "export/transcript.txt?timestamps=${timestamps}&speakers=${speakers}" in page.text
-    assert "fetch('/file/r1/export/notes.md',{signal:cleanupController.signal})" in page.text
+    assert "export/transcript.txt?timestamps=true&amp;speakers=true" in page.text
+    assert 'href="/file/r1/export/notes.md"' in page.text
     assert 'data-fmt="docx"' in page.text and 'data-fmt="pdf"' in page.text
     txt = c.get("/file/r1/export/transcript.txt?timestamps=false&speakers=false")
     assert txt.status_code == 200 and "hello team" in txt.text
@@ -1537,9 +1537,10 @@ def test_saved_note_only_recording_can_open_export_and_copy_notes(monkeypatch, t
 
     page = c.get("/file/notes-only")
     assert page.status_code == 200
-    assert 'id="open-export"' in page.text
+    assert 'data-recording-share' in page.text
+    assert 'data-share-view="notes"' in page.text
     assert 'id="copy-notes"' in page.text
-    assert 'id="copy-transcript"' not in page.text
+    assert re.search(r'<button[^>]+id="copy-transcript"[^>]+disabled', page.text)
     assert 'href="/file/notes-only/export.md"' in page.text
     exported = c.get("/file/notes-only/export/notes.md")
     assert exported.status_code == 200 and "Local content" in exported.text
@@ -1883,3 +1884,116 @@ def test_acoustic_revision_notice_describes_shown_history_and_preserves_tab(monk
     current = c.get('/file/history?tab=transcript')
     assert 'Transcript rechecked against audio.' in current.text
     assert '?view=raw&amp;tab=transcript&amp;return_to=' in current.text
+
+
+def test_recording_reading_and_share_entrypoints(monkeypatch, tmp_path):
+    """Local-only notes open for reading; public sharing is explicit, never automatic."""
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    page = client.get("/file/r1")
+    assert page.status_code == 200
+    html = page.text
+    assert 'class="recording-reading-title">Weekly Sync</h2>' in html
+    disclosure = re.search(r'<details[^>]+id="note-generation-settings"[^>]*>', html)
+    assert disclosure and 'open' not in disclosure.group()
+    assert 'id="menu-edit-title"' in html
+    assert 'id="menu-find-transcript"' in html
+    share = html.split('id="share-backdrop"', 1)[1].split('{% endblock', 1)[0]
+    assert share.index('id="public-share-title"') < share.index('class="workspace-share"')
+    assert 'id="create-public-share"' in share
+    assert 'data-share-view="transcript"' in share
+    assert 'data-share-view="notes"' in share
+    assert 'id="export-backdrop"' not in html
+    assert client.get('/api/files/r1/share-link').json()['active'] is False
+    assert 'src="/static/recording-share.js?v=3"' in html
+    assert "url.searchParams.set('tab',requested)" in html
+    assert "if(requested==='transcript')url.searchParams.delete('tab')" not in html
+
+
+def test_empty_recording_exposes_note_generation_settings(monkeypatch, tmp_path):
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import session_scope
+
+    client = _client(monkeypatch, tmp_path)
+    with session_scope() as session:
+        session.add(PlaudFile(id='empty-reader', filename='Empty recording', origin='upload'))
+    html = client.get('/file/empty-reader').text
+    disclosure = re.search(r'<details[^>]+id="note-generation-settings"[^>]*>', html)
+    assert disclosure and 'open' in disclosure.group()
+    assert 'A local transcript is required first.' in html
+
+
+def test_share_sheet_is_available_in_progressive_workspace(monkeypatch, tmp_path):
+    """Library navigation receives the complete share UI and its independent initializer."""
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    page = client.get('/file/r1?workspace=true', headers={'HX-Request': 'true'})
+    assert page.status_code == 200
+    assert 'data-recording-share' in page.text
+    assert 'id="share-backdrop" data-file-id="r1" hidden' in page.text
+    assert 'data-share-panel="menu"' in page.text
+    assert 'data-share-panel="link"' in page.text
+    assert 'data-share-panel="transcript"' in page.text
+    assert 'data-share-panel="notes"' in page.text
+    assert 'id="export-backdrop"' not in page.text
+    assert '/static/recording-share.js?v=3' in page.text
+    # HTMX retains the outer shell: its old CSS must not size the new sheet.
+    assert '<link rel="stylesheet" href="/static/recording-share.css?v=2">' in page.text
+    stylesheet = client.get('/static/recording-share.css?v=2')
+    assert stylesheet.status_code == 200
+    assert stylesheet.headers['content-type'].startswith('text/css')
+    # Fanboy Social's generic ##.share-body rule hides essential app controls.
+    # Keep our dialog body out of that generic social-widget namespace.
+    assert 'class="import-body lp-recording-actions-body"' in page.text
+    assert not re.search(r'class="[^"]*(?<![\w-])share-body(?![\w-])', page.text)
+    assert '.lp-recording-actions-body' in stylesheet.text
+    assert client.get('/static/recording-share.js?v=3').status_code == 200
+    assert client.get('/api/files/r1/share-link').json()['active'] is False
+
+
+def test_share_note_clipboard_payload_is_local_and_script_safe(monkeypatch, tmp_path):
+    from localplaud.db.models import PlaudFile, UserNote
+    from localplaud.db.session import session_scope
+
+    client = _client(monkeypatch, tmp_path)
+    content = '</script><script>alert("note")</script>\n\nLocal manual note'
+    with session_scope() as session:
+        session.add(PlaudFile(id='clipboard-note', filename='Notes', origin='upload'))
+        session.add(UserNote(file_id='clipboard-note', title='My note', content_md=content, source_type='manual'))
+    html = client.get('/file/clipboard-note').text
+    payload = re.search(r'<script type="application/json" data-copy-note-text="saved-\d+">(.*?)</script>', html, re.S)
+    assert payload is not None
+    assert '</script>' not in payload.group(1)
+    assert json.loads(payload.group(1)) == content
+    assert re.search(r'<button[^>]+id="copy-transcript"[^>]+disabled', html)
+    assert 'data-share-view="copy-notes"' in html
+
+
+def test_cloud_note_uses_imported_tab_name_and_explains_unavailable_card(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile, Summary
+    from localplaud.db.session import session_scope
+    with session_scope() as session:
+        session.add(PlaudFile(id="cloud-card", filename="Recording", origin="plaud", error="Local stage paused"))
+        session.add(Summary(file_id="cloud-card", template="auto_sum_note", source="cloud",
+                            template_snapshot={"name": "Project review", "source": "plaud"},
+                            content_md="[](plaud://image?type=summaryCard&id=synthetic)\n\n## Topic\n\nOriginal ending"))
+        session.add(PlaudFile(id="cloud-empty", filename="Empty", origin="plaud"))
+        session.add(PlaudFile(id="cloud-expired", filename="Expired image", origin="plaud"))
+        session.add(Summary(file_id="cloud-expired", template="auto_sum_note", source="cloud",
+                            template_snapshot={"name": "Summary", "unavailable_images": 1},
+                            content_md="Original text with unavailable image"))
+    expired = c.get("/file/cloud-expired?tab=notes")
+    assert 'class="sub cloud-image-notice"' in expired.text
+    assert 'Original text with unavailable image' in expired.text
+    page = c.get("/file/cloud-card?tab=notes")
+    assert "Project review" in page.text
+    recovery = re.search(r'<details class="recording-recovery"([^>]*)>', page.text)
+    assert recovery and "open" not in recovery.group(1)
+    assert "Auto_Sum_Note" not in page.text
+    assert 'class="sub cloud-image-notice"' in page.text
+    assert "<h2>Topic</h2>" in page.text
+    assert "<p>Original ending</p>" in page.text
+    empty = c.get("/file/cloud-empty?tab=notes")
+    assert "Import Plaud notes" in empty.text
+    assert 'data-cloud-import-status role="status"' in empty.text

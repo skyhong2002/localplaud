@@ -10,6 +10,7 @@ from localplaud.asr.base import Segment, Transcript, Word
 from localplaud.config import Settings
 from localplaud.llm.base import (
     LLMInputTooLarge,
+    LLMTimeout,
     LLMTransientError,
 )
 from localplaud.worker.polish import _propose_corrections as polish_transcript
@@ -78,7 +79,7 @@ def test_polish_preserves_ids_timestamps_speakers_and_words(monkeypatch):
     assert result["detail"]["changed_segment_ids"] == [0]
     assert result["provider"] == "opencode-go"
     assert result["model"] == "qwen3.7-plus"
-    assert result["prompt_version"] == "transcript-polish/v4"
+    assert result["prompt_version"] == "transcript-polish/v5"
 
 
 def test_polish_reports_chunk_and_segment_progress(monkeypatch):
@@ -498,3 +499,53 @@ def test_polish_token_budget_scales_with_target_text(monkeypatch):
     polish_transcript(transcript, Settings())
 
     assert provider.budgets[0] >= len(long_text) * 2
+
+
+def test_polish_splits_requests_that_time_out(monkeypatch):
+    class SizeLimitedPolisher(FakePolisher):
+        def complete(self, prompt, **kwargs):
+            request = json.loads(prompt)
+            self.requests.append(request)
+            if len(request["target_segments"]) > 1:
+                raise LLMTimeout("Codex CLI timed out after 900s")
+            return json.dumps({"segments": request["target_segments"]})
+
+    provider = SizeLimitedPolisher()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        segments=[Segment(text=f"part {index}", start=index, end=index + 1) for index in range(3)]
+    )
+
+    result = polish_transcript(transcript, Settings())
+
+    assert [len(request["target_segments"]) for request in provider.requests] == [3, 1, 2, 1, 1]
+    assert result["detail"]["chunks"] == 3
+    assert [segment.text for segment in result["transcript"].segments] == [
+        "part 0",
+        "part 1",
+        "part 2",
+    ]
+
+
+def test_polish_fails_when_a_single_segment_times_out(monkeypatch):
+    class TimedOutPolisher(FakePolisher):
+        def complete(self, prompt, **kwargs):
+            self.requests.append(json.loads(prompt))
+            raise LLMTimeout("Codex CLI timed out after 900s")
+
+    provider = TimedOutPolisher()
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    transcript = Transcript(
+        segments=[Segment(text="first", start=0, end=1), Segment(text="second", start=1, end=2)]
+    )
+
+    with pytest.raises(LLMTimeout):
+        polish_transcript(transcript, Settings())
+
+    assert [len(request["target_segments"]) for request in provider.requests] == [2, 1]
+
+
+def test_codex_polish_chunk_default_stays_below_timeout_scale():
+    from localplaud.config import CodexLocalLlmConfig
+
+    assert CodexLocalLlmConfig().polish_chunk_chars <= 12_000
