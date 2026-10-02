@@ -398,7 +398,7 @@
 .sf-catchip { flex:none;display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border:1px solid var(--c-border,var(--border));border-radius:var(--radius,5px);font-size:14px;color:var(--c-text,var(--fg));background:var(--c-surface,var(--panel)); }
 .sf-catchip:hover { background:var(--c-hover,var(--panel2)); }
 .sf-catchip.on { border-color:var(--c-text,var(--fg));font-weight:600; }
-.sf-carousel { display:grid;grid-auto-flow:column;grid-auto-columns:316px;gap:16px;overflow-x:auto;scroll-snap-type:x proximity;padding:2px 2px 10px;margin:-2px -2px 0;scrollbar-width:thin;overscroll-behavior-x:contain; }
+.sf-carousel { display:grid;grid-auto-flow:column;grid-auto-columns:316px;gap:16px;overflow-x:auto;scroll-snap-type:x proximity;padding:2px 2px 10px;margin:-2px -2px 0;scroll-padding-inline:2px;scrollbar-width:thin;overscroll-behavior-x:contain; }
 .sf-carousel>* { scroll-snap-align:start; }
 /* Desktop: no native scrollbar; edge fades and round prev/next buttons instead. */
 .sf-carousel-wrap { position:relative; }
