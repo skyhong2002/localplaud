@@ -486,3 +486,47 @@ a.sf-app-card:hover { border-color:var(--c-border-strong,var(--border2)); }
   .sf-rule-actions .btn,.sf-switch { min-height:40px; }
   .sf-wt-head { font-size:24px; }
 }
+
+/* ============================ SETTINGS ============================ */
+.settings-page { overflow-x:clip; }
+.settings-page .sf-settings-head { margin-bottom:6px; }
+.settings-page .settings-layout { grid-template-columns:220px minmax(0,1fr);gap:32px; }
+.settings-page .settings-nav { top:12px;max-height:calc(100vh - 24px);overflow:auto;padding:8px;border-radius:var(--radius,5px);background:var(--c-bg-sidebar,#F9F9F9); }
+.settings-page .settings-nav a { font-weight:400;font-size:14px;color:var(--c-text-body,var(--fg));padding:8px 10px;border-radius:var(--radius,5px); }
+.settings-page .settings-nav a[aria-current] { background:var(--c-hover-ui,rgba(31,35,41,.08));color:var(--c-text,var(--fg));font-weight:600; }
+.sf-nav-caption { margin:12px 10px 4px;font-size:12px;color:var(--c-text-2,var(--muted)); }
+.sf-nav-caption:first-child { margin-top:2px; }
+.sf-settings-group { margin-bottom:40px; }
+.sf-settings-group-title { font-size:24px;font-weight:300;line-height:1.5;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--c-border,var(--border)); }
+.settings-sections .sf-settings-panel { margin-top:14px;scroll-margin-top:18px; }
+.sf-settings-group-title+.sf-settings-panel { margin-top:0; }
+.sf-settings-back { display:inline-flex;align-items:center;gap:4px;min-height:44px;padding:0 6px 0 0;border:0;background:none;font:inherit;font-size:15px;color:var(--c-accent,var(--blue));cursor:pointer; }
+.sf-settings-back[hidden],.sf-settings-index[hidden] { display:none!important; }
+.sf-privacy-list { list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:13.5px;line-height:1.5; }
+.sf-privacy-list li { display:flex;gap:10px;align-items:flex-start; }
+.sf-privacy-list .i { flex:none;margin-top:2px;color:var(--c-text-2,var(--muted)); }
+.sf-health-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px;margin-top:12px; }
+.sf-health-n { font-size:26px;font-weight:300;margin-top:2px; }
+.sf-settings-index { margin:6px -4px 0; }
+.sf-profile { display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 0 22px; }
+.sf-avatar { width:72px;height:72px;border-radius:50%;display:grid;place-items:center;background:var(--c-subtle,var(--panel2));font-size:26px;font-weight:300; }
+.sf-profile-name { font-size:16px;font-weight:600; }
+.sf-profile-stats { display:flex;justify-content:center;gap:42px;margin:6px 0 0; }
+.sf-profile-stats div { text-align:center; }
+.sf-profile-stats dt { font-size:12px;color:var(--c-text-2,var(--muted)); }
+.sf-profile-stats dd { margin:2px 0 0;font-size:28px;font-weight:300; }
+.sf-index-row { display:flex;align-items:center;gap:14px;min-height:56px;padding:0 6px;border-bottom:1px solid var(--c-border,var(--border));color:var(--c-text,var(--fg));font-size:16px; }
+.sf-index-row:active { background:var(--c-hover,var(--panel2)); }
+.sf-index-icon { width:32px;height:32px;border-radius:8px;display:grid;place-items:center;background:var(--c-hover,var(--panel2)); }
+.sf-index-label { flex:1; }
+.sf-index-row>.i:last-child { color:var(--c-text-3,var(--faint)); }
+@media (max-width:820px) {
+  .settings-page[data-view="index"] .sf-settings-head p,.settings-page[data-view="group"] .sf-settings-head { display:none; }
+  .settings-page[data-view="group"] .settings-nav,.settings-page[data-view="index"] .settings-nav { display:none; }
+  .settings-page .settings-layout { grid-template-columns:1fr;margin-top:4px; }
+  .sf-settings-group-title { font-size:28px;border-bottom:0;padding-bottom:0; }
+  .settings-sections .sf-settings-panel { scroll-margin-top:calc(var(--sf-top) + 8px); }
+  .sf-profile-stats { gap:30px; }
+  .settings-sections form[style*="grid-template-columns:1fr 1fr"],.settings-sections form[style*="grid-template-columns:repeat(2"] { grid-template-columns:minmax(0,1fr)!important; }
+  .settings-sections .panel input,.settings-sections .panel select,.settings-sections .panel textarea { max-width:100%;min-width:0;box-sizing:border-box; }
+}

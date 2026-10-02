@@ -1,28 +1,62 @@
 {% extends "base.html" %}
 {% block title %}Settings — localplaud{% endblock %}
 {% block body %}
-<div class="content"><div class="pane-inner settings-page">
-  <h1 class="page">{{ t('Settings') }}</h1>
-  <p class="sub">{{ t('Account, processing, templates, integrations, and the execution boundary for this local workspace.') }}</p>
+<link rel="stylesheet" href="/static/css/surfaces.css">
+<div class="content"><div class="pane-inner settings-page" data-surface="settings">
+  <header class="sf-settings-head">
+    <h1 class="page sf-large-title">{{ t('Settings') }}</h1>
+    <p class="sub">{{ t('Account, processing, templates, integrations, and the execution boundary for this local workspace.') }}</p>
+  </header>
+  <div class="sf-settings-index" data-sf-settings-index hidden>
+    <div class="sf-profile">
+      <span class="sf-avatar" aria-hidden="true">{{ (workspace_preferences.workspace_name or 'LP')[:2] | upper }}</span>
+      <strong class="sf-profile-name">{{ workspace_preferences.workspace_name }}</strong>
+      <dl class="sf-profile-stats">
+        <div><dt>{{ t('Days') }}</dt><dd>{{ library_stats.days }}</dd></div>
+        <div><dt>{{ t('Recordings') }}</dt><dd>{{ library_stats.total }}</dd></div>
+        <div><dt>{{ t('Hours') }}</dt><dd>{{ library_stats.hours }}</dd></div>
+      </dl>
+    </div>
+    <a class="sf-index-row" href="#group-account" data-sf-open-group="account"><span class="sf-index-icon">{{ sf_icon('user') }}</span><span class="sf-index-label">{{ t('Account & security') }}</span>{{ icon('chevron-right', 'sm') }}</a>
+    <a class="sf-index-row" href="#group-workspace" data-sf-open-group="workspace"><span class="sf-index-icon">{{ sf_icon('sliders') }}</span><span class="sf-index-label">{{ t('Workspace & preferences') }}</span>{{ icon('chevron-right', 'sm') }}</a>
+    <a class="sf-index-row" href="#group-processing" data-sf-open-group="processing"><span class="sf-index-icon">{{ sf_icon('cpu') }}</span><span class="sf-index-label">{{ t('Speech & AI providers') }}</span>{{ icon('chevron-right', 'sm') }}</a>
+    <a class="sf-index-row" href="#group-data" data-sf-open-group="data"><span class="sf-index-icon">{{ sf_icon('database') }}</span><span class="sf-index-label">{{ t('Sync, backup & privacy') }}</span>{{ icon('chevron-right', 'sm') }}</a>
+    <a class="sf-index-row" href="#group-integrations" data-sf-open-group="integrations"><span class="sf-index-icon">{{ sf_icon('plug') }}</span><span class="sf-index-label">{{ t('Integrations & automation') }}</span>{{ icon('chevron-right', 'sm') }}</a>
+    <a class="sf-index-row" href="#group-help" data-sf-open-group="help"><span class="sf-index-icon">{{ sf_icon('life-buoy') }}</span><span class="sf-index-label">{{ t('Help & about') }}</span>{{ icon('chevron-right', 'sm') }}</a>
+  </div>
   <div class="settings-layout">
     <nav class="settings-nav" aria-label="{{ t('Settings sections') }}">
-      <a href="#plaud-account">{{ t('Account') }}</a>
-      <a href="#access-security">{{ t('Access & security') }}</a>
-      <a href="#workspace-preferences">{{ t('Workspace') }}</a>
-      <a href="#private-backup">{{ t('Data & backup') }}</a>
-      <a href="#hardware-profiles">{{ t('Processing') }}</a>
-      <a href="#vocabulary">{{ t('Vocabulary') }}</a>
-      <a href="#note-templates">{{ t('Templates') }}</a>
-      <a href="#connections">{{ t('Providers') }}</a>
-      <a href="#remote-workers">{{ t('Remote workers') }}</a>
-      <a href="#webhook-integrations">{{ t('Webhooks') }}</a>
-      <a href="#email-integrations">{{ t('Email') }}</a>
-      <a href="#support-about">{{ t('Support & about') }}</a>
-      <a href="/status">{{ t('System health') }} ↗</a>
+      <div class="sf-nav-caption">{{ t('Account & security') }}</div>
+      <a href="#plaud-account" data-sf-nav-target="plaud-account">{{ t('Plaud account') }}</a>
+      <a href="#access-security" data-sf-nav-target="access-security">{{ t('Security & sessions') }}</a>
+      <div class="sf-nav-caption">{{ t('Workspace & preferences') }}</div>
+      <a href="#workspace-preferences" data-sf-nav-target="workspace-preferences">{{ t('Personalization & locale') }}</a>
+      <a href="#vocabulary" data-sf-nav-target="vocabulary">{{ t('Custom vocabulary') }}</a>
+      <a href="#note-templates" data-sf-nav-target="note-templates">{{ t('Note templates') }}</a>
+      <div class="sf-nav-caption">{{ t('Speech & AI providers') }}</div>
+      <a href="#hardware-profiles" data-sf-nav-target="hardware-profiles">{{ t('ASR & diarization') }}</a>
+      <a href="#connections" data-sf-nav-target="connections">{{ t('Providers & connections') }}</a>
+      <a href="#model-catalog" data-sf-nav-target="model-catalog">{{ t('Models: LLM & embeddings') }}</a>
+      <a href="#execution-profiles" data-sf-nav-target="execution-profiles">{{ t('Execution profiles') }}</a>
+      <a href="#folder-profiles" data-sf-nav-target="folder-profiles">{{ t('Folder defaults') }}</a>
+      <a href="#remote-workers" data-sf-nav-target="remote-workers">{{ t('Remote workers') }}</a>
+      <div class="sf-nav-caption">{{ t('Sync, backup & privacy') }}</div>
+      <a href="#private-backup" data-sf-nav-target="private-backup">{{ t('Sync & backup') }}</a>
+      <a href="#privacy" data-sf-nav-target="privacy">{{ t('Privacy') }}</a>
+      <div class="sf-nav-caption">{{ t('Integrations & automation') }}</div>
+      <a href="#webhook-integrations" data-sf-nav-target="webhook-integrations">{{ t('Webhooks') }}</a>
+      <a href="#email-integrations" data-sf-nav-target="email-integrations">{{ t('Email') }}</a>
+      <a href="#automation" data-sf-nav-target="automation">{{ t('Automation') }}</a>
+      <div class="sf-nav-caption">{{ t('Help & about') }}</div>
+      <a href="#system-health" data-sf-nav-target="system-health">{{ t('System health') }}</a>
+      <a href="#support-about" data-sf-nav-target="support-about">{{ t('Support & about') }}</a>
+      <a href="/status">{{ t('System status') }} ↗</a>
     </nav>
     <div class="settings-sections">
-
-  <div class="panel" style="margin-top:18px" id="plaud-account">
+      <button class="sf-settings-back" type="button" data-sf-settings-back hidden>{{ icon('chevron-left', 'sm') }}{{ t('Settings') }}</button>
+  <section class="sf-settings-group" id="group-account" data-sf-group="account" aria-labelledby="group-account-title">
+  <h2 class="sf-settings-group-title" id="group-account-title">{{ t('Account & security') }}</h2>
+  <div class="panel sf-settings-panel" id="plaud-account">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
       <div><strong>{{ t('Plaud account') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Read-only official Plaud MCP connection used for metadata and raw audio.') if plaud_provider == 'mcp' else t('Read-only Open API connection used for metadata and raw audio.') }}</div></div>
       <span class="st {{ 'healthy' if plaud_auth.ok else 'failed' }}">{{ t('connected') if plaud_auth.ok else t('sign-in required') }}</span>
@@ -34,8 +68,7 @@
     </div>
     {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">{% if plaud_provider == 'mcp' %}{{ t('Run the official Plaud MCP installer on this machine to sign in.') }} <code>npx -y @plaud-ai/mcp@latest install</code>{% else %}{{ t('On the machine running localplaud, run the following command. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.') }} <code>localplaud auth login</code>{% endif %}</div>{% endif %}
   </div>
-
-  <div class="panel" style="margin-top:16px" id="access-security">
+  <div class="panel sf-settings-panel" id="access-security">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Access & security') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Truthful authentication boundaries for this deployment.') }}</div></div><span class="st {{ 'done' if about.access.browser_login_configured else 'degraded' }}">{{ t('Web login configured') if about.access.browser_login_configured else t('Web login not configured') }}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px;margin-top:12px">
       <div class="tile"><div class="k">{{ t('Application authentication') }}</div><div style="margin-top:4px">{{ t('Revocable browser session') if about.access.browser_login_configured else t('No Web login') }}</div></div>
@@ -50,8 +83,10 @@
       </div>{% else %}<div class="sub">{{ t('No active browser sessions.') }}</div>{% endfor %}
     </div>{% endif %}
   </div>
-
-  <div class="panel" style="margin-top:16px" id="workspace-preferences">
+  </section>
+  <section class="sf-settings-group" id="group-workspace" data-sf-group="workspace" aria-labelledby="group-workspace-title">
+  <h2 class="sf-settings-group-title" id="group-workspace-title">{{ t('Workspace & preferences') }}</h2>
+  <div class="panel sf-settings-panel" id="workspace-preferences">
     <strong>{{ t('Workspace preferences') }}</strong>
     <p class="sub" style="margin:4px 0 12px">{{ t('Durable workspace preferences shared by every browser using localplaud.') }}</p>
     <form id="workspace-preferences-form" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
@@ -66,69 +101,7 @@
       <div style="display:flex;align-items:end;gap:10px"><button class="btn" type="submit">{{ t('Save preferences') }}</button><span id="workspace-preferences-result" class="sub"></span></div>
     </form>
   </div>
-
-  <div class="panel" style="margin-top:16px" id="private-backup">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><strong>{{ t('Private workspace backup') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Consistent SQLite snapshot with manifest and SHA-256. Secrets, config, and Plaud tokens are excluded.') }}</div></div><a class="sub" href="/api/docs" style="font-size:12px">{{ t('API documentation') }} ↗</a></div>
-    {% if backup_error %}<div class="sub" style="color:var(--red);margin-top:12px">{{ backup_error }}</div>{% else %}
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:13px"><button class="btn backup-create" data-media="false" type="button">{{ t('Back up database') }}</button><button class="btn sec backup-create" data-media="true" type="button">{{ t('Back up database + media') }}</button><span id="backup-result" class="sub"></span></div>
-    <p class="sub" style="font-size:11.5px;margin:9px 0 0">{{ t('Media archives may be very large. Keep every downloaded backup private: transcripts and notes can contain sensitive information.') }}</p>
-    <div style="display:grid;gap:8px;margin-top:13px" id="backup-list">
-      {% for backup in workspace_backups %}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px;flex-wrap:wrap">
-        <div style="min-width:0;flex:1"><strong style="overflow-wrap:anywhere">{{ backup.name }}</strong>{% if backup.status=='ready' %}<div class="sub" style="font-size:11px">{{ backup.created_at[:16]|replace('T',' · ') }} · {{ (backup.size_bytes / 1048576)|round(1) }} MB · {% if backup.media.included %}{{ t('database') }} + {{ backup.media.files }} {{ t('media files') }}{% else %}{{ t('database only') }}{% endif %}</div><div class="sub" style="font-size:10px;overflow-wrap:anywhere">SHA-256 {{ backup.sha256 }}</div>{% else %}<div class="sub" style="font-size:11px;color:var(--red)">{{ t('Invalid or incomplete archive') }}</div>{% endif %}</div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">{% if backup.status=='ready' %}{% if enabled_backup_destinations %}<select class="search-input backup-destination" aria-label="{{ t('Sync destination for') }} {{ backup.name }}" style="width:auto;padding:6px 8px">{% for destination in enabled_backup_destinations %}<option value="{{ destination.id }}">{{ destination.name }}</option>{% endfor %}</select><button class="btn sec backup-sync" data-name="{{ backup.name }}" type="button" style="padding:6px 9px">{{ t('Upload') }}</button>{% endif %}<a class="btn sec" href="/api/backups/{{ backup.name }}/download" style="padding:6px 9px">{{ t('Download') }}</a>{% endif %}<button class="btn sec backup-delete" data-name="{{ backup.name }}" type="button" style="padding:6px 9px;color:var(--red)">{{ t('Delete') }}</button></div>
-      </div>
-      {% else %}<div class="sub">{{ t('No workspace backups yet.') }}</div>{% endfor %}
-    </div>{% endif %}
-    {% if not backup_error %}<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px"><strong>{{ t('Authorized backup destinations') }}</strong><p class="sub" style="font-size:11.5px;margin:4px 0 10px">{{ t('Uploads use an idempotent HTTP PUT. Public destinations require HTTPS; bearer tokens remain environment-only references.') }}</p><div style="display:grid;gap:8px">{% for destination in backup_destinations %}<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><strong>{{ destination.name }}</strong> <span class="chip">{{ t('enabled') if destination.enabled else t('disabled') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ destination.url }}{% if destination.last_used_at %} · {{ t('used') }} {{ destination.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div><div><span id="backup-destination-health-{{ destination.id }}" class="st {{ destination.health.status or 'unknown' }}" title="{{ destination.health.detail or '' }}">{{ t(destination.health.status or 'unknown') }}</span> <button class="btn sec backup-destination-test" data-id="{{ destination.id }}" type="button" style="padding:6px 9px">{{ t('Test') }}</button> <button class="btn sec backup-destination-delete" data-id="{{ destination.id }}" type="button" style="padding:6px 9px;color:var(--red)">{{ t('Revoke') }}</button></div></div>{% else %}<div class="sub">{{ t('No remote backup destination authorized.') }}</div>{% endfor %}</div>
-    <form id="backup-destination-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px"><input class="search-input" name="name" maxlength="120" placeholder="{{ t('Destination name') }}" required><input class="search-input" name="url" type="url" maxlength="2048" placeholder="https://backup.example/webdav/localplaud" required><input class="search-input" name="secret_ref" maxlength="256" placeholder="{{ t('Bearer secret ref, e.g. env:BACKUP_TOKEN') }}"><label class="sub"><input type="checkbox" name="allow_private_network"> {{ t('Explicitly allow private/LAN destination and HTTP') }}</label><label class="sub"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label><div style="display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize destination') }}</button><span id="backup-destination-result" class="sub"></span></div></form>
-    {% if backup_sync_deliveries %}<div style="margin-top:14px"><strong>{{ t('Sync history') }}</strong><div style="display:grid;gap:7px;margin-top:8px">{% for delivery in backup_sync_deliveries %}<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:12px"><span style="min-width:0;overflow-wrap:anywhere">{{ delivery.backup_name }} → {{ delivery.destination_name or t('revoked destination') }}</span><span><span class="st {{ 'done' if delivery.status=='completed' else 'error' }}">{{ t(delivery.status) }}</span>{% if delivery.status!='completed' %} <button class="btn sec backup-sync-retry" data-id="{{ delivery.id }}" type="button" style="padding:4px 7px">{{ t('Retry') }}</button>{% endif %}</span></div>{% endfor %}</div></div>{% endif %}</div>{% endif %}
-  </div>
-
-  <div class="panel" style="margin-top:18px" id="hardware-profiles">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-      <div><strong>{{ t('Recommended for this host') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Evidence-based local ASR profiles; no accelerator is claimed unless detected.') }}</div></div>
-      <span class="chip">{{ hardware_recommendations.host.system }} · {{ hardware_recommendations.host.machine }}{% if hardware_recommendations.host.memory_gb %} · {{ hardware_recommendations.host.memory_gb }} GB{% endif %}</span>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:12px">
-      {% set profile_keys = profiles|map(attribute='key')|list %}
-      {% for recommendation in hardware_recommendations.recommendations %}
-      <div class="tile" style="display:flex;flex-direction:column;gap:7px">
-        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ recommendation.name }}</strong><span class="st {{ 'healthy' if recommendation.ready else 'degraded' }}">{{ t('ready') if recommendation.ready else t('setup needed') }}</span></div>
-        <div class="sub" style="font-size:11px">{{ recommendation.hardware }}</div>
-        <div><code>{{ recommendation.model }}</code></div>
-        <div class="sub" style="font-size:11.5px;flex:1">{{ recommendation.reason }}</div>
-        {% if ('recommended-' ~ recommendation.key) in profile_keys %}<span class="chip on">{{ t('Profile created') }}</span>{% elif recommendation.ready %}<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="false" style="padding:6px 9px">{{ t('Create profile') }}</button><button class="btn hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="true" style="padding:6px 9px">{{ t('Create & use') }}</button></div>{% else %}<button class="btn sec" type="button" disabled style="padding:6px 9px">{{ t('Install requirements first') }}</button>{% endif %}
-      </div>
-      {% endfor %}
-    </div>
-    <div id="hardware-result" class="sub" style="font-size:12px;margin-top:10px"></div>
-  </div>
-
-  <div class="panel" style="margin-top:16px" id="connections">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-      <strong>{{ t('Connections') }}</strong>
-      <span class="sub">{{ t('Secrets are stored as references, never copied into profiles.') }}</span>
-    </div>
-    <div style="display:grid;gap:10px;margin-top:12px">
-      {% for c in connections %}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 0;border-top:1px solid var(--border)">
-        <div>
-          <div style="font-weight:650">{{ c.name }} <code>{{ c.key }}</code></div>
-          <div class="sub" style="font-size:12px">{{ c.execution_target }} · {% if c.data_egress %}{{ t('data egress allowed') }}{% else %}{{ t('no data egress') }}{% endif %}{% if c.secret_ref %} · {{ t('secret configured') }}{% endif %}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}" title="{{ c.health.detail or '' }}">{{ t(c.health.status or 'unknown') }}</span>
-          <button class="btn sec" style="padding:7px 10px" onclick="testHealth({{ c.id }})">{{ t('Test') }}</button>
-          <button class="btn sec" style="padding:7px 10px" onclick="editConnection({{ c.id }})">{{ t('Edit') }}</button>
-          <button class="btn sec" style="padding:7px 10px;color:var(--red)" onclick="removeItem('connections',{{ c.id }})">{{ t('Delete') }}</button>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <div class="panel" style="margin-top:16px" id="vocabulary">
+  <div class="panel sf-settings-panel" id="vocabulary">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
       <div><strong>{{ t('Custom vocabulary') }}</strong><div class="sub" style="font-size:12px">{{ t('Correct names and specialist terms without changing raw ASR output.') }}</div></div>
       <button class="btn sec" id="apply-vocabulary" type="button" style="padding:7px 10px">{{ t('Apply to library') }}</button>
@@ -149,53 +122,7 @@
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Add correction') }}</button><button class="btn sec" id="cancel-vocabulary" type="button" hidden>{{ t('Cancel edit') }}</button><span id="vocabulary-result" class="sub"></span></div>
     </form>
   </div>
-
-  <div class="panel" style="margin-top:16px" id="model-catalog">
-    <strong>{{ t('Model catalog') }}</strong>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px">
-      {% for m in models %}
-      <div class="tile">
-        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ m.display_name }}</strong><span><button class="btn sec" style="padding:5px 8px" onclick="testModel({{ m.id }})">{{ t('Test') }}</button> <button class="btn sec" style="padding:5px 8px" onclick="editModel({{ m.id }})">{{ t('Edit') }}</button> <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="removeItem('models',{{ m.id }})">{{ t('Delete') }}</button></span></div>
-        <div class="sub" style="font-size:11px;margin-top:3px">{{ m.connection_key }} · <code>{{ m.model_key }}</code></div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">{% for capability in m.capabilities.stages or [] %}<span class="chip">{{ capability.stage }}</span>{% endfor %}</div>
-        {% set pricing=(m.capabilities.metadata or {}).pricing or {} %}{% if pricing %}<div class="sub" style="font-size:10.5px;margin-top:6px">{{ t('Pricing') }} · {% if pricing.free %}{{ t('explicitly free') }}{% else %}{{ t('input') }} {{ pricing.input_per_million_tokens_usd or 0 }}/M · {{ t('output') }} {{ pricing.output_per_million_tokens_usd or 0 }}/M · {{ t('audio') }} {{ pricing.audio_per_minute_usd or 0 }}/min{% endif %}</div>{% endif %}
-        <div id="model-health-{{ m.id }}" class="sub" style="font-size:11px;margin-top:7px">{{ t((m.capabilities.health or {}).status or 'not tested') }}</div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <div class="panel" style="margin-top:16px" id="execution-profiles">
-    <strong>{{ t('Execution profiles') }}</strong>
-    <div style="display:grid;gap:12px;margin-top:12px">
-      {% for p in profiles %}
-      <details {% if p.is_system_default %}open{% endif %} style="border-top:1px solid var(--border);padding-top:11px">
-        <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:12px;list-style:none">
-          <span><strong>{{ p.name }}</strong> <code>{{ p.key }}@{{ p.version }}</code></span>
-          <span>{% if p.is_system_default %}<span class="chip on">{{ t('Default') }}</span>{% endif %} <span class="chip">{{ t('Local only') if p.policy.no_egress else t('Egress allowed') }}</span>{% if p.policy.cost_ceiling is not none %} <span class="chip">{{ t('Cost ceiling') }} · US${{ '%.2f'|format(p.policy.cost_ceiling) }}</span>{% endif %} <button class="btn sec" style="padding:5px 8px" onclick="event.preventDefault();newProfileVersion({{ p.id }})">{{ t('New version') }}</button>{% if not p.is_system_default %} <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="event.preventDefault();removeItem('profiles',{{ p.id }})">{{ t('Delete') }}</button>{% endif %}</span>
-        </summary>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px">
-          {% for stage, selection in p.stages.items() %}
-          <div class="tile"><div class="k">{{ stage }}</div><div style="font-weight:600;margin-top:3px">{{ selection.model }}</div><div class="sub" style="font-size:11px">{{ selection.connection }} · {{ selection.execution_target }}</div></div>
-          {% endfor %}
-        </div>
-        {% set fallbacks=(p.policy.fallback_policy or {}).stages or {} %}{% if fallbacks %}<div class="sub" style="font-size:11.5px;margin-top:10px"><strong>{{ t('Fallback order') }}</strong>{% for stage, candidates in fallbacks.items() %}{% if candidates %}<div style="margin-top:3px">{{ stage }} · {% for candidate in candidates %}{{ loop.index }}. {{ candidate.connection }}:{{ candidate.model }}{% if not loop.last %} → {% endif %}{% endfor %}</div>{% endif %}{% endfor %}</div>{% endif %}
-      </details>
-      {% endfor %}
-    </div>
-  </div>
-
-  <div class="panel" style="margin-top:16px" id="folder-profiles">
-    <div><strong>{{ t('Folder execution profiles') }}</strong><div class="sub" style="font-size:12px">{{ t('Recordings inherit this profile unless an AutoFlow, template, or recording override is more specific.') }}</div></div>
-    <div style="display:grid;gap:9px;margin-top:12px">
-      {% for folder in organization.folders %}
-      <label class="folder-profile-row" style="display:grid;grid-template-columns:minmax(140px,1fr) minmax(220px,2fr);gap:10px;align-items:center;border-top:1px solid var(--border);padding-top:9px"><span>{{ folder.name }}</span><select class="search-input folder-profile-select" data-folder-id="{{ folder.id }}"><option value="">{{ t('Automatic') }}</option>{% for profile in profiles %}<option value="{{ profile.id }}" {% if folder.execution_profile_id==profile.id %}selected{% endif %}>{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}</select></label>
-      {% else %}<div class="sub">{{ t('No folders yet.') }}</div>{% endfor %}
-    </div>
-    <div id="folder-profile-result" class="sub" style="font-size:12px;margin-top:8px"></div>
-  </div>
-
-  <div class="panel" style="margin-top:16px" id="note-templates">
+  <div class="panel sf-settings-panel" id="note-templates">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
       <div><strong>{{ t('Note templates') }}</strong><div class="sub" style="font-size:12px">{{ t('Editable, versioned prompts for structured notes. Existing notes keep their exact template snapshot.') }}</div></div>
     </div>
@@ -218,8 +145,93 @@
       <div style="display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create template') }}</button><button class="btn sec" id="cancel-template-edit" type="button" hidden>{{ t('Cancel edit') }}</button><span id="note-template-result" class="sub"></span></div>
     </form>
   </div>
-
-  <div class="panel" style="margin-top:16px" id="create-connection">
+  </section>
+  <section class="sf-settings-group" id="group-processing" data-sf-group="processing" aria-labelledby="group-processing-title">
+  <h2 class="sf-settings-group-title" id="group-processing-title">{{ t('Speech & AI providers') }}</h2>
+  <div class="panel sf-settings-panel" id="hardware-profiles">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div><strong>{{ t('Recommended for this host') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Evidence-based local ASR profiles; no accelerator is claimed unless detected.') }}</div></div>
+      <span class="chip">{{ hardware_recommendations.host.system }} · {{ hardware_recommendations.host.machine }}{% if hardware_recommendations.host.memory_gb %} · {{ hardware_recommendations.host.memory_gb }} GB{% endif %}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:12px">
+      {% set profile_keys = profiles|map(attribute='key')|list %}
+      {% for recommendation in hardware_recommendations.recommendations %}
+      <div class="tile" style="display:flex;flex-direction:column;gap:7px">
+        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ recommendation.name }}</strong><span class="st {{ 'healthy' if recommendation.ready else 'degraded' }}">{{ t('ready') if recommendation.ready else t('setup needed') }}</span></div>
+        <div class="sub" style="font-size:11px">{{ recommendation.hardware }}</div>
+        <div><code>{{ recommendation.model }}</code></div>
+        <div class="sub" style="font-size:11.5px;flex:1">{{ recommendation.reason }}</div>
+        {% if ('recommended-' ~ recommendation.key) in profile_keys %}<span class="chip on">{{ t('Profile created') }}</span>{% elif recommendation.ready %}<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="false" style="padding:6px 9px">{{ t('Create profile') }}</button><button class="btn hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="true" style="padding:6px 9px">{{ t('Create & use') }}</button></div>{% else %}<button class="btn sec" type="button" disabled style="padding:6px 9px">{{ t('Install requirements first') }}</button>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div id="hardware-result" class="sub" style="font-size:12px;margin-top:10px"></div>
+  </div>
+  <div class="panel sf-settings-panel" id="connections">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <strong>{{ t('Connections') }}</strong>
+      <span class="sub">{{ t('Secrets are stored as references, never copied into profiles.') }}</span>
+    </div>
+    <div style="display:grid;gap:10px;margin-top:12px">
+      {% for c in connections %}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 0;border-top:1px solid var(--border)">
+        <div>
+          <div style="font-weight:650">{{ c.name }} <code>{{ c.key }}</code></div>
+          <div class="sub" style="font-size:12px">{{ c.execution_target }} · {% if c.data_egress %}{{ t('data egress allowed') }}{% else %}{{ t('no data egress') }}{% endif %}{% if c.secret_ref %} · {{ t('secret configured') }}{% endif %}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}" title="{{ c.health.detail or '' }}">{{ t(c.health.status or 'unknown') }}</span>
+          <button class="btn sec" style="padding:7px 10px" onclick="testHealth({{ c.id }})">{{ t('Test') }}</button>
+          <button class="btn sec" style="padding:7px 10px" onclick="editConnection({{ c.id }})">{{ t('Edit') }}</button>
+          <button class="btn sec" style="padding:7px 10px;color:var(--red)" onclick="removeItem('connections',{{ c.id }})">{{ t('Delete') }}</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="panel sf-settings-panel" id="model-catalog">
+    <strong>{{ t('Model catalog') }}</strong>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px">
+      {% for m in models %}
+      <div class="tile">
+        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ m.display_name }}</strong><span><button class="btn sec" style="padding:5px 8px" onclick="testModel({{ m.id }})">{{ t('Test') }}</button> <button class="btn sec" style="padding:5px 8px" onclick="editModel({{ m.id }})">{{ t('Edit') }}</button> <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="removeItem('models',{{ m.id }})">{{ t('Delete') }}</button></span></div>
+        <div class="sub" style="font-size:11px;margin-top:3px">{{ m.connection_key }} · <code>{{ m.model_key }}</code></div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">{% for capability in m.capabilities.stages or [] %}<span class="chip">{{ capability.stage }}</span>{% endfor %}</div>
+        {% set pricing=(m.capabilities.metadata or {}).pricing or {} %}{% if pricing %}<div class="sub" style="font-size:10.5px;margin-top:6px">{{ t('Pricing') }} · {% if pricing.free %}{{ t('explicitly free') }}{% else %}{{ t('input') }} {{ pricing.input_per_million_tokens_usd or 0 }}/M · {{ t('output') }} {{ pricing.output_per_million_tokens_usd or 0 }}/M · {{ t('audio') }} {{ pricing.audio_per_minute_usd or 0 }}/min{% endif %}</div>{% endif %}
+        <div id="model-health-{{ m.id }}" class="sub" style="font-size:11px;margin-top:7px">{{ t((m.capabilities.health or {}).status or 'not tested') }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="panel sf-settings-panel" id="execution-profiles">
+    <strong>{{ t('Execution profiles') }}</strong>
+    <div style="display:grid;gap:12px;margin-top:12px">
+      {% for p in profiles %}
+      <details {% if p.is_system_default %}open{% endif %} style="border-top:1px solid var(--border);padding-top:11px">
+        <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:12px;list-style:none">
+          <span><strong>{{ p.name }}</strong> <code>{{ p.key }}@{{ p.version }}</code></span>
+          <span>{% if p.is_system_default %}<span class="chip on">{{ t('Default') }}</span>{% endif %} <span class="chip">{{ t('Local only') if p.policy.no_egress else t('Egress allowed') }}</span>{% if p.policy.cost_ceiling is not none %} <span class="chip">{{ t('Cost ceiling') }} · US${{ '%.2f'|format(p.policy.cost_ceiling) }}</span>{% endif %} <button class="btn sec" style="padding:5px 8px" onclick="event.preventDefault();newProfileVersion({{ p.id }})">{{ t('New version') }}</button>{% if not p.is_system_default %} <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="event.preventDefault();removeItem('profiles',{{ p.id }})">{{ t('Delete') }}</button>{% endif %}</span>
+        </summary>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px">
+          {% for stage, selection in p.stages.items() %}
+          <div class="tile"><div class="k">{{ stage }}</div><div style="font-weight:600;margin-top:3px">{{ selection.model }}</div><div class="sub" style="font-size:11px">{{ selection.connection }} · {{ selection.execution_target }}</div></div>
+          {% endfor %}
+        </div>
+        {% set fallbacks=(p.policy.fallback_policy or {}).stages or {} %}{% if fallbacks %}<div class="sub" style="font-size:11.5px;margin-top:10px"><strong>{{ t('Fallback order') }}</strong>{% for stage, candidates in fallbacks.items() %}{% if candidates %}<div style="margin-top:3px">{{ stage }} · {% for candidate in candidates %}{{ loop.index }}. {{ candidate.connection }}:{{ candidate.model }}{% if not loop.last %} → {% endif %}{% endfor %}</div>{% endif %}{% endfor %}</div>{% endif %}
+      </details>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="panel sf-settings-panel" id="folder-profiles">
+    <div><strong>{{ t('Folder execution profiles') }}</strong><div class="sub" style="font-size:12px">{{ t('Recordings inherit this profile unless an AutoFlow, template, or recording override is more specific.') }}</div></div>
+    <div style="display:grid;gap:9px;margin-top:12px">
+      {% for folder in organization.folders %}
+      <label class="folder-profile-row" style="display:grid;grid-template-columns:minmax(140px,1fr) minmax(220px,2fr);gap:10px;align-items:center;border-top:1px solid var(--border);padding-top:9px"><span>{{ folder.name }}</span><select class="search-input folder-profile-select" data-folder-id="{{ folder.id }}"><option value="">{{ t('Automatic') }}</option>{% for profile in profiles %}<option value="{{ profile.id }}" {% if folder.execution_profile_id==profile.id %}selected{% endif %}>{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}</select></label>
+      {% else %}<div class="sub">{{ t('No folders yet.') }}</div>{% endfor %}
+    </div>
+    <div id="folder-profile-result" class="sub" style="font-size:12px;margin-top:8px"></div>
+  </div>
+  <div class="panel sf-settings-panel" id="create-connection">
     <strong>{{ t('Create provider connection') }}</strong>
     <form id="connection-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
       <input class="search-input" name="name" placeholder="{{ t('Display name') }}" required>
@@ -231,8 +243,7 @@
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create connection') }}</button><span id="connection-result" class="sub"></span></div>
     </form>
   </div>
-
-  <div class="panel" style="margin-top:16px" id="create-model">
+  <div class="panel sf-settings-panel" id="create-model">
     <strong>{{ t('Add model') }}</strong>
     <form id="model-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
       <select class="search-input" name="connection_id" required>{% for c in connections %}<option value="{{ c.id }}" data-target="{{ c.execution_target }}" data-egress="{{ 'true' if c.data_egress else 'false' }}">{{ c.name }}</option>{% endfor %}</select>
@@ -246,8 +257,7 @@
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Add model') }}</button><span id="model-result" class="sub"></span></div>
     </form>
   </div>
-
-  <div class="panel" style="margin-top:16px" id="create-profile">
+  <div class="panel sf-settings-panel" id="create-profile">
     <strong>{{ t('Create execution profile') }}</strong>
     <p class="sub" style="margin:4px 0 12px">{{ t('Each stage is explicit. Unsupported model/stage combinations are rejected before saving.') }}</p>
     <form id="profile-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
@@ -267,8 +277,7 @@
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create profile') }}</button><span id="profile-result" class="sub"></span></div>
     </form>
   </div>
-
-  <div class="panel" style="margin-top:16px" id="remote-workers">
+  <div class="panel sf-settings-panel" id="remote-workers">
     <strong>{{ t('Remote workers') }}</strong>
     <p class="sub" style="margin:4px 0 12px">{{ t('Authenticated localplaud-worker v1 hosts. Tokens remain in environment variables.') }}</p>
     <div style="display:grid;gap:9px">
@@ -287,8 +296,41 @@
       <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center"><button class="btn" type="submit">{{ t('Register worker') }}</button><span id="worker-result" class="sub"></span></div>
     </form>
   </div>
-
-  <div class="panel" style="margin-top:16px" id="webhook-integrations">
+  </section>
+  <section class="sf-settings-group" id="group-data" data-sf-group="data" aria-labelledby="group-data-title">
+  <h2 class="sf-settings-group-title" id="group-data-title">{{ t('Sync, backup & privacy') }}</h2>
+  <div class="panel sf-settings-panel" id="private-backup">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><strong>{{ t('Private workspace backup') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Consistent SQLite snapshot with manifest and SHA-256. Secrets, config, and Plaud tokens are excluded.') }}</div></div><a class="sub" href="/api/docs" style="font-size:12px">{{ t('API documentation') }} ↗</a></div>
+    {% if backup_error %}<div class="sub" style="color:var(--red);margin-top:12px">{{ backup_error }}</div>{% else %}
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:13px"><button class="btn backup-create" data-media="false" type="button">{{ t('Back up database') }}</button><button class="btn sec backup-create" data-media="true" type="button">{{ t('Back up database + media') }}</button><span id="backup-result" class="sub"></span></div>
+    <p class="sub" style="font-size:11.5px;margin:9px 0 0">{{ t('Media archives may be very large. Keep every downloaded backup private: transcripts and notes can contain sensitive information.') }}</p>
+    <div style="display:grid;gap:8px;margin-top:13px" id="backup-list">
+      {% for backup in workspace_backups %}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px;flex-wrap:wrap">
+        <div style="min-width:0;flex:1"><strong style="overflow-wrap:anywhere">{{ backup.name }}</strong>{% if backup.status=='ready' %}<div class="sub" style="font-size:11px">{{ backup.created_at[:16]|replace('T',' · ') }} · {{ (backup.size_bytes / 1048576)|round(1) }} MB · {% if backup.media.included %}{{ t('database') }} + {{ backup.media.files }} {{ t('media files') }}{% else %}{{ t('database only') }}{% endif %}</div><div class="sub" style="font-size:10px;overflow-wrap:anywhere">SHA-256 {{ backup.sha256 }}</div>{% else %}<div class="sub" style="font-size:11px;color:var(--red)">{{ t('Invalid or incomplete archive') }}</div>{% endif %}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">{% if backup.status=='ready' %}{% if enabled_backup_destinations %}<select class="search-input backup-destination" aria-label="{{ t('Sync destination for') }} {{ backup.name }}" style="width:auto;padding:6px 8px">{% for destination in enabled_backup_destinations %}<option value="{{ destination.id }}">{{ destination.name }}</option>{% endfor %}</select><button class="btn sec backup-sync" data-name="{{ backup.name }}" type="button" style="padding:6px 9px">{{ t('Upload') }}</button>{% endif %}<a class="btn sec" href="/api/backups/{{ backup.name }}/download" style="padding:6px 9px">{{ t('Download') }}</a>{% endif %}<button class="btn sec backup-delete" data-name="{{ backup.name }}" type="button" style="padding:6px 9px;color:var(--red)">{{ t('Delete') }}</button></div>
+      </div>
+      {% else %}<div class="sub">{{ t('No workspace backups yet.') }}</div>{% endfor %}
+    </div>{% endif %}
+    {% if not backup_error %}<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px"><strong>{{ t('Authorized backup destinations') }}</strong><p class="sub" style="font-size:11.5px;margin:4px 0 10px">{{ t('Uploads use an idempotent HTTP PUT. Public destinations require HTTPS; bearer tokens remain environment-only references.') }}</p><div style="display:grid;gap:8px">{% for destination in backup_destinations %}<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><strong>{{ destination.name }}</strong> <span class="chip">{{ t('enabled') if destination.enabled else t('disabled') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ destination.url }}{% if destination.last_used_at %} · {{ t('used') }} {{ destination.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div><div><span id="backup-destination-health-{{ destination.id }}" class="st {{ destination.health.status or 'unknown' }}" title="{{ destination.health.detail or '' }}">{{ t(destination.health.status or 'unknown') }}</span> <button class="btn sec backup-destination-test" data-id="{{ destination.id }}" type="button" style="padding:6px 9px">{{ t('Test') }}</button> <button class="btn sec backup-destination-delete" data-id="{{ destination.id }}" type="button" style="padding:6px 9px;color:var(--red)">{{ t('Revoke') }}</button></div></div>{% else %}<div class="sub">{{ t('No remote backup destination authorized.') }}</div>{% endfor %}</div>
+    <form id="backup-destination-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px"><input class="search-input" name="name" maxlength="120" placeholder="{{ t('Destination name') }}" required><input class="search-input" name="url" type="url" maxlength="2048" placeholder="https://backup.example/webdav/localplaud" required><input class="search-input" name="secret_ref" maxlength="256" placeholder="{{ t('Bearer secret ref, e.g. env:BACKUP_TOKEN') }}"><label class="sub"><input type="checkbox" name="allow_private_network"> {{ t('Explicitly allow private/LAN destination and HTTP') }}</label><label class="sub"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label><div style="display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize destination') }}</button><span id="backup-destination-result" class="sub"></span></div></form>
+    {% if backup_sync_deliveries %}<div style="margin-top:14px"><strong>{{ t('Sync history') }}</strong><div style="display:grid;gap:7px;margin-top:8px">{% for delivery in backup_sync_deliveries %}<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:12px"><span style="min-width:0;overflow-wrap:anywhere">{{ delivery.backup_name }} → {{ delivery.destination_name or t('revoked destination') }}</span><span><span class="st {{ 'done' if delivery.status=='completed' else 'error' }}">{{ t(delivery.status) }}</span>{% if delivery.status!='completed' %} <button class="btn sec backup-sync-retry" data-id="{{ delivery.id }}" type="button" style="padding:4px 7px">{{ t('Retry') }}</button>{% endif %}</span></div>{% endfor %}</div></div>{% endif %}</div>{% endif %}
+  </div>
+  <div class="panel sf-settings-panel" id="privacy">
+    <strong>{{ t('Privacy & data boundary') }}</strong>
+    <p class="sub" style="font-size:12px;margin:4px 0 12px">{{ t('What may leave this host, and where it is decided.') }}</p>
+    {% set egress = connections | selectattr('data_egress') | list %}
+    <ul class="sf-privacy-list">
+      <li>{{ icon('cloud', 'sm') }}<span>{{ t('Plaud access is read-only: localplaud lists recordings and downloads raw audio. It never asks Plaud to transcribe, summarize, or change anything.') }}</span></li>
+      <li>{{ sf_icon('shield', 'sm') }}<span>{% if egress %}{{ t('These provider connections are allowed to send recording data off this host:') }} <strong>{{ egress | map(attribute='name') | join(', ') }}</strong>.{% else %}{{ t('No provider connection is allowed to send recording data off this host.') }}{% endif %} {{ t('Local-only profiles never fall back to a cloud or remote provider.') }}</span></li>
+      <li>{{ sf_icon('lock', 'sm') }}<span>{{ t('Secrets are stored as environment references, never copied into profiles, backups, or diagnostics.') }}</span></li>
+    </ul>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><a class="btn sec" href="#connections">{{ t('Review provider connections') }}</a><a class="btn sec" href="/api/system/diagnostics.json">{{ t('Download safe diagnostics') }}</a></div>
+  </div>
+  </section>
+  <section class="sf-settings-group" id="group-integrations" data-sf-group="integrations" aria-labelledby="group-integrations-title">
+  <h2 class="sf-settings-group-title" id="group-integrations-title">{{ t('Integrations & automation') }}</h2>
+  <div class="panel sf-settings-panel" id="webhook-integrations">
     <strong>{{ t('Authorized webhooks') }}</strong>
     <p class="sub" style="margin:4px 0 12px">{{ t('Outbound data delivery is opt-in. Rules reference these destinations; bearer secrets stay in environment variables.') }}</p>
     <div style="display:grid;gap:9px">
@@ -309,8 +351,7 @@
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize webhook') }}</button><span id="webhook-result" class="sub"></span></div>
     </form>
   </div>
-
-  <div class="panel" style="margin-top:16px" id="email-integrations">
+  <div class="panel sf-settings-panel" id="email-integrations">
     <strong>{{ t('Authorized email') }}</strong>
     <p class="sub" style="margin:4px 0 12px">{{ t('SMTP delivery is opt-in. Passwords stay in environment variables; Test sends no recording data.') }}</p>
     <div style="display:grid;gap:9px">
@@ -337,16 +378,34 @@
       <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize email') }}</button><span id="email-result" class="sub"></span></div>
     </form>
   </div>
-
-  <div class="panel" style="margin-top:16px" id="support-about">
+  <div class="panel sf-settings-panel" id="automation">
+    <strong>{{ t('Automation') }}</strong>
+    <p class="sub" style="font-size:12px;margin:4px 0 12px">{{ t('AutoFlow rules, their notifications, and run history live in Discover.') }}</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn sec" href="/discover#autoflow">{{ t('Open AutoFlow') }}</a><a class="btn sec" href="/notifications">{{ t('Notifications') }}</a></div>
+  </div>
+  </section>
+  <section class="sf-settings-group" id="group-help" data-sf-group="help" aria-labelledby="group-help-title">
+  <h2 class="sf-settings-group-title" id="group-help-title">{{ t('Help & about') }}</h2>
+  <div class="panel sf-settings-panel" id="system-health">
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('System health') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Processing queue and provider checks for this workspace.') }}</div></div><a class="btn sec" href="/status">{{ t('Open system status') }}</a></div>
+    <div class="sf-health-grid">
+      <div class="tile"><div class="k">{{ t('ready') }}</div><div class="sf-health-n">{{ sidebar.ops.ready }}</div></div>
+      <div class="tile"><div class="k">{{ t('generating') }}</div><div class="sf-health-n">{{ sidebar.ops.processing }}</div></div>
+      <div class="tile"><div class="k">{{ t('awaiting processing') }}</div><div class="sf-health-n">{{ sidebar.ops.queued }}</div></div>
+      <div class="tile"><div class="k">{{ t('need attention') }}</div><div class="sf-health-n{% if sidebar.ops.attention %} sf-text-danger{% endif %}">{{ sidebar.ops.attention }}</div></div>
+    </div>
+  </div>
+  <div class="panel sf-settings-panel" id="support-about">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Support & about') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Runtime identity and a deliberately redacted support bundle.') }}</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;margin-top:12px"><div class="tile"><div class="k">{{ t('Runtime') }}</div><div style="margin-top:4px">Python {{ about.python }}</div></div><div class="tile"><div class="k">{{ t('Host') }}</div><div style="margin-top:4px">{{ about.system }} · {{ about.machine }}</div></div><div class="tile"><div class="k">{{ t('License') }}</div><div style="margin-top:4px">{{ about.license }}</div></div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px"><a class="btn" href="/api/system/diagnostics.json">{{ t('Download safe diagnostics') }}</a><a class="btn sec" href="/status">{{ t('System health') }}</a><a class="btn sec" href="/api/docs">{{ t('API documentation') }}</a><a class="btn sec" href="{{ about.support.repository }}" target="_blank" rel="noopener">{{ t('GitHub repository') }} ↗</a></div>
     <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t('Diagnostics contain aggregate counts and non-secret runtime switches only. Recording IDs, titles, content, paths, URLs, addresses, errors, environment variables, and credentials are excluded.') }}</p>
   </div>
+  </section>
     </div>
   </div>
 </div></div>
+<script src="/static/js/surfaces.js"></script>
 {% endblock %}
 {% block scripts %}
 <style>

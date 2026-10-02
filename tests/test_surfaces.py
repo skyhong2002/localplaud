@@ -361,3 +361,32 @@ def test_discover_cards_distinguish_editable_and_external_rules(monkeypatch, tmp
                  "note_template_key", "profile_id", "action_folder_id", "notify"):
         assert f'name="{name}"' in html
     assert 'id="run-history"' in html and 'id="integrations"' in html
+
+
+# --------------------------------------------------------------------------- #
+# Settings
+# --------------------------------------------------------------------------- #
+
+
+def test_settings_groups_sections_with_phone_index_and_profile_stats(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    html = client.get("/settings").text
+    assert 'data-surface="settings"' in html
+    groups = re.findall(r'data-sf-group="([a-z]+)"', html)
+    assert groups == ["account", "workspace", "processing", "data", "integrations", "help"]
+    for group in groups:
+        assert f'href="#group-{group}" data-sf-open-group="{group}"' in html
+    # Every legacy anchor still exists and is reachable from the section nav.
+    for target in ("plaud-account", "access-security", "workspace-preferences", "vocabulary",
+                   "note-templates", "hardware-profiles", "connections", "model-catalog",
+                   "execution-profiles", "remote-workers", "private-backup", "privacy",
+                   "webhook-integrations", "email-integrations", "automation",
+                   "system-health", "support-about"):
+        assert f'id="{target}"' in html
+        assert f'href="#{target}"' in html
+    for hidden_form in ("create-connection", "create-model", "create-profile", "folder-profiles"):
+        assert f'id="{hidden_form}"' in html
+    assert "Local-only profiles never fall back to a cloud or remote provider." in html
+    assert "<dt>Recordings</dt><dd>2</dd>" in html
+    assert "data-sf-settings-back hidden" in html

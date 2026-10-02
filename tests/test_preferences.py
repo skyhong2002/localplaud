@@ -80,7 +80,7 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
         for text in (
             "帳號",
             "存取與安全性",
-            "資料與備份",
+            "同步與備份",
             "私人工作區備份",
             "此主機的建議設定",
             "連線",

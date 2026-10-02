@@ -1029,6 +1029,59 @@
     if (params.get('create') === '1') openEditor('create');
   };
 
+  /* ============================ SETTINGS ============================ */
+  initialisers.settings = (root, signal) => {
+    const index = $(root, '[data-sf-settings-index]');
+    const layout = $(root, '.settings-layout');
+    const back = $(root, '[data-sf-settings-back]');
+    const groups = $$(root, '[data-sf-group]');
+    const navLinks = $$(root, '[data-sf-nav-target]');
+    const groupOf = (id) => document.getElementById(id)?.closest('[data-sf-group]')?.dataset.sfGroup || null;
+
+    function render() {
+      const hash = decodeURIComponent(location.hash.slice(1));
+      const active = hash.startsWith('group-') ? hash.slice(6) : (hash ? groupOf(hash) : null);
+      if (!isPhone()) {
+        index.hidden = true; layout.hidden = false; back.hidden = true;
+        groups.forEach((group) => { group.hidden = false; });
+        root.dataset.view = 'all';
+        return;
+      }
+      if (!active) {
+        index.hidden = false; layout.hidden = true; root.dataset.view = 'index';
+        return;
+      }
+      index.hidden = true; layout.hidden = false; back.hidden = false; root.dataset.view = 'group';
+      groups.forEach((group) => { group.hidden = group.dataset.sfGroup !== active; });
+      setTimeout(() => {
+        const target = hash && !hash.startsWith('group-') ? document.getElementById(hash) : null;
+        if (target) target.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
+      }, 30);
+    }
+    window.addEventListener('hashchange', render, { signal });
+    window.matchMedia('(max-width: 820px)').addEventListener('change', render, { signal });
+    back.addEventListener('click', () => {
+      history.pushState(history.state, '', location.pathname + location.search);
+      render();
+      $(index, '.sf-index-row')?.focus();
+    }, { signal });
+    render();
+
+    /* Desktop scroll-spy: highlight the section currently in view. */
+    if ('IntersectionObserver' in window) {
+      const byId = new Map(navLinks.map((link) => [link.dataset.sfNavTarget, link]));
+      const visible = new Set();
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => { if (entry.isIntersecting) visible.add(entry.target.id); else visible.delete(entry.target.id); });
+        const first = [...byId.keys()].find((id) => visible.has(id));
+        navLinks.forEach((link) => link.removeAttribute('aria-current'));
+        if (first) byId.get(first).setAttribute('aria-current', 'location');
+      }, { rootMargin: '-10% 0px -60% 0px' });
+      byId.forEach((_link, id) => { const node = document.getElementById(id); if (node) observer.observe(node); });
+      signal.addEventListener('abort', () => observer.disconnect(), { once: true });
+    }
+  };
+
   function init() {
     pageController?.abort();
     pageController = new AbortController();

@@ -3247,7 +3247,10 @@ def settings_page(request: Request):
                 .order_by(BrowserSession.last_seen_at.desc())
             )
         )
+        from .surfaces import library_profile_stats
+
         ctx = _base_ctx(request, "settings") | {
+            "library_stats": _stats(session) | library_profile_stats(session),
             "connections": list_connections(session),
             "models": list_models(session),
             "profiles": list_profiles(session),

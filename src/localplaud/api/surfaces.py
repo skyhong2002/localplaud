@@ -622,3 +622,22 @@ def template_library_context(tab: str, q: str, category: str | None) -> dict:
         # Everything rendered on the page, keyed for the detail/editor dialogs.
         "template_items": template_items,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Settings
+# --------------------------------------------------------------------------- #
+
+
+def library_profile_stats(session) -> dict:
+    """Profile header numbers (Plaud's Days / Recordings / Hours): days with at
+    least one non-trash recording, counted in UTC calendar days."""
+    from ..db.models import PlaudFile
+
+    starts = session.scalars(
+        select(PlaudFile.start_time_ms).where(
+            PlaudFile.is_trash.is_(False), PlaudFile.start_time_ms.is_not(None)
+        )
+    )
+    days = {int(ms // 86_400_000) for ms in starts}
+    return {"days": len(days)}
