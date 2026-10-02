@@ -1,10 +1,10 @@
 """Traditional Chinese (Taiwan) strings for the recording workspace.
 
 Kept separate from the main catalog so workspace UI work merges cleanly; the
-entries are folded into ``i18n._ZH_HANT_TW``.
+entries are merged by ``localplaud.i18n_ext``.
 """
 
-WORKSPACE_ZH_HANT_TW = {
+ZH_HANT_TW = {
     "A new transcript revision is created; the previous one stays in history.": "會建立新的逐字稿修訂版，先前版本保留在歷史紀錄中。",
     "All export options": "所有匯出選項",
     "Apply to": "套用範圍",

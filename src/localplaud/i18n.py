@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .i18n_workspace import WORKSPACE_ZH_HANT_TW
-
 SUPPORTED_LOCALES = {"en": "English", "zh-Hant-TW": "繁體中文（台灣）"}
 
 _ZH_HANT_TW = {
@@ -1120,9 +1118,15 @@ _ZH_HANT_TW = {
     "Transcript position": "逐字稿位置",
 }
 
-_ZH_HANT_TW.update(WORKSPACE_ZH_HANT_TW)
+def _with_extensions(locale: str, core: dict[str, str]) -> dict[str, str]:
+    # Area catalogs (localplaud/i18n_ext/*.py) extend the core dictionary; the
+    # core entries win so a stray duplicate cannot silently change copy.
+    from .i18n_ext import extra_catalog
 
-CATALOGS = {"zh-Hant-TW": _ZH_HANT_TW}
+    return extra_catalog(locale) | core
+
+
+CATALOGS = {"zh-Hant-TW": _with_extensions("zh-Hant-TW", _ZH_HANT_TW)}
 
 
 def catalog(locale: str) -> dict[str, str]:
