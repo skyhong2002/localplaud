@@ -18,6 +18,7 @@ from sqlalchemy import select
 from .config import get_settings
 from .db.models import FileStatus, PlaudFile
 from .db.session import session_scope
+from .llm.ai_gateway import AiGatewayLLM
 from .llm.codex_local import CodexLocalLLM
 from .providers.service import resolve_recording_profile
 from .worker.pipeline import _settings_for_stage, new_recordings_waiting, processing_claim_active
@@ -112,12 +113,18 @@ def text_provider_health(file_id: str, cache: dict) -> tuple[bool, str]:
         ).to_dict()
     for stage in ("correct", "summarize", "mind_map"):
         selected = _settings_for_stage(settings, snapshot, stage).llm
-        if selected.provider != "codex-local":
+        if selected.provider == "codex-local":
+            key = selected.codex_local.model_dump_json()
+            provider = CodexLocalLLM(selected.codex_local)
+        elif selected.provider == "ai-gateway":
+            # Both spend the same subscription; check its reserve before queueing.
+            key = selected.ai_gateway.model_dump_json()
+            provider = AiGatewayLLM(selected.ai_gateway)
+        else:
             continue
-        key = selected.codex_local.model_dump_json()
         cached = cache.get(key)
         if cached is None or time.monotonic() - cached[0] > 60:
-            cache[key] = (time.monotonic(), CodexLocalLLM(selected.codex_local).health())
+            cache[key] = (time.monotonic(), provider.health())
         healthy, detail = cache[key][1]
         if not healthy:
             return False, detail

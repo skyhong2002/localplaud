@@ -379,13 +379,51 @@ class CodexLocalLlmConfig(BaseModel):
     quota_check_timeout_seconds: int = Field(default=20, ge=2, le=30)
 
 
+class AiGatewayLlmConfig(BaseModel):
+    """OpenAI-compatible gateway that resolves semantic aliases to models.
+
+    ``model`` is an alias such as ``sky-quality``; the gateway's policy decides
+    which concrete model answers, and each response's model is recorded as
+    provenance. The gateway spends the ChatGPT subscription whose Codex login
+    lives in ``quota_codex_home``, so that login's usage window is checked before
+    every call with the same reserve as the Codex CLI adapter.
+    """
+
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str = "sky-quality"
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] | None = "high"
+    # Responses streaming keeps bytes flowing while a high-effort turn reasons.
+    api_mode: Literal["chat", "responses"] = "responses"
+    # Whole-call limit. The SDK does not retry: a repeated long turn would spend
+    # the subscription twice, and the correction stage splits timed-out requests.
+    timeout_seconds: int = Field(default=1800, ge=30, le=3600)
+    polish_chunk_chars: int = Field(default=8_000, ge=1_000, le=60_000)
+    summary_chunk_chars: int = Field(default=32_000, ge=6_000, le=240_000)
+    # The gateway's alias policy (JSON with ``revision`` and ``aliases``). Its
+    # alias target is recorded in each resolved profile so a remap is not
+    # mistaken for the model that produced an existing artifact.
+    policy_file: str | None = None
+    quota_executable: str = "codex"
+    quota_codex_home: str = "~/.codex"
+    # Optional ChatGPT account id the quota login must report; a different
+    # login would guard the wrong subscription.
+    quota_account_id: str | None = None
+    quota_reserve_percent: int = Field(default=5, ge=3, le=50)
+    quota_call_headroom_percent: int = Field(default=2, ge=0, le=20)
+    quota_check_timeout_seconds: int = Field(default=20, ge=2, le=30)
+
+
 class LlmConfig(BaseModel):
-    provider: Literal["ollama", "openai", "anthropic", "opencode-go", "codex-local"] = "ollama"
+    provider: Literal[
+        "ollama", "openai", "anthropic", "opencode-go", "codex-local", "ai-gateway"
+    ] = "ollama"
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     openai: OpenAILlmConfig = Field(default_factory=OpenAILlmConfig)
     anthropic: AnthropicLlmConfig = Field(default_factory=AnthropicLlmConfig)
     opencode_go: OpenCodeGoLlmConfig = Field(default_factory=OpenCodeGoLlmConfig)
     codex_local: CodexLocalLlmConfig = Field(default_factory=CodexLocalLlmConfig)
+    ai_gateway: AiGatewayLlmConfig = Field(default_factory=AiGatewayLlmConfig)
 
     @model_validator(mode="after")
     def codex_is_profile_scoped(self) -> LlmConfig:

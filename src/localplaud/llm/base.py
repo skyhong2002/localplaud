@@ -9,12 +9,40 @@ dependencies to be installed.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from ..config import LlmConfig
 
 log = logging.getLogger(__name__)
+
+_RESOLVED_MODELS: ContextVar[dict[str, list[str]] | None] = ContextVar(
+    "llm_resolved_models", default=None
+)
+
+
+def note_resolved_model(requested: str, resolved: str | None) -> None:
+    """Record which model answered a request for ``requested`` (an alias or name)."""
+    models = _RESOLVED_MODELS.get()
+    if models is None or not resolved:
+        return
+    seen = models.setdefault(requested, [])
+    if resolved not in seen:
+        seen.append(resolved)
+
+
+@contextmanager
+def capture_resolved_models() -> Iterator[dict[str, list[str]]]:
+    """Collect requested -> answering models for the calls made in this block."""
+    models: dict[str, list[str]] = {}
+    token = _RESOLVED_MODELS.set(models)
+    try:
+        yield models
+    finally:
+        _RESOLVED_MODELS.reset(token)
 
 
 class LLMError(RuntimeError):
@@ -101,4 +129,8 @@ def build_llm(cfg: LlmConfig) -> LLMProvider:
         from .codex_local import CodexLocalLLM
 
         return CodexLocalLLM(cfg.codex_local)
+    if cfg.provider == "ai-gateway":
+        from .ai_gateway import AiGatewayLLM
+
+        return AiGatewayLLM(cfg.ai_gateway)
     raise LLMUnavailable(f"unknown LLM provider: {cfg.provider!r}")

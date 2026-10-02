@@ -201,6 +201,20 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   quota_call_headroom_percent = 2 # do not start a turn too close to that floor
   quota_check_timeout_seconds = 20 # tolerate a busy app-server between consecutive stages
 
+  [llm.ai_gateway]               # central OpenAI-compatible gateway; select it per profile
+  # client key via a connection secret_ref such as env:LOCALPLAUD_AI_GATEWAY_KEY
+  base_url = "http://127.0.0.1:8317/v1"
+  model = "sky-quality"          # a gateway alias, never a concrete model
+  reasoning_effort = "high"
+  api_mode = "responses"         # streamed, so long reasoning turns keep the connection busy
+  timeout_seconds = 1800         # whole-call limit; no SDK retries
+  polish_chunk_chars = 8000
+  summary_chunk_chars = 32000
+  policy_file = "~/Projects/ai-gateway/model-policy.json" # alias targets recorded in profiles
+  quota_codex_home = "~/.codex"  # Codex login of the subscription the gateway spends
+  quota_reserve_percent = 5
+  quota_call_headroom_percent = 2
+
 # --------------------------------------------------------------------------- #
 # Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.
 # --------------------------------------------------------------------------- #

@@ -38,7 +38,7 @@ from ..db.models import (
 from ..db.session import session_scope
 from ..embeddings.base import build_embedder
 from ..error_redaction import sanitize_error
-from ..llm.base import build_llm
+from ..llm.base import build_llm, capture_resolved_models
 from ..providers.fallback import candidate_snapshots, is_retryable_fallback_error
 from ..providers.service import preview_resolution, resolve_recording_profile
 from ..providers.usage import (
@@ -1379,7 +1379,8 @@ def answer(
                 llm = build_llm(candidate_settings.llm)
                 return _complete_answer(llm, prompt, system, 0.2, 800)
 
-            text = _dispatch_with_current_evidence(hits, dispatch)
+            with capture_resolved_models() as resolved_models:
+                text = _dispatch_with_current_evidence(hits, dispatch)
             actual_usage = normalize_usage(
                 {
                     "input_chars": len(prompt) + len(system),
@@ -1388,6 +1389,8 @@ def answer(
                 }
             )
             llm_cost = estimate_cost(actual_usage, pricing)
+            if resolved_models:
+                actual_usage["resolved_models"] = resolved_models
             provenance = copy.deepcopy(candidate)
             provenance["fallback_failures"] = failures
             provenance["retrieval_profile"] = copy.deepcopy(embed_snapshot)
@@ -1407,7 +1410,8 @@ def answer(
                     "provider": selection["connection"].split(":", 1)[-1],
                     "model": selection["model"],
                     "profile": provenance,
-                },
+                }
+                | ({"resolved_models": resolved_models} if resolved_models else {}),
                 "_cost_reservation_ids": reservation_ids,
             }
         except Exception as exc:  # noqa: BLE001 - explicit retry classification

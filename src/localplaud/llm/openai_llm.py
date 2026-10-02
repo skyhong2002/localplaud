@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from ..config import get_settings
@@ -11,7 +12,7 @@ from ..openai_budget import (
     assert_openai_free_pool,
     is_real_openai_base_url,
 )
-from .base import LLMError, LLMUnavailable
+from .base import LLMError, LLMTimeout, LLMUnavailable, note_resolved_model
 
 if TYPE_CHECKING:
     from ..config import OpenAILlmConfig
@@ -40,6 +41,13 @@ class OpenAILLM:
         """True if an API key is configured."""
         return bool(self.cfg.api_key)
 
+    def _client(self, openai_class):
+        return openai_class(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None)
+
+    def _call_time_limit(self) -> int | None:
+        """Whole-call limit for streamed responses; the SDK bounds only idle reads."""
+        return None
+
     def complete(
         self,
         prompt: str,
@@ -67,7 +75,7 @@ class OpenAILLM:
             except OpenAIBudgetBlocked as exc:
                 raise LLMError(str(exc)) from exc
 
-        client = OpenAI(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None)
+        client = self._client(OpenAI)
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -100,6 +108,7 @@ class OpenAILLM:
         resp = client.chat.completions.create(
             **request,
         )
+        note_resolved_model(self.cfg.model, getattr(resp, "model", None))
         content = resp.choices[0].message.content
         if content is None:
             raise LLMError("OpenAI LLM: empty completion")
@@ -143,12 +152,19 @@ class OpenAILLM:
         parts: list[str] = []
         incomplete: str | None = None
         completed = False
+        limit = self._call_time_limit()
+        started = time.monotonic()
         for event in client.responses.create(**request):
+            if limit is not None and time.monotonic() - started > limit:
+                raise LLMTimeout(f"{self.name} call exceeded {limit}s")
             kind = getattr(event, "type", "")
             if kind == "response.output_text.delta":
                 parts.append(event.delta)
             elif kind == "response.completed":
                 completed = True
+                note_resolved_model(
+                    self.cfg.model, getattr(getattr(event, "response", None), "model", None)
+                )
             elif kind == "response.failed":
                 detail = getattr(getattr(event.response, "error", None), "message", None)
                 raise LLMError(f"OpenAI LLM: response failed: {detail or 'unknown error'}")

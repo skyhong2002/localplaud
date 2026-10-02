@@ -67,6 +67,7 @@ def _is_cloud(name: str) -> bool:
         "anthropic",
         "opencode-go",
         "codex-local",
+        "ai-gateway",
     }
 
 
@@ -580,17 +581,24 @@ def _connection_catalog(session: Session) -> dict[str, dict[str, Any]]:
         f"worker:{worker.key}"
         for worker in session.scalars(select(RemoteWorker).where(RemoteWorker.enabled.is_(False)))
     }
-    return {
-        connection.key: {
+    catalog: dict[str, dict[str, Any]] = {}
+    for connection in session.scalars(select(ProviderConnection)):
+        if connection.key in disabled_workers:
+            continue
+        details = {
             "provider_type": connection.provider_type,
             "execution_target": connection.execution_target,
             "data_egress": connection.data_egress,
             "configuration": _snapshot_connection_config(connection.config or {}),
             "secret_ref": connection.secret_ref,
         }
-        for connection in session.scalars(select(ProviderConnection))
-        if connection.key not in disabled_workers
-    }
+        if connection.provider_type == "ai-gateway":
+            from ..llm.ai_gateway import alias_policy
+
+            # The resolver records the selected alias's current target.
+            details["gateway_policy"] = alias_policy((connection.config or {}).get("policy_file"))
+        catalog[connection.key] = details
+    return catalog
 
 
 def list_profiles(session: Session) -> list[dict[str, Any]]:

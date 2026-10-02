@@ -65,8 +65,11 @@ class CodexLocalLLM:
 
     name = "codex-local"
 
-    def __init__(self, cfg: CodexLocalLlmConfig):
+    def __init__(self, cfg: CodexLocalLlmConfig, *, expected_account_id: str | None = None):
         self.cfg = cfg
+        # When another client spends this subscription, its reserve is only
+        # meaningful if the local login reports that same account.
+        self.expected_account_id = expected_account_id
 
     @property
     def model(self) -> str:
@@ -107,7 +110,20 @@ class CodexLocalLLM:
         used = primary.get("usedPercent")
         if not isinstance(used, int) or isinstance(used, bool) or not 0 <= used <= 100:
             raise LLMUnavailable("Codex subscription quota response was incomplete")
+        # A reported secondary window can be the tighter limit; honour whichever
+        # leaves less. Plans without one report null.
+        secondary = (snapshot.get("secondary") or {}).get("usedPercent")
+        if isinstance(secondary, int) and not isinstance(secondary, bool) and 0 <= secondary <= 100:
+            used = max(used, secondary)
         return 100 - used
+
+    def _check_quota_account(self, result: dict) -> None:
+        if self.expected_account_id is not None and result.get("accountId") != (
+            self.expected_account_id
+        ):
+            raise LLMUnavailable(
+                "Codex quota login does not report the configured subscription account"
+            )
 
     def _remaining_quota_percent(self) -> int:
         """Read the Codex subscription window without spending a model turn."""
@@ -166,6 +182,7 @@ class CodexLocalLLM:
                 if response.get("error"):
                     raise LLMUnavailable("Codex subscription quota could not be read")
                 result = response.get("result") or {}
+                self._check_quota_account(result)
                 return self._remaining_from_rate_limit_result(result)
             raise _QuotaCheckTimeout("Codex subscription quota check timed out")
         except (OSError, ValueError, json.JSONDecodeError) as exc:

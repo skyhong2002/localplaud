@@ -127,6 +127,14 @@ def resolve_profile(
             raise ResolutionError(f"no-egress profile cannot use {key[0]}/{key[1]}")
         if details:
             selection.update(details)
+        policy = selection.pop("gateway_policy", None)
+        if policy is not None:
+            # An alias names a policy slot, not a model. Record what it resolves
+            # to now so a later remap does not pass as the same selection.
+            selection["alias_resolution"] = {
+                "revision": policy.get("revision"),
+                "model": (policy.get("aliases") or {}).get(key[1]),
+            }
         selection["execution_target"] = execution_target
         selection["data_egress"] = data_egress
 

@@ -42,6 +42,7 @@ from ..db.models import (
 from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
+from ..llm.base import capture_resolved_models
 from ..note_speakers import SPEAKER_ATTRIBUTION_PROMPT_VERSION, anonymous_summary_content
 from ..providers.fallback import candidate_snapshots, is_retryable_fallback_error
 from ..providers.service import lock_library_profile_resolution, resolve_recording_profile
@@ -358,9 +359,14 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
 
     family_config = getattr(resolved, family)
     provider = selected.get("provider_type") or str(selected["connection"]).split(":", 1)[-1]
-    if provider == "codex-local" and stage not in {"correct", "summarize", "mind_map", "ask"}:
+    if provider in {"codex-local", "ai-gateway"} and stage not in {
+        "correct",
+        "summarize",
+        "mind_map",
+        "ask",
+    }:
         raise ValueError(
-            "codex-local supports only correction, summaries, mind maps, and Ask; "
+            f"{provider} supports only correction, summaries, mind maps, and Ask; "
             f"it cannot run stage {stage}"
         )
     family_config.provider = provider
@@ -978,12 +984,20 @@ def _run_fallback_stage(
                 StageName.align,
                 StageName.diarize,
             }
-            with _SPEECH_STAGE_LOCK if speech_stage else nullcontext():
+            with (
+                _SPEECH_STAGE_LOCK if speech_stage else nullcontext(),
+                capture_resolved_models() as resolved_models,
+            ):
                 outcome = operation(candidate)
             detail = dict(outcome.get("detail") or {}) | {
                 "fallback": candidate["fallback"],
                 "fallback_failures": failures,
             }
+            usage = outcome.get("usage")
+            if resolved_models:
+                # The requested model may be an alias; keep what actually answered.
+                detail["resolved_models"] = resolved_models
+                usage = dict(usage or {}) | {"resolved_models": resolved_models}
             _finish_stage(
                 file_id,
                 durable_stage,
@@ -991,7 +1005,7 @@ def _run_fallback_stage(
                 model=outcome.get("model"),
                 artifact_source=outcome.get("artifact_source", "local"),
                 detail=detail,
-                usage=outcome.get("usage"),
+                usage=usage,
                 expected_stale_generation=stale_generation,
             )
             return outcome.get("value"), candidate
@@ -3491,6 +3505,10 @@ _EXECUTION_ONLY_KEYS = frozenset(
         "quota_reserve_percent",
         "quota_call_headroom_percent",
         "quota_check_timeout_seconds",
+        "quota_executable",
+        "quota_codex_home",
+        "quota_account_id",
+        "policy_file",
     }
 )
 # Chunk budgets only shape the stage that uses them.
@@ -3506,6 +3524,11 @@ def _comparable_selection(selection, stage: str):
         return selection
     # A quality-floor verdict describes eligibility, not how the artifact was made.
     selection = {key: value for key, value in selection.items() if key != "quality_resolution"}
+    if isinstance(selection.get("alias_resolution"), dict):
+        # The alias's target model matters; an unrelated policy revision does not.
+        # An unknown target never matches, so an unreadable policy cannot vouch
+        # for an existing artifact.
+        selection["alias_resolution"] = selection["alias_resolution"].get("model") or object()
     if not isinstance(selection.get("configuration"), dict):
         return selection
     ignored = _EXECUTION_ONLY_KEYS | _STAGE_IRRELEVANT_KEYS.get(stage, frozenset())

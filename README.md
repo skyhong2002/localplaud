@@ -282,6 +282,17 @@ select it through an execution profile with explicit cloud egress. The shipped l
 requires another 2% of pre-call headroom, keeping the user's requested 3% floor
 outside the callable range.
 
+The `ai-gateway` adapter sends the same text stages to a central OpenAI-compatible
+gateway that maps semantic aliases (for example `sky-quality`) to concrete models.
+Profiles select the alias, never a concrete model. Each stage attempt records the
+alias it requested and the model that answered, and each resolved profile records the
+alias's current target from the gateway's policy file, so a remapped alias is not
+treated as the model that produced an existing artifact. When the gateway spends a
+ChatGPT subscription, the adapter reads that subscription's window through a Codex
+login (`quota_codex_home`, optionally pinned with `quota_account_id`) before every
+call and fails closed with the same reserve as `codex-local`. The client key is a
+`secret_ref` environment reference. See [docs/gpt6-settings.md](docs/gpt6-settings.md).
+
 Recording notes default to an evidence workflow: timestamped facts, source-based
 extraction checks, topic planning, section drafting and a separate verification
 pass. Failed checks preserve existing notes; successful regeneration archives them.
