@@ -104,6 +104,7 @@
 .sf-ask-banner[hidden] { display:none; }
 .sf-ask-banner a { color:inherit;font-weight:600;text-decoration:underline; }
 .sf-banner-detail { font-size:12.5px;opacity:.85;margin:2px 0 4px; }
+.sf-banner-actions { display:flex;flex-wrap:wrap;gap:2px 16px; }
 .sf-ask-banner .i { width:16px;height:16px;margin-top:2px; }
 .sf-ask-scroll { flex:1;overflow-y:auto;overscroll-behavior:contain;scroll-behavior:smooth; }
 .sf-ask-col { width:min(760px,calc(100% - 36px));margin:0 auto;padding:8px 0 28px; }

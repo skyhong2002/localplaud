@@ -722,15 +722,17 @@
         const text = document.createElement('div');
         const title = document.createElement('strong'); title.textContent = tr('Ask is running in a limited state');
         const detail = document.createElement('div'); detail.className = 'sf-banner-detail'; detail.textContent = messages.join(' ');
-        text.append(title, detail);
+        const actions = document.createElement('div'); actions.className = 'sf-banner-actions';
         if (!data.indexed_recordings) {
           const link = document.createElement('a'); link.href = '/status'; link.textContent = tr('Check processing and index status');
-          text.append(link);
+          actions.append(link);
         }
         if (!data.llm.ok) {
           const link = document.createElement('a'); link.href = '/settings#connections'; link.textContent = tr('Open provider settings');
-          text.append(document.createTextNode(' '), link);
+          actions.append(link);
         }
+        text.append(title, detail);
+        if (actions.childElementCount) text.append(actions);
         banner.replaceChildren(icon, text); banner.hidden = false;
       } catch (_error) { /* readiness is advisory only */ }
     })();
