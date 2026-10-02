@@ -679,6 +679,9 @@ body.ws-mm-full-open { overflow: hidden; }
 
   /* Notes: note picker "Summary ⌄" + grey "+" pill, huge title, large body. */
   .ws-m-notebar { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; }
+  /* Without notes the empty state below already offers New note / Generate, so a
+     lone "+" pill would sit on its own row between the banner and the title. */
+  .ws-m-notebar:not(:has(.ws-note-picker)) { display: none; }
   .ws-note-picker { position: relative; min-width: 0; }
   .ws-note-picker-btn { display: inline-flex; align-items: center; gap: 4px; max-width: 70vw; min-height: 44px; padding: 0; border: 0; background: none; color: var(--c-text, #000); font: inherit; font-size: 17px; font-weight: 600; cursor: pointer; }
   .ws-note-picker-btn > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
