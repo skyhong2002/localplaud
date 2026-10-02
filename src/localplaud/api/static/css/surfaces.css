@@ -428,8 +428,8 @@
 .sf-tcard-desc { margin:0;font-size:14px;line-height:1.45;color:var(--c-text-2,var(--muted));display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere; }
 .sf-tcard-foot { margin-top:auto;padding-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--c-text-2,var(--muted)); }
 .sf-tcard-foot>span:first-child { display:inline-flex;align-items:center;gap:3px; }
-.sf-tcard-author { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%; }
-.sf-tcard-foot .sf-badge { margin-left:auto; }
+.sf-tcard-author { flex:1 1 0;min-width:min(8em,100%);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%; }
+.sf-tcard-foot .sf-badge { margin-left:auto;flex:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .sf-tcard-rank { position:absolute;top:0;right:12px;padding:2px 8px;border-radius:0 0 4px 4px;background:color-mix(in srgb,#9A8F2E 18%,transparent);font-size:12px;font-style:italic;color:var(--c-text,var(--fg)); }
 .sf-tcard-create { align-items:center;justify-content:center;gap:10px;border-style:dashed;cursor:pointer;font:inherit;font-size:18px;font-weight:300;color:var(--c-text,var(--fg)); }
 .sf-tcard-create .i { width:28px;height:28px; }
@@ -557,12 +557,12 @@ a.sf-app-card:hover { border-color:var(--c-border-strong,var(--border2)); }
 .settings-row[data-disabled]>.settings-row-main { opacity:.55; }
 .settings-row-main { flex:1 1 auto;min-width:0;overflow-wrap:anywhere; }
 .settings-row-main code,.settings-wrap code,.settings-model-name { overflow-wrap:anywhere; }
-.settings-panel-head { display:flex;justify-content:space-between;align-items:center;gap:8px 12px;flex-wrap:wrap; }
-.settings-panel-head>.sub { font-size:12px; }
-.settings-panel-top>div:first-child { flex:1 1 160px;min-width:0; }
 /* Keys wrap to their own line as a unit instead of splitting mid-word beside a long name. */
 .settings-row-main code { display:inline-block;max-width:100%;vertical-align:baseline; }
 .settings-path { padding:0;background:none;overflow-wrap:break-word; }
+.settings-panel-head { display:flex;justify-content:space-between;align-items:center;gap:8px 12px;flex-wrap:wrap; }
+.settings-panel-head>.sub { font-size:12px; }
+.settings-panel-top>div:first-child { flex:1 1 160px;min-width:0; }
 .settings-session { display:flex;justify-content:space-between;align-items:center;gap:12px;min-width:0; }
 .settings-model { display:flex;flex-direction:column;min-width:0; }
 .settings-model-actions { justify-content:flex-start;margin-top:auto;padding-top:10px; }
