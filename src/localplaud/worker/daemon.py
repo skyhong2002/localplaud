@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from .claims import processing_owner
@@ -12,7 +13,7 @@ log = logging.getLogger(__name__)
 
 
 class DaemonJobs:
-    """A slow provider cannot prevent discovery; each loop remains single-flight."""
+    """Independent discovery and bounded, continuously refilled recording slots."""
 
     def __init__(self, settings, owner: str, scheduler):
         self.settings = settings
@@ -21,6 +22,12 @@ class DaemonJobs:
         self.stopped = threading.Event()
         self.sync_lock = threading.Lock()
         self.work_lock = threading.Lock()
+        self.workers = max(1, settings.pipeline.concurrency)
+        self.pool = ThreadPoolExecutor(max_workers=self.workers) if self.workers > 1 else None
+        self.inflight = set()
+        self.job_settings = settings.model_copy(deep=True)
+        self.job_settings.pipeline.concurrency = 1
+        self.job_settings.pipeline.files_per_cycle = 1
 
     def install(self):
         from ..poller.poll import _DAEMON_HEARTBEAT_INTERVAL_SECONDS
@@ -99,4 +106,54 @@ class DaemonJobs:
         def process():
             return process_automatic_pending(self.settings, daemon_owner=self.owner)
 
-        return self._run(self.work_lock, process)
+        if self.pool is None:
+            return self._run(self.work_lock, process)
+        if self.stopped.is_set() or not self.work_lock.acquire(blocking=False):
+            return None
+        try:
+            self.inflight = {future for future in self.inflight if not future.done()}
+            # Include Web/maintenance claims in the capacity calculation. Futures
+            # without a claim yet also occupy a slot, preventing over-dispatch.
+            available = self.workers - max(len(self.inflight), self.active_recordings())
+            for _ in range(max(0, available)):
+                self.inflight.add(self.pool.submit(self._parallel_cycle))
+            return max(0, available)
+        finally:
+            self.work_lock.release()
+
+    def active_recordings(self):
+        from sqlalchemy import func, select
+
+        from ..db.models import PlaudFile
+        from ..db.session import session_scope
+
+        with session_scope() as session:
+            return (
+                session.scalar(
+                    select(func.count())
+                    .select_from(PlaudFile)
+                    .where(
+                        PlaudFile.processing_token.is_not(None),
+                        PlaudFile.processing_lease_until > datetime.now(UTC),
+                    )
+                )
+                or 0
+            )
+
+    def _parallel_cycle(self):
+        from ..cli import process_automatic_pending
+
+        if self.stopped.is_set():
+            return
+        try:
+            # Each slot selects one recording afresh. A long-running sibling
+            # never prevents a free slot from taking a newly uploaded recording.
+            with processing_owner(self.owner):
+                process_automatic_pending(self.job_settings, daemon_owner=self.owner)
+        except Exception:
+            log.exception("Automatic processing slot failed; later dispatch remains enabled")
+
+    def shutdown(self):
+        self.stopped.set()
+        if self.pool is not None:
+            self.pool.shutdown(wait=True, cancel_futures=True)

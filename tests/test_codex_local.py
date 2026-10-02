@@ -64,7 +64,7 @@ def test_codex_uses_stdin_ephemeral_isolation_and_output_schema(monkeypatch, tmp
     monkeypatch.setattr("localplaud.llm.codex_local.subprocess.run", fake_run)
     monkeypatch.setenv("LOCALPLAUD_LLM__OPENAI__API_KEY", "must-not-leak")
     provider = _provider(monkeypatch, tmp_path)
-    assert provider.polish_chunk_chars == 48_000
+    assert provider.polish_chunk_chars == 8_000
     schema = {"type": "object", "properties": {"segments": {"type": "array"}}}
 
     assert provider.complete("private transcript", system="rules", json_schema=schema) == (
@@ -218,3 +218,31 @@ def test_codex_quota_snapshot_prefers_main_codex_bucket():
         CodexLocalLLM._remaining_from_rate_limit_result(
             {"rateLimits": {"primary": {"usedPercent": True}}}
         )
+
+
+def test_quota_check_timeout_is_read_once_more_then_fails_closed(monkeypatch):
+    from localplaud.llm import codex_local
+    from localplaud.llm.base import LLMUnavailable
+
+    provider = CodexLocalLLM(CodexLocalLlmConfig())
+    outcomes = [codex_local._QuotaCheckTimeout("timed out"), 60]
+
+    def read():
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(provider, "_remaining_quota_percent", read)
+    assert provider._ensure_quota_reserve() == 60
+
+    calls = []
+
+    def always_slow():
+        calls.append(1)
+        raise codex_local._QuotaCheckTimeout("timed out")
+
+    monkeypatch.setattr(provider, "_remaining_quota_percent", always_slow)
+    with pytest.raises(LLMUnavailable, match="timed out"):
+        provider._ensure_quota_reserve()
+    assert len(calls) == 2

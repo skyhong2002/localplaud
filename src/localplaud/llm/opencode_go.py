@@ -11,6 +11,7 @@ from .base import (
     LLMError,
     LLMInputTooLarge,
     LLMQuotaExhausted,
+    LLMTimeout,
     LLMTransientError,
     LLMUnavailable,
 )
@@ -128,9 +129,7 @@ class OpenCodeGoLLM:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise LLMTransientError(
-                f"OpenCode Go timed out after {self.cfg.timeout_seconds}s"
-            ) from exc
+            raise LLMTimeout(f"OpenCode Go timed out after {self.cfg.timeout_seconds}s") from exc
         except OSError as exc:
             raise LLMUnavailable(f"could not start OpenCode CLI: {exc}") from exc
         if result.returncode != 0:

@@ -4,7 +4,7 @@
    dynamic revision number out so the prose part stays translatable. #}
 {% macro lineage(label) %}{% if label and label.startswith('transcript rev ') %}{{ t('transcript rev') }} {{ label[15:] }}{% else %}{{ t(label) }}{% endif %}{% endmacro %}
 {% block body %}
-<div class="shell recording-shell">
+<div class="shell recording-shell" data-active-panel="{{ active_tab }}">
   {% set active_id = f.id %}
   <header class="detail-topbar">
     <div class="recording-breadcrumb">
@@ -23,12 +23,14 @@
     </div>
     <div class="recording-actions">
       <button class="icon-action" id="open-ask-dock" type="button" aria-controls="recording-panel-ask" aria-expanded="false"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span><span class="action-label">{{ t('Ask') }}</span></button>
-      <button class="icon-action" id="open-share" type="button" aria-label="{{ t('Share') }}" title="{{ t('Share') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span><span class="action-label">{{ t('Share') }}</span></button>
-      {% if f.transcript or f.summaries or f.user_notes or f.has_audio %}<button class="icon-action" id="open-export" type="button" aria-label="{{ t('Export') }}" title="{{ t('Export') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span><span class="action-label">{{ t('Export') }}</span></button>{% endif %}
+      <button class="icon-action" id="open-share" type="button" data-recording-share aria-label="{{ t('Share') }}" title="{{ t('Share') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span><span class="action-label">{{ t('Share') }}</span></button>
       <details class="recording-more"><summary class="icon-action icon-only" aria-label="{{ t('More actions') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/ellipsis.svg')"></span></summary><div class="recording-menu">
         {% if not f.has_audio and f.origin == 'plaud' and not f.audio_on_demand %}<button id="import-recording-audio" type="button" data-import-audio><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Import audio') }}</button>{% endif %}
-        {% if f.origin == 'plaud' and not f.is_trash %}<button id="refresh-plaud-cloud" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Refresh Plaud cloud artifacts') }}</button>{% endif %}
+        {% if f.origin == 'plaud' and not f.is_trash %}<button id="refresh-plaud-cloud" data-refresh-plaud-cloud type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/cloud.svg')"></span>{{ t('Refresh Plaud cloud artifacts') }}</button>{% endif %}
         {% if f.local_title %}<button id="clear-local-title" type="button">{{ t('Use Plaud title') }}</button>{% endif %}
+        <button id="menu-edit-title" type="button">{{ t('Edit title') }}</button>
+        {% if f.transcript %}<button id="menu-find-transcript" type="button">{{ t('Find in transcript') }} / {{ t('Replace') }}</button>{% endif %}
+        {% if f.speakers %}<button id="menu-name-speakers" type="button">{{ t('Speaker name') }}</button>{% endif %}
         <button id="menu-edit-recording-metadata" type="button">{{ t('Folder and tags') }}</button>
         {% if f.has_audio or f.audio_on_demand %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ t('Rebuild all') }}</button>{% endif %}
         <button id="menu-processing-details" type="button">{{ t('Processing details') }}</button>
@@ -59,12 +61,14 @@
     {% set notes = f.summaries | rejectattr('template', 'equalto', 'mind_map') | list %}
     <div class="tabs" role="tablist" aria-label="{{ t('Recording workspace') }}">
       <button id="recording-tab-transcript" role="tab" aria-controls="recording-panel-transcript" aria-selected="{{ 'true' if active_tab == 'transcript' else 'false' }}" tabindex="{{ '0' if active_tab == 'transcript' else '-1' }}" data-panel="transcript" class="{% if active_tab == 'transcript' %}on{% endif %}">{{ t('Transcript') }}</button>
-      <button id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' else '-1' }}" data-panel="notes" class="{% if active_tab == 'notes' %}on{% endif %}">{{ t('Meeting notes') }}</button>
+      <button id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' else '-1' }}" data-panel="notes" class="{% if active_tab == 'notes' %}on{% endif %}">{{ t('Notes') }}</button>
       <button id="recording-tab-mindmap" role="tab" aria-controls="recording-panel-mindmap" aria-selected="{{ 'true' if active_tab == 'mindmap' else 'false' }}" tabindex="{{ '0' if active_tab == 'mindmap' else '-1' }}" data-panel="mindmap" class="{% if active_tab == 'mindmap' %}on{% endif %}">{{ t('Mind map') }}</button>
       <button id="recording-tab-ask" role="tab" aria-controls="recording-panel-ask" aria-selected="{{ 'true' if active_tab == 'ask' else 'false' }}" tabindex="{{ '0' if active_tab == 'ask' else '-1' }}" data-panel="ask" class="{% if active_tab == 'ask' %}on{% endif %}">{{ t('Ask') }}</button>
     </div>
     <div id="reprocess-msg" class="sub" aria-live="polite" style="margin:6px 0; font-size:13px">{% if f.audio_on_demand %}{{ t('Processing is complete. Audio is stored in Plaud and downloads automatically when played, exported, or reprocessed.') }}{% elif not f.has_audio and f.origin == 'plaud' %}{{ t('Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.') }}{% endif %}</div>
+    {% if f.error and notes %}<details class="recording-recovery" style="margin:8px 0;color:var(--muted);font-size:12px"><summary style="cursor:pointer">{{ t('Processing details') }} · {{ t('Processing paused') }}</summary>{% endif %}
     {% if f.error %}<div class="recording-alert"><span class="nav-icon" style="--nav-icon:url('/static/lucide/triangle-alert.svg')"></span><div class="recording-alert-body"><strong>{{ t('Processing paused') }}</strong><div class="sub" style="font-size:11.5px;margin-top:3px">{% if f.retry.exhausted %}{{ t('Resume with the active AI profile and a fresh retry budget.') }}{% elif f.retry.next_at %}{{ t('Automatic retry scheduled for') }} {{ f.retry.next_at }}.{% else %}{{ t('Resume the missing or failed stages when ready.') }}{% endif %}</div><details class="technical-error"><summary>{{ t('Technical details') }}</summary><div>{{ f.error }}</div></details></div>{% if f.has_audio %}<div class="recording-alert-actions"><button class="icon-action" hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML">{{ t('Resume') }}</button></div>{% endif %}</div>{% endif %}
+    {% if f.error and notes %}</details>{% endif %}
 
     <details class="recording-advanced" id="recording-advanced">
       <summary>{{ t('Processing details') }}</summary>
@@ -227,6 +231,8 @@
     </div>
 
     <div class="tabpanel" id="recording-panel-notes" role="tabpanel" aria-labelledby="recording-tab-notes" data-panel="notes" {% if active_tab != 'notes' %}hidden{% endif %}>
+      <h2 class="recording-reading-title">{{ f.filename }}</h2>
+      <details class="note-generation-settings" id="note-generation-settings" {% if not notes and not f.user_notes %}open{% endif %}><summary>{{ t('Generate notes') }}</summary>
       <div class="notes-toolbar">
         <div class="notes-template-control">
           <label for="note-template-select">{{ t('Note template') }}</label>
@@ -245,6 +251,7 @@
         <button class="btn" type="button" id="generate-notes" {% if not f.has_local_transcript %}disabled{% endif %}><span class="nav-icon" style="--nav-icon:url('/static/lucide/sparkles.svg')"></span>{{ t('Regenerate notes') if notes else t('Generate notes') }}</button>
         <span id="note-template-result" class="notes-status sub">{% if not f.has_local_transcript %}{{ t('A local transcript is required first.') }}{% endif %}</span>
       </div>
+      </details>
       {% if notes or f.user_notes %}
       {# One shared active target keeps the highlighted tab and the initially
          visible panel in lockstep even if either list's ordering changes. #}
@@ -265,7 +272,16 @@
           {% endif %}
         </div>
       </div>
-      <div class="md">{{ s.content_md | markdown }}</div>
+      {% if s.source in ('cloud', 'plaud') and ('plaud://image?' in s.content_md or s.unavailable_images) %}<p class="sub cloud-image-notice" role="note">{{ t('A Plaud image is unavailable through the official interface or its link has expired. The original text is shown below.') }}</p>{% endif %}
+      <div class="md" data-generated-note-prose>{{ s.content_md | markdown }}</div>
+      <script>
+      document.currentScript.previousElementSibling.querySelectorAll('a[href]').forEach(link=>{
+        const href=link.getAttribute('href');
+        if(!href.startsWith('/file/'))return;
+        const url=new URL(href,location.href);
+        if(url.origin===location.origin&&/^\/file\/[A-Za-z0-9_-]+$/.test(url.pathname)&&url.searchParams.has('t')&&/^(?:\d+:)?\d{2}:\d{2}$/.test(link.textContent.trim()))link.remove();
+      });
+      </script>
     </div>
     {% endfor %}
 
@@ -296,6 +312,7 @@
       <div class="empty generate-empty">
         <span class="nav-icon empty-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span>
         <strong class="empty-title">{{ t('No notes yet.') }}</strong>
+        {% if f.origin == 'plaud' and not f.is_trash %}<div class="cloud-import-empty"><p class="sub">{{ t('Already generated notes in Plaud? Import them here with their original content and Plaud source label.') }}</p><button class="btn sec" type="button" data-refresh-plaud-cloud>{{ t('Import Plaud notes') }}</button><p class="sub" data-cloud-import-status role="status" aria-live="polite"></p></div>{% endif %}
         <span class="sub empty-sub">{% if f.has_local_transcript %}{{ t('Create your own note or choose a template to generate one from the transcript.') }}{% else %}{{ t('Create a note now. Generated notes become available after a local transcript exists.') }}{% endif %}</span>
         {% if not f.is_trash %}<button class="btn sec generate-cta" type="button" data-open-manual-note><span class="nav-icon" style="--nav-icon:url('/static/lucide/plus.svg')"></span>{{ t('New note') }}</button>{% endif %}
       </div>
@@ -429,83 +446,7 @@
     </form>
   </section>
 </div>
-<div class="import-backdrop" id="share-backdrop" hidden>
-  <section class="import-modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title">
-    <div class="import-head"><span id="share-title">{{ t('Share recording') }}</span><button class="import-close" id="share-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
-    <div class="import-body share-body">
-      <div class="share-icon"><span class="nav-icon" style="--nav-icon:url('/static/lucide/link.svg')"></span></div>
-      <div><strong>{{ t('Workspace link') }}</strong><div class="sub" style="font-size:12px;margin-top:2px">{{ t('Available only to people who can sign in to this localplaud workspace.') }}</div></div>
-      <div class="share-link-row"><input id="share-link" class="search-input" readonly value=""><button class="btn" id="copy-share-link" type="button">{{ t('Copy link') }}</button></div>
-      <button class="btn sec" id="system-share" type="button" hidden><span class="nav-icon" style="--nav-icon:url('/static/lucide/share-2.svg')"></span>{{ t('Share with…') }}</button>
-      <div id="share-result" class="sub" role="status"></div>
-      <section class="public-share-section" aria-labelledby="public-share-title">
-        <div><strong id="public-share-title">{{ t('Public share link') }}</strong><div class="sub" style="font-size:12px;margin-top:2px">{{ t('Anyone with this link can view this recording without signing in.') }}</div></div>
-        <div class="share-options" role="group" aria-labelledby="share-options-title">
-          <span class="share-options-title" id="share-options-title">{{ t('Shared content') }}</span>
-          <label><input type="checkbox" id="share-opt-audio" data-share-option="audio" checked>{{ t('Audio') }}</label>
-          <label><input type="checkbox" id="share-opt-transcript" data-share-option="transcript" checked>{{ t('Transcript') }}</label>
-          <label><input type="checkbox" id="share-opt-notes" data-share-option="notes" checked>{{ t('Notes and mind map') }}</label>
-          <label><input type="checkbox" id="share-opt-plaud" data-share-option="plaud_artifacts">{{ t('Plaud-imported content') }}</label>
-          <span class="sub share-options-note">{{ t('Plaud-imported content is published only when enabled, and is always clearly labelled on the public page.') }}</span>
-        </div>
-        <div id="public-share-empty" hidden><button class="btn" id="create-public-share" type="button">{{ t('Create public link') }}</button></div>
-        <div id="public-share-active" style="display:grid;gap:8px" hidden>
-          <div class="share-link-row"><input id="public-share-link" class="search-input" readonly value="" aria-label="{{ t('Public share link') }}"><button class="btn" id="copy-public-share" type="button">{{ t('Copy') }}</button></div>
-          <div class="public-share-actions"><button class="btn danger" id="revoke-public-share" type="button">{{ t('Disable link') }}</button><span id="public-share-created" class="sub" style="font-size:12px"></span></div>
-        </div>
-        <div id="public-share-result" class="sub" role="status" aria-live="polite"></div>
-      </section>
-    </div>
-  </section>
-</div>
-{% if f.transcript or f.summaries or f.user_notes or f.has_audio %}
-<div class="import-backdrop" id="export-backdrop" hidden>
-  <section class="import-modal" style="min-height:0;width:min(560px,100%)" role="dialog" aria-modal="true" aria-labelledby="export-title">
-    <div class="import-head"><span id="export-title">{{ t('Export recording') }}</span><button class="import-close" id="export-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
-    <div class="import-body" style="gap:18px">
-      {% if f.transcript %}
-      <section>
-        <strong>{{ t('Transcript') }}</strong>
-        <div class="sub" style="font-size:12px;margin:3px 0 9px">{{ t('Canonical corrected transcript when available') }}</div>
-        <div style="display:flex;gap:14px;margin-bottom:10px;font-size:13px">
-          <label><input id="export-timestamps" type="checkbox" checked> {{ t('Timestamps') }}</label>
-          <label><input id="export-speakers" type="checkbox" checked> {{ t('Speaker labels') }}</label>
-        </div>
-        <div style="display:flex;gap:7px;flex-wrap:wrap" data-export-group="transcript">
-          <button class="btn sec" id="copy-transcript" type="button" style="padding:7px 11px"><span class="nav-icon" style="--nav-icon:url('/static/lucide/copy.svg')"></span>{{ t('Copy transcript') }}</button>
-          {% for fmt in ['txt','srt','vtt','docx','pdf'] %}<a class="btn sec" data-fmt="{{ fmt }}" href="#" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
-        </div>
-      </section>
-      {% endif %}
-      {% if f.summaries or f.user_notes %}
-      <section>
-        <strong>{{ t('Notes') }}</strong>
-        <div class="sub" style="font-size:12px;margin:3px 0 9px">{{ t('Generated notes and saved notes, without transcript') }}</div>
-        <div style="display:flex;gap:7px;flex-wrap:wrap">
-          <button class="btn sec" id="copy-notes" type="button" style="padding:7px 11px"><span class="nav-icon" style="--nav-icon:url('/static/lucide/copy.svg')"></span>{{ t('Copy all notes') }}</button>
-          {% for fmt in ['md','txt','docx','pdf'] %}<a class="btn sec" href="/file/{{ f.id }}/export/notes.{{ fmt }}" style="padding:7px 11px;text-transform:uppercase">{{ fmt }}</a>{% endfor %}
-        </div>
-      </section>
-      {% endif %}
-      {% if mindmaps %}
-      <section>
-        <strong>{{ t('Mind map') }}</strong>
-        <div class="sub" style="font-size:12px;margin:3px 0 9px">{{ t('Complete tree rendered from the latest local mind map') }}</div>
-        <a class="btn sec" href="/file/{{ f.id }}/export/mind-map.png" style="padding:7px 11px">PNG</a>
-      </section>
-      {% endif %}
-      <section>
-        <strong>{{ t('Combined archive') }}</strong>
-        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
-          {% if f.transcript or f.summaries or f.user_notes %}<a class="btn sec" href="/file/{{ f.id }}/export.md" style="padding:7px 11px">{{ t('Markdown archive') }}</a>{% endif %}
-          {% if f.has_audio or f.audio_on_demand %}<a class="btn sec" href="/file/{{ f.id }}/export/audio" style="padding:7px 11px">{{ t('Original audio') }}</a>{% endif %}
-        </div>
-      </section>
-      <div id="export-result" class="sub" role="status" aria-live="polite" style="font-size:12px;min-height:17px"></div>
-    </div>
-  </section>
-</div>
-{% endif %}
+{% include "_recording_share.html" %}
 {% if not f.is_trash %}
 <div class="import-backdrop" id="manual-note-backdrop" data-dirty="false" hidden>
   <section class="import-modal manual-note-modal" role="dialog" aria-modal="true" aria-labelledby="manual-note-title">
@@ -526,6 +467,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/recording-share.js?v=3"></script>
 <script>
 (()=>{
   const cleanupController=new AbortController(),appView=document.getElementById('app-view');
@@ -542,7 +484,7 @@
   function closeDialog(backdrop,{restoreFocus=true}={}){if(!backdrop)return;backdrop.hidden=true;recordingShell.inert=false;dialogChromeInert.forEach((wasInert,region)=>{region.inert=wasInert;});dialogChromeInert.clear();document.body.classList.remove('dialog-open');if(activeDialog===backdrop)activeDialog=null;if(restoreFocus)dialogOpener?.focus();dialogOpener=null;}
   document.addEventListener('keydown',event=>{if(!activeDialog)return;if(event.key==='Escape'){event.preventDefault();closeDialog(activeDialog);return;}if(event.key!=='Tab')return;const items=dialogFocusables(activeDialog);if(!items.length){event.preventDefault();return;}const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}},{signal:cleanupController.signal});
   cleanupController.signal.addEventListener('abort',()=>{if(activeDialog)closeDialog(activeDialog,{restoreFocus:false});},{once:true});
-  const workspacePopovers=[...document.querySelectorAll('.transcript-tool,.speaker-pill,.note-add-menu')];
+  const workspacePopovers=[...document.querySelectorAll('.transcript-tool,.speaker-pill,.note-add-menu,.recording-more')];
   function closeWorkspacePopover(details,{restoreFocus=true}={}){if(!details?.open)return;details.open=false;details.querySelector('form.speaker-editor')?.reset();if(restoreFocus)details.querySelector(':scope>summary')?.focus();}
   workspacePopovers.forEach(details=>{details.addEventListener('toggle',()=>{if(!details.open)return;workspacePopovers.forEach(other=>{if(other!==details)closeWorkspacePopover(other,{restoreFocus:false});});const panel=details.querySelector('.transcript-popover,.speaker-editor,.note-add-popover');requestAnimationFrame(()=>{(panel?.querySelector('input:not([type="hidden"]),textarea,select,button:not([data-close-popover]),a[href]')||panel?.querySelector('[data-close-popover]'))?.focus();});});details.querySelector('[data-close-popover]')?.addEventListener('click',()=>closeWorkspacePopover(details));});
   document.addEventListener('pointerdown',event=>{workspacePopovers.forEach(details=>{if(details.open&&!details.contains(event.target))closeWorkspacePopover(details,{restoreFocus:false});});},{signal:cleanupController.signal});
@@ -558,6 +500,9 @@
   const editTitle=()=>{titleDisplayRow.hidden=true;titleForm.hidden=false;titleInput.focus();titleInput.select();};
   const cancelTitle=()=>{titleInput.value={{ f.filename|tojson }};titleForm.hidden=true;titleDisplayRow.hidden=false;};
   document.getElementById('edit-recording-title')?.addEventListener('click',editTitle);
+  document.getElementById('menu-edit-title')?.addEventListener('click',event=>{event.currentTarget.closest('details').open=false;editTitle();});
+  document.getElementById('menu-find-transcript')?.addEventListener('click',event=>{event.currentTarget.closest('details').open=false;activatePanel('transcript',true);const search=document.querySelector('.transcript-tool');if(search)search.open=true;});
+  document.getElementById('menu-name-speakers')?.addEventListener('click',event=>{event.currentTarget.closest('details').open=false;activatePanel('transcript',true);const speaker=document.querySelector('.speaker-pill');if(speaker){speaker.open=true;speaker.scrollIntoView({block:'center'});}});
   document.getElementById('cancel-recording-title')?.addEventListener('click',cancelTitle);
   titleInput?.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();cancelTitle();}});
   titleForm?.addEventListener('submit',async event=>{event.preventDefault();const button=event.currentTarget.querySelector('[type=submit]');button.disabled=true;const response=await fetch('/api/files/{{ f.id }}/title',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title:titleInput.value})}),data=await response.json();if(response.ok)location.reload();else{button.disabled=false;document.getElementById('reprocess-msg').textContent=data.detail||tr('Save failed');}});
@@ -617,10 +562,6 @@
     document.getElementById('toggle-replace')?.addEventListener('click',()=>{const row=document.getElementById('replace-row');row.hidden=!row.hidden;if(!row.hidden)document.getElementById('transcript-replace').focus();});
     document.getElementById('replace-all')?.addEventListener('click',async()=>{const output=document.getElementById('replace-result'),button=document.getElementById('replace-all');if(!findInput.value.trim()){output.textContent=tr('Enter text to find');return;}button.disabled=true;output.textContent=tr('Replacing…');const body=new FormData();body.set('find',findInput.value);body.set('replace',document.getElementById('transcript-replace').value);body.set('base_revision','{{ f.transcript.revision if f.transcript else 0 }}');body.set('case_sensitive',document.getElementById('replace-case').checked?'true':'false');const response=await fetch('/file/{{ f.id }}/transcript/replace',{method:'POST',body}),data=await response.json();if(response.ok&&data.replacements){output.textContent=`${tr('Replaced')} ${data.replacements}. ${tr('Reloading…')}`;location.href='/file/{{ f.id }}?view=corrected';return;}output.textContent=response.ok?tr('No matches'):(data.error||tr('Replace failed'));button.disabled=false;});
   }
-  const exportBackdrop=document.getElementById('export-backdrop');
-  const exportResult=document.getElementById('export-result');
-  document.getElementById('open-export')?.addEventListener('click',event=>{if(exportResult)exportResult.textContent='';openDialog(exportBackdrop,event.currentTarget);});
-  document.getElementById('export-close')?.addEventListener('click',()=>closeDialog(exportBackdrop));
   const generateBackdrop=document.getElementById('generate-backdrop');
   if(generateBackdrop){
     document.querySelectorAll('[data-open-generate]').forEach(button=>button.addEventListener('click',event=>openDialog(generateBackdrop,event.currentTarget)));
@@ -655,33 +596,8 @@
       }catch(_error){out.textContent=tr('Could not start generation');button.disabled=false;}
     });
   }
-  exportBackdrop?.addEventListener('click',event=>{if(event.target===exportBackdrop)closeDialog(exportBackdrop);});
-  const shareBackdrop=document.getElementById('share-backdrop'),shareInput=document.getElementById('share-link'),shareResult=document.getElementById('share-result'),systemShare=document.getElementById('system-share'),publicShareEmpty=document.getElementById('public-share-empty'),publicShareActive=document.getElementById('public-share-active'),publicShareInput=document.getElementById('public-share-link'),publicShareResult=document.getElementById('public-share-result'),publicShareCreated=document.getElementById('public-share-created');
-  const recordingUrl=()=>{const url=new URL(location.href);url.searchParams.delete('workspace');url.searchParams.delete('preserve_filelist');url.searchParams.delete('return_to');url.hash='';return url.href;};
-  async function shareRequestJson(options={}){let response;try{response=await fetch('/api/files/{{ f.id }}/share-link',{...options,signal:cleanupController.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr('Could not update public link'));}let data={};try{data=await response.json();}catch(_error){}if(!response.ok)throw new Error(tr(typeof data.detail==='string'?data.detail:'Could not update public link'));return data;}
-  const shareOptionInputs=[...document.querySelectorAll('[data-share-option]')];
-  const shareOptionValues=()=>Object.fromEntries(shareOptionInputs.map(input=>[input.dataset.shareOption,input.checked]));
-  let publicShareActiveState=false;
-  function renderPublicShare(data){publicShareActiveState=Boolean(data.active);publicShareEmpty.hidden=Boolean(data.active);publicShareActive.hidden=!data.active;publicShareInput.value=data.url||'';publicShareCreated.textContent=data.created_at?`${tr('Created')} · ${new Intl.DateTimeFormat(document.documentElement.lang||undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(data.created_at))}`:'';if(data.options)shareOptionInputs.forEach(input=>{input.checked=Boolean(data.options[input.dataset.shareOption]);});}
-  async function loadPublicShare(){publicShareEmpty.hidden=true;publicShareActive.hidden=true;publicShareResult.textContent=tr('Loading public link…');try{renderPublicShare(await shareRequestJson());publicShareResult.textContent='';}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not load public link');}}
-  shareOptionInputs.forEach(input=>input.addEventListener('change',async()=>{if(!publicShareActiveState)return;publicShareResult.textContent=tr('Updating…');try{renderPublicShare(await shareRequestJson({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:shareOptionValues()})}));publicShareResult.textContent=tr('Shared content updated');}catch(error){if(error.name!=='AbortError'){publicShareResult.textContent=error.message||tr('Could not update public link');loadPublicShare();}}}));
-  document.getElementById('open-share')?.addEventListener('click',event=>{shareInput.value=recordingUrl();systemShare.hidden=!navigator.share;openDialog(shareBackdrop,event.currentTarget);loadPublicShare();});
-  document.getElementById('share-close')?.addEventListener('click',()=>{closeDialog(shareBackdrop);shareResult.textContent='';publicShareResult.textContent='';});
-  shareBackdrop?.addEventListener('click',event=>{if(event.target===shareBackdrop)document.getElementById('share-close').click();});
   async function writeClipboard(text){try{await navigator.clipboard.writeText(text);return;}catch(_error){}const priorFocus=document.activeElement,area=document.createElement('textarea');area.value=text;area.setAttribute('readonly','');area.style.cssText='position:fixed;opacity:0;pointer-events:none';document.body.append(area);area.select();const copied=document.execCommand('copy');area.remove();priorFocus?.focus();if(!copied)throw new Error('clipboard unavailable');}
   function showNoteConflict(form,status){form.querySelector('[data-note-conflict]')?.remove();status.textContent=tr('This note changed elsewhere. Your text is still here. Reload before saving.');const recovery=document.createElement('button');recovery.className='btn sec';recovery.type='button';recovery.dataset.noteConflict='';recovery.textContent=tr('Copy draft and reload');recovery.addEventListener('click',async()=>{recovery.disabled=true;try{await writeClipboard(`# ${form.elements.title.value}\n\n${form.elements.content_md.value}`);location.reload();}catch(_error){status.textContent=tr('Could not copy draft');recovery.disabled=false;}});status.after(recovery);recovery.focus();}
-  document.getElementById('copy-share-link')?.addEventListener('click',async()=>{try{await writeClipboard(shareInput.value);shareResult.textContent=tr('Copied');}catch(_error){shareResult.textContent=tr('Copy failed');}});
-  document.getElementById('create-public-share')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;publicShareResult.textContent=tr('Creating public link…');try{renderPublicShare(await shareRequestJson({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({options:shareOptionValues()})}));publicShareResult.textContent='';}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not create public link');}finally{event.currentTarget.disabled=false;}});
-  document.getElementById('copy-public-share')?.addEventListener('click',async()=>{try{await writeClipboard(publicShareInput.value);publicShareResult.textContent=tr('Copied');}catch(_error){publicShareResult.textContent=tr('Copy failed');}});
-  document.getElementById('revoke-public-share')?.addEventListener('click',async event=>{if(!confirm(tr('Disable this public link? Anyone using it will immediately lose access.')))return;event.currentTarget.disabled=true;publicShareResult.textContent=tr('Disabling public link…');try{await shareRequestJson({method:'DELETE'});renderPublicShare({active:false});publicShareResult.textContent=tr('Public link disabled');}catch(error){if(error.name!=='AbortError')publicShareResult.textContent=error.message||tr('Could not disable public link');}finally{event.currentTarget.disabled=false;}});
-  systemShare?.addEventListener('click',async()=>{try{await navigator.share({title:{{ f.filename|tojson }},url:shareInput.value});}catch(error){if(error.name!=='AbortError')shareResult.textContent=tr('Share failed');}});
-  document.querySelectorAll('[data-export-group="transcript"] a').forEach(link=>link.addEventListener('click',event=>{
-    event.preventDefault();const timestamps=document.getElementById('export-timestamps').checked;
-    const speakers=document.getElementById('export-speakers').checked;
-    location.href=`/file/{{ f.id }}/export/transcript.${link.dataset.fmt}?timestamps=${timestamps}&speakers=${speakers}`;
-  }));
-  document.getElementById('copy-transcript')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;exportResult.textContent=tr('Copying…');try{const timestamps=document.getElementById('export-timestamps').checked,speakers=document.getElementById('export-speakers').checked,response=await fetch(`/file/{{ f.id }}/export/transcript.txt?timestamps=${timestamps}&speakers=${speakers}`,{signal:cleanupController.signal});if(!response.ok)throw new Error();const text=await response.text();if(cleanupController.signal.aborted)return;await writeClipboard(text);exportResult.textContent=tr('Transcript copied');}catch(error){if(error.name!=='AbortError')exportResult.textContent=tr('Could not copy transcript');}finally{if(!cleanupController.signal.aborted)button.disabled=false;}});
-  document.getElementById('copy-notes')?.addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;exportResult.textContent=tr('Copying…');try{const response=await fetch('/file/{{ f.id }}/export/notes.md',{signal:cleanupController.signal});if(!response.ok)throw new Error();const text=await response.text();if(cleanupController.signal.aborted)return;await writeClipboard(text);exportResult.textContent=tr('Notes copied');}catch(error){if(error.name!=='AbortError')exportResult.textContent=tr('Could not copy notes');}finally{if(!cleanupController.signal.aborted)button.disabled=false;}});
   document.querySelectorAll('[data-import-audio]').forEach(button=>button.addEventListener('click',async()=>{
     const label=button.querySelector('.action-label'),out=document.getElementById('reprocess-msg');button.disabled=true;if(label)label.textContent=tr('Importing…');
     let response,data;try{response=await fetch('/api/imports/plaud/files/{{ f.id }}/audio',{method:'POST',signal:cleanupController.signal});data=await response.json();}catch(error){if(error.name!=='AbortError'){out.textContent=tr('Could not start audio import');button.disabled=false;if(label)label.textContent=tr('Import audio');}return;}
@@ -692,10 +608,10 @@
       if(status.status==='error'){out.textContent=status.error||tr('Audio import failed');button.disabled=false;if(label)label.textContent=tr('Retry audio import');return;}
       out.textContent=tr('Downloading this recording from Plaud…');importTimer=setTimeout(poll,1000);};poll();
   }));
-  document.getElementById('refresh-plaud-cloud')?.addEventListener('click',async event=>{
-    const button=event.currentTarget,out=document.getElementById('reprocess-msg');button.disabled=true;out.textContent=tr('Refreshing Plaud cloud artifacts…');
-    try{const response=await fetch('/api/files/{{ f.id }}/refresh-cloud-artifacts',{method:'POST',signal:cleanupController.signal}),data=await response.json();if(!response.ok)throw new Error(data.detail||tr('Could not refresh Plaud cloud artifacts'));out.textContent=`${tr('Plaud cloud artifacts refreshed.')} ${data.notes} ${tr('notes')}`;setTimeout(()=>location.reload(),700);}catch(error){if(error.name!=='AbortError'){out.textContent=error.message||tr('Could not refresh Plaud cloud artifacts');button.disabled=false;}}
-  });
+  document.querySelectorAll('[data-refresh-plaud-cloud]').forEach(button=>button.addEventListener('click',async event=>{
+    const button=event.currentTarget,out=button.closest('.cloud-import-empty')?.querySelector('[data-cloud-import-status]')||document.getElementById('reprocess-msg');button.disabled=true;out.textContent=tr('Refreshing Plaud cloud artifacts…');
+    try{const response=await fetch('/api/files/{{ f.id }}/refresh-cloud-artifacts',{method:'POST',signal:cleanupController.signal}),data=await response.json();if(!response.ok)throw new Error(data.detail||tr('Could not refresh Plaud cloud artifacts'));if(!data.notes){out.textContent=tr('No Plaud notes are available for this recording yet.');button.disabled=false;return;}out.textContent=`${tr('Plaud cloud artifacts refreshed.')} ${data.notes} ${tr('notes')}`;setTimeout(()=>location.reload(),700);}catch(error){if(error.name!=='AbortError'){out.textContent=error.message||tr('Could not refresh Plaud cloud artifacts');button.disabled=false;}}
+  }));
   // Friendly generation progress: reuse the read-only per-recording status
   // endpoint. The empty state reloads once work reaches a terminal state;
   // when usable content is already on screen only the header label updates.
@@ -742,7 +658,7 @@
     statusTimer=setTimeout(tick,2500);
   })();
   const noteTemplateSelect=document.getElementById('note-template-select');
-  document.querySelectorAll('[data-open-note-generation]').forEach(button=>button.addEventListener('click',()=>{closeWorkspacePopover(button.closest('.note-add-menu'),{restoreFocus:false});document.querySelector('.notes-toolbar')?.scrollIntoView({behavior:'smooth',block:'nearest'});noteTemplateSelect?.focus();}));
+  document.querySelectorAll('[data-open-note-generation]').forEach(button=>button.addEventListener('click',()=>{closeWorkspacePopover(button.closest('.note-add-menu'),{restoreFocus:false});document.getElementById('note-generation-settings').open=true;document.querySelector('.notes-toolbar')?.scrollIntoView({behavior:'smooth',block:'nearest'});noteTemplateSelect?.focus();}));
   function renderResolvedStages(resolved){const list=document.getElementById('resolved-stage-list');if(!list||!resolved?.stages)return;list.replaceChildren();for(const [stage,choice] of Object.entries(resolved.stages)){const chip=document.createElement('span');chip.className='chip';chip.textContent=`${tr(stage)} · ${choice.connection}:${choice.model}`;list.append(chip);}}
   async function previewTemplateResolution(key){const response=await fetch(`/api/providers/recordings/{{ f.id }}/resolution?template_key=${encodeURIComponent(key)}`),data=await response.json();if(response.ok)renderResolvedStages(data.resolved);}
   async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent=tr('Checking recording signals…');const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`${tr('Auto suggests')} ${data.template?.name||data.key} · ${data.confidence} ${tr('confidence')} · ${reason}`;previewTemplateResolution(data.key);}else out.textContent=data.detail||tr('Could not preview Auto selection');}
@@ -780,11 +696,11 @@
   const askDock=document.getElementById('recording-panel-ask'),askDockLayout=document.querySelector('.recording-workspace-layout'),askDockButton=document.getElementById('open-ask-dock'),askDockMedia=window.matchMedia('(min-width:1200px)'),askDockStorageKey='localplaud:recording-ask-dock';
   const storedAskDockOpen=()=>{try{return localStorage.getItem(askDockStorageKey)==='open';}catch(_error){return false;}};
   const setAskDock=(open,{remember=true,focus=false}={})=>{if(!askDockMedia.matches)return false;askDockLayout.classList.toggle('ask-dock-open',open);askDock.hidden=!open;askDockButton.setAttribute('aria-expanded',String(open));if(remember){try{localStorage.setItem(askDockStorageKey,open?'open':'closed');}catch(_error){}}if(open&&focus)requestAnimationFrame(()=>document.getElementById('ask-q')?.focus());return open;};
-  const workspacePathForTab=(raw,name)=>{const url=new URL(raw,location.origin);if(name==='transcript')url.searchParams.delete('tab');else url.searchParams.set('tab',name);url.searchParams.delete('note');url.searchParams.delete('note_id');return `${url.pathname}${url.search}${url.hash}`;};
+  const workspacePathForTab=(raw,name)=>{const url=new URL(raw,location.origin);url.searchParams.set('tab',name);url.searchParams.delete('note');url.searchParams.delete('note_id');return `${url.pathname}${url.search}${url.hash}`;};
   const pushWorkspaceUrl=(url,state)=>{const next=`${url.pathname}${url.search}${url.hash}`,current=`${location.pathname}${location.search}${location.hash}`;if(next!==current)history.pushState(state,'',url);};
   const syncFilelistTab=name=>document.querySelectorAll('#recording-file-list [data-recording-id]').forEach(link=>{for(const attribute of ['href','hx-get']){const raw=link.getAttribute(attribute);if(raw)link.setAttribute(attribute,workspacePathForTab(raw,name));}});
   const activePanelName=()=>document.querySelector('.tabs>button.on')?.dataset.panel||'transcript';
-  const activatePanel=(requested,push=false)=>{const dockRequest=requested==='ask'&&askDockMedia.matches,name=dockRequest?'transcript':requested,button=document.querySelector(`.tabs>button[data-panel="${name}"]`);if(!button)return;if(dockRequest)setAskDock(true);document.querySelectorAll('.tabs>button').forEach(item=>{const active=item===button;item.classList.toggle('on',active);item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;});panels.forEach(panel=>{if(panel===askDock&&askDockMedia.matches)panel.hidden=!askDockLayout.classList.contains('ask-dock-open');else panel.hidden=panel.dataset.panel!==name;});syncFilelistTab(name);if(push){const url=new URL(location.href);if(requested==='transcript')url.searchParams.delete('tab');else url.searchParams.set('tab',requested);if(requested!=='notes'){url.searchParams.delete('note');url.searchParams.delete('note_id');}pushWorkspaceUrl(url,{localplaudTab:requested});}};
+  const activatePanel=(requested,push=false)=>{const dockRequest=requested==='ask'&&askDockMedia.matches,name=dockRequest?'transcript':requested,button=document.querySelector(`.tabs>button[data-panel="${name}"]`);if(!button)return;recordingShell.dataset.activePanel=name;if(dockRequest)setAskDock(true);document.querySelectorAll('.tabs>button').forEach(item=>{const active=item===button;item.classList.toggle('on',active);item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;});panels.forEach(panel=>{if(panel===askDock&&askDockMedia.matches)panel.hidden=!askDockLayout.classList.contains('ask-dock-open');else panel.hidden=panel.dataset.panel!==name;});syncFilelistTab(name);if(push){const url=new URL(location.href);url.searchParams.set('tab',requested);if(requested!=='notes'){url.searchParams.delete('note');url.searchParams.delete('note_id');}pushWorkspaceUrl(url,{localplaudTab:requested});}};
   document.querySelectorAll('.tabs>button').forEach(button=>button.onclick=()=>activatePanel(button.dataset.panel,true));
   askDockButton.addEventListener('click',()=>{if(askDockMedia.matches){setAskDock(true,{focus:true});syncFilelistTab(activePanelName());}else activatePanel('ask',true);});
   document.getElementById('close-ask-dock').addEventListener('click',()=>{setAskDock(false);const url=new URL(location.href);if(url.searchParams.get('tab')==='ask'){url.searchParams.delete('tab');history.replaceState({localplaudTab:'transcript'},'',url);}syncFilelistTab(document.querySelector('.tabs>button.on')?.dataset.panel||'transcript');askDockButton.focus();});

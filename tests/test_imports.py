@@ -472,6 +472,7 @@ def test_cloud_note_asset_failure_keeps_import_successful(monkeypatch, tmp_path)
     with session_scope() as session:
         note = session.query(Summary).filter_by(file_id="failed-asset").one()
         assert note.content_md == "Before\n\nPoster\n\nAfter"
+        assert note.template_snapshot["unavailable_images"] == 1
 
 
 def test_incremental_import_migration_is_additive_and_idempotent(tmp_path):
@@ -738,3 +739,64 @@ def test_existing_catalog_without_marker_gets_one_safe_upgrade_baseline(
     assert sync_file_list(client, settings) == (1, 0)
     with session_scope() as session:
         assert session.get(PlaudFile, "post-upgrade").status == FileStatus.discovered
+
+
+def test_cloud_refresh_keeps_note_identity_names_and_partial_results(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import PlaudFile, Summary
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import refresh_cloud_artifacts_for
+
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="stable", filename="Test"))
+        session.add(Summary(file_id="stable", template="auto_sum_note", source="local", content_md="Mine"))
+
+    class Client:
+        notes = [
+            {"key": "auto_sum_note", "cloud_id": "a", "tab_name": "Meeting",
+             "title": "A", "markdown": "First"},
+            {"key": "auto_sum_note", "cloud_id": "b", "tab_name": "Actions",
+             "title": "B", "markdown": "Second"},
+        ]
+        def get_detail(self, file_id):
+            return {}
+        def get_cloud_notes(self, file_id, detail):
+            return self.notes
+        def get_cloud_transcript_segments(self, file_id, detail):
+            return []
+
+    client = Client()
+    refresh_cloud_artifacts_for(client, "stable")
+    with session_scope() as session:
+        before = {n.title: n.id for n in session.query(Summary).filter_by(source="cloud")}
+    client.notes.reverse()
+    refresh_cloud_artifacts_for(client, "stable")
+    client.notes = []
+    refresh_cloud_artifacts_for(client, "stable")
+    with session_scope() as session:
+        after = {n.title: n.id for n in session.query(Summary).filter_by(source="cloud")}
+        assert before == after
+        assert session.query(Summary).filter_by(source="local").one().content_md == "Mine"
+        assert {n.template_snapshot["name"] for n in session.query(Summary).filter_by(source="cloud")} == {"Meeting", "Actions"}
+        assert session.get(PlaudFile, "stable").cloud_artifacts_synced_at is not None
+
+
+@respx.mock
+def test_cloud_note_direct_https_image_is_mirrored_without_download_map(monkeypatch, tmp_path):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.poller.poll import _mirror_note_assets
+
+    urls = []
+    monkeypatch.setattr("localplaud.poller.poll._assert_safe_fetch_url", urls.append)
+    url = "https://assets.example/direct.png?signature=private"
+    route = respx.get(url).mock(return_value=httpx.Response(200, content=b"image"))
+    rendered = _mirror_note_assets(
+        {"markdown": f"![Original diagram]({url})\n\nFull text", "assets": {}},
+        file_id="direct-image", settings=settings,
+    )
+    assert "![Original diagram](/api/files/direct-image/note-assets/" in rendered
+    assert rendered.endswith("Full text")
+    assert "signature" not in rendered
+    assert urls == [url]
+    assert "authorization" not in route.calls[0].request.headers
