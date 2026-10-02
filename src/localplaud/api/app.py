@@ -391,6 +391,23 @@ templates.env.filters["dur"] = _fmt_dur
 templates.env.filters["mmss"] = _mmss
 templates.env.filters["markdown"] = _render_markdown
 
+
+def _static_asset_version(*names: str) -> str:
+    """Content hash for cache-busting the recording workspace's static assets."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    for name in names:
+        path = _HERE / "static" / name
+        if path.exists():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+templates.env.globals["workspace_asset_version"] = _static_asset_version(
+    "css/recording.css", "js/workspace.js"
+)
+
 _NOTE_ASSET_NAME = re.compile(r"[0-9a-f]{16}\.(?:png|jpe?g|gif|webp)")
 _NOTE_ASSET_MEDIA_TYPES = {
     "png": "image/png",
@@ -938,6 +955,14 @@ def _transcript_revision_reason(note: str | None) -> dict | None:
             "segment": int(reassigned.group(2)) + 1,
             "from": None if reassigned.group(3) == "unassigned" else reassigned.group(3),
             "to": None if reassigned.group(4) == "unassigned" else reassigned.group(4),
+        }
+    merged = re.fullmatch(r"merged speaker (.+) into (.+) across (\d+) segments?", note)
+    if merged:
+        return {
+            "kind": "speaker_merge",
+            "segment": int(merged.group(3)),
+            "from": merged.group(1),
+            "to": merged.group(2),
         }
     normalized = re.fullmatch(r"normalized segment (\d+) word speakers as (.+)", note)
     if normalized:
@@ -2386,6 +2411,38 @@ def _start_transcript_reindex(
     return True
 
 
+_WORD_SPAN_LIMIT = 600
+
+
+def _segment_word_spans(segment: dict) -> list[dict] | None:
+    """Timed word spans that reproduce the segment text exactly, else None.
+
+    Word-level playback highlighting must never alter what the reader sees: an
+    edited segment (whose words were cleared) or providers whose word tokens do
+    not losslessly rebuild the text fall back to plain segment text."""
+    words = segment.get("words") or []
+    text = (segment.get("text") or "").strip()
+    if not words or not text or len(words) > _WORD_SPAN_LIMIT:
+        return None
+    tokens = [str(word.get("text") or word.get("word") or "") for word in words]
+    if "".join(tokens).strip() == text:
+        spans = tokens
+        spans[0] = spans[0].lstrip()
+    elif " ".join(token.strip() for token in tokens) == text:
+        spans = [(" " if index else "") + token.strip() for index, token in enumerate(tokens)]
+    else:
+        return None
+    out = []
+    for token, word in zip(spans, words, strict=True):
+        try:
+            start = float(word.get("start"))
+            end = float(word.get("end"))
+        except (TypeError, ValueError):
+            return None
+        out.append({"text": token, "start": round(start, 2), "end": round(end, 2)})
+    return out
+
+
 @app.get("/file/{file_id}/transcript-page", response_class=HTMLResponse)
 def recording_transcript_page(
     request: Request,
@@ -2488,7 +2545,10 @@ def recording_transcript_page(
             segments = list(selected_revision.segments or [])
             transcript_revision = selected_revision.revision
             can_edit = revision is None
-        page_segments = segments[offset : offset + limit]
+        page_segments = [
+            dict(seg) | {"word_spans": _segment_word_spans(seg)}
+            for seg in segments[offset : offset + limit]
+        ]
         next_offset = offset + limit if offset + limit < len(segments) else None
         speaker_names = display_names(session, file_id)
         speaker_options = [
@@ -2567,6 +2627,76 @@ def _note_history_entries(
         }
         for item in rows[:limit]
     ]
+
+
+def _speaker_talk_stats(segments: list[dict], samples: int = 2) -> dict[str, dict]:
+    """Per-speaker talk time and a few representative clips for naming voices."""
+    stats: dict[str, dict] = {}
+    for segment in segments or []:
+        key = segment.get("speaker")
+        if not key:
+            continue
+        try:
+            start = float(segment.get("start") or 0)
+            end = float(segment.get("end") or start)
+        except (TypeError, ValueError):
+            continue
+        entry = stats.setdefault(key, {"seconds": 0.0, "candidates": []})
+        entry["seconds"] += max(0.0, end - start)
+        text = (segment.get("text") or "").strip()
+        if text:
+            entry["candidates"].append((end - start, start, end, text))
+    out: dict[str, dict] = {}
+    for key, entry in stats.items():
+        # Longest utterances identify a voice best; present them in time order.
+        best = sorted(entry["candidates"], key=lambda item: -item[0])[:samples]
+        out[key] = {
+            "seconds": round(entry["seconds"], 1),
+            "samples": [
+                {"start": round(start, 2), "end": round(end, 2), "text": text[:220]}
+                for _length, start, end, text in sorted(best, key=lambda item: item[1])
+            ],
+        }
+    return out
+
+
+def _diarization_state(stage_runs, transcript: dict | None, speakers: list[dict]) -> dict:
+    """Workspace-facing diarization health for the shown transcript.
+
+    Whisper never labels speakers, so a transcript without diarization output is
+    a degraded result that the workspace must say out loud rather than present
+    as complete. Imported or empty transcripts are not judged here."""
+    run = next((item for item in stage_runs if item.stage == StageName.diarize), None)
+    status = run.status.value if run is not None else None
+    if transcript is None or not transcript.get("segments"):
+        return {"degraded": False, "status": status, "error": None}
+    has_speakers = any(seg.get("speaker") for seg in transcript["segments"]) or bool(speakers)
+    degraded = (not has_speakers) or status in {
+        StageStatus.failed.value,
+        StageStatus.degraded.value,
+        StageStatus.skipped.value,
+    }
+    return {
+        "degraded": degraded,
+        "status": status,
+        "has_speakers": has_speakers,
+        "error": (
+            sanitize_error(run.error, max_length=300) if run is not None and run.error else None
+        ),
+    }
+
+
+def _notes_stage_state(stage_runs) -> dict:
+    """Generation state of the notes stage for progress and failure recovery."""
+    run = next((item for item in stage_runs if item.stage == StageName.summarize), None)
+    if run is None:
+        return {"status": None, "error": None, "provider": None, "model": None}
+    return {
+        "status": run.status.value,
+        "error": sanitize_error(run.error, max_length=500) if run.error else None,
+        "provider": run.provider,
+        "model": run.model,
+    }
 
 
 @app.get("/file/{file_id}", response_class=HTMLResponse)
@@ -2718,6 +2848,8 @@ def file_detail(
                     "template_version": s.template_version,
                     "created_at": _fmt_history_time(s.created_at),
                     "source": s.source,
+                    "provider": s.llm_provider,
+                    "model": s.model,
                     "input_transcript_revision": s.input_transcript_revision,
                     "input_transcript_source": s.input_transcript_source,
                     "lineage_label": _lineage_label(s.input_transcript_revision),
@@ -2769,8 +2901,10 @@ def file_detail(
             else (raw_row.segments if raw_row is not None else [])
         )
         speaker_names = display_names(session, r.id)
+        speaker_stats = _speaker_talk_stats(canonical_segments)
         speakers = [
             {"key": key, "name": speaker_names.get(key)}
+            | speaker_stats.get(key, {"seconds": 0, "samples": []})
             for key in _speaker_keys_for_editing(session, r, canonical_segments)
         ]
         show_corrected = corrected is not None and view != "raw"
@@ -2825,6 +2959,7 @@ def file_detail(
                 and r.local_transcript is not None
             ),
             "is_trash": r.is_trash,
+            "scene_label": _scene_label(r.scene),
             "has_local_transcript": r.local_transcript is not None,
             "origin": r.origin or "plaud",
             "transcript": transcript,
@@ -2962,6 +3097,8 @@ def file_detail(
                 "stages": len(r.stage_runs),
             },
         }
+        f["diarization"] = _diarization_state(r.stage_runs, transcript, speakers)
+        f["notes_state"] = _notes_stage_state(r.stage_runs)
         profile_rows = list(
             session.scalars(
                 select(ExecutionProfile).order_by(
@@ -3013,6 +3150,8 @@ def file_detail(
                 "key": item.key,
                 "name": item.name,
                 "version": item.version,
+                "description": item.description,
+                "category": item.category or item.scenario,
             }
             for item in session.scalars(
                 select(NoteTemplate)
@@ -4234,6 +4373,7 @@ def choose_recording_profile(file_id: str, profile_id: str = Form("")):
 
 @app.post("/file/{file_id}/speakers")
 def rename_speaker(
+    request: Request,
     file_id: str,
     key: str = Form(...),
     name: str = Form(""),
@@ -4283,11 +4423,122 @@ def rename_speaker(
         expected_revision=expected_revision,
         expected_speaker_names=expected_names,
     )
+    if "application/json" in request.headers.get("accept", ""):
+        # The workspace renames in place (optimistic UI) instead of reloading.
+        return {"key": key, "name": clean, "display": clean or key}
     return_to = _validated_library_return_url(return_to)
     redirect_url = _file_workspace_url(
         file_id, return_to, tab="transcript", t=_safe_playback_second(t)
     )
     return RedirectResponse(url=redirect_url, status_code=303)
+
+
+@app.post("/file/{file_id}/speakers/merge")
+def merge_speakers(
+    file_id: str,
+    source: str = Form(...),
+    target: str = Form(...),
+    base_revision: int = Form(...),
+):
+    """Reassign every segment (and timed word) of one speaker to another.
+
+    The merge is a new immutable TranscriptRevision on top of the canonical
+    transcript; raw ASR and earlier revisions are untouched, so it can be
+    reverted from revision history. Display names are not deleted."""
+    import copy
+
+    if source == target:
+        return JSONResponse(
+            {"error": "choose two different speakers", "code": "same_speaker"}, status_code=400
+        )
+    with session_scope() as session:
+        _serialize_transcript_mutation(session, file_id)
+        r = session.get(PlaudFile, file_id)
+        if r is None:
+            return JSONResponse({"error": "not found", "code": "not_found"}, status_code=404)
+        if _recording_edit_blocked(r):
+            return JSONResponse(
+                {
+                    "error": "recording is processing; try again when it finishes",
+                    "code": "recording_processing",
+                },
+                status_code=409,
+            )
+        settings = get_settings()
+        raw_row = _canonical_raw_row(r, settings)
+        corrected = _canonical_revision(r, raw_row)
+        if corrected is not None:
+            base_segments = corrected.segments
+            base_transcript_id = corrected.base_transcript_id
+            revision_source = corrected.source
+        elif raw_row is not None:
+            base_segments = raw_row.segments
+            base_transcript_id = raw_row.id
+            revision_source = raw_row.source
+        else:
+            return JSONResponse(
+                {"error": "no transcript to edit", "code": "no_transcript"}, status_code=400
+            )
+        current_revision = corrected.revision if corrected is not None else 0
+        if base_revision != current_revision:
+            return JSONResponse(
+                {"error": "transcript changed; reload before saving", "code": "stale_revision"},
+                status_code=409,
+            )
+        valid_speakers = set(_speaker_keys_for_editing(session, r, base_segments))
+        if source not in valid_speakers or target not in valid_speakers:
+            return JSONResponse(
+                {"error": "unknown speaker key", "code": "unknown_speaker"}, status_code=400
+            )
+        segments = copy.deepcopy(base_segments)
+        moved = 0
+        for index, segment in enumerate(segments):
+            words = list(segment.get("words") or [])
+            touched = segment.get("speaker") == source or any(
+                word.get("speaker") == source for word in words
+            )
+            if not touched:
+                continue
+            moved += 1
+            for word in words:
+                if word.get("speaker") == source:
+                    word["speaker"] = target
+            segments[index] = dict(segment) | {
+                "speaker": target if segment.get("speaker") == source else segment.get("speaker"),
+                "words": words,
+            }
+        if not moved:
+            return {"changed": False, "revision": current_revision, "segments": 0}
+        next_revision = max((rev.revision for rev in r.transcript_revisions), default=0) + 1
+        joined = "\n".join(
+            (seg.get("text") or "").strip() for seg in segments if (seg.get("text") or "").strip()
+        )
+        session.add(
+            TranscriptRevision(
+                file_id=file_id,
+                base_transcript_id=base_transcript_id,
+                revision=next_revision,
+                source=revision_source,
+                segments=segments,
+                text=joined,
+                has_speakers=bool(speaker_keys_from_segments(segments)),
+                note=(
+                    f"merged speaker {source} into {target} across {moved} "
+                    f"segment{'s' if moved != 1 else ''}"
+                ),
+                kind="speaker_edit",
+            )
+        )
+        session.execute(delete(Chunk).where(Chunk.file_id == file_id))
+        _queue_transcript_reindex(session, file_id)
+        expected_names = display_names(session, file_id)
+
+    _start_transcript_reindex(
+        file_id,
+        expected_revision=next_revision,
+        expected_speaker_names=expected_names,
+    )
+    return {"changed": True, "revision": next_revision, "segments": moved, "target": target}
 
 
 @app.post("/file/{file_id}/transcript/segments/{idx}")

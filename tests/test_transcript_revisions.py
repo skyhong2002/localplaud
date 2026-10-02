@@ -4,9 +4,11 @@ rerunning ASR."""
 
 from __future__ import annotations
 
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Barrier
 
 import pytest
@@ -634,15 +636,20 @@ def test_segment_editor_lists_stable_speakers_and_restores_focus_contract(
     assert '<option value="SPEAKER_00" selected>SPEAKER_00</option>' in transcript.text
     assert '<option value="SPEAKER_01" >Facilitator</option>' in transcript.text
     detail = c.get("/file/r1")
-    assert "form.parentElement.querySelector('.editbtn')?.focus()" in detail.text
-    assert "event.target.closest?.('.seg .segedit')" in detail.text
-    assert "const resetSegmentEditor=form=>{form.reset()" in detail.text
-    assert "form.querySelector('[data-segment-status]').textContent=''" in detail.text
-    assert "form.querySelector('[type=\"submit\"]').disabled=false" in detail.text
-    assert "headers:{accept:'application/json'}" in detail.text
-    assert "url.searchParams.set('tab','transcript')" in detail.text
-    assert "else url.searchParams.delete('t')" in detail.text
-    assert "recording_processing:'Recording is processing." in detail.text
+    # Inline correction lives in the workspace script: optimistic save with
+    # rollback, focus restored to the pencil, structured conflict messages.
+    assert '<script src="/static/js/workspace.js?v=' in detail.text
+    workspace_js = (
+        Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    ).read_text()
+    assert "form.parentElement.querySelector('.editbtn')?.focus()" in workspace_js
+    assert "event.target.closest?.('.seg .segedit')" in workspace_js
+    assert "function resetSegmentEditor(form) {\n    form.reset();" in workspace_js
+    assert "form.querySelector('[data-segment-status]').textContent = '';" in workspace_js
+    assert "form.querySelector('[type=\"submit\"]').disabled = false;" in workspace_js
+    assert "headers: { accept: 'application/json' }" in workspace_js
+    assert "paragraph.innerHTML = before.html;" in workspace_js  # rollback on failure
+    assert "recording_processing: 'Recording is processing." in workspace_js
     assert "document.querySelector('[data-segment-edit-error]')?.focus()" in detail.text
     assert ".seg:focus-within .editbtn" in detail.text
     assert ".seg .editbtn:focus-visible" in detail.text
@@ -753,7 +760,11 @@ def test_non_finite_playback_offsets_are_discarded(monkeypatch, tmp_path, offset
     assert detail.status_code == 200
     assert partial.status_code == 200
     assert 'name="t" value=""' in partial.text
-    assert "Number.isFinite(s)&&s>=0" in detail.text
+    assert '<script src="/static/js/workspace.js?v=' in detail.text
+    workspace_js = (
+        Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    ).read_text()
+    assert "Number.isFinite(s) && s >= 0" in workspace_js
 
 
 def test_segment_conflicts_have_distinct_structured_codes_and_native_processing_recovery(
@@ -1299,7 +1310,8 @@ def test_detail_view_toggle_raw_vs_corrected(monkeypatch, tmp_path):
     # explicit raw view shows the untouched ASR output, read-only
     raw = c.get("/file/r1?view=raw")
     raw_transcript = c.get("/file/r1/transcript-page?view=raw").text
-    assert "hello team" in raw_transcript
+    # Timed words render as spans that losslessly rebuild the segment text.
+    assert "hello team" in re.sub(r"<[^>]+>", "", raw_transcript)
     assert "hello, team!" not in raw_transcript
     assert "?view=corrected" in raw.text
     assert 'class="editbtn"' not in raw_transcript  # no edits from the raw view

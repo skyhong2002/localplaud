@@ -423,13 +423,20 @@ def test_detail_page_renders_mind_map_tab(monkeypatch, tmp_path):
     assert 'id="mindmap-src"' in r.text and "Sync topics" in r.text
     assert 'id="mm-zoom"' in r.text and 'id="mm-fit"' in r.text
     assert 'id="mm-zoom" type="range" min="15" max="140"' in r.text
-    assert "availableHeight=Math.max(1,viewport.clientHeight-30)" in r.text
-    assert "availableHeight/natural.height*100" in r.text
+    # Fit never enlarges beyond 100% and accounts for both axes; the tree is
+    # rendered, folded, panned and pinch-zoomed by the workspace script.
+    from pathlib import Path
+
+    workspace_js = (
+        Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    ).read_text()
     assert (
-        "Math.min(100,availableWidth/natural.width*100,"
-        "availableHeight/natural.height*100)" in r.text
+        "setZoom(Math.min(100, ((viewport.clientWidth - 24) / natural.width) * 100, "
+        "((viewport.clientHeight - 24) / natural.height) * 100));" in workspace_js
     )
-    assert "Math.max(60,available/natural*100)" not in r.text
+    assert "Math.max(60,available/natural*100)" not in workspace_js
+    assert "mm-toggle" in workspace_js and "pinch" in workspace_js
+    assert 'id="mm-toggle-all"' in r.text and 'id="mm-fullscreen"' in r.text
     assert "height:clamp(360px,58vh,520px)" in r.text
     assert 'class="mindmap-viewport"' in r.text
     # The mind map is excluded from the generic summary tabs.
