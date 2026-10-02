@@ -186,7 +186,7 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 5px; border: 1px soli
 .icon-btn-lg { width: 44px; height: 44px; }
 .text-btn { padding: 4px 6px; border: 0; border-radius: var(--radius); background: transparent; color: var(--c-text-2); font-size: 14px; cursor: pointer; }
 .text-btn:hover { color: var(--c-text); background: var(--c-hover-ui); }
-.view-all { display: inline-flex; align-items: center; gap: 2px; color: var(--c-text-2); font-size: 14px; }
+.view-all { display: inline-flex; align-items: center; gap: 2px; color: var(--c-text-2); font-size: 14px; white-space: nowrap; flex: none; }
 .view-all:hover { color: var(--c-text); }
 .view-all .i { width: 16px; height: 16px; }
 
@@ -991,7 +991,7 @@ body.progressive-failed .progressive-error { display: flex; }
   .home-section + .home-section { margin-top: 40px; }
   .section-head { margin-bottom: 12px; }
   .page-title, .t-display, h1.page { font-size: clamp(28px, 8vw, 34px); }
-  .library-head .page-title, .home-page .section-head .page-title:first-child { font-size: clamp(40px, 13vw, 56px); line-height: 1.15; font-weight: 300; }
+  .library-head .page-title, .home-page .home-section:first-child .section-head .page-title { font-size: clamp(40px, 13vw, 56px); line-height: 1.15; font-weight: 300; }
   .library-head { padding-bottom: 20px; border-bottom: 1px solid var(--c-border); }
   .library-head + .file-table .file-list, .library-head ~ .file-table .file-list { border-top: 0; }
   .library-search { display: none; }
@@ -1020,7 +1020,7 @@ body.progressive-failed .progressive-error { display: flex; }
   .organization-manager-create label { flex-basis: 100%; }
   .pagination { justify-content: center; flex-wrap: wrap; }
   .pagination .pagination-summary { flex-basis: 100%; margin: 0; text-align: center; }
-  .template-strip { display: flex; overflow-x: auto; scroll-snap-type: x proximity; gap: 12px; margin: 0 -16px; padding: 0 16px 4px; scrollbar-width: none; }
+  .template-strip { display: flex; overflow-x: auto; scroll-snap-type: x proximity; gap: 12px; margin: 0 -16px; padding: 0 16px 4px; scroll-padding-inline: 16px; scrollbar-width: none; }
   .template-strip::-webkit-scrollbar { display: none; }
   .template-card { flex: 0 0 72%; min-height: 168px; scroll-snap-align: start; }
   input, select, textarea { font-size: 16px; } /* no iOS zoom on focus */
