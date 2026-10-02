@@ -4,7 +4,7 @@
 <div class="shell recording-shell progressive-shell" aria-busy="true">
   <header class="detail-topbar">
     <div class="recording-breadcrumb">
-      <button class="collapse-toggle" type="button" data-collapse-toggle="list" aria-label="{{ t('Hide file list') }}" title="{{ t('Hide file list') }}" aria-controls="recording-file-list" aria-expanded="true"><span class="nav-icon" style="--nav-icon:url('/static/lucide/list-collapse.svg')"></span></button>
+      <button class="collapse-toggle" type="button" data-collapse-toggle="list" aria-label="{{ t('Hide file list') }}" title="{{ t('Hide file list') }}" aria-controls="recording-file-list" aria-expanded="true">{{ icon('list-collapse') }}</button>
       <a class="recording-crumb-link" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true"><span class="nav-icon" style="--nav-icon:url('/static/lucide/folder.svg')"></span>{{ t('All files') }}</a>
       <span class="recording-crumb-separator" aria-hidden="true">›</span>
       <div class="recording-title-row"><h1 id="recording-title-display" title="{{ f.filename }}">{{ f.filename }}</h1></div>

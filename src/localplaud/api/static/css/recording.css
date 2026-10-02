@@ -25,6 +25,8 @@
 .ws-topbar .icon-action { border-radius: 5px; }
 .ws-topbar .icon-action.icon-only { border-color: transparent; background: none; }
 .ws-topbar .icon-action.icon-only:hover, .ws-topbar .icon-action[aria-expanded="true"] { background: var(--c-subtle, #EBEBEB); }
+.recording-shell .collapse-toggle { display: inline-grid; place-items: center; flex: none; width: 34px; height: 34px; padding: 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--c-text-2); cursor: pointer; }
+.recording-shell .collapse-toggle:hover { background: var(--c-subtle); color: var(--c-text); }
 .ws-divider { width: 1px; height: 16px; background: var(--border2); }
 .ws-topbar #open-ask-dock[aria-expanded="true"] { background: var(--c-subtle, #EBEBEB); }
 .ws-menu-wrap { position: relative; }
@@ -631,7 +633,8 @@ body.ws-mm-full-open { overflow: hidden; }
 
 @media (max-width: 820px) {
   /* (a) the desktop list toggle has no place on the pushed phone screen */
-  .ws-topbar [data-collapse-toggle="list"], .ws-topbar .recording-crumb-separator { display: none !important; }
+  .ws-topbar [data-collapse-toggle="list"], .ws-topbar .recording-crumb-separator,
+  .progressive-shell .detail-topbar [data-collapse-toggle="list"] { display: none !important; }
   /* (b) leave room for the sticky player + pinned Ask input + safe area */
   .recording-shell .pane-inner { padding-bottom: calc(var(--ws-player-h) + 84px + env(safe-area-inset-bottom)) !important; }
   .recording-pane:not(.has-player) .pane-inner { padding-bottom: calc(84px + env(safe-area-inset-bottom)) !important; }
