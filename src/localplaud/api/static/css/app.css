@@ -608,6 +608,12 @@ a.home-card:hover { background: var(--c-hover); }
 .quickadd form { position: absolute; left: 0; top: calc(100% + 4px); z-index: 5; display: flex; gap: 6px; width: 280px; padding: 8px; border: 1px solid var(--c-border-ui); border-radius: var(--radius); background: var(--c-surface); box-shadow: var(--shadow-pop); }
 .org-manage { display: inline-flex; align-items: center; gap: 6px; width: max-content; padding: 4px 6px; border: 0; border-radius: var(--radius); background: transparent; color: var(--c-text-2); font-size: 12px; cursor: pointer; }
 .org-manage:hover { background: var(--c-hover); color: var(--c-text); }
+/* Wrapped chips and label-less rows (quick-add tag, manage, status) stay in the control column. */
+.orgrow, .filtrow { padding-left: 90px; }
+.orgrow > .lbl, .filtrow > .lbl { margin-left: -90px; }
+.orgbox > .org-manage, .orgbox > .org-status { margin-left: 90px; }
+.org-status { min-height: 16px; font-size: 11px; }
+.org-status:empty { min-height: 0; margin-top: -10px; }
 .range-filter { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--c-border); }
 .range-filter fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .range-filter legend { margin-bottom: 6px; color: var(--c-text-body); font-size: 12px; font-weight: 500; }
@@ -994,6 +1000,11 @@ body.progressive-failed .progressive-error { display: flex; }
   .range-filter { grid-template-columns: 1fr; }
   .range-actions { grid-column: 1; }
   .orgrow .lbl, .filtrow .lbl, .tag-filter-select .lbl { width: 100%; }
+  .tag-filter-select { flex-wrap: wrap; }
+  .tag-filter-select .select { width: 100%; }
+  .orgrow, .filtrow { padding-left: 0; }
+  .orgrow > .lbl, .filtrow > .lbl { margin-left: 0; }
+  .orgbox > .org-manage, .orgbox > .org-status { margin-left: 0; }
   .mobile-library-controls { display: flex; align-items: center; gap: 12px; padding: 4px 0 8px; }
   .mobile-library-controls .t-meta { margin-right: auto; }
   .mobile-sort-label { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--c-text-body); }
