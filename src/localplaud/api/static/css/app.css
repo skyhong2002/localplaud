@@ -308,6 +308,7 @@ dialog.sheet {
     position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: none; max-height: 92dvh;
     border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; padding-bottom: var(--safe-bottom);
   }
+  dialog.dialog.sheet-on-phone.dialog-lg { width: 100% !important; }
   dialog.sheet[open], dialog.dialog.sheet-on-phone[open] { animation: lp-sheet-in .22s var(--ease); }
   .sheet-grabber { display: block; width: 36px; height: 4px; margin: 8px auto 0; border-radius: 2px; background: var(--c-border-strong); flex: none; }
   .dialog-head { padding-left: 16px; }
