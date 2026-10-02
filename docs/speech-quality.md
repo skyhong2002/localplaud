@@ -23,6 +23,28 @@ native VAD. Install `localplaud[vad]` to avoid these degraded paths. VAD cannot
 guarantee perfect recognition: quiet speech, music, and background voices remain
 difficult cases.
 
+For confirmed missed quiet speech, Qwen supports explicitly disabling VAD for
+one transcription stage with profile options `{"vad": {"enabled": false}}`.
+The remote worker validates and applies these options to that job only. Qwen then
+decodes bounded, contiguous windows covering the entire recording, including its
+tail; token-limit retries still bisect windows without dropping either half.
+Artifact metadata records VAD as disabled and zero skipped seconds. This increases
+work and can expose the decoder to silence/noise, so it is an explicit recovery
+choice, not a global default or a guarantee that every utterance is recognized.
+Merely cleaning or polishing an old transcript cannot recover missing speech.
+
+Operators can also persist this choice in a new execution-profile version for
+future Qwen recordings after checking their own audio. Existing profile versions
+and per-recording selections remain traceable. This is a coverage/compute tradeoff,
+not a change of ASR provider or a promise of verbatim accuracy; validate quiet
+speech and hallucinations on representative recordings before selecting it.
+
+Nemotron recordings longer than ten minutes compute full-recording acoustic
+features on CPU before transferring features to CUDA. This avoids a large CUDA
+STFT allocation while retaining one continuous speaker cache; it does not split
+the recording into independently numbered speaker groups. Host memory must still
+accommodate the full-recording feature calculation.
+
 ## Recovering old output
 
 `python -m localplaud.silence_repair plan RECORDING_ID --output private.jsonl`
@@ -87,16 +109,25 @@ not automatically enqueue the whole library for rewriting.
 
 ## Automatic correction and edit review
 
-`transcript-polish/v4` runs before notes for both normal ingestion and notes-only
+`transcript-polish/v5` runs before notes for both normal ingestion and notes-only
 resume/regeneration. It proposes contextual edits, then makes a separate model
 call to review individual edits against the original dialogue and nearby speaker
 context. Latin words and numbers stay atomic during edit extraction. Accepted
 nonoverlapping edits are applied to the original text only after every review
 batch validates. Rejecting one uncertain edit in a long segment does not discard
-unrelated supported corrections. Each edit, decision and reason is recorded in
-the correction stage. Adjacent replacements without an unchanged boundary remain
+unrelated supported corrections. Each edit and decision is recorded in the
+correction stage. Review responses list approved IDs and brief rejection reasons;
+approved entries store a generic approval marker, not a model-written rationale.
+Every ID must still appear exactly once, including punctuation edits. Accepted v4
+revisions remain reusable because v5 changes the output protocol, not the review
+policy. Adjacent replacements without an unchanged boundary remain
 one review unit; accepting an edit requires support for the complete span.
 There is no manual approval step and no library-wide homophone replacement list.
+
+Proposal requests are bounded by the provider's `polish_chunk_chars`. A request
+that exceeds the per-call timeout is retried as two smaller requests covering the
+same segments; a single segment that still times out fails the stage for durable
+retry. Transport and quota failures are not split.
 
 Malformed, incomplete, or unavailable review fails the correction stage before a
 new revision or dependent notes are saved. Durable retry runs correction again

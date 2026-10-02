@@ -148,7 +148,8 @@ def test_full_source_tail_quotes_and_status_and_links():
         fact["status"] == "proposed" and "3m" in fact["text"] and "15m" in fact["text"]
         for fact in evidence["facts"]
     )
-    assert "[00:00](/file/safe_1?t=0)" in result["content_md"]
+    assert "?t=" not in result["content_md"]
+    assert "[[f" not in result["content_md"]
     assert evidence["chunks"][0]["audit_issues"] == []
     assert result["coverage"]["requests"] == len(llm.calls)
 
@@ -244,9 +245,9 @@ def test_draft_reviewer_failure_is_bounded():
     assert len([p for p, _ in llm.calls if p.startswith("撰寫")]) == 3
 
 
-def test_invalid_file_id_has_plain_timestamp():
+def test_notes_have_no_display_timestamp_without_valid_file_id():
     result = note(Fake(), context={"file_id": "../../escape"})
-    assert "[00:00]" in result["content_md"]
+    assert "[00:00]" not in result["content_md"]
     assert "/file/" not in result["content_md"]
 
 
@@ -294,7 +295,7 @@ def test_default_summary_dispatches_to_evidence_without_plaud_artifacts(monkeypa
     assert result["template_snapshot"]["evidence"]["facts"][0]["status"] == "proposed"
 
 
-def test_adjacent_citations_share_one_timestamp_without_losing_evidence():
+def test_adjacent_citations_are_hidden_without_losing_evidence():
     class SharedPassage(Fake):
         def complete(self, prompt, **kwargs):
             result = super().complete(prompt, **kwargs)
@@ -311,7 +312,7 @@ def test_adjacent_citations_share_one_timestamp_without_losing_evidence():
 
     result = note(SharedPassage(), context={"file_id": "safe_1"})
     assert len(result["template_snapshot"]["evidence"]["facts"]) == 2
-    assert result["content_md"] == "共同來源 [00:00](/file/safe_1?t=0) 後續文字。"
+    assert result["content_md"] == "共同來源 後續文字。"
 
 
 def test_source_coverage_rejects_silently_unaccounted_segments():
@@ -477,3 +478,77 @@ def test_patch_cache_survives_transport_failure_before_review(tmp_path):
     assert not any(p.startswith(("從 target", "修補上一版擷取")) for p, _ in resumed.calls)
     facts = result["template_snapshot"]["evidence"]["facts"]
     assert len(facts) == 1 and facts[0]["owner"] is None
+
+
+def test_repair_reviews_receive_previous_issues_without_waiving_failures(tmp_path):
+    with pytest.raises(LLMOutputInvalid):
+        note(Fake(bad_owner=True), checkpoint_dir=tmp_path)
+    resumed = Fake()
+    note(resumed, checkpoint_dir=tmp_path)
+    audit = next(p for p, _ in resumed.calls if "逐項完整掃描" in p)
+    assert '"previous_issues":["虛構負責人"]' in audit
+    assert "不得僅因已重試就放行" in audit
+
+    with pytest.raises(LLMOutputInvalid):
+        note(Fake(review_issues=True), checkpoint_dir=tmp_path / "draft")
+
+    class ChangedDraft(Fake):
+        def complete(self, prompt, **kwargs):
+            result = super().complete(prompt, **kwargs)
+            if prompt.startswith("撰寫"):
+                value = json.loads(result)
+                value["content_md"] += " 修正後。"
+                return json.dumps(value)
+            return result
+
+    resumed = ChangedDraft()
+    note(resumed, checkpoint_dir=tmp_path / "draft")
+    review = next(p for p, _ in resumed.calls if "比對草稿" in p)
+    assert '"previous_issues":["虛構負責人"]' in review
+
+
+def test_bad_quote_retry_identifies_reference_and_keeps_exact_validation():
+    class QuoteRepair(Fake):
+        def complete(self, prompt, **kwargs):
+            result = super().complete(prompt, **kwargs)
+            if prompt.startswith("從 target"):
+                data = json.loads(result)
+                data["facts"][0]["sources"][0]["quote"] = "不存在的引文"
+                return json.dumps(data, ensure_ascii=False)
+            if prompt.startswith("修補上一版擷取"):
+                assert "第 1 項事實" in prompt
+                assert "不存在的引文" in prompt
+                payload = json.loads(prompt.split("\n", 1)[1])
+                data = json.loads(result)
+                data["replace"][0]["fact"]["sources"][0]["quote"] = payload["source"]["target"][0]["text"]
+                return json.dumps(data, ensure_ascii=False)
+            return result
+    llm = QuoteRepair()
+    assert note(llm)
+    assert sum(p.startswith("從 target") for p, _ in llm.calls) == 1
+    assert sum(p.startswith("修補上一版擷取") for p, _ in llm.calls) == 1
+
+
+def test_invalid_quote_is_not_published_when_repairs_keep_bad_reference(tmp_path):
+    class BadQuote(Fake):
+        def complete(self, prompt, **kwargs):
+            result = super().complete(prompt, **kwargs)
+            if prompt.startswith("從 target"):
+                data = json.loads(result)
+                data["facts"][0]["sources"][0]["quote"] = "不存在的引文"
+                return json.dumps(data, ensure_ascii=False)
+            return result
+    llm = BadQuote()
+    with pytest.raises(LLMOutputInvalid, match="逐字引文不符"):
+        note(llm, checkpoint_dir=tmp_path)
+    assert len(llm.calls) == 3
+    assert not list(tmp_path.glob("*.json"))
+
+
+def test_quote_verification_ignores_chinese_script_but_not_wording():
+    from localplaud.worker.evidence_notes import _quote_matches
+
+    source = "第十六週的時候都要停下來。对，等等这样子。嗯。"
+    assert _quote_matches("對，等等這樣子。", source)
+    assert _quote_matches("对，等等这样子。", source)
+    assert not _quote_matches("對，然後這樣子。", source)

@@ -30,14 +30,22 @@ snapshot is retained separately from our execution policy.
 6. Independently verify each draft against its source passages. Repair extraction
    or prose at most twice; continuing material verification failures leave the stage failed
    and existing notes intact. Noncritical wording observations are retained separately
-   in provenance; they are not a claim of perfect accuracy. Timestamp links open
-   the recording at the evidence.
+   in provenance; they are not a claim of perfect accuracy. Evidence references
+   remain internal: published note prose does not include playback timestamps
+   or timestamp links. The note page also hides legacy generated playback links
+   without rewriting the original content or its indexed evidence.
 7. Save accepted notes through normal revision history and invalidate a dependent
    mind map when its source changes. Canonical transcript, speaker and note
    fingerprints reject a save if the user edited the inputs during generation.
    When evidence-note generation fails, preserve the old dependent mind map in a
    degraded state; indexing the usable canonical transcript can still complete.
    Review failures include the remaining material issues for targeted recovery.
+   Invalid quotation feedback identifies the fact and rejected source reference,
+   so retries can copy the exact source span instead of receiving only a generic
+   validation failure. A rejected extraction is retained in memory for targeted
+   patches within the existing repair limit; it is never cached as accepted.
+   Patched facts still require exact-source validation and independent review
+   before publication.
 
 The ledger stores source IDs, timestamps, quotations, source digest and the
 provider/model. Coverage and phase usage describe executed checks; they are not

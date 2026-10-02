@@ -8,6 +8,70 @@ database, and the codebase: every open item below was re-verified with
 evidence; completed work moved to the compressed archive at the bottom.
 Full pre-audit engineering detail lives in this file's git history.
 
+## Empty share sheet follow-up (2026-09-26)
+
+- Android Brave follow-up: Fanboy Social's generic `##.share-body` cosmetic
+  filter matched the entire dialog body, leaving its title visible. Replace that
+  generic social-widget class with `lp-recording-actions-body`; version both
+  assets. The v3 delegated handler takes over retained v2 listeners during HTMX
+  navigation without reloading the page or discarding edits. This addresses a
+  different cause than the earlier sheet-height fix. Browser verification uses
+  the blocking rule itself: actual desktop Brave reproduced the blank body and
+  recovered with the rule still active. Sixteen viewport/state combinations
+  passed (ready/empty/loading/error; mobile/landscape/desktop), as did all 55 Web
+  UI tests. Browser interactions also verified create/copy/revoke links, actual
+  clipboard and downloads, HTMX library navigation, API failure/retry, WebKit,
+  and v3 takeover with reconstructed v2 listeners. A physical Android Brave
+  check is still unavailable.
+
+Processing recovery follow-up: Qwen's Korean forced-alignment path failed because
+the isolated speech environment lacked `soynlp`. The speech image now pins Korean
+and Japanese tokenizer dependencies and runs both during its build check. A scoped,
+private recovery runner supports provider-quota waits, model-migration checks, and
+bounded per-recording retries; see [processing-repair.md](docs/processing-repair.md).
+Backlog completion and note-quality validation remain pending while recovery runs.
+The operator-confirmed Qwen/Nemotron/GPT-6 Sol selections resolve consistently for
+all 946 non-trash recordings; 374 older per-recording overrides were migrated.
+The 343-entry recovery manifest runs under launchd. A priority recording now
+completes Qwen ASR and Nemotron diarization, but retains six unsupported-language
+alignment spans and waits for the selected text provider's quota. These are still
+open issues, not successful end-to-end completion.
+
+- The user screenshot showed a sheet reduced to its handle/title. Share sizing is
+  now self-contained: every recording fragment loads its own stylesheet, the
+  dialog has an explicit viewport-bounded height, and its body scrolls separately.
+  This also prevents an older HTMX shell stylesheet from sizing the new content.
+- Verified actual content heights and reachable actions in Chromium/WebKit at
+  390×844, 360×640, 1440×900 and 844×390, including internal scrolling, Back,
+  Escape and old-shell navigation. The old-shell simulation did not reproduce
+  zero height; it verifies compatibility rather than proving the device cause.
+
+## Unified recording share sheet (2026-09-25 follow-up)
+
+- Replaced separate Share/Export dialogs and header buttons with one grouped sheet:
+  public link, clipboard transcript/individual notes/all notes, and file formats
+  for audio/transcript/notes/mind map. Back navigation stays inside the sheet.
+- Sharing initializes independently of the transcript/player script and delegates
+  actions across progressive navigation and history restoration. Link errors offer
+  Retry, pending requests abort on close, and clipboard writes start within the
+  user gesture for Safari. Public sharing remains explicitly opt-in.
+- Verified 68 API/render tests, desktop/mobile link and clipboard/export flows,
+  Chromium and WebKit library navigation/history restoration, injected workspace
+  failures and Retry, plus read-only Share open/close on live recordings.
+
+## Recording workspace repair (2026-09-25)
+
+- Fixed collapsed share/export dialog bodies, moved public-link creation and copy
+  ahead of the authenticated workspace link, and routed native sharing to the
+  public URL. Notes now prioritize the complete title and content; generation
+  controls expand on demand. Mobile playback stays at the bottom, More stays
+  within the viewport, and transcript selection survives refresh/Back.
+- Regression coverage includes local-only notes, explicit sharing, and empty
+  recording generation controls; no Plaud-generated artifact is required.
+- Verified with 66 API/render tests and 26 browser checks at 360×740, 390×844,
+  and 1440×900, including create/copy/public access/revoke, actual TXT download,
+  empty/loading/error states, long notes, and share-request failure recovery.
+
 ## Note quality update (2026-09-24)
 
 - Evidence notes v2 adds timestamped facts, extraction/draft verification, bounded
@@ -265,3 +329,26 @@ this file's git history (pre-2026-07-31 versions).
   prefixes and retry from full-transcript evidence on controller and remote worker.
 - [x] Add reviewable, resumable title-only repair plans with input/provenance checks
   and preservation of manual names, notes, audio, and processing state.
+
+### Plaud migration completeness follow-up (2026-09-26)
+
+- [x] Resolve link-only notes, transcripts and outlines through bounded read-only
+  storage requests; preserve existing mirrors on failures or partial responses.
+- [x] Keep cloud note identities, original tab names, duplicate note types and
+  local notes intact across refreshes; expose import directly in an empty workspace.
+- [x] Explain unavailable Plaud app-only summary cards rather than rendering dead
+  URI text or claiming their images were copied.
+- [ ] Exact summary-card parity remains limited by the official interface when it
+  supplies no downloadable image. Local-generation quality remains a separate
+  benchmark; migration is not a substitute for the independent pipeline.
+
+Acceptance evidence for the migration repair: a read-only six-month audit covered
+462 non-trash recordings; 141 supplied notes/outlines. The repair recovered 22
+previously unmirrored recordings without changing local-note hashes. All 291
+currently returned note bodies were checked: 290 matched normalized original text
+exactly; one retained its text with an unavailable, expired image explicitly
+labelled. Prior mirrors absent from a later reply remain preserved. Chromium and
+WebKit desktop/mobile checks covered named tabs, long text, tables/lists,
+import loading/failure/retry and image limitations; the observed WebKit selector
+width overflow was corrected and remeasured at the viewport width. Private source
+payloads and screenshots are kept outside the repository.

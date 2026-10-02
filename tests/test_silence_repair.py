@@ -434,7 +434,7 @@ def test_plan_is_json_serializable_and_contains_no_transcript_text(monkeypatch, 
 def test_retranscription_replaces_when_acoustic_removal_count_is_zero_and_preserves_history(
     monkeypatch, repair_db
 ):
-    from localplaud.db.models import Chunk, PlaudFile, StageName, StageRun, StageStatus
+    from localplaud.db.models import Chunk, PlaudFile, Speaker, StageName, StageRun, StageStatus
     from localplaud.db.session import session_scope
 
     settings, tmp_path = repair_db
@@ -465,6 +465,10 @@ def test_retranscription_replaces_when_acoustic_removal_count_is_zero_and_preser
         ]
         retranscribed = row.transcript_revisions[-1]
         assert retranscribed.segments == replacement
+        from localplaud.store.speakers import speaker_keys_from_segments
+
+        registered = set(session.scalars(select(Speaker.key).where(Speaker.file_id == row.id)))
+        assert set(speaker_keys_from_segments(replacement)) <= registered
         assert retranscribed.text == "\n".join(item["text"] for item in replacement)
         assert retranscribed.has_speakers is True
         assert retranscribed.provider == "faster-whisper"

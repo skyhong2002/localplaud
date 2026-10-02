@@ -738,6 +738,9 @@ def apply_retranscription(
                 resolved_profile_snapshot=resolved_snapshot,
             )
         )
+        from .store.speakers import speaker_keys_from_segments, sync_speakers
+
+        sync_speakers(session, file_id, speaker_keys_from_segments(replacement))
         _invalidate_after_transcript_change(
             session,
             row,

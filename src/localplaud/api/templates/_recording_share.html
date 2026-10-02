@@ -1,0 +1,73 @@
+<link rel="stylesheet" href="/static/recording-share.css?v=2">
+{% macro share_row(label, icon, view='', id='', disabled=false, copy=false) %}
+<button class="share-menu-row" type="button" {% if id %}id="{{ id }}"{% endif %} {% if view %}data-share-view="{{ view }}"{% endif %} {% if disabled %}disabled{% endif %}>
+  <span class="nav-icon" style="--nav-icon:url('/static/lucide/{{ icon }}.svg')"></span><span>{{ t(label) }}</span><span class="share-row-end" aria-hidden="true">{% if copy %}<span class="nav-icon" style="--nav-icon:url('/static/lucide/copy.svg')"></span>{% else %}›{% endif %}</span>
+</button>
+{% endmacro %}
+<div class="import-backdrop recording-share-backdrop" id="share-backdrop" data-file-id="{{ f.id }}" hidden>
+  <section class="import-modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title" tabindex="-1">
+    <div class="share-sheet-handle" aria-hidden="true"></div>
+    <div class="import-head"><button class="import-close" id="share-back" type="button" aria-label="{{ t('Back') }}" hidden>‹</button><span id="share-title" data-root-title="{{ t('Share') }}">{{ t('Share') }}</span><button class="import-close" id="share-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
+    <div class="import-body lp-recording-actions-body">
+      <div data-share-panel="menu" data-title="{{ t('Share') }}">
+        <section class="share-menu-group"><h3>{{ t('Share') }}</h3>{{ share_row('Public share link','link','link') }}</section>
+        <section class="share-menu-group"><h3>{{ t('Copy') }}</h3>
+          {{ share_row('Transcript','files',id='copy-transcript',disabled=not f.transcript,copy=true) }}
+          {{ share_row('Notes','sticky-note','copy-notes',disabled=not (f.summaries or f.user_notes)) }}
+        </section>
+        <section class="share-menu-group"><h3>{{ t('Export') }}</h3>
+          {{ share_row('Audio','audio-lines','audio',disabled=not (f.has_audio or f.audio_on_demand)) }}
+          {{ share_row('Transcript','files','transcript',disabled=not f.transcript) }}
+          {{ share_row('Notes','sticky-note','notes',disabled=not (f.summaries or f.user_notes)) }}
+          {{ share_row('Mind map','list-filter','mindmap',disabled=not mindmaps) }}
+        </section>
+      </div>
+      <div data-share-panel="link" data-title="{{ t('Public share link') }}" hidden>
+      <section class="public-share-section" aria-labelledby="public-share-title">
+        <div><strong id="public-share-title">{{ t('Public share link') }}</strong><div class="sub" style="font-size:12px;margin-top:2px">{{ t('Anyone with this link can view this recording without signing in.') }}</div></div>
+        <div class="share-options" role="group" aria-labelledby="share-options-title">
+          <span class="share-options-title" id="share-options-title">{{ t('Shared content') }}</span>
+          <label><input type="checkbox" id="share-opt-audio" data-share-option="audio" checked>{{ t('Audio') }}</label>
+          <label><input type="checkbox" id="share-opt-transcript" data-share-option="transcript" checked>{{ t('Transcript') }}</label>
+          <label><input type="checkbox" id="share-opt-notes" data-share-option="notes" checked>{{ t('Notes and mind map') }}</label>
+          <label><input type="checkbox" id="share-opt-plaud" data-share-option="plaud_artifacts">{{ t('Plaud-imported content') }}</label>
+          <span class="sub share-options-note">{{ t('Plaud-imported content is published only when enabled, and is always clearly labelled on the public page.') }}</span>
+        </div>
+        <div id="public-share-empty" hidden><button class="btn" id="create-public-share" type="button">{{ t('Create public link') }}</button></div>
+        <div id="public-share-active" style="display:grid;gap:8px" hidden>
+          <div class="share-link-row"><input id="public-share-link" class="search-input" readonly value="" aria-label="{{ t('Public share link') }}"><button class="btn" id="copy-public-share" type="button">{{ t('Copy') }}</button></div>
+          <button class="btn" id="system-share" type="button" hidden>{{ t('Share with…') }}</button>
+          <div class="public-share-actions"><button class="btn danger" id="revoke-public-share" type="button">{{ t('Disable link') }}</button><span id="public-share-created" class="sub" style="font-size:12px"></span></div>
+        </div>
+        <div id="public-share-result" class="sub" role="status" aria-live="polite"></div>
+      </section>
+      <details class="workspace-share"><summary>{{ t('Workspace link') }}</summary><div class="workspace-share-body">
+      <div class="share-icon"><span class="nav-icon" style="--nav-icon:url('/static/lucide/link.svg')"></span></div>
+      <div><strong>{{ t('Workspace link') }}</strong><div class="sub" style="font-size:12px;margin-top:2px">{{ t('Available only to people who can sign in to this localplaud workspace.') }}</div></div>
+      <div class="share-link-row"><input id="share-link" class="search-input" readonly value=""><button class="btn" id="copy-share-link" type="button">{{ t('Copy link') }}</button></div>
+      <div id="share-result" class="sub" role="status"></div>
+      </div></details>
+        <button class="btn sec" id="retry-public-share" type="button" hidden>{{ t('Retry') }}</button>
+      </div>
+      <div data-share-panel="copy-notes" data-title="{{ t('Copy') }} · {{ t('Notes') }}" hidden>
+        <p class="sub">{{ t('Generated notes and saved notes, without transcript') }}</p>
+        <button class="share-menu-row" id="copy-notes" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/copy.svg')"></span>{{ t('Copy all notes') }}</button>
+        {% for s in notes %}<button class="share-menu-row" data-copy-note="summary-{{ s.id }}" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span><span>{{ s.title or s.template_name }}{% if s.source in ('cloud','plaud') %} · Plaud{% endif %}</span><span class="share-row-end" aria-hidden="true">⧉</span></button><script type="application/json" data-copy-note-text="summary-{{ s.id }}">{{ s.content_md|tojson }}</script>{% endfor %}
+        {% for note in f.user_notes %}<button class="share-menu-row" data-copy-note="saved-{{ note.id }}" type="button"><span class="nav-icon" style="--nav-icon:url('/static/lucide/sticky-note.svg')"></span><span>{{ note.title }}</span><span class="share-row-end" aria-hidden="true">⧉</span></button><script type="application/json" data-copy-note-text="saved-{{ note.id }}">{{ note.content_md|tojson }}</script>{% endfor %}
+      </div>
+      <div data-share-panel="transcript" data-title="{{ t('Export') }} · {{ t('Transcript') }}" hidden>
+        <p class="sub">{{ t('Canonical corrected transcript when available') }}</p>
+        <div class="share-transcript-options"><label><input id="export-timestamps" type="checkbox" checked> {{ t('Timestamps') }}</label><label><input id="export-speakers" type="checkbox" checked> {{ t('Speaker labels') }}</label></div>
+        <div class="share-format-grid" data-export-group="transcript">{% for fmt in ['txt','srt','vtt','docx','pdf'] %}<a class="btn sec" data-fmt="{{ fmt }}" href="/file/{{ f.id }}/export/transcript.{{ fmt }}?timestamps=true&amp;speakers=true">{{ fmt|upper }}</a>{% endfor %}</div>
+      </div>
+      <div data-share-panel="notes" data-title="{{ t('Export') }} · {{ t('Notes') }}" hidden>
+        <p class="sub">{{ t('Generated notes and saved notes, without transcript') }}</p>
+        <div class="share-format-grid">{% for fmt in ['md','txt','docx','pdf'] %}<a class="btn sec" href="/file/{{ f.id }}/export/notes.{{ fmt }}">{{ fmt|upper }}</a>{% endfor %}</div>
+        <details class="share-archive"><summary>{{ t('Combined archive') }}</summary><a class="btn sec" href="/file/{{ f.id }}/export.md">{{ t('Markdown archive') }}</a></details>
+      </div>
+      <div data-share-panel="audio" data-title="{{ t('Export') }} · {{ t('Audio') }}" hidden><a class="share-menu-row" href="/file/{{ f.id }}/export/audio"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>{{ t('Original audio') }}</a></div>
+      <div data-share-panel="mindmap" data-title="{{ t('Export') }} · {{ t('Mind map') }}" hidden><p class="sub">{{ t('Complete tree rendered from the latest local mind map') }}</p><a class="share-menu-row" href="/file/{{ f.id }}/export/mind-map.png"><span class="nav-icon" style="--nav-icon:url('/static/lucide/download.svg')"></span>PNG</a></div>
+      <div id="export-result" class="share-feedback sub" role="status" aria-live="polite"></div>
+    </div>
+  </section>
+</div>
