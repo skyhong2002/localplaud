@@ -425,13 +425,20 @@ def test_detail_page_renders_mind_map_tab(monkeypatch, tmp_path):
     assert 'id="mindmap-src"' in r_assets and "Sync topics" in r_assets
     assert 'id="mm-zoom"' in r_assets and 'id="mm-fit"' in r_assets
     assert 'id="mm-zoom" type="range" min="15" max="140"' in r_assets
-    assert "availableHeight=Math.max(1,viewport.clientHeight-30)" in r_assets
-    assert "availableHeight/natural.height*100" in r_assets
+    # Fit never enlarges beyond 100% and accounts for both axes; the tree is
+    # rendered, folded, panned and pinch-zoomed by the workspace script.
+    from pathlib import Path
+
+    workspace_js = (
+        Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    ).read_text()
     assert (
-        "Math.min(100,availableWidth/natural.width*100,"
-        "availableHeight/natural.height*100)" in r_assets
+        "setZoom(Math.min(100, ((viewport.clientWidth - 24) / natural.width) * 100, "
+        "((viewport.clientHeight - 24) / natural.height) * 100));" in workspace_js
     )
-    assert "Math.max(60,available/natural*100)" not in r.text
+    assert "Math.max(60,available/natural*100)" not in workspace_js
+    assert "mm-toggle" in workspace_js and "pinch" in workspace_js
+    assert 'id="mm-toggle-all"' in r_assets and 'id="mm-fullscreen"' in r_assets
     assert "height:clamp(360px,58vh,520px)" in r_assets
     assert 'class="mindmap-viewport"' in r_assets
     # The mind map is excluded from the generic summary tabs.

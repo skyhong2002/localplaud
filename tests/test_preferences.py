@@ -301,8 +301,9 @@ def test_traditional_chinese_catalog_covers_all_static_template_messages():
     from localplaud.i18n import catalog
 
     template_dir = Path(__file__).parents[1] / "src/localplaud/api/templates"
+    workspace_js = Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
     keys: set[str] = set()
-    for template in template_dir.glob("*.html"):
+    for template in [*template_dir.glob("*.html"), workspace_js]:
         source = template.read_text(encoding="utf-8")
         keys.update(re.findall(r"\b(?:t|tr)\('([^']+)'\)", source))
 
@@ -327,7 +328,8 @@ def test_dynamic_action_messages_use_translation_helper():
         # unlocalized as well.
         "${speeds[speedIndex]}",
     )
-    for template in template_dir.glob("*.html"):
+    workspace_js = Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    for template in [*template_dir.glob("*.html"), workspace_js]:
         source = template.read_text(encoding="utf-8")
         for pattern in literal_patterns:
             for message in re.findall(pattern, source):

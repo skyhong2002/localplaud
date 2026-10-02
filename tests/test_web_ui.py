@@ -8,10 +8,15 @@ import json
 import re
 import zipfile
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
 from tests.assets import with_assets
+
+WORKSPACE_JS = (
+    Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+).read_text()
 
 
 def _client(monkeypatch, tmp_path):
@@ -422,7 +427,10 @@ def test_transcript_page_wraps_speaker_name_for_one_line_clamp(monkeypatch, tmp_
     assert page.status_code == 200
     # The name is wrapped in .who-name (CSS clamps it to one ellipsized line)
     # and duplicated into title= so the full identity stays reachable.
-    assert f'<span class="who" title="{long_name}">' in page.text
+    assert (
+        f'<button class="who" type="button" title="{long_name}" data-speaker-menu'
+        in page.text
+    )
     assert f'<span class="who-name">{long_name}</span>' in page.text
 
 
@@ -560,7 +568,11 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert "workspaceNoteDirty" in r.text and "beforeunload" in r.text
     assert "Discard unsaved note changes?" in r.text
     # Generated-note provenance now carries version and creation time.
-    assert _re.search(r"v3 · [A-Z][a-z]{2} \d{2}, \d{4} · \d{2}:\d{2} · Generated from", r.text)
+    assert _re.search(
+        r" · v3</span>(?:<span[^>]*>.*?</span>)?<span>[A-Z][a-z]{2} \d{2}, \d{4} · \d{2}:\d{2}"
+        r"</span><span>Generated from",
+        r.text,
+    )
     # Lockstep invariant: the highlighted tab's target is exactly the one
     # panel rendered visible, independent of either list's ordering.
     active_target = _re.search(
@@ -882,7 +894,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     # Desktop pencil keeps a 28px hit area; double-clicking segment text opens
     # the same editor because the hover pencil alone is hard to discover.
     assert "min-width:28px;min-height:28px" in r_assets
-    assert "document.addEventListener('dblclick'" in r_assets
+    assert "on(document, 'dblclick'" in WORKSPACE_JS
     assert "max-height: calc(100dvh - 24px); overflow: hidden" in r_assets
     assert ".import-body { min-height: 0;" in r_assets and "overflow-y:auto" in r_assets
     assert ".ask-user-message" in r_assets and ".saved-note-actions" in r_assets
@@ -900,7 +912,8 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'class="nav-scrim" type="button" data-nav-close aria-label="Close menu" hidden' in r_assets
     assert "event.target.closest('a.nav-item[href]" in r_assets
     assert "document.activeElement===last" in r_assets
-    assert 'data-open-import="device" aria-label="Add audio"' in r_assets
+    # The recording is a pushed screen on phones (no app top bar); Add audio stays in the shell.
+    assert 'data-import-mode="device"' in r_assets
     assert "event.target.closest('[data-open-import]')" in r_assets
     assert "getElementById('add-audio-button')?.click()" not in r.text
     assert 'id="recording-file-list" hx-preserve' in r_assets
@@ -913,7 +926,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "const drainTranscript=()=>" in r_assets
     assert ".tabs::-webkit-scrollbar { display:none; }" in r_assets
     assert ".sidebar-scroll" in r_assets
-    assert 'data-start' in r_assets  # seekable segments
+    assert 'data-start' in c.get("/file/r1/transcript-page").text  # seekable segments
     assert "meeting" in r_assets.lower()  # summary tab
     assert "Processing details" in r_assets
     assert ".recording-advanced:not([open]) { display:none; }" in r_assets
@@ -939,12 +952,15 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert r.text.index('class="tabs" role="tablist"') < r.text.index('id="persistent-player"')
     assert 'aria-label="Back 15 seconds" title="Back 15 seconds"' in r_assets
     assert 'aria-label="Forward 15 seconds" title="Forward 15 seconds"' in r_assets
-    assert "player.currentTime-15" in r_assets and "player.currentTime+15" in r_assets
+    assert "skip(-15)" in WORKSPACE_JS and "skip(15)" in WORKSPACE_JS
     assert 'id="open-share" type="button" data-recording-share aria-label="Share" title="Share"' in r_assets
+    # Share opens the one share sheet (link, copy, exports): no separate Export.
     assert 'id="open-export"' not in r.text
-    header = r.text.split('<div class="recording-actions">', 1)[1].split("</details>", 1)[0]
-    assert header.index('id="open-ask-dock"') < header.index('id="open-share"')
-    assert header.index('id="open-share"') < header.index('class="recording-more"')
+    # Plaud Web order: Share · Find · More · | · Ask.
+    header = r.text.split('<div class="recording-actions">', 1)[1].split("</header>", 1)[0]
+    assert header.index('id="open-share"') < header.index('id="open-find"')
+    assert header.index('id="open-find"') < header.index('class="recording-more"')
+    assert header.index('class="recording-more"') < header.index('id="open-ask-dock"')
     assert 'class="tabs" role="tablist"' in r_assets
     assert 'id="recording-tab-transcript" role="tab"' in r_assets
     assert 'id="recording-panel-transcript" role="tabpanel"' in r_assets
@@ -979,8 +995,9 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     # The clock shows the recording's stored duration before the browser has
     # loaded audio metadata; playback sync falls back to the same value.
     assert ">0:00 / 10:00</span>" in r_assets
-    assert "const knownDuration=600.0;" in r_assets
-    assert "d=player.duration||knownDuration" in r_assets
+    assert '"durationSeconds": 600.0' in r_assets
+    assert "const knownDuration = Number(cfg.durationSeconds || 0);" in WORKSPACE_JS
+    assert "player.duration > 0 ? player.duration : knownDuration" in WORKSPACE_JS
     # Speaker labels clamp to one visual line; the full name stays in the
     # legend, hover title, and exports.
     assert (
@@ -988,8 +1005,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
         in r_assets
     )
     assert ".speaker-pill>summary{max-width:min(200px,58vw)}" in r_assets
-    assert "availableHeight=Math.max(1,viewport.clientHeight-30)" in r_assets
-    assert "availableHeight/natural.height*100" in r_assets
+    assert "((viewport.clientHeight - 24) / natural.height) * 100" in WORKSPACE_JS
     assert "zoom:var(--mm-scale)" in r_assets
     assert 'id="subscription-independence"' in r_assets
     assert "Subscription independence" in r_assets

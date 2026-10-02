@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -1543,9 +1544,13 @@ def test_detail_page_has_ask_tab_and_deeplink(monkeypatch, tmp_path):
     assert "requestAnimationFrame(()=>{(question?.isConnected?question" in r_assets
     # Suggested, grounded, non-mutating chips.
     assert "What was decided?" in r_assets
-    # Delegated seek handler + ?t= deep-link support.
-    assert "data-seek" in r_assets
-    assert "URLSearchParams" in r_assets
+    # Delegated seek handler + ?t= deep-link support live in the workspace script.
+    workspace_js = (
+        Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
+    ).read_text()
+    assert '<script src="/static/js/workspace.js?v=' in r_assets
+    assert "event.target.closest('[data-seek]')" in workspace_js
+    assert "deepLinkSeconds(location.search)" in workspace_js
 
 
 @pytest.mark.parametrize('file_id', ['r1', None])
