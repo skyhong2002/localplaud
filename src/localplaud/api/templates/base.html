@@ -257,6 +257,16 @@
       <div class="dialog-foot"><button class="btn-ghost btn" type="button" data-folder-create>{{ icon('folder-plus', 'sm') }}{{ t('New folder') }}</button><span style="flex:1"></span><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn" type="submit">{{ t('Move') }}</button></div>
     </form>
   </dialog>
+  <div id="lp-audio-host" hidden></div>
+  <section class="mini-player" id="lp-mini-player" aria-label="{{ t('Now playing') }}" hidden>
+    <span class="mini-progress" aria-hidden="true"><span></span></span>
+    <button class="icon-btn mini-toggle" type="button" data-mini-toggle aria-label="{{ t('Play') }}" data-label-play="{{ t('Play') }}" data-label-pause="{{ t('Pause') }}"><svg class="i" aria-hidden="true"><use href="#i-play"></use></svg></button>
+    <a class="mini-title" href="/" data-mini-link><span class="mini-name truncate"></span><span class="mini-time t-meta t-num"></span></a>
+    <button class="icon-btn" type="button" data-mini-skip="-15" aria-label="{{ t('Back 15 seconds') }}">{{ icon('undo') }}</button>
+    <button class="icon-btn" type="button" data-mini-skip="15" aria-label="{{ t('Forward 15 seconds') }}">{{ icon('redo') }}</button>
+    <button class="icon-btn" type="button" data-mini-close aria-label="{{ t('Close player') }}">{{ icon('x') }}</button>
+  </section>
+  <div class="offline-banner" id="lp-offline-banner" role="status" hidden>{{ icon('cloud', 'sm') }}<span>{{ t('You are offline. Showing saved pages; changes need a connection.') }}</span></div>
   <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
   <script src="/static/js/surfaces.js?v={{ asset_version }}" defer></script>
 </body>

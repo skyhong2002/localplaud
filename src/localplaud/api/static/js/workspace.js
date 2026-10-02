@@ -158,7 +158,12 @@
   }
 
   // ---------------------------------------------------------------- player
-  const player = document.getElementById('player');
+  // Shared app-wide player (app.js): reuses the live element when this recording is
+  // already playing from another page, so playback continues across navigation.
+  const pagePlayer = document.getElementById('player');
+  const player = window.lp?.player?.attach
+    ? window.lp.player.attach(pagePlayer, { fileId: cfg.fileId, title: cfg.title, href: `/file/${encodeURIComponent(cfg.fileId)}?tab=transcript` })
+    : pagePlayer;
   const followPill = document.getElementById('ws-follow');
   let following = true, activeSegment = null, activeWord = null, lastProgrammaticScroll = 0;
 
@@ -312,7 +317,7 @@
       signal.addEventListener('abort', () => resize.disconnect(), { once: true });
     }
     let waveformTimer = null;
-    signal.addEventListener('abort', () => { if (waveformTimer) clearTimeout(waveformTimer); player.pause(); }, { once: true });
+    signal.addEventListener('abort', () => { if (waveformTimer) clearTimeout(waveformTimer); if (window.lp?.player?.audio !== player || !window.lp.player.parked) player.pause(); }, { once: true });
     const loadWaveform = async () => {
       if (signal.aborted) return;
       try {

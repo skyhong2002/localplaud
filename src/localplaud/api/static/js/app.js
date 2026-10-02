@@ -220,6 +220,171 @@
   lp.shortcut('?', () => lp.openDialog('shortcuts-dialog'), {description: 'Show keyboard shortcuts'});
   lp.shortcut('[', () => document.querySelector('.sidebar-collapse, .nav-expand:not([hidden])')?.click(), {description: 'Toggle sidebar'});
 
+  /* ----------------------------------------------- persistent audio player
+   * One recording plays at a time and keeps playing while the user navigates.
+   * The detail page registers its <audio> with lp.player.attach(el, info);
+   * before #app-view is swapped away a playing element is moved into
+   * #lp-audio-host (outside #app-view), and the mini player takes over. When
+   * the same recording is opened again, attach() puts the live element back
+   * into the page so playback, position, and rate continue uninterrupted.
+   *
+   *   lp.player.attach(audioEl, {fileId, title, href}) -> the element to use
+   *   lp.player.audio / .info / .play() / .pause() / .toggle() / .seek(s) / .skip(d)
+   *   lp.player.stop()   — pause and dismiss the mini player
+   *   lp.player.on('change'|'time', fn)
+   */
+  lp.player = (() => {
+    let audio = null, info = {};
+    const listeners = {change: new Set(), time: new Set()};
+    const emit = type => listeners[type].forEach(fn => { try { fn(api); } catch (_error) { /* listener bug */ } });
+    const fileIdFrom = el => {
+      try { return decodeURIComponent(new URL(el.currentSrc || el.getAttribute('src') || '', location.href).pathname.split('/audio/')[1] || '').split('/')[0] || null; }
+      catch (_error) { return null; }
+    };
+    const titleNow = () => (document.title || '').replace(/\s+—\s+localplaud$/, '') || 'localplaud';
+    const bound = new WeakSet();
+    function bind(el) {
+      if (bound.has(el)) return;
+      bound.add(el);
+      el.addEventListener('play', () => {
+        if (audio && audio !== el) { audio.pause(); if (!audio.closest('#app-view')) audio.remove(); }
+        if (audio !== el) { audio = el; info = el._lpInfo || info; }
+        updateSession(); emit('change');
+      });
+      ['pause', 'ended', 'ratechange', 'loadedmetadata'].forEach(type => el.addEventListener(type, () => { if (el === audio) { updateSession(); emit('change'); } }));
+      el.addEventListener('timeupdate', () => { if (el === audio) emit('time'); });
+    }
+    function attach(el, details = {}) {
+      if (!el) return el;
+      const fileId = details.fileId || fileIdFrom(el);
+      const next = {fileId, title: details.title || titleNow(), href: details.href || `/file/${encodeURIComponent(fileId || '')}`};
+      if (audio && audio !== el && info.fileId && info.fileId === fileId) {
+        // Same recording: hand the live element back to the page.
+        audio.id = el.id; audio.className = el.className;
+        el.replaceWith(audio);
+        info = {...info, ...next};
+        audio._lpInfo = info;
+        emit('change');
+        return audio;
+      }
+      el._lpInfo = next;
+      bind(el);
+      if (!audio || (audio.paused && audio.currentTime === 0)) { audio = el; info = next; emit('change'); }
+      return el;
+    }
+    function park() {
+      // Called before #app-view is replaced: keep a started recording alive.
+      if (!audio || !audio.closest('#app-view')) return;
+      const started = !audio.paused || audio.currentTime > 0;
+      if (!started) { audio = null; info = {}; emit('change'); return; }
+      // Leave an inert twin in the page so history snapshots keep valid markup.
+      const twin = audio.cloneNode(false);
+      twin.removeAttribute('autoplay');
+      audio.replaceWith(twin);
+      document.getElementById('lp-audio-host')?.append(audio);
+      emit('change');
+    }
+    function stop() {
+      if (!audio) return;
+      audio.pause();
+      if (!audio.closest('#app-view')) audio.remove();
+      audio = null; info = {};
+      if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+      emit('change');
+    }
+    function updateSession() {
+      if (!('mediaSession' in navigator) || !audio) return;
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({title: info.title || 'localplaud', artist: 'localplaud',
+          artwork: [{src: '/static/icons/icon-192.png', sizes: '192x192', type: 'image/png'}, {src: '/static/icons/icon-512.png', sizes: '512x512', type: 'image/png'}]});
+        navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+      } catch (_error) { /* unsupported */ }
+    }
+    if ('mediaSession' in navigator) {
+      const handlers = {play: () => api.play(), pause: () => api.pause(), seekbackward: () => api.skip(-15), seekforward: () => api.skip(15),
+        seekto: details => api.seek(details.seekTime), stop: () => stop()};
+      for (const [action, handler] of Object.entries(handlers)) { try { navigator.mediaSession.setActionHandler(action, handler); } catch (_error) { /* unsupported action */ } }
+    }
+    const api = {
+      attach, park, stop,
+      get audio() { return audio; },
+      get info() { return {...info}; },
+      get parked() { return Boolean(audio && !audio.closest('#app-view')); },
+      play: () => audio?.play().catch(() => {}),
+      pause: () => audio?.pause(),
+      toggle: () => (audio ? (audio.paused ? api.play() : api.pause()) : undefined),
+      seek: seconds => { if (audio && Number.isFinite(seconds)) audio.currentTime = Math.max(0, seconds); },
+      skip: delta => { if (audio) audio.currentTime = Math.max(0, Math.min(audio.duration || Infinity, audio.currentTime + delta)); },
+      on: (type, fn) => { listeners[type]?.add(fn); return () => listeners[type]?.delete(fn); },
+    };
+    document.addEventListener('htmx:beforeSwap', event => { if (event.detail?.target?.id === 'app-view') park(); });
+    // Back/forward restores #app-view from htmx's history cache without a beforeSwap;
+    // this listener is registered before htmx's own popstate handler, so it runs first.
+    window.addEventListener('popstate', park);
+    return api;
+  })();
+
+  /* ---------------------------------------------------------- mini player */
+  const clock = seconds => {
+    const total = Math.max(0, Math.floor(seconds || 0)), h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+    return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+  };
+  const whenReady = fn => (document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', fn) : fn());
+  whenReady(() => {
+    const bar = document.getElementById('lp-mini-player');
+    if (!bar) return;
+    const toggle = bar.querySelector('[data-mini-toggle]'), link = bar.querySelector('[data-mini-link]');
+    const name = bar.querySelector('.mini-name'), time = bar.querySelector('.mini-time'), fill = bar.querySelector('.mini-progress span');
+    const render = () => {
+      const p = lp.player, audio = p.audio, show = Boolean(audio && p.parked);
+      bar.hidden = !show;
+      document.body.classList.toggle('has-mini-player', show);
+      if (!show) return;
+      const info = p.info;
+      name.textContent = info.title || 'localplaud';
+      const href = info.href || '/';
+      if (link.getAttribute('href') !== href) {
+        link.setAttribute('href', href);
+        if (link.hasAttribute('hx-get')) { link.setAttribute('hx-get', href); window.htmx?.process(link); }
+      }
+      const playing = !audio.paused;
+      toggle.querySelector('use').setAttribute('href', playing ? '#i-pause' : '#i-play');
+      toggle.setAttribute('aria-label', playing ? toggle.dataset.labelPause : toggle.dataset.labelPlay);
+      renderTime();
+    };
+    const renderTime = () => {
+      const audio = lp.player.audio;
+      if (!audio || bar.hidden) return;
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      time.textContent = duration ? `${clock(audio.currentTime)} / ${clock(duration)}` : clock(audio.currentTime);
+      fill.style.width = duration ? `${Math.min(100, (audio.currentTime / duration) * 100)}%` : '0%';
+    };
+    lp.player.on('change', render);
+    lp.player.on('time', renderTime);
+    bar.addEventListener('click', event => {
+      if (event.target.closest('[data-mini-toggle]')) lp.player.toggle();
+      const skip = event.target.closest('[data-mini-skip]');
+      if (skip) lp.player.skip(Number(skip.dataset.miniSkip));
+      if (event.target.closest('[data-mini-close]')) lp.player.stop();
+    });
+    document.addEventListener('htmx:afterSettle', render);
+    render();
+  });
+
+  /* ------------------------------------------ view transitions, offline */
+  try {
+    if (window.htmx && document.startViewTransition && !reduceMotion()) window.htmx.config.globalViewTransitions = true;
+  } catch (_error) { /* older htmx */ }
+  // Only page navigations cross-fade; in-page fragment swaps stay instant.
+  document.addEventListener('htmx:beforeTransition', event => { if (event.detail?.target?.id !== 'app-view') event.preventDefault(); });
+  whenReady(() => {
+    const banner = document.getElementById('lp-offline-banner');
+    const sync = () => { if (banner) banner.hidden = navigator.onLine; document.body.classList.toggle('is-offline', !navigator.onLine); };
+    window.addEventListener('online', () => { sync(); lp.toast(lp.t('Back online'), {type: 'success', timeout: 2500}); });
+    window.addEventListener('offline', sync);
+    sync();
+  });
+
   /* --------------------------------------------------- shell: DOM wiring */
   const onReady = fn => (document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', fn) : fn());
 
@@ -560,6 +725,8 @@
       if(event.detail?.target?.id==='app-view'&&document.getElementById('recording-file-list')&&!trigger?.closest?.('[data-replace-filelist]'))event.detail.headers['X-Localplaud-Preserve-Filelist']='true';
     });
     prepareLinks(document);
+    // htmx already processed the initial DOM before this ran; bind the links we just prepared.
+    document.querySelectorAll('a[hx-get][hx-target="#app-view"]').forEach(link => window.htmx?.process(link));
     document.addEventListener('click',event=>{
       if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
       const link=event.target.closest('a[href]');

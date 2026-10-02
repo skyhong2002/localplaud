@@ -72,6 +72,11 @@ ZH_HANT_TW = {
     "No recordings yet": "還沒有錄音",
     "Record with your Plaud device as usual. New uploads appear here and are processed locally. You can also add an audio file.": "照常用 Plaud 裝置錄音，新上傳的錄音會出現在這裡並在本機處理。也可以直接加入音訊檔。",
     "with local audio": "份有本機音訊",
+    # persistent player, offline
+    "Now playing": "正在播放",
+    "Close player": "關閉播放器",
+    "You are offline. Showing saved pages; changes need a connection.": "目前離線，顯示已儲存的頁面；變更需要連線。",
+    "Back online": "已恢復連線",
     # pipeline stage names shown in status chips
     "convert": "轉檔",
     "transcribe": "轉錄",
