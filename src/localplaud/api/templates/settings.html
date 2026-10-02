@@ -79,7 +79,7 @@
   <section class="sf-settings-group" id="group-account" data-sf-group="account" aria-labelledby="group-account-title">
   <h2 class="sf-settings-group-title" id="group-account-title">{{ t('Account & security') }}</h2>
   <div class="panel sf-settings-panel" id="plaud-account">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
       <div><strong>{{ t('Plaud account') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Read-only official Plaud MCP connection used for metadata and raw audio.') if plaud_provider == 'mcp' else t('Read-only Open API connection used for metadata and raw audio.') }}</div></div>
       <span class="st {{ 'healthy' if plaud_auth.ok else 'failed' }}">{{ t('connected') if plaud_auth.ok else t('sign-in required') }}</span>
     </div>
@@ -91,7 +91,7 @@
     {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">{% if plaud_provider == 'mcp' %}{{ t('Run the official Plaud MCP installer on this machine to sign in.') }} <code>npx -y @plaud-ai/mcp@latest install</code>{% else %}{{ t('On the machine running localplaud, run the following command. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.') }} <code>localplaud auth login</code>{% endif %}</div>{% endif %}
   </div>
   <div class="panel sf-settings-panel" id="access-security">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Access & security') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Truthful authentication boundaries for this deployment.') }}</div></div><span class="st {{ 'done' if about.access.browser_login_configured else 'degraded' }}">{{ t('Web login configured') if about.access.browser_login_configured else t('Web login not configured') }}</span></div>
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Access & security') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Truthful authentication boundaries for this deployment.') }}</div></div><span class="st {{ 'done' if about.access.browser_login_configured else 'degraded' }}">{{ t('Web login configured') if about.access.browser_login_configured else t('Web login not configured') }}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px;margin-top:12px">
       <div class="tile"><div class="k">{{ t('Application authentication') }}</div><div style="margin-top:4px">{{ t('Revocable browser session') if about.access.browser_login_configured else t('No Web login') }}</div></div>
       <div class="tile"><div class="k">{{ t('Reverse proxy') }}</div><div style="margin-top:4px">{{ t('External · not observable by localplaud') }}</div></div>
@@ -99,9 +99,9 @@
     </div>
     <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t(about.access.session_detail) }}. {{ t('Configure login_password and session_secret before remote exposure; keep auth_token for API clients.') }}</p>
     {% if about.access.browser_login_configured %}<div style="display:grid;gap:8px;margin-top:13px" id="browser-session-list">
-      {% for item in browser_sessions %}<div class="tile" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-        <div style="min-width:0;flex:1"><strong>{{ t('This session') if item.current else t('Browser session') }}</strong>{% if item.current %} <span class="chip on">{{ t('current') }}</span>{% endif %}<div class="sub" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ item.user_agent }}">{{ item.user_agent }}</div><div class="sub" style="font-size:10.5px">{{ t('Last active') }}: {{ item.last_seen_at[:16]|replace('T',' · ') }} · {{ t('Expires') }}: {{ item.expires_at[:10] }}</div></div>
-        <button class="btn sec session-revoke" data-id="{{ item.id }}" data-current="{{ 'true' if item.current else 'false' }}" type="button" style="padding:6px 9px;color:var(--red)">{{ t('Revoke') }}</button>
+      {% for item in browser_sessions %}<div class="tile settings-session">
+        <div class="settings-row-main"><strong>{{ t('This session') if item.current else t('Browser session') }}</strong>{% if item.current %} <span class="chip on">{{ t('current') }}</span>{% endif %}<div class="sub" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ item.user_agent }}">{{ item.user_agent }}</div><div class="sub" style="font-size:10.5px">{{ t('Last active') }}: {{ item.last_seen_at[:16]|replace('T',' · ') }} · {{ t('Expires') }}: {{ item.expires_at[:10] }}</div></div>
+        <button class="btn btn-danger btn-sm session-revoke" data-id="{{ item.id }}" data-current="{{ 'true' if item.current else 'false' }}" type="button">{{ t('Revoke') }}</button>
       </div>{% else %}<div class="sub">{{ t('No active browser sessions.') }}</div>{% endfor %}
     </div>{% endif %}
   </div>
@@ -111,42 +111,42 @@
   <div class="panel sf-settings-panel" id="workspace-preferences">
     <strong>{{ t('Workspace preferences') }}</strong>
     <p class="sub" style="margin:4px 0 12px">{{ t('Durable workspace preferences shared by every browser using localplaud.') }}</p>
-    <form id="workspace-preferences-form" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
-      <label class="sub">{{ t('Workspace name') }}<input class="search-input" name="workspace_name" maxlength="80" required value="{{ workspace_preferences.workspace_name }}" style="width:100%;margin-top:4px"></label>
-      <label class="sub">{{ t('Interface language') }}<select class="search-input" name="locale" style="width:100%;margin-top:4px">{% for code, label in supported_locales.items() %}<option value="{{ code }}" {% if workspace_preferences.locale==code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-      <label class="sub">{{ t('Timezone') }}<input class="search-input" name="timezone" list="timezone-suggestions" maxlength="64" required value="{{ workspace_preferences.timezone }}" style="width:100%;margin-top:4px"></label>
+    <form id="workspace-preferences-form" class="settings-form">
+      <label class="sub settings-field">{{ t('Workspace name') }}<input class="search-input" name="workspace_name" maxlength="80" required value="{{ workspace_preferences.workspace_name }}"></label>
+      <label class="sub settings-field">{{ t('Interface language') }}<select class="search-input select" name="locale">{% for code, label in supported_locales.items() %}<option value="{{ code }}" {% if workspace_preferences.locale==code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label class="sub settings-field">{{ t('Timezone') }}<input class="search-input" name="timezone" list="timezone-suggestions" maxlength="64" required value="{{ workspace_preferences.timezone }}"></label>
       <datalist id="timezone-suggestions"><option value="Asia/Taipei"><option value="UTC"><option value="Asia/Tokyo"><option value="America/Los_Angeles"><option value="Europe/London"></datalist>
       <input type="hidden" name="theme" value="light">
-      <div class="sub" style="grid-column:1/-1"><span id="settings-appearance-label">{{ t('Appearance') }}</span><div style="margin-top:4px"><div class="segmented" role="group" aria-labelledby="settings-appearance-label">
+      <div class="sub settings-field"><span id="settings-appearance-label">{{ t('Appearance') }}</span><div><div class="segmented settings-appearance" role="group" aria-labelledby="settings-appearance-label">
         <button type="button" data-appearance-set="light" aria-pressed="false">{{ icon('sun', 'xs') }}{{ t('Light') }}</button>
         <button type="button" data-appearance-set="dark" aria-pressed="false">{{ icon('moon', 'xs') }}{{ t('Dark') }}</button>
         <button type="button" data-appearance-set="system" aria-pressed="false">{{ icon('monitor', 'xs') }}{{ t('Auto') }}</button>
       </div></div></div>
-      <label class="sub">{{ t('Display density') }}<select class="search-input" name="density" style="width:100%;margin-top:4px"><option value="comfortable" {% if workspace_preferences.density=='comfortable' %}selected{% endif %}>{{ t('Comfortable') }}</option><option value="compact" {% if workspace_preferences.density=='compact' %}selected{% endif %}>{{ t('Compact') }}</option></select></label>
-      <label class="sub">{{ t('Clock') }}<select class="search-input" name="hour_cycle" style="width:100%;margin-top:4px"><option value="24" {% if workspace_preferences.hour_cycle=='24' %}selected{% endif %}>{{ t('24-hour') }}</option><option value="12" {% if workspace_preferences.hour_cycle=='12' %}selected{% endif %}>{{ t('12-hour') }}</option></select></label>
-      <label class="sub" style="display:flex;align-items:center;gap:9px;grid-column:1/-1;border-top:1px solid var(--border);padding-top:10px"><input type="checkbox" name="auto_process_new_recordings" {% if workspace_preferences.auto_process_new_recordings %}checked{% endif %}> <strong>{{ t('Process new recordings automatically') }}</strong></label>
-      <div style="display:flex;align-items:end;gap:10px"><button class="btn" type="submit">{{ t('Save preferences') }}</button><span id="workspace-preferences-result" class="sub"></span></div>
+      <label class="sub settings-field">{{ t('Display density') }}<select class="search-input select" name="density"><option value="comfortable" {% if workspace_preferences.density=='comfortable' %}selected{% endif %}>{{ t('Comfortable') }}</option><option value="compact" {% if workspace_preferences.density=='compact' %}selected{% endif %}>{{ t('Compact') }}</option></select></label>
+      <label class="sub settings-field">{{ t('Clock') }}<select class="search-input select" name="hour_cycle"><option value="24" {% if workspace_preferences.hour_cycle=='24' %}selected{% endif %}>{{ t('24-hour') }}</option><option value="12" {% if workspace_preferences.hour_cycle=='12' %}selected{% endif %}>{{ t('12-hour') }}</option></select></label>
+      <label class="sub settings-check settings-check-divided"><input type="checkbox" name="auto_process_new_recordings" {% if workspace_preferences.auto_process_new_recordings %}checked{% endif %}> <strong>{{ t('Process new recordings automatically') }}</strong></label>
+      <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Save preferences') }}</button><span id="workspace-preferences-result" class="sub"></span></div>
     </form>
   </div>
   <div class="panel sf-settings-panel" id="vocabulary">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <div class="settings-panel-head">
       <div><strong>{{ t('Custom vocabulary') }}</strong><div class="sub" style="font-size:12px">{{ t('Correct names and specialist terms without changing raw ASR output.') }}</div></div>
-      <button class="btn sec" id="apply-vocabulary" type="button" style="padding:7px 10px">{{ t('Apply to library') }}</button>
+      <button class="btn sec btn-sm" id="apply-vocabulary" type="button">{{ t('Apply to library') }}</button>
     </div>
     <div style="display:grid;gap:8px;margin-top:12px">
       {% for term in vocabulary_terms %}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px;{% if not term.enabled %}opacity:.55{% endif %}">
-        <div><strong>{{ term.source_text }}</strong> → <strong>{{ term.replacement_text }}</strong><div class="sub" style="font-size:11px">{{ term.language or t('All languages') }} · {{ t('case-sensitive') if term.case_sensitive else t('ignore case') }}{% if not term.enabled %} · {{ t('disabled') }}{% endif %}</div></div>
-        <div><button class="btn sec" type="button" style="padding:6px 9px" onclick="editVocabulary({{ term.id }})">{{ t('Edit') }}</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteVocabulary({{ term.id }})">{{ t('Delete') }}</button></div>
+      <div class="settings-row"{% if not term.enabled %} data-disabled{% endif %}>
+        <div class="settings-row-main"><strong>{{ term.source_text }}</strong> → <strong>{{ term.replacement_text }}</strong><div class="sub" style="font-size:11px">{{ term.language or t('All languages') }} · {{ t('case-sensitive') if term.case_sensitive else t('ignore case') }}{% if not term.enabled %} · {{ t('disabled') }}{% endif %}</div></div>
+        <div class="settings-actions"><button class="btn sec btn-sm" type="button" onclick="editVocabulary({{ term.id }})">{{ t('Edit') }}</button> <button class="btn btn-danger btn-sm" type="button" onclick="deleteVocabulary({{ term.id }})">{{ t('Delete') }}</button></div>
       </div>
       {% else %}<div class="sub">{{ t('No correction rules yet.') }}</div>{% endfor %}
     </div>
-    <form id="vocabulary-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
+    <form id="vocabulary-form" class="settings-form">
       <input class="search-input" name="source_text" maxlength="300" placeholder="{{ t('ASR writes…') }}" required>
       <input class="search-input" name="replacement_text" maxlength="300" placeholder="{{ t('Correct to…') }}" required>
       <input class="search-input" name="language" maxlength="24" placeholder="{{ t('Language (optional, e.g. zh)') }}">
-      <div class="sub" style="display:flex;align-items:center;gap:14px"><label><input type="checkbox" name="case_sensitive"> {{ t('Case-sensitive') }}</label><label><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label></div>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Add correction') }}</button><button class="btn sec" id="cancel-vocabulary" type="button" hidden>{{ t('Cancel edit') }}</button><span id="vocabulary-result" class="sub"></span></div>
+      <div class="sub settings-checks"><label><input type="checkbox" name="case_sensitive"> {{ t('Case-sensitive') }}</label><label><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label></div>
+      <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Add correction') }}</button><button class="btn sec" id="cancel-vocabulary" type="button" hidden>{{ t('Cancel edit') }}</button><span id="vocabulary-result" class="sub"></span></div>
     </form>
   </div>
   <div class="panel sf-settings-panel" id="note-templates">
@@ -155,21 +155,21 @@
     </div>
     <div style="display:grid;gap:9px;margin-top:12px">
       {% for template in note_templates %}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px">
-        <div><strong>{{ template.name }}</strong> <code>{{ template.key }}@{{ template.version }}</code>{% if template.is_builtin %} <span class="chip">{{ t('Built-in') }}</span>{% endif %}{% if template.execution_profile_id %}{% for profile in profiles if profile.id==template.execution_profile_id %} <span class="chip">{{ profile.name }} · v{{ profile.version }}</span>{% endfor %}{% endif %}</div>
-        <div><button class="btn sec" style="padding:6px 9px" onclick="editNoteTemplate('{{ template.key }}')">{{ t('New version') }}</button>{% if template.key != 'default' %} <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="archiveNoteTemplate('{{ template.key }}')">{{ t('Archive') }}</button>{% endif %}</div>
+      <div class="settings-row">
+        <div class="settings-row-main"><strong>{{ template.name }}</strong> <code>{{ template.key }}@{{ template.version }}</code>{% if template.is_builtin %} <span class="chip">{{ t('Built-in') }}</span>{% endif %}{% if template.execution_profile_id %}{% for profile in profiles if profile.id==template.execution_profile_id %} <span class="chip">{{ profile.name }} · v{{ profile.version }}</span>{% endfor %}{% endif %}</div>
+        <div class="settings-actions"><button class="btn sec btn-sm" onclick="editNoteTemplate('{{ template.key }}')">{{ t('New version') }}</button>{% if template.key != 'default' %} <button class="btn btn-danger btn-sm" onclick="archiveNoteTemplate('{{ template.key }}')">{{ t('Archive') }}</button>{% endif %}</div>
       </div>
       {% endfor %}
     </div>
-    <form id="note-template-form" style="display:grid;gap:9px;margin-top:14px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+    <form id="note-template-form" class="settings-form settings-form-stack">
+      <div class="settings-form">
         <input class="search-input" name="name" maxlength="80" placeholder="{{ t('Template name') }}" required>
         <input class="search-input" name="key" maxlength="64" pattern="[a-z0-9][a-z0-9-]*" placeholder="{{ t('Stable key, e.g. research-interview') }}" required>
       </div>
-      <label class="sub">{{ t('System prompt') }}<textarea class="search-input" name="system_prompt" rows="4" maxlength="20000" style="width:100%;margin-top:3px;resize:vertical"></textarea></label>
-      <label class="sub">{{ t('Markdown structure and instructions') }}<textarea class="search-input" name="instructions" rows="9" maxlength="20000" required style="width:100%;margin-top:3px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></textarea></label>
-      <label class="sub">{{ t('Execution profile') }}<select class="search-input" name="execution_profile_id" style="width:100%;margin-top:3px"><option value="">{{ t('Inherit from previous layers') }}</option>{% for profile in profiles %}<option value="{{ profile.id }}">{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}</select></label>
-      <div style="display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create template') }}</button><button class="btn sec" id="cancel-template-edit" type="button" hidden>{{ t('Cancel edit') }}</button><span id="note-template-result" class="sub"></span></div>
+      <label class="sub settings-field">{{ t('System prompt') }}<textarea class="search-input" name="system_prompt" rows="4" maxlength="20000"></textarea></label>
+      <label class="sub settings-field">{{ t('Markdown structure and instructions') }}<textarea class="search-input" name="instructions" rows="9" maxlength="20000" required data-mono></textarea></label>
+      <label class="sub settings-field">{{ t('Execution profile') }}<select class="search-input select" name="execution_profile_id"><option value="">{{ t('Inherit from previous layers') }}</option>{% for profile in profiles %}<option value="{{ profile.id }}">{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}</select></label>
+      <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Create template') }}</button><button class="btn sec" id="cancel-template-edit" type="button" hidden>{{ t('Cancel edit') }}</button><span id="note-template-result" class="sub"></span></div>
     </form>
   </div>
   </section>
@@ -197,7 +197,7 @@
   <section class="sf-settings-group" id="group-processing" data-sf-group="processing" aria-labelledby="group-processing-title">
   <h2 class="sf-settings-group-title" id="group-processing-title">{{ t('Speech & AI providers') }}</h2>
   <div class="panel sf-settings-panel" id="hardware-profiles">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div><strong>{{ t('Recommended for this host') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Evidence-based local ASR profiles; no accelerator is claimed unless detected.') }}</div></div>
       <span class="chip">{{ hardware_recommendations.host.system }} · {{ hardware_recommendations.host.machine }}{% if hardware_recommendations.host.memory_gb %} · {{ hardware_recommendations.host.memory_gb }} GB{% endif %}</span>
     </div>
@@ -209,7 +209,7 @@
         <div class="sub" style="font-size:11px">{{ recommendation.hardware }}</div>
         <div><code>{{ recommendation.model }}</code></div>
         <div class="sub" style="font-size:11.5px;flex:1">{{ recommendation.reason }}</div>
-        {% if ('recommended-' ~ recommendation.key) in profile_keys %}<span class="chip on">{{ t('Profile created') }}</span>{% elif recommendation.ready %}<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="false" style="padding:6px 9px">{{ t('Create profile') }}</button><button class="btn hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="true" style="padding:6px 9px">{{ t('Create & use') }}</button></div>{% else %}<button class="btn sec" type="button" disabled style="padding:6px 9px">{{ t('Install requirements first') }}</button>{% endif %}
+        {% if ('recommended-' ~ recommendation.key) in profile_keys %}<span class="chip on">{{ t('Profile created') }}</span>{% elif recommendation.ready %}<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec btn-sm hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="false">{{ t('Create profile') }}</button><button class="btn btn-sm hardware-install" type="button" data-key="{{ recommendation.key }}" data-default="true">{{ t('Create & use') }}</button></div>{% else %}<button class="btn sec btn-sm" type="button" disabled>{{ t('Install requirements first') }}</button>{% endif %}
       </div>
       {% endfor %}
     </div>
@@ -224,7 +224,7 @@
         <p class="sub starter-egress">{{ t(starter.egress) }}</p>
         <form class="starter-form" data-kind="{{ starter.kind }}">
           {% if starter.kind == 'remote-gpu' %}
-          <label class="field"><span>{{ t('Remote worker') }}</span><select class="search-input" name="worker_key" required>{% for worker in workers if worker.enabled %}<option value="{{ worker.key }}">{{ worker.name }}</option>{% else %}<option value="" disabled selected>{{ t('Register a remote worker first') }}</option>{% endfor %}</select></label>
+          <label class="field"><span>{{ t('Remote worker') }}</span><select class="search-input select" name="worker_key" required>{% for worker in workers if worker.enabled %}<option value="{{ worker.key }}">{{ worker.name }}</option>{% else %}<option value="" disabled selected>{{ t('Register a remote worker first') }}</option>{% endfor %}</select></label>
           {% else %}
           {% if starter.kind == 'openai-compatible' %}
           <label class="field"><span>{{ t('Endpoint base URL') }}</span><input class="search-input" name="base_url" type="url" required placeholder="https://llm.example/v1" autocomplete="off"></label>
@@ -242,22 +242,22 @@
     </div>
   </div>
   <div class="panel sf-settings-panel" id="connections">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <div class="settings-panel-head">
       <strong>{{ t('Connections') }}</strong>
       <span class="sub">{{ t('Secrets are stored as references, never copied into profiles.') }}</span>
     </div>
     <div style="display:grid;gap:10px;margin-top:12px">
       {% for c in connections %}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 0;border-top:1px solid var(--border)">
-        <div>
+      <div class="settings-row">
+        <div class="settings-row-main">
           <div style="font-weight:650">{{ c.name }} <code>{{ c.key }}</code></div>
           <div class="sub" style="font-size:12px">{{ c.execution_target }} · {% if c.data_egress %}{{ t('data egress allowed') }}{% else %}{{ t('no data egress') }}{% endif %}{% if c.secret_ref %} · {{ t('secret configured') }}{% endif %}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px">
+        <div class="settings-actions">
           <span id="health-{{ c.id }}" class="st {{ c.health.status or 'unknown' }}" title="{{ c.health.detail or '' }}">{{ t(c.health.status or 'unknown') }}</span>
-          <button class="btn sec" style="padding:7px 10px" onclick="testHealth({{ c.id }})">{{ t('Test') }}</button>
-          <button class="btn sec" style="padding:7px 10px" onclick="editConnection({{ c.id }})">{{ t('Edit') }}</button>
-          <button class="btn sec" style="padding:7px 10px;color:var(--red)" onclick="removeItem('connections',{{ c.id }})">{{ t('Delete') }}</button>
+          <button class="btn sec btn-sm" onclick="testHealth({{ c.id }})">{{ t('Test') }}</button>
+          <button class="btn sec btn-sm" onclick="editConnection({{ c.id }})">{{ t('Edit') }}</button>
+          <button class="btn btn-danger btn-sm" onclick="removeItem('connections',{{ c.id }})">{{ t('Delete') }}</button>
         </div>
       </div>
       {% endfor %}
@@ -267,12 +267,13 @@
     <strong>{{ t('Model catalog') }}</strong>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px">
       {% for m in models %}
-      <div class="tile">
-        <div style="display:flex;justify-content:space-between;gap:8px"><strong>{{ m.display_name }}</strong><span><button class="btn sec" style="padding:5px 8px" onclick="testModel({{ m.id }})">{{ t('Test') }}</button> <button class="btn sec" style="padding:5px 8px" onclick="editModel({{ m.id }})">{{ t('Edit') }}</button> <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="removeItem('models',{{ m.id }})">{{ t('Delete') }}</button></span></div>
-        <div class="sub" style="font-size:11px;margin-top:3px">{{ m.connection_key }} · <code>{{ m.model_key }}</code></div>
+      <div class="tile settings-model">
+        <strong class="settings-model-name">{{ m.display_name }}</strong>
+        <div class="sub settings-wrap" style="font-size:11px;margin-top:3px">{{ m.connection_key }} · <code>{{ m.model_key }}</code></div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">{% for capability in m.capabilities.stages or [] %}<span class="chip">{{ capability.stage }}</span>{% endfor %}</div>
         {% set pricing=(m.capabilities.metadata or {}).pricing or {} %}{% if pricing %}<div class="sub" style="font-size:10.5px;margin-top:6px">{{ t('Pricing') }} · {% if pricing.free %}{{ t('explicitly free') }}{% else %}{{ t('input') }} {{ pricing.input_per_million_tokens_usd or 0 }}/M · {{ t('output') }} {{ pricing.output_per_million_tokens_usd or 0 }}/M · {{ t('audio') }} {{ pricing.audio_per_minute_usd or 0 }}/min{% endif %}</div>{% endif %}
         <div id="model-health-{{ m.id }}" class="sub" style="font-size:11px;margin-top:7px">{{ t((m.capabilities.health or {}).status or 'not tested') }}</div>
+        <div class="settings-actions settings-model-actions"><button class="btn sec btn-sm" onclick="testModel({{ m.id }})">{{ t('Test') }}</button><button class="btn sec btn-sm" onclick="editModel({{ m.id }})">{{ t('Edit') }}</button><button class="btn btn-danger btn-sm" onclick="removeItem('models',{{ m.id }})">{{ t('Delete') }}</button></div>
       </div>
       {% endfor %}
     </div>
@@ -281,14 +282,14 @@
     <strong>{{ t('Execution profiles') }}</strong>
     <div style="display:grid;gap:12px;margin-top:12px">
       {% for p in profiles %}
-      <details {% if p.is_system_default %}open{% endif %} style="border-top:1px solid var(--border);padding-top:11px">
-        <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:12px;list-style:none">
-          <span><strong>{{ p.name }}</strong> <code>{{ p.key }}@{{ p.version }}</code></span>
-          <span>{% if p.is_system_default %}<span class="chip on">{{ t('Default') }}</span>{% endif %} <span class="chip">{{ t('Local only') if p.policy.no_egress else t('Egress allowed') }}</span>{% if p.policy.cost_ceiling is not none %} <span class="chip">{{ t('Cost ceiling') }} · US${{ '%.2f'|format(p.policy.cost_ceiling) }}</span>{% endif %} <button class="btn sec" style="padding:5px 8px" onclick="event.preventDefault();newProfileVersion({{ p.id }})">{{ t('New version') }}</button>{% if not p.is_system_default %} <button class="btn sec" style="padding:5px 8px;color:var(--red)" onclick="event.preventDefault();removeItem('profiles',{{ p.id }})">{{ t('Delete') }}</button>{% endif %}</span>
+      <details class="settings-profile" {% if p.is_system_default %}open{% endif %}>
+        <summary class="settings-profile-summary">
+          <span class="settings-row-main"><strong>{{ p.name }}</strong> <code>{{ p.key }}@{{ p.version }}</code></span>
+          <span class="settings-actions">{% if p.is_system_default %}<span class="chip on">{{ t('Default') }}</span>{% endif %} <span class="chip">{{ t('Local only') if p.policy.no_egress else t('Egress allowed') }}</span>{% if p.policy.cost_ceiling is not none %} <span class="chip">{{ t('Cost ceiling') }} · US${{ '%.2f'|format(p.policy.cost_ceiling) }}</span>{% endif %} <button class="btn sec btn-sm" onclick="event.preventDefault();newProfileVersion({{ p.id }})">{{ t('New version') }}</button>{% if not p.is_system_default %} <button class="btn btn-danger btn-sm" onclick="event.preventDefault();removeItem('profiles',{{ p.id }})">{{ t('Delete') }}</button>{% endif %}</span>
         </summary>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:12px">
           {% for stage, selection in p.stages.items() %}
-          <div class="tile"><div class="k">{{ stage }}</div><div style="font-weight:600;margin-top:3px">{{ selection.model }}</div><div class="sub" style="font-size:11px">{{ selection.connection }} · {{ selection.execution_target }}</div></div>
+          <div class="tile"><div class="k">{{ stage }}</div><div style="font-weight:600;margin-top:3px">{{ selection.model }}</div><div class="sub" style="font-size:11px">{{ selection.connection }}{% if selection.execution_target %} · {{ selection.execution_target }}{% endif %}</div></div>
           {% endfor %}
         </div>
         {% set fallbacks=(p.policy.fallback_policy or {}).stages or {} %}{% if fallbacks %}<div class="sub" style="font-size:11.5px;margin-top:10px"><strong>{{ t('Fallback order') }}</strong>{% for stage, candidates in fallbacks.items() %}{% if candidates %}<div style="margin-top:3px">{{ stage }} · {% for candidate in candidates %}{{ loop.index }}. {{ candidate.connection }}:{{ candidate.model }}{% if not loop.last %} → {% endif %}{% endfor %}</div>{% endif %}{% endfor %}</div>{% endif %}
@@ -300,7 +301,7 @@
     <div><strong>{{ t('Folder execution profiles') }}</strong><div class="sub" style="font-size:12px">{{ t('Recordings inherit this profile unless an AutoFlow, template, or recording override is more specific.') }}</div></div>
     <div style="display:grid;gap:9px;margin-top:12px">
       {% for folder in organization.folders %}
-      <label class="folder-profile-row" style="display:grid;grid-template-columns:minmax(140px,1fr) minmax(220px,2fr);gap:10px;align-items:center;border-top:1px solid var(--border);padding-top:9px"><span>{{ folder.name }}</span><select class="search-input folder-profile-select" data-folder-id="{{ folder.id }}"><option value="">{{ t('Automatic') }}</option>{% for profile in profiles %}<option value="{{ profile.id }}" {% if folder.execution_profile_id==profile.id %}selected{% endif %}>{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}</select></label>
+      <label class="folder-profile-row"><span>{{ folder.name }}</span><select class="search-input select folder-profile-select" data-folder-id="{{ folder.id }}"><option value="">{{ t('Automatic') }}</option>{% for profile in profiles %}<option value="{{ profile.id }}" {% if folder.execution_profile_id==profile.id %}selected{% endif %}>{{ profile.name }} · v{{ profile.version }}</option>{% endfor %}</select></label>
       {% else %}<div class="sub">{{ t('No folders yet.') }}</div>{% endfor %}
     </div>
     <div id="folder-profile-result" class="sub" style="font-size:12px;margin-top:8px"></div>
@@ -308,8 +309,8 @@
   <div class="panel sf-settings-panel" id="resolution-preview">
     <div><strong>{{ t('Resolution preview') }}</strong><div class="sub" style="font-size:12px">{{ t('Choose a scope to see which provider and model each stage would use, which layer chose it, and whether data may leave this host.') }}</div></div>
     <form id="resolution-preview-form" class="resolution-preview-form">
-      <label class="field"><span>{{ t('Folder') }}</span><select class="search-input" name="folder_id"><option value="">{{ t('System default (no folder)') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}</select></label>
-      <label class="field"><span>{{ t('Note template') }}</span><select class="search-input" name="template_key"><option value="">{{ t('No template layer') }}</option>{% for template in note_templates %}<option value="{{ template.key }}">{{ template.name }}</option>{% endfor %}</select></label>
+      <label class="field"><span>{{ t('Folder') }}</span><select class="search-input select" name="folder_id"><option value="">{{ t('System default (no folder)') }}</option>{% for folder in organization.folders %}<option value="{{ folder.id }}">{{ folder.name }}</option>{% endfor %}</select></label>
+      <label class="field"><span>{{ t('Note template') }}</span><select class="search-input select" name="template_key"><option value="">{{ t('No template layer') }}</option>{% for template in note_templates %}<option value="{{ template.key }}">{{ template.name }}</option>{% endfor %}</select></label>
       <label class="field"><span>{{ t('Recording ID (optional)') }}</span><input class="search-input" name="file_id" autocomplete="off" spellcheck="false" placeholder="{{ t('Uses that recording’s folder, rules and overrides') }}"></label>
       <div class="resolution-preview-actions"><button class="btn" type="submit">{{ t('Preview') }}</button></div>
     </form>
@@ -317,48 +318,48 @@
   </div>
   <div class="panel sf-settings-panel" id="create-connection">
     <strong>{{ t('Create provider connection') }}</strong>
-    <form id="connection-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
+    <form id="connection-form" class="settings-form">
       <input class="search-input" name="name" placeholder="{{ t('Display name') }}" required>
       <input class="search-input" name="key" placeholder="{{ t('Unique key, e.g. llm:studio') }}" required>
       <input class="search-input" name="provider_type" placeholder="{{ t('Provider type') }}" required>
-      <select class="search-input" name="execution_target"><option value="local">{{ t('Local') }}</option><option value="cloud">{{ t('Cloud') }}</option><option value="remote_worker">{{ t('Remote worker') }}</option></select>
+      <select class="search-input select" name="execution_target"><option value="local">{{ t('Local') }}</option><option value="cloud">{{ t('Cloud') }}</option><option value="remote_worker">{{ t('Remote worker') }}</option></select>
       <input class="search-input" name="secret_ref" placeholder="{{ t('Secret ref (optional)') }}">
-      <label class="sub" style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="data_egress"> {{ t('Data may leave this host') }}</label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create connection') }}</button><span id="connection-result" class="sub"></span></div>
+      <label class="sub settings-check"><input type="checkbox" name="data_egress"> {{ t('Data may leave this host') }}</label>
+      <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Create connection') }}</button><span id="connection-result" class="sub"></span></div>
     </form>
   </div>
   <div class="panel sf-settings-panel" id="create-model">
     <strong>{{ t('Add model') }}</strong>
-    <form id="model-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
-      <select class="search-input" name="connection_id" required>{% for c in connections %}<option value="{{ c.id }}" data-target="{{ c.execution_target }}" data-egress="{{ 'true' if c.data_egress else 'false' }}">{{ c.name }}</option>{% endfor %}</select>
+    <form id="model-form" class="settings-form">
+      <select class="search-input select" name="connection_id" required>{% for c in connections %}<option value="{{ c.id }}" data-target="{{ c.execution_target }}" data-egress="{{ 'true' if c.data_egress else 'false' }}">{{ c.name }}</option>{% endfor %}</select>
       <input class="search-input" name="model_key" placeholder="{{ t('Model identifier') }}" required>
       <input class="search-input" name="display_name" placeholder="{{ t('Display name') }}" required>
-      <div class="sub" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">{% for stage in provider_stages %}<label><input type="checkbox" name="capability" value="{{ stage }}"> {{ stage }}</label>{% endfor %}</div>
+      <div class="sub settings-checks">{% for stage in provider_stages %}<label><input type="checkbox" name="capability" value="{{ stage }}"> {{ stage }}</label>{% endfor %}</div>
       <input class="search-input" type="number" min="0" step="0.000001" name="input_price" placeholder="{{ t('Input $ / 1M tokens (optional)') }}">
       <input class="search-input" type="number" min="0" step="0.000001" name="output_price" placeholder="{{ t('Output $ / 1M tokens (optional)') }}">
       <input class="search-input" type="number" min="0" step="0.000001" name="audio_price" placeholder="{{ t('Audio $ / minute (optional)') }}">
-      <label class="sub" style="display:flex;align-items:center;gap:7px"><input type="checkbox" name="free_pricing"> {{ t('Explicitly free / no provider charge') }}</label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Add model') }}</button><span id="model-result" class="sub"></span></div>
+      <label class="sub settings-check"><input type="checkbox" name="free_pricing"> {{ t('Explicitly free / no provider charge') }}</label>
+      <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Add model') }}</button><span id="model-result" class="sub"></span></div>
     </form>
   </div>
   <div class="panel sf-settings-panel" id="create-profile">
     <strong>{{ t('Create execution profile') }}</strong>
     <p class="sub" style="margin:4px 0 12px">{{ t('Each stage is explicit. Unsupported model/stage combinations are rejected before saving.') }}</p>
-    <form id="profile-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+    <form id="profile-form" class="settings-form">
       <input class="search-input" name="name" placeholder="{{ t('Profile name') }}" required>
       <input class="search-input" name="key" placeholder="{{ t('Stable key, e.g. apple-local') }}" required>
       {% for stage in provider_stages %}
-      <label class="sub">{{ stage }} · {{ t('primary') }}
-        <select class="search-input" name="stage-{{ stage }}" required style="margin-top:3px"><option value="">{{ t('Choose model…') }}</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
+      <label class="sub settings-field">{{ stage }} · {{ t('primary') }}
+        <select class="search-input select" name="stage-{{ stage }}" required><option value="">{{ t('Choose model…') }}</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
       </label>
-      <label class="sub">{{ stage }} · {{ t('first fallback') }}
-        <select class="search-input" name="fallback-{{ stage }}" style="margin-top:3px"><option value="">{{ t('No fallback') }}</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
+      <label class="sub settings-field">{{ stage }} · {{ t('first fallback') }}
+        <select class="search-input select" name="fallback-{{ stage }}"><option value="">{{ t('No fallback') }}</option>{% for m in models %}<option value="{{ m.connection_key }}|||{{ m.model_key }}">{{ m.display_name }} · {{ m.connection_key }}</option>{% endfor %}</select>
       </label>
       {% endfor %}
-      <label class="sub"><input type="checkbox" name="no_egress" checked> {{ t('Local only / no egress') }}</label>
-      <label class="sub"><input type="checkbox" name="is_system_default"> {{ t('Make system default') }}</label>
-      <label class="sub">{{ t('Cost ceiling') }} <input class="search-input" type="number" step="0.01" min="0" name="cost_ceiling" placeholder="{{ t('Optional') }}"></label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Create profile') }}</button><span id="profile-result" class="sub"></span></div>
+      <label class="sub settings-check"><input type="checkbox" name="no_egress" checked> {{ t('Local only / no egress') }}</label>
+      <label class="sub settings-check"><input type="checkbox" name="is_system_default"> {{ t('Make system default') }}</label>
+      <label class="sub settings-field">{{ t('Cost ceiling') }} <input class="search-input" type="number" step="0.01" min="0" name="cost_ceiling" placeholder="{{ t('Optional') }}"></label>
+      <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Create profile') }}</button><span id="profile-result" class="sub"></span></div>
     </form>
   </div>
   <div class="panel sf-settings-panel" id="remote-workers">
@@ -367,9 +368,9 @@
     <div style="display:grid;gap:9px">
       {% for worker in workers %}
       <div class="worker-entry">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-        <div><strong>{{ worker.name }}</strong> <code>{{ worker.key }}</code><div class="sub" style="font-size:11px">{{ t('protocol') }} {{ worker.protocol_version or t('not checked') }} · {{ worker.token_env }}</div></div>
-        <div><span id="worker-health-{{ worker.id }}" class="st {{ worker.health.status or 'unknown' }}">{{ t(worker.health.status or 'unknown') }}</span> <button class="btn sec" style="padding:6px 9px" onclick="testWorker({{ worker.id }})">{{ t('Test') }}</button> <button class="btn sec" style="padding:6px 9px;color:var(--red)" onclick="removeItem('workers',{{ worker.id }})">{{ t('Delete') }}</button></div>
+      <div class="settings-row settings-row-plain">
+        <div class="settings-row-main"><strong>{{ worker.name }}</strong> <code>{{ worker.key }}</code><div class="sub" style="font-size:11px">{{ t('protocol') }} {{ worker.protocol_version or t('not checked') }} · {{ worker.token_env }}</div></div>
+        <div class="settings-actions"><span id="worker-health-{{ worker.id }}" class="st {{ worker.health.status or 'unknown' }}">{{ t(worker.health.status or 'unknown') }}</span> <button class="btn sec btn-sm" onclick="testWorker({{ worker.id }})">{{ t('Test') }}</button> <button class="btn btn-danger btn-sm" onclick="removeItem('workers',{{ worker.id }})">{{ t('Delete') }}</button></div>
       </div>
       {% set runtime = worker.health.runtime or {} %}
       <dl class="worker-facts">
@@ -384,33 +385,33 @@
       </div>
       {% endfor %}
     </div>
-    <form id="worker-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
+    <form id="worker-form" class="settings-form">
       <input class="search-input" name="name" placeholder="{{ t('Worker name') }}" required>
       <input class="search-input" name="key" placeholder="{{ t('Stable key, e.g. cclab-gpu') }}" required>
       <input class="search-input" name="base_url" type="url" placeholder="https://worker.example/" required>
       <input class="search-input" name="token_env" value="LOCALPLAUD_WORKER_TOKEN" placeholder="{{ t('Token environment variable') }}" required>
-      <div style="grid-column:1/-1;display:flex;gap:10px;align-items:center"><button class="btn" type="submit">{{ t('Register worker') }}</button><span id="worker-result" class="sub"></span></div>
+      <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Register worker') }}</button><span id="worker-result" class="sub"></span></div>
     </form>
   </div>
   </section>
   <section class="sf-settings-group" id="group-data" data-sf-group="data" aria-labelledby="group-data-title">
   <h2 class="sf-settings-group-title" id="group-data-title">{{ t('Sync, backup & privacy') }}</h2>
   <div class="panel sf-settings-panel" id="private-backup">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><strong>{{ t('Private workspace backup') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Consistent SQLite snapshot with manifest and SHA-256. Secrets, config, and Plaud tokens are excluded.') }}</div></div><a class="sub" href="/api/docs" style="font-size:12px">{{ t('API documentation') }} ↗</a></div>
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><strong>{{ t('Private workspace backup') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Consistent SQLite snapshot with manifest and SHA-256. Secrets, config, and Plaud tokens are excluded.') }}</div></div><a class="sub" href="/api/docs" style="font-size:12px">{{ t('API documentation') }} ↗</a></div>
     {% if backup_error %}<div class="sub" style="color:var(--red);margin-top:12px">{{ backup_error }}</div>{% else %}
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:13px"><button class="btn backup-create" data-media="false" type="button">{{ t('Back up database') }}</button><button class="btn sec backup-create" data-media="true" type="button">{{ t('Back up database + media') }}</button><span id="backup-result" class="sub"></span></div>
     <p class="sub" style="font-size:11.5px;margin:9px 0 0">{{ t('Media archives may be very large. Keep every downloaded backup private: transcripts and notes can contain sensitive information.') }}</p>
     <div style="display:grid;gap:8px;margin-top:13px" id="backup-list">
       {% for backup in workspace_backups %}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--border);padding-top:9px;flex-wrap:wrap">
-        <div style="min-width:0;flex:1"><strong style="overflow-wrap:anywhere">{{ backup.name }}</strong>{% if backup.status=='ready' %}<div class="sub" style="font-size:11px">{{ backup.created_at[:16]|replace('T',' · ') }} · {{ (backup.size_bytes / 1048576)|round(1) }} MB · {% if backup.media.included %}{{ t('database') }} + {{ backup.media.files }} {{ t('media files') }}{% else %}{{ t('database only') }}{% endif %}</div><div class="sub" style="font-size:10px;overflow-wrap:anywhere">SHA-256 {{ backup.sha256 }}</div>{% else %}<div class="sub" style="font-size:11px;color:var(--red)">{{ t('Invalid or incomplete archive') }}</div>{% endif %}</div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">{% if backup.status=='ready' %}{% if enabled_backup_destinations %}<select class="search-input backup-destination" aria-label="{{ t('Sync destination for') }} {{ backup.name }}" style="width:auto;padding:6px 8px">{% for destination in enabled_backup_destinations %}<option value="{{ destination.id }}">{{ destination.name }}</option>{% endfor %}</select><button class="btn sec backup-sync" data-name="{{ backup.name }}" type="button" style="padding:6px 9px">{{ t('Upload') }}</button>{% endif %}<a class="btn sec" href="/api/backups/{{ backup.name }}/download" style="padding:6px 9px">{{ t('Download') }}</a>{% endif %}<button class="btn sec backup-delete" data-name="{{ backup.name }}" type="button" style="padding:6px 9px;color:var(--red)">{{ t('Delete') }}</button></div>
+      <div class="settings-row">
+        <div class="settings-row-main"><strong>{{ backup.name }}</strong>{% if backup.status=='ready' %}<div class="sub" style="font-size:11px">{{ backup.created_at[:16]|replace('T',' · ') }} · {{ (backup.size_bytes / 1048576)|round(1) }} MB · {% if backup.media.included %}{{ t('database') }} + {{ backup.media.files }} {{ t('media files') }}{% else %}{{ t('database only') }}{% endif %}</div><div class="sub" style="font-size:10px;overflow-wrap:anywhere">SHA-256 {{ backup.sha256 }}</div>{% else %}<div class="sub" style="font-size:11px;color:var(--red)">{{ t('Invalid or incomplete archive') }}</div>{% endif %}</div>
+        <div class="settings-actions">{% if backup.status=='ready' %}{% if enabled_backup_destinations %}<select class="search-input select backup-destination" aria-label="{{ t('Sync destination for') }} {{ backup.name }}" data-size="sm">{% for destination in enabled_backup_destinations %}<option value="{{ destination.id }}">{{ destination.name }}</option>{% endfor %}</select><button class="btn sec btn-sm backup-sync" data-name="{{ backup.name }}" type="button">{{ t('Upload') }}</button>{% endif %}<a class="btn sec btn-sm" href="/api/backups/{{ backup.name }}/download">{{ t('Download') }}</a>{% endif %}<button class="btn btn-danger btn-sm backup-delete" data-name="{{ backup.name }}" type="button">{{ t('Delete') }}</button></div>
       </div>
       {% else %}<div class="sub">{{ t('No workspace backups yet.') }}</div>{% endfor %}
     </div>{% endif %}
-    {% if not backup_error %}<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px"><strong>{{ t('Authorized backup destinations') }}</strong><p class="sub" style="font-size:11.5px;margin:4px 0 10px">{{ t('Uploads use an idempotent HTTP PUT. Public destinations require HTTPS; bearer tokens remain environment-only references.') }}</p><div style="display:grid;gap:8px">{% for destination in backup_destinations %}<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><strong>{{ destination.name }}</strong> <span class="chip">{{ t('enabled') if destination.enabled else t('disabled') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ destination.url }}{% if destination.last_used_at %} · {{ t('used') }} {{ destination.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div><div><span id="backup-destination-health-{{ destination.id }}" class="st {{ destination.health.status or 'unknown' }}" title="{{ destination.health.detail or '' }}">{{ t(destination.health.status or 'unknown') }}</span> <button class="btn sec backup-destination-test" data-id="{{ destination.id }}" type="button" style="padding:6px 9px">{{ t('Test') }}</button> <button class="btn sec backup-destination-delete" data-id="{{ destination.id }}" type="button" style="padding:6px 9px;color:var(--red)">{{ t('Revoke') }}</button></div></div>{% else %}<div class="sub">{{ t('No remote backup destination authorized.') }}</div>{% endfor %}</div>
-    <form id="backup-destination-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px"><input class="search-input" name="name" maxlength="120" placeholder="{{ t('Destination name') }}" required><input class="search-input" name="url" type="url" maxlength="2048" placeholder="https://backup.example/webdav/localplaud" required><input class="search-input" name="secret_ref" maxlength="256" placeholder="{{ t('Bearer secret ref, e.g. env:BACKUP_TOKEN') }}"><label class="sub"><input type="checkbox" name="allow_private_network"> {{ t('Explicitly allow private/LAN destination and HTTP') }}</label><label class="sub"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label><div style="display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize destination') }}</button><span id="backup-destination-result" class="sub"></span></div></form>
-    {% if backup_sync_deliveries %}<div style="margin-top:14px"><strong>{{ t('Sync history') }}</strong><div style="display:grid;gap:7px;margin-top:8px">{% for delivery in backup_sync_deliveries %}<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:12px"><span style="min-width:0;overflow-wrap:anywhere">{{ delivery.backup_name }} → {{ delivery.destination_name or t('revoked destination') }}</span><span><span class="st {{ 'done' if delivery.status=='completed' else 'error' }}">{{ t(delivery.status) }}</span>{% if delivery.status!='completed' %} <button class="btn sec backup-sync-retry" data-id="{{ delivery.id }}" type="button" style="padding:4px 7px">{{ t('Retry') }}</button>{% endif %}</span></div>{% endfor %}</div></div>{% endif %}</div>{% endif %}
+    {% if not backup_error %}<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px"><strong>{{ t('Authorized backup destinations') }}</strong><p class="sub" style="font-size:11.5px;margin:4px 0 10px">{{ t('Uploads use an idempotent HTTP PUT. Public destinations require HTTPS; bearer tokens remain environment-only references.') }}</p><div style="display:grid;gap:8px">{% for destination in backup_destinations %}<div class="settings-row settings-row-plain"><div class="settings-row-main"><strong>{{ destination.name }}</strong> <span class="chip">{{ t('enabled') if destination.enabled else t('disabled') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ destination.url }}{% if destination.last_used_at %} · {{ t('used') }} {{ destination.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div><div class="settings-actions"><span id="backup-destination-health-{{ destination.id }}" class="st {{ destination.health.status or 'unknown' }}" title="{{ destination.health.detail or '' }}">{{ t(destination.health.status or 'unknown') }}</span> <button class="btn sec btn-sm backup-destination-test" data-id="{{ destination.id }}" type="button">{{ t('Test') }}</button> <button class="btn btn-danger btn-sm backup-destination-delete" data-id="{{ destination.id }}" type="button">{{ t('Revoke') }}</button></div></div>{% else %}<div class="sub">{{ t('No remote backup destination authorized.') }}</div>{% endfor %}</div>
+    <form id="backup-destination-form" class="settings-form"><input class="search-input" name="name" maxlength="120" placeholder="{{ t('Destination name') }}" required><input class="search-input" name="url" type="url" maxlength="2048" placeholder="https://backup.example/webdav/localplaud" required><input class="search-input" name="secret_ref" maxlength="256" placeholder="{{ t('Bearer secret ref, e.g. env:BACKUP_TOKEN') }}"><label class="sub settings-check"><input type="checkbox" name="allow_private_network"> {{ t('Explicitly allow private/LAN destination and HTTP') }}</label><label class="sub settings-check"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label><div class="settings-form-actions"><button class="btn" type="submit">{{ t('Authorize destination') }}</button><span id="backup-destination-result" class="sub"></span></div></form>
+    {% if backup_sync_deliveries %}<div style="margin-top:14px"><strong>{{ t('Sync history') }}</strong><div style="display:grid;gap:7px;margin-top:8px">{% for delivery in backup_sync_deliveries %}<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:12px"><span style="min-width:0;overflow-wrap:anywhere">{{ delivery.backup_name }} → {{ delivery.destination_name or t('revoked destination') }}</span><span class="settings-actions"><span class="st {{ 'done' if delivery.status=='completed' else 'error' }}">{{ t(delivery.status) }}</span>{% if delivery.status!='completed' %} <button class="btn sec btn-sm backup-sync-retry" data-id="{{ delivery.id }}" type="button">{{ t('Retry') }}</button>{% endif %}</span></div>{% endfor %}</div></div>{% endif %}</div>{% endif %}
   </div>
   <div class="panel sf-settings-panel" id="storage">
     <div><strong>{{ t('Storage & retention') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Measured on this host. Original audio, the database and your edits are never removed by retention.') }}</div></div>
@@ -424,7 +425,7 @@
     </dl>
     <form id="retention-form" class="retention-form">
       <label class="field"><span>{{ t('Workspace backups to keep') }}</span>
-        <select class="search-input" name="backup_keep_latest" aria-describedby="retention-help">
+        <select class="search-input select" name="backup_keep_latest" aria-describedby="retention-help">
           <option value="" {% if storage_retention.policy.backup_keep_latest is none %}selected{% endif %}>{{ t('Keep every backup') }}</option>
           {% set saved_keep = storage_retention.policy.backup_keep_latest %}{% for count in ([1, 3, 5, 10, 20] + ([saved_keep] if saved_keep and saved_keep not in [1, 3, 5, 10, 20] else []))|sort %}<option value="{{ count }}" {% if storage_retention.policy.backup_keep_latest == count %}selected{% endif %}>{{ t('Newest') }} {{ count }}</option>{% endfor %}
         </select>
@@ -461,20 +462,20 @@
     <p class="sub" style="margin:4px 0 12px">{{ t('Outbound data delivery is opt-in. Rules reference these destinations; bearer secrets stay in environment variables.') }}</p>
     <div style="display:grid;gap:9px">
       {% for integration in webhook_integrations %}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:9px;{% if not integration.enabled %}opacity:.55{% endif %}">
-        <div><strong>{{ integration.name }}</strong> <span class="chip">{{ integration.scopes|join(', ') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ integration.url }} · {{ t('private/LAN allowed') if integration.allow_private_network else t('public HTTPS only') }}{% if integration.last_used_at %} · {{ t('used') }} {{ integration.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div>
-        <div><span id="webhook-health-{{ integration.id }}" class="st {{ integration.health.status or 'unknown' }}" title="{{ integration.health.detail or '' }}">{{ t(integration.health.status or 'unknown') }}</span> <button class="btn sec" type="button" style="padding:6px 9px" onclick="testWebhook({{ integration.id }})">{{ t('Test') }}</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteWebhook({{ integration.id }})">{{ t('Delete') }}</button></div>
+      <div class="settings-row"{% if not integration.enabled %} data-disabled{% endif %}>
+        <div class="settings-row-main"><strong>{{ integration.name }}</strong> <span class="chip">{{ integration.scopes|join(', ') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ integration.url }} · {{ t('private/LAN allowed') if integration.allow_private_network else t('public HTTPS only') }}{% if integration.last_used_at %} · {{ t('used') }} {{ integration.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div>
+        <div class="settings-actions"><span id="webhook-health-{{ integration.id }}" class="st {{ integration.health.status or 'unknown' }}" title="{{ integration.health.detail or '' }}">{{ t(integration.health.status or 'unknown') }}</span> <button class="btn sec btn-sm" type="button" onclick="testWebhook({{ integration.id }})">{{ t('Test') }}</button> <button class="btn btn-danger btn-sm" type="button" onclick="deleteWebhook({{ integration.id }})">{{ t('Delete') }}</button></div>
       </div>
       {% else %}<div class="sub">{{ t('No webhook destinations authorized.') }}</div>{% endfor %}
     </div>
-    <form id="webhook-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
+    <form id="webhook-form" class="settings-form">
       <input class="search-input" name="name" maxlength="120" placeholder="{{ t('Webhook name') }}" required>
       <input class="search-input" name="url" type="url" maxlength="2048" placeholder="https://example.com/webhook" required>
       <input class="search-input" name="secret_ref" maxlength="256" placeholder="{{ t('Bearer secret ref, e.g. env:WEBHOOK_TOKEN') }}">
-      <div class="sub" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><label><input type="checkbox" name="scope" value="metadata" checked> {{ t('Metadata') }}</label><label><input type="checkbox" name="scope" value="transcript"> {{ t('Transcript') }}</label><label><input type="checkbox" name="scope" value="notes"> {{ t('Notes') }}</label></div>
-      <label class="sub"><input type="checkbox" name="allow_private_network"> {{ t('Explicitly allow private/LAN destination and HTTP') }}</label>
-      <label class="sub"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize webhook') }}</button><span id="webhook-result" class="sub"></span></div>
+      <div class="sub settings-checks"><label><input type="checkbox" name="scope" value="metadata" checked> {{ t('Metadata') }}</label><label><input type="checkbox" name="scope" value="transcript"> {{ t('Transcript') }}</label><label><input type="checkbox" name="scope" value="notes"> {{ t('Notes') }}</label></div>
+      <label class="sub settings-check"><input type="checkbox" name="allow_private_network"> {{ t('Explicitly allow private/LAN destination and HTTP') }}</label>
+      <label class="sub settings-check"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label>
+      <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Authorize webhook') }}</button><span id="webhook-result" class="sub"></span></div>
     </form>
   </div>
   <div class="panel sf-settings-panel" id="email-integrations">
@@ -482,26 +483,26 @@
     <p class="sub" style="margin:4px 0 12px">{{ t('SMTP delivery is opt-in. Passwords stay in environment variables; Test sends no recording data.') }}</p>
     <div style="display:grid;gap:9px">
       {% for integration in email_integrations %}
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:9px;{% if not integration.enabled %}opacity:.55{% endif %}">
-        <div><strong>{{ integration.name }}</strong> <span class="chip">{{ integration.scopes|join(', ') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ integration.smtp_host }}:{{ integration.smtp_port }} · {{ integration.security }} · {{ t('to') }} {{ integration.to_addresses|join(', ') }}{% if integration.last_used_at %} · {{ t('used') }} {{ integration.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div>
-        <div><span id="email-health-{{ integration.id }}" class="st {{ integration.health.status or 'unknown' }}" title="{{ integration.health.detail or '' }}">{{ t(integration.health.status or 'unknown') }}</span> <button class="btn sec" type="button" style="padding:6px 9px" onclick="testEmail({{ integration.id }})">{{ t('Test') }}</button> <button class="btn sec" type="button" style="padding:6px 9px;color:var(--red)" onclick="deleteEmail({{ integration.id }})">{{ t('Delete') }}</button></div>
+      <div class="settings-row"{% if not integration.enabled %} data-disabled{% endif %}>
+        <div class="settings-row-main"><strong>{{ integration.name }}</strong> <span class="chip">{{ integration.scopes|join(', ') }}</span><div class="sub" style="font-size:11px;overflow-wrap:anywhere">{{ integration.smtp_host }}:{{ integration.smtp_port }} · {{ integration.security }} · {{ t('to') }} {{ integration.to_addresses|join(', ') }}{% if integration.last_used_at %} · {{ t('used') }} {{ integration.last_used_at[:16]|replace('T',' · ') }}{% endif %}</div></div>
+        <div class="settings-actions"><span id="email-health-{{ integration.id }}" class="st {{ integration.health.status or 'unknown' }}" title="{{ integration.health.detail or '' }}">{{ t(integration.health.status or 'unknown') }}</span> <button class="btn sec btn-sm" type="button" onclick="testEmail({{ integration.id }})">{{ t('Test') }}</button> <button class="btn btn-danger btn-sm" type="button" onclick="deleteEmail({{ integration.id }})">{{ t('Delete') }}</button></div>
       </div>
       {% else %}<div class="sub">{{ t('No email destinations authorized.') }}</div>{% endfor %}
     </div>
-    <form id="email-form" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:14px">
+    <form id="email-form" class="settings-form">
       <input class="search-input" name="name" maxlength="120" placeholder="{{ t('Email destination name') }}" required>
       <input class="search-input" name="smtp_host" maxlength="255" placeholder="{{ t('SMTP host') }}" required>
       <input class="search-input" name="smtp_port" type="number" min="1" max="65535" value="587" required>
-      <select class="search-input" name="security"><option value="starttls">STARTTLS</option><option value="tls">{{ t('Implicit TLS') }}</option><option value="plain">{{ t('Plain SMTP') }}</option></select>
+      <select class="search-input select" name="security"><option value="starttls">STARTTLS</option><option value="tls">{{ t('Implicit TLS') }}</option><option value="plain">{{ t('Plain SMTP') }}</option></select>
       <input class="search-input" name="username" maxlength="320" placeholder="{{ t('SMTP username (optional)') }}">
       <input class="search-input" name="password_ref" maxlength="256" placeholder="{{ t('Password ref, e.g. env:SMTP_PASSWORD') }}">
       <input class="search-input" name="from_address" type="email" maxlength="320" placeholder="{{ t('From address') }}" required>
       <input class="search-input" name="to_addresses" maxlength="2000" placeholder="{{ t('Recipients, comma separated') }}" required>
       <input class="search-input" name="subject_prefix" maxlength="80" value="[localplaud]" placeholder="{{ t('Subject prefix') }}">
-      <div class="sub" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><label><input type="checkbox" name="scope" value="metadata" checked> {{ t('Metadata') }}</label><label><input type="checkbox" name="scope" value="transcript"> {{ t('Transcript') }}</label><label><input type="checkbox" name="scope" value="notes"> {{ t('Notes') }}</label></div>
-      <label class="sub"><input type="checkbox" name="allow_insecure_private"> {{ t('Explicitly allow private/LAN host and plain SMTP') }}</label>
-      <label class="sub"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label>
-      <div style="grid-column:1/-1;display:flex;align-items:center;gap:10px"><button class="btn" type="submit">{{ t('Authorize email') }}</button><span id="email-result" class="sub"></span></div>
+      <div class="sub settings-checks"><label><input type="checkbox" name="scope" value="metadata" checked> {{ t('Metadata') }}</label><label><input type="checkbox" name="scope" value="transcript"> {{ t('Transcript') }}</label><label><input type="checkbox" name="scope" value="notes"> {{ t('Notes') }}</label></div>
+      <label class="sub settings-check"><input type="checkbox" name="allow_insecure_private"> {{ t('Explicitly allow private/LAN host and plain SMTP') }}</label>
+      <label class="sub settings-check"><input type="checkbox" name="enabled" checked> {{ t('Enabled') }}</label>
+      <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Authorize email') }}</button><span id="email-result" class="sub"></span></div>
     </form>
   </div>
   <div class="panel sf-settings-panel" id="automation">
@@ -513,7 +514,7 @@
   <section class="sf-settings-group" id="group-help" data-sf-group="help" aria-labelledby="group-help-title">
   <h2 class="sf-settings-group-title" id="group-help-title">{{ t('Help & about') }}</h2>
   <div class="panel sf-settings-panel" id="system-health">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('System health') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Processing queue and provider checks for this workspace.') }}</div></div><a class="btn sec" href="/status">{{ t('Open system status') }}</a></div>
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('System health') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Processing queue and provider checks for this workspace.') }}</div></div><a class="btn sec" href="/status">{{ t('Open system status') }}</a></div>
     <div class="sf-health-grid">
       <div class="tile"><div class="k">{{ t('ready') }}</div><div class="sf-health-n">{{ sidebar.ops.ready }}</div></div>
       <div class="tile"><div class="k">{{ t('generating') }}</div><div class="sf-health-n">{{ sidebar.ops.processing }}</div></div>
@@ -522,7 +523,7 @@
     </div>
   </div>
   <div class="panel sf-settings-panel" id="support-about">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Support & about') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Runtime identity and a deliberately redacted support bundle.') }}</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
+    <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Support & about') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Runtime identity and a deliberately redacted support bundle.') }}</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;margin-top:12px"><div class="tile"><div class="k">{{ t('Runtime') }}</div><div style="margin-top:4px">Python {{ about.python }}</div></div><div class="tile"><div class="k">{{ t('Host') }}</div><div style="margin-top:4px">{{ about.system }} · {{ about.machine }}</div></div><div class="tile"><div class="k">{{ t('License') }}</div><div style="margin-top:4px">{{ about.license }}</div></div></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px"><a class="btn" href="/api/system/diagnostics.json">{{ t('Download safe diagnostics') }}</a><a class="btn sec" href="/status">{{ t('System health') }}</a><a class="btn sec" href="/api/docs">{{ t('API documentation') }}</a><a class="btn sec" href="{{ about.support.repository }}" target="_blank" rel="noopener">{{ t('GitHub repository') }} ↗</a></div>
     <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t('Diagnostics contain aggregate counts and non-secret runtime switches only. Recording IDs, titles, content, paths, URLs, addresses, errors, environment variables, and credentials are excluded.') }}</p>
@@ -539,7 +540,7 @@
 .resolution-preview-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:9px;margin-top:12px;align-items:end}.resolution-preview-form .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--c-text-2);min-width:0}.resolution-preview-actions{display:flex;align-items:end}.resolution-preview-result{margin-top:12px;display:grid;gap:10px}.resolution-layers{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:6px 0 0;padding:0}.resolution-stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.resolution-stage{display:flex;flex-direction:column;gap:4px;min-width:0}.resolution-model{font-weight:600;overflow-wrap:anywhere}.resolution-stage .sub{font-size:11px;overflow-wrap:anywhere}.resolution-stage .chip{align-self:flex-start}.chip.resolution-egress{color:var(--c-warn);background:var(--c-warn-soft)}.resolution-error{color:var(--c-danger);font-size:12.5px}
 .worker-entry{border-top:1px solid var(--c-border);padding-top:9px}.worker-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px 14px;margin:8px 0 0;font-size:12px}.worker-facts>div{min-width:0}.worker-facts dt{color:var(--c-text-2);font-size:11px}.worker-facts dd{margin:2px 0 0;overflow-wrap:anywhere;color:var(--c-text-body)}.worker-facts .chip{margin:0 4px 4px 0}.chip.worker-revoked{color:var(--c-danger);background:var(--c-danger-soft)}
 .storage-usage{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin:12px 0 0}.storage-usage>div{background:var(--c-surface-2);border-radius:var(--radius-md);padding:10px 12px;min-width:0}.storage-usage dt{font-size:11.5px;color:var(--c-text-2)}.storage-usage dd{margin:3px 0 0;font-weight:600;color:var(--c-text)}.storage-usage dd.sub{font-weight:400;font-size:11px;color:var(--c-text-2)}.retention-form{display:flex;gap:9px;align-items:end;flex-wrap:wrap;margin-top:14px}.retention-form .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--c-text-2);min-width:min(240px,100%)}.retention-dialog-list{margin:8px 0 0;padding-left:18px;font-size:12.5px;overflow-wrap:anywhere;max-height:40vh;overflow:auto}
-.starter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;margin-top:12px;align-items:start}.starter-card summary{cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}.starter-card summary:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px}.starter-egress{font-size:12px;margin:8px 0}.starter-form{display:grid;gap:8px}.starter-form .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--c-text-2);min-width:0}.starter-help{font-size:11px;margin:0}.starter-ack{display:flex;gap:7px;align-items:flex-start;font-size:12px;color:var(--c-text-body)}.starter-result{font-size:12px;margin:0}
+.starter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;margin-top:12px;align-items:start}.starter-card summary{cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:6px}.starter-card summary:focus-visible{outline:2px solid var(--c-accent);outline-offset:2px}.starter-egress{font-size:12px;margin:8px 0}.starter-form{display:grid;gap:8px}.starter-form .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--c-text-2);min-width:0}.starter-help{font-size:11px;margin:0}.starter-ack{display:flex;gap:7px;align-items:flex-start;font-size:12px;color:var(--c-text-body)}.starter-result{font-size:12px;margin:0}
 </style>
 <script>
 (()=>{
@@ -739,6 +740,20 @@ async function deleteEmail(id){if(!confirm(tr('Delete this email authorization? 
 document.getElementById('email-form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target),recipients=String(f.get('to_addresses')).split(',').map(value=>value.trim()).filter(Boolean),body={name:f.get('name'),smtp_host:f.get('smtp_host'),smtp_port:Number(f.get('smtp_port')),security:f.get('security'),allow_insecure_private:f.get('allow_insecure_private')==='on',username:f.get('username')||null,password_ref:f.get('password_ref')||null,from_address:f.get('from_address'),to_addresses:recipients,subject_prefix:f.get('subject_prefix'),scopes:f.getAll('scope'),enabled:f.get('enabled')==='on'};const r=await fetch('/api/integrations/emails',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await r.json(),out=document.getElementById('email-result');if(r.ok){out.textContent=tr('Authorized. Reloading…');location.reload();}else out.textContent=data.detail?.[0]?.msg||data.detail||tr('Could not authorize email');});
 document.querySelectorAll('.session-revoke').forEach(button=>button.addEventListener('click',async()=>{if(!confirm(tr('Revoke this browser session?')))return;const response=await fetch(`/api/sessions/${button.dataset.id}/revoke`,{method:'POST'});if(response.ok){if(button.dataset.current==='true')location.assign('/login');else location.reload();}else{const data=await response.json();alert(data.detail||tr('Could not revoke session'));}}));
 Object.assign(window,{editVocabulary,deleteVocabulary,editNoteTemplate,archiveNoteTemplate,removeItem,editConnection,editModel,newProfileVersion,testHealth,testModel,testWorker,testWebhook,deleteWebhook,testEmail,deleteEmail});
+})();
+</script>
+<script>
+(()=>{
+  // Keep the active section link visible inside the sticky, internally scrolling index.
+  const nav=document.querySelector('.settings-nav');
+  if(!nav||!('MutationObserver' in window))return;
+  new MutationObserver(()=>{
+    const link=nav.querySelector('a[aria-current]');
+    if(!link||nav.scrollHeight<=nav.clientHeight)return;
+    const top=link.getBoundingClientRect().top-nav.getBoundingClientRect().top+nav.scrollTop, bottom=top+link.offsetHeight;
+    if(top<nav.scrollTop+8)nav.scrollTop=Math.max(0,top-40);
+    else if(bottom>nav.scrollTop+nav.clientHeight-8)nav.scrollTop=bottom-nav.clientHeight+40;
+  }).observe(nav,{subtree:true,attributes:true,attributeFilter:['aria-current']});
 })();
 </script>
 {% endblock %}
