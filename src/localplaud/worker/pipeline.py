@@ -359,7 +359,7 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
 
     family_config = getattr(resolved, family)
     provider = selected.get("provider_type") or str(selected["connection"]).split(":", 1)[-1]
-    if provider in {"codex-local", "ai-gateway"} and stage not in {
+    if provider == "ai-gateway" and stage not in {
         "correct",
         "summarize",
         "mind_map",

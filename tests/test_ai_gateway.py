@@ -21,7 +21,7 @@ from localplaud.llm.base import (
     build_llm,
     capture_resolved_models,
 )
-from localplaud.llm.codex_local import CodexLocalLLM
+from localplaud.llm.codex_quota import CodexQuotaReader
 from localplaud.providers.contracts import Capability, StageCapabilities
 from localplaud.providers.resolver import resolve_profile
 from localplaud.worker.pipeline import (
@@ -67,13 +67,13 @@ def _fake_openai(monkeypatch, events=None, error=None):
 
 
 def _quota(monkeypatch, remaining):
-    reads: list[CodexLocalLLM] = []
+    reads: list[CodexQuotaReader] = []
 
     def read(self):
         reads.append(self)
         return remaining
 
-    monkeypatch.setattr(CodexLocalLLM, "_remaining_quota_percent", read)
+    monkeypatch.setattr(CodexQuotaReader, "_remaining_quota_percent", read)
     return reads
 
 
@@ -253,6 +253,6 @@ def test_remote_workers_still_attest_the_exact_requested_model():
 
 def test_reserve_uses_the_tighter_reported_window():
     result = {"rateLimits": {"primary": {"usedPercent": 40}, "secondary": {"usedPercent": 95}}}
-    assert CodexLocalLLM._remaining_from_rate_limit_result(result) == 5
+    assert CodexQuotaReader._remaining_from_rate_limit_result(result) == 5
     result["rateLimits"]["secondary"] = None
-    assert CodexLocalLLM._remaining_from_rate_limit_result(result) == 60
+    assert CodexQuotaReader._remaining_from_rate_limit_result(result) == 60

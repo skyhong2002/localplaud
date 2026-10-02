@@ -229,7 +229,7 @@
           {% if starter.kind == 'openai-compatible' %}
           <label class="field"><span>{{ t('Endpoint base URL') }}</span><input class="search-input" name="base_url" type="url" required placeholder="https://llm.example/v1" autocomplete="off"></label>
           {% endif %}
-          <label class="field"><span>{{ t('Model identifier') }}</span><input class="search-input" name="model" {% if starter.kind == 'openai-compatible' %}required{% endif %} autocomplete="off" placeholder="{{ t('Optional; uses the configured default') if starter.kind == 'openai-cloud' else 'model-name' }}"></label>
+          <label class="field"><span>{{ t('Model identifier') }}</span><input class="search-input" name="model" required autocomplete="off" placeholder="model-name"></label>
           <label class="field"><span>{{ t('API key environment variable') }}</span><input class="search-input" name="secret_env" {% if starter.kind == 'openai-compatible' %}required{% endif %} autocomplete="off" spellcheck="false" placeholder="{{ 'OPENAI_API_KEY' if starter.kind == 'openai-cloud' else 'LLM_API_KEY' }}" pattern="[A-Z_][A-Z0-9_]*" aria-describedby="starter-secret-help-{{ loop.index }}"></label>
           <p class="sub starter-help" id="starter-secret-help-{{ loop.index }}">{{ t('Only the variable name is stored. Set the key in the localplaud service environment.') }}</p>
           {% endif %}

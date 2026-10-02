@@ -379,14 +379,18 @@ def test_cloud_only_recording_fails_gate_with_actionable_checks(monkeypatch, tmp
     assert {"raw_audio_local", "local_transcript", "local_notes", "required_exports"} <= failed
 
 
-def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatch, tmp_path):
+def test_polish_failure_then_gateway_profile_resume_rebuilds_downstream(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     from localplaud.acceptance import subscription_independence_report
     from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
     from localplaud.db.session import init_db, session_scope
+    from localplaud.providers.contracts import ProviderStage
     from localplaud.providers.service import (
+        _capability,
         create_profile_version,
         list_profiles,
+        save_connection,
+        save_model,
         select_recording_override,
     )
     from localplaud.worker.pipeline import process_file
@@ -434,17 +438,37 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
         current = next(
             profile for profile in list_profiles(session) if profile["is_system_default"]
         )
+        gateway = save_connection(
+            session,
+            {
+                "key": "llm:ai-gateway",
+                "name": "AI gateway",
+                "provider_type": "ai-gateway",
+                "execution_target": "cloud",
+                "data_egress": True,
+                "config": {"base_url": "http://127.0.0.1:8317/v1"},
+            },
+        )
+        save_model(
+            session,
+            {
+                "connection_id": gateway["id"],
+                "model_key": "sky-quality",
+                "display_name": "sky-quality",
+                "capabilities": _capability([ProviderStage.correct], cloud=True),
+            },
+        )
         stages = dict(current["stages"])
         stages["correct"] = {
-            "connection": "correct:codex-local",
-            "model": "gpt-6.1-sol",
+            "connection": "llm:ai-gateway",
+            "model": "sky-quality",
             "options": {},
         }
         codex_profile = create_profile_version(
             session,
             {
-                "key": "codex-correction",
-                "name": "Codex correction",
+                "key": "gateway-correction",
+                "name": "Gateway correction",
                 "privacy_policy": "allow-egress",
                 "no_egress": False,
                 "fallback_policy": {},
@@ -461,11 +485,11 @@ def test_polish_failure_then_codex_profile_resume_rebuilds_downstream(monkeypatc
         assert row.status == FileStatus.done
         assert row.corrected_transcript is not None
         assert row.corrected_transcript.revision == 1
-        assert row.corrected_transcript.provider == "codex-local"
-        assert row.corrected_transcript.model == "gpt-6.1-sol"
+        assert row.corrected_transcript.provider == "ai-gateway"
+        assert row.corrected_transcript.model == "sky-quality"
         assert (
             row.corrected_transcript.resolved_profile_snapshot["stages"]["correct"]["connection"]
-            == "correct:codex-local"
+            == "llm:ai-gateway"
         )
         assert {summary.input_transcript_revision for summary in row.summaries} == {1}
         assert row.chunks and {chunk.input_transcript_revision for chunk in row.chunks} == {1}

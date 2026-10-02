@@ -1454,12 +1454,12 @@ def test_execution_only_connection_settings_do_not_invalidate_completed_stages()
     from localplaud.worker.pipeline import _profile_stage_matches
 
     def snapshot(**configuration):
-        base = {"executable": "codex", "polish_chunk_chars": 8000, "summary_chunk_chars": 240000}
+        base = {"api_mode": "responses", "polish_chunk_chars": 8000, "summary_chunk_chars": 32000}
         return {
             "stages": {
                 "correct": {
-                    "connection": "correct:codex-local",
-                    "model": "gpt-6.1-sol",
+                    "connection": "llm:ai-gateway",
+                    "model": "sky-quality",
                     "configuration": base | {"timeout_seconds": 900} | configuration,
                 }
             }

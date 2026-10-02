@@ -545,7 +545,7 @@ def test_polish_fails_when_a_single_segment_times_out(monkeypatch):
     assert [len(request["target_segments"]) for request in provider.requests] == [2, 1]
 
 
-def test_codex_polish_chunk_default_stays_below_timeout_scale():
-    from localplaud.config import CodexLocalLlmConfig
+def test_gateway_polish_chunk_default_stays_below_timeout_scale():
+    from localplaud.config import AiGatewayLlmConfig
 
-    assert CodexLocalLlmConfig().polish_chunk_chars <= 12_000
+    assert AiGatewayLlmConfig().polish_chunk_chars <= 12_000

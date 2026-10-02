@@ -334,9 +334,9 @@ this file's git history (pre-2026-07-31 versions).
   append-only usage/cost ledger with pre-egress cost-ceiling reservations;
   authenticated `localplaud-worker` protocol v1 (idempotent jobs, progress,
   cancellation, SHA-256 artifacts, credential rejection); stage-scoped
-  explicit cross-provider fallback; the experimental codex-local correction
-  adapter — now live in production as the correct-stage fallback on profile
-  `mac-wsl-hybrid` v7 with completed real attempts.
+  explicit cross-provider fallback; the experimental codex-local text
+  adapter (served production text stages until 2026-10-02; removed 2026-10-03
+  in favor of the `ai-gateway` alias provider, historical rows still load).
 - **Speech and speakers.** MLX Whisper large-v3-turbo on Apple Silicon;
   pyannote `speaker-diarization-community-1` with explicit device selection
   and real production completions; the durable `align` stage (honest

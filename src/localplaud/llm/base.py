@@ -126,9 +126,11 @@ def build_llm(cfg: LlmConfig) -> LLMProvider:
 
         return OpenCodeGoLLM(cfg.opencode_go)
     if cfg.provider == "codex-local":
-        from .codex_local import CodexLocalLLM
-
-        return CodexLocalLLM(cfg.codex_local)
+        # Historical profiles may still name the retired Codex CLI text backend.
+        raise LLMUnavailable(
+            "the codex-local text provider was removed; select the ai-gateway "
+            "connection (sky-quality alias) for this stage"
+        )
     if cfg.provider == "ai-gateway":
         from .ai_gateway import AiGatewayLLM
 

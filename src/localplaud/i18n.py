@@ -1045,7 +1045,6 @@ _ZH_HANT_TW = {
     "Recording audio is uploaded to the selected localplaud worker for transcription and speaker diarization. Other stages keep their current providers.": "錄音音訊會上傳到所選的 localplaud 工作節點進行語音轉文字與語者分離；其他階段維持目前的供應商。",
     "Register a remote worker first": "請先註冊遠端工作節點",
     "Endpoint base URL": "端點基礎網址",
-    "Optional; uses the configured default": "選填；未填則使用設定中的預設值",
     "API key environment variable": "API 金鑰環境變數",
     "Only the variable name is stored. Set the key in the localplaud service environment.": "只會儲存變數名稱。請在 localplaud 服務的環境中設定金鑰。",
     "I understand which recording data leaves this host.": "我了解哪些錄音資料會離開這台主機。",

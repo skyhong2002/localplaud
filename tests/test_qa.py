@@ -1555,31 +1555,50 @@ def test_detail_page_has_ask_tab_and_deeplink(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize('file_id', ['r1', None])
 @pytest.mark.parametrize('quota_blocked', [False, True])
-def test_codex_ask_keeps_scope_provenance_and_quota_guard(
+def test_gateway_ask_keeps_scope_provenance_and_quota_guard(
     monkeypatch, tmp_path, file_id, quota_blocked
 ):
     from localplaud.db.models import ProviderCostReservation
     from localplaud.db.session import session_scope
+    from localplaud.llm.ai_gateway import AiGatewayLLM
     from localplaud.llm.base import LLMQuotaExhausted
-    from localplaud.llm.codex_local import CodexLocalLLM
-    from localplaud.providers.service import create_profile_version, list_profiles
+    from localplaud.providers.contracts import ProviderStage
+    from localplaud.providers.service import (
+        _capability,
+        create_profile_version,
+        list_profiles,
+        save_connection,
+        save_model,
+    )
     from localplaud.worker.qa import answer
 
     _fresh_db(monkeypatch, tmp_path)
     with session_scope() as session:
+        gateway = save_connection(session, {
+            'key': 'llm:ai-gateway', 'name': 'AI gateway', 'provider_type': 'ai-gateway',
+            'execution_target': 'cloud', 'data_egress': True,
+            'secret_ref': 'env:TEST_GATEWAY_KEY',
+            'config': {'base_url': 'http://127.0.0.1:8317/v1'},
+        })
+        save_model(session, {
+            'connection_id': gateway['id'], 'model_key': 'sky-quality',
+            'display_name': 'sky-quality',
+            'capabilities': _capability([ProviderStage.ask], cloud=True),
+        })
         old = list_profiles(session)[0]
         stages = old['stages']
-        stages['ask'] = {'connection': 'correct:codex-local', 'model': 'gpt-6.1-sol'}
+        stages['ask'] = {'connection': 'llm:ai-gateway', 'model': 'sky-quality'}
         create_profile_version(session, {
-            'key': 'codex-ask', 'name': 'Codex Ask', 'is_system_default': True,
+            'key': 'gateway-ask', 'name': 'Gateway Ask', 'is_system_default': True,
             'privacy_policy': 'allow-egress', 'no_egress': False, 'stages': stages,
         })
+    monkeypatch.setenv('TEST_GATEWAY_KEY', 'test-key')
     _seed_two_files()
     monkeypatch.setattr('localplaud.worker.qa.build_embedder', lambda cfg: _FakeEmbedder())
     calls = []
 
     def complete(provider, prompt, **kwargs):
-        assert provider.model == 'gpt-6.1-sol'
+        assert provider.model == 'sky-quality'
         assert 'r1 relevant' in prompt
         if file_id is not None:
             assert 'r2 relevant' not in prompt
@@ -1588,7 +1607,7 @@ def test_codex_ask_keeps_scope_provenance_and_quota_guard(
             raise LLMQuotaExhausted('Codex subscription reserve protected')
         return 'Grounded answer at [Recording One @ 12s].'
 
-    monkeypatch.setattr(CodexLocalLLM, 'complete', complete)
+    monkeypatch.setattr(AiGatewayLLM, 'complete', complete)
     if quota_blocked:
         with pytest.raises(LLMQuotaExhausted, match='reserve protected'):
             answer('relevant', file_id=file_id)
@@ -1597,8 +1616,8 @@ def test_codex_ask_keeps_scope_provenance_and_quota_guard(
             assert all(r.status != 'active' for r in session.query(ProviderCostReservation))
     else:
         result = answer('relevant', file_id=file_id)
-        assert result['provenance']['model'] == 'gpt-6.1-sol'
-        assert result['provenance']['provider'] == 'codex-local'
+        assert result['provenance']['model'] == 'sky-quality'
+        assert result['provenance']['provider'] == 'ai-gateway'
         assert any(s['file_id'] == 'r1' and s['start'] == 12.0 for s in result['sources'])
         if file_id:
             assert {s['file_id'] for s in result['sources']} == {'r1'}

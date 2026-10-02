@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from ..config import CodexLocalLlmConfig
+from ..config import CodexQuotaConfig
 from .base import (
     LLMError,
     LLMInputTooLarge,
@@ -18,13 +18,21 @@ from .base import (
     LLMTransientError,
     LLMUnavailable,
 )
-from .codex_local import _CONTEXT_MARKERS, CodexLocalLLM
+from .codex_quota import CodexQuotaReader
 from .openai_llm import OpenAILLM
 
 if TYPE_CHECKING:
     from ..config import AiGatewayLlmConfig
 
 log = logging.getLogger(__name__)
+
+_CONTEXT_MARKERS = (
+    "context window",
+    "input too large",
+    "maximum context length",
+    "prompt too long",
+    "too many tokens",
+)
 
 
 class AiGatewayLLM(OpenAILLM):
@@ -53,9 +61,9 @@ class AiGatewayLLM(OpenAILLM):
     def _call_time_limit(self) -> int | None:
         return self.cfg.timeout_seconds
 
-    def _quota_reader(self) -> CodexLocalLLM:
-        return CodexLocalLLM(
-            CodexLocalLlmConfig(
+    def _quota_reader(self) -> CodexQuotaReader:
+        return CodexQuotaReader(
+            CodexQuotaConfig(
                 executable=self.cfg.quota_executable,
                 codex_home=self.cfg.quota_codex_home,
                 quota_reserve_percent=self.cfg.quota_reserve_percent,

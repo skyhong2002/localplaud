@@ -32,6 +32,14 @@ from .resolver import ResolvedProfile, resolve_profile
 from .usage import lock_cost_budget
 
 DEFAULT_PROFILE_KEY = "legacy-settings-default"
+# The Codex CLI text backend was replaced by the AI gateway. Historical
+# connections, catalog rows, profile versions and artifact provenance that name
+# it stay readable, but nothing new may select it and it no longer dispatches.
+RETIRED_TEXT_PROVIDER = "codex-local"
+_RETIRED_TEXT_PROVIDER_MESSAGE = (
+    "the codex-local text provider was removed; select the ai-gateway connection "
+    "(sky-quality alias) instead"
+)
 _STAGE_FAMILY = {
     "transcribe": "asr",
     "align": "asr",
@@ -66,7 +74,6 @@ def _is_cloud(name: str) -> bool:
         "assemblyai",
         "anthropic",
         "opencode-go",
-        "codex-local",
         "ai-gateway",
     }
 
@@ -106,7 +113,14 @@ def _snapshot_connection_config(value: Any) -> Any:
 
 def _model_for(settings: Settings, family: str, provider: str) -> str:
     config = getattr(getattr(settings, family), provider.replace("-", "_"))
-    return str(getattr(config, "model", provider))
+    if not hasattr(config, "model"):
+        return provider
+    if not config.model:
+        raise ValueError(
+            f"[{family}.{provider.replace('-', '_')}].model is not set; name the model "
+            "explicitly or select an ai-gateway alias in an execution profile"
+        )
+    return str(config.model)
 
 
 def _capability(stages: list[ProviderStage], *, cloud: bool) -> dict:
@@ -129,10 +143,6 @@ def _capability(stages: list[ProviderStage], *, cloud: bool) -> dict:
 
 
 def _settings_specs(settings: Settings):
-    if settings.llm.provider == "codex-local":
-        raise ValueError(
-            "codex-local is profile-scoped and cannot bootstrap a general LLM connection"
-        )
     return [
         (
             "asr",
@@ -301,91 +311,6 @@ def _ensure_forced_alignment_entry(
     return connection, model
 
 
-def _ensure_codex_entry(
-    session: Session, settings: Settings
-) -> tuple[ProviderConnection, ModelCatalogEntry]:
-    """Catalog the opt-in Codex CLI text stages without selecting them."""
-    config = settings.llm.codex_local
-    connection = session.scalar(
-        select(ProviderConnection).where(ProviderConnection.key == "correct:codex-local")
-    )
-    snapshot = config.model_dump(mode="json", exclude={"model"})
-    if connection is None:
-        connection = ProviderConnection(
-            key="correct:codex-local",
-            name="Codex CLI (experimental)",
-            provider_type="codex-local",
-            execution_target="cloud",
-            data_egress=True,
-            secret_ref=None,
-            config=snapshot,
-            health={
-                "status": "unknown",
-                "detail": "requires an explicit trusted-single-user ChatGPT login",
-            },
-        )
-        session.add(connection)
-        session.flush()
-    else:
-        connection.name = "Codex CLI (experimental)"
-        connection.execution_target = "cloud"
-        connection.data_egress = True
-        connection.config = snapshot
-    model = session.scalar(
-        select(ModelCatalogEntry).where(
-            ModelCatalogEntry.connection_id == connection.id,
-            ModelCatalogEntry.model_key == config.model,
-        )
-    )
-    if model is None:
-        model = ModelCatalogEntry(
-            connection_id=connection.id,
-            model_key=config.model,
-            display_name=f"Codex {config.model} (experimental)",
-            capabilities=Capability(
-                execution_target="cloud",
-                data_egress=True,
-                health=Health(
-                    status="unknown",
-                    detail="requires an explicit trusted-single-user ChatGPT login",
-                ),
-                stages=(
-                    StageCapabilities(
-                        stage=ProviderStage.correct,
-                        hardware_requirement="local Codex CLI; cloud inference",
-                    ),
-                    StageCapabilities(
-                        stage=ProviderStage.summarize,
-                        hardware_requirement="local Codex CLI; cloud inference",
-                    ),
-                    StageCapabilities(
-                        stage=ProviderStage.mind_map,
-                        hardware_requirement="local Codex CLI; cloud inference",
-                    ),
-                    StageCapabilities(
-                        stage=ProviderStage.ask,
-                        hardware_requirement="local Codex CLI; cloud inference",
-                    ),
-                ),
-                metadata={
-                    "experimental": True,
-                    "trusted_single_user_only": True,
-                    "auth_owner": "codex-cli",
-                    "billing": "ChatGPT Codex entitlement owned by the Codex CLI login",
-                },
-            ).model_dump(mode="json"),
-        )
-        session.add(model)
-        session.flush()
-    else:
-        model.capabilities = _with_required_capabilities(
-            model.capabilities,
-            [ProviderStage.correct, ProviderStage.summarize, ProviderStage.mind_map, ProviderStage.ask],
-            cloud=True,
-        )
-    return connection, model
-
-
 def _profile_is_complete(session: Session, profile: ExecutionProfile) -> bool:
     by_stage = {selection.stage: selection for selection in profile.stage_selections}
     if set(by_stage) != set(_STAGE_FAMILY):
@@ -407,7 +332,6 @@ def _profile_is_complete(session: Session, profile: ExecutionProfile) -> bool:
 def bootstrap_default_profile(session: Session, settings: Settings) -> ExecutionProfile:
     """Create a Settings-equivalent profile once, without changing runtime dispatch."""
     _ensure_forced_alignment_entry(session)
-    _ensure_codex_entry(session, settings)
     existing = session.scalar(
         select(ExecutionProfile)
         .where(ExecutionProfile.key == DEFAULT_PROFILE_KEY)
@@ -1153,15 +1077,16 @@ def save_connection(session: Session, data: dict, connection_id: int | None = No
         lock_library_profile_change(session)
     provider_type = data.get("provider_type", getattr(row, "provider_type", None))
     execution_target = data.get("execution_target", getattr(row, "execution_target", None))
-    data_egress = data.get("data_egress", getattr(row, "data_egress", None))
     if execution_target == "remote_worker":
         from ..remote.client import validate_provider_timeout
 
         config = data.get("config", getattr(row, "config", {})) or {}
         validate_provider_timeout(config.get("timeout", 120), field="timeout")
         validate_provider_timeout(config.get("job_timeout", 3600), field="job_timeout")
-    if provider_type == "codex-local" and (execution_target != "cloud" or data_egress is not True):
-        raise ValueError("codex-local requires cloud execution with data egress")
+    if provider_type == RETIRED_TEXT_PROVIDER and (
+        row is None or row.provider_type != RETIRED_TEXT_PROVIDER
+    ):
+        raise ValueError(_RETIRED_TEXT_PROVIDER_MESSAGE)
     if row is None:
         row = ProviderConnection(
             key=data["key"], name=data["name"], provider_type=data["provider_type"]
@@ -1371,25 +1296,8 @@ def save_model(session: Session, data: dict, model_id: int | None = None) -> dic
     )
     if connection is None:
         raise LookupError("provider connection not found")
-    capabilities = data.get("capabilities", getattr(row, "capabilities", {}))
-    if connection.provider_type == "codex-local":
-        codex_capability = Capability.model_validate(capabilities)
-        if codex_capability.execution_target != "cloud" or not codex_capability.data_egress:
-            raise ValueError("codex-local requires cloud execution with data egress")
-        supported = {
-            ProviderStage.correct,
-            ProviderStage.summarize,
-            ProviderStage.mind_map,
-            ProviderStage.ask,
-        }
-        invalid_stages = [
-            item.stage.value for item in codex_capability.stages if item.stage not in supported
-        ]
-        if invalid_stages:
-            raise ValueError(
-                "codex-local supports only correction, summaries, mind maps, and Ask; "
-                "unsupported stages: " + ", ".join(invalid_stages)
-            )
+    if connection.provider_type == RETIRED_TEXT_PROVIDER and row is None:
+        raise ValueError(_RETIRED_TEXT_PROVIDER_MESSAGE)
     if row is None:
         row = ModelCatalogEntry(
             connection_id=data["connection_id"],
@@ -1458,6 +1366,8 @@ def create_profile_version(session: Session, data: dict) -> dict:
         )
         if connection is None:
             raise LookupError(f"provider connection not found: {selection['connection']}")
+        if connection.provider_type == RETIRED_TEXT_PROVIDER:
+            raise ValueError(_RETIRED_TEXT_PROVIDER_MESSAGE)
         model = session.scalar(
             select(ModelCatalogEntry).where(
                 ModelCatalogEntry.connection_id == connection.id,
@@ -1475,6 +1385,18 @@ def create_profile_version(session: Session, data: dict) -> dict:
             )
         )
     session.flush()
+    retired = {
+        connection.key
+        for connection in session.scalars(
+            select(ProviderConnection).where(
+                ProviderConnection.provider_type == RETIRED_TEXT_PROVIDER
+            )
+        )
+    }
+    for candidates in ((row.fallback_policy or {}).get("stages") or {}).values():
+        for candidate in candidates if isinstance(candidates, list) else []:
+            if isinstance(candidate, dict) and candidate.get("connection") in retired:
+                raise ValueError(_RETIRED_TEXT_PROVIDER_MESSAGE)
     # Reuse the resolver as the write-time policy/capability gate.
     resolve_profile(
         [_profile_layer(row)], _capability_catalog(session), _connection_catalog(session)

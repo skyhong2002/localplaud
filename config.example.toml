@@ -162,7 +162,7 @@ device = "auto"                  # auto | cpu | cuda (auto uses CUDA when availa
 # choose a different capable provider independently for each stage.
 # --------------------------------------------------------------------------- #
 [llm]
-provider = "ollama"              # ollama | openai | anthropic | opencode-go
+provider = "ollama"              # ollama | openai | anthropic | opencode-go | ai-gateway
 
   [llm.ollama]                   # local, no API key
   host = "http://localhost:11434"
@@ -173,9 +173,11 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
 
   [llm.openai]
   # api_key via LOCALPLAUD_LLM__OPENAI__API_KEY
-  model = "gpt-4o-mini"
-  # Set for OpenAI reasoning models such as gpt-5.4. Leave unset for
-  # OpenAI-compatible endpoints that only support the legacy sampling request.
+  # No default model: name one explicitly when this is the global provider.
+  # Prefer the ai-gateway alias in execution profiles.
+  # model = "..."
+  # Set for OpenAI reasoning models. Leave unset for OpenAI-compatible
+  # endpoints that only support the legacy sampling request.
   # reasoning_effort = "medium"
 
   [llm.anthropic]
@@ -189,18 +191,6 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   timeout_seconds = 900
   polish_chunk_chars = 12000      # conservative CLI batch; structural failures split further
 
-  [llm.codex_local]              # trusted local ChatGPT subscription adapter
-  executable = "codex"
-  model = "gpt-6.1-sol"
-  codex_home = "~/.localplaud/codex" # dedicated login; localplaud never reads its tokens
-  reasoning_effort = "high"
-  timeout_seconds = 900
-  polish_chunk_chars = 8000       # stays inside the per-call timeout; invalid output and timeouts are bisected
-  require_chatgpt_login = true   # reject API-key auth when subscription usage is intended
-  quota_reserve_percent = 5      # hard floor above the requested 3% remaining usage
-  quota_call_headroom_percent = 2 # do not start a turn too close to that floor
-  quota_check_timeout_seconds = 20 # tolerate a busy app-server between consecutive stages
-
   [llm.ai_gateway]               # central OpenAI-compatible gateway; select it per profile
   # client key via a connection secret_ref such as env:LOCALPLAUD_AI_GATEWAY_KEY
   base_url = "http://127.0.0.1:8317/v1"
@@ -212,8 +202,9 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go
   summary_chunk_chars = 32000
   policy_file = "~/Projects/ai-gateway/model-policy.json" # alias targets recorded in profiles
   quota_codex_home = "~/.codex"  # Codex login of the subscription the gateway spends
-  quota_reserve_percent = 5
-  quota_call_headroom_percent = 2
+  quota_reserve_percent = 5      # never spend the last 5% of the subscription window
+  quota_call_headroom_percent = 2 # do not start a call too close to that floor
+  quota_check_timeout_seconds = 20 # tolerate a busy app-server between consecutive stages
 
 # --------------------------------------------------------------------------- #
 # Embeddings — for Q&A ("Ask Plaud" equivalent) and semantic search.
