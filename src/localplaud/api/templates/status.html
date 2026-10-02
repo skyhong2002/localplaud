@@ -10,19 +10,17 @@
   <div class="tile"><div class="k">{{ t('In progress') }}</div><div class="v">{{ stats.processing }}</div></div>
   <div class="tile"><div class="k">{{ t('Total audio') }}</div><div class="v">{{ stats.hours }}<small> h</small></div></div>
 </div>
-<div class="sub" style="margin:8px 2px 0">{{ usage_totals.attempts }} {{ t('recorded stage attempts') }} · {{ usage_totals.latency_hours }} {{ t('execution hours') }}{% if usage_totals.estimated_cost_usd %} · {{ t('estimated provider cost') }} ${{ usage_totals.estimated_cost_usd }}{% else %} · {{ t('no priced provider usage recorded') }}{% endif %}</div>
+<div class="sub status-usage">{{ usage_totals.attempts }} {{ t('recorded stage attempts') }} · {{ usage_totals.latency_hours }} {{ t('execution hours') }}{% if usage_totals.estimated_cost_usd %} · {{ t('estimated provider cost') }} ${{ usage_totals.estimated_cost_usd }}{% else %} · {{ t('no priced provider usage recorded') }}{% endif %}</div>
 
-<div class="cols" style="grid-template-columns:1fr 1fr; gap:16px">
+<div class="status-cols">
   <div class="panel">
     <strong>{{ t('Environment') }}</strong>
-    <div style="margin-top:10px; display:flex; flex-direction:column; gap:7px">
+    <div class="status-list">
       {% for c in checks %}
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px">
-        <span>{{ c.name }}</span>
-        <span style="display:flex;align-items:center;gap:8px">
-          {% if c.detail %}<span class="sub" style="font-size:12px">{{ c.detail }}</span>{% endif %}
-          <span style="color:{% if c.ok %}var(--ok){% else %}var(--err){% endif %};font-weight:700">{% if c.ok %}✓{% else %}✗{% endif %}</span>
-        </span>
+      <div class="status-check">
+        <span class="status-check-name">{{ c.name }}</span>
+        {% if c.detail %}<span class="sub status-check-detail">{{ c.detail }}</span>{% endif %}
+        <span class="status-check-mark {% if c.ok %}ok{% else %}bad{% endif %}">{% if c.ok %}{{ icon('check', 'sm') }}{% else %}{{ icon('x', 'sm') }}{% endif %}</span>
       </div>
       {% endfor %}
     </div>
@@ -30,11 +28,11 @@
 
   <div class="panel">
     <strong>{{ t('Pipeline') }}</strong>
-    <div style="margin-top:10px; display:flex; flex-direction:column; gap:7px">
+    <div class="status-list">
       {% for name, count in status_rows %}
-      <div style="display:flex; justify-content:space-between">
-        <span class="st {{ name }}" style="background:none;padding:0">{{ name }}</span>
-        <span style="font-variant-numeric:tabular-nums">{{ count }}</span>
+      <div class="status-row">
+        <span class="st {{ name }}">{{ name }}</span>
+        <span class="status-count">{{ count }}</span>
       </div>
       {% endfor %}
     </div>
@@ -42,13 +40,13 @@
 </div>
 
 {% if stage_rows %}
-<div class="panel" style="margin-top:16px">
+<div class="panel status-panel">
   <strong>{{ t('Processing stages') }}</strong>
-  <div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px">
+  <div class="status-stage-grid">
     {% for stage, state, count in stage_rows %}
-    <div style="display:flex;justify-content:space-between;gap:8px">
-      <span>{{ stage }} <span class="st {{ state }}">{{ state }}</span></span>
-      <span style="font-variant-numeric:tabular-nums">{{ count }}</span>
+    <div class="status-row">
+      <span class="status-stage">{{ stage }} <span class="st {{ state }}">{{ state }}</span></span>
+      <span class="status-count">{{ count }}</span>
     </div>
     {% endfor %}
   </div>
@@ -56,23 +54,23 @@
 {% endif %}
 
 {% if stage_issues %}
-<div class="panel" style="margin-top:16px">
+<div class="panel status-panel">
   <strong>{{ t('Needs attention') }}</strong>
-  <div style="margin-top:10px;display:flex;flex-direction:column;gap:9px">
+  <div class="status-list status-issues">
     {% for issue in stage_issues %}
     <div>
       <a href="/file/{{ issue.file_id }}">{{ issue.filename }}</a>
       · {{ issue.stage }} <span class="st {{ issue.status }}">{{ issue.status }}</span>
-      {% if issue.error %}<div class="sub" style="font-size:12px;margin-top:2px">{{ issue.error }}</div>{% endif %}
+      {% if issue.error %}<div class="sub status-issue-error">{{ issue.error }}</div>{% endif %}
     </div>
     {% endfor %}
   </div>
 </div>
 {% endif %}
 
-<div class="panel" style="margin-top:16px">
+<div class="panel status-panel">
   <strong>{{ t('Configuration') }}</strong>
-  <div style="margin-top:10px; display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px">
+  <div class="status-config">
     <div><span class="sub">ASR</span><br><code>{{ cfg.asr }}</code></div>
     <div><span class="sub">LLM</span><br><code>{{ cfg.llm }}</code></div>
     <div><span class="sub">{{ t('Automatic processing') }}</span><br><code>{{ t(cfg.auto_process) }}</code></div>
