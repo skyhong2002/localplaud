@@ -1,5 +1,6 @@
 # ---- Secrets & local config (NEVER commit) ----
 config.toml
+config.toml.*
 .env
 .env.*
 !.env.example
