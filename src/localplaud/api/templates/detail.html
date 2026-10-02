@@ -16,10 +16,6 @@
 {% set active_note_target = (('saved-' ~ f.selected_note_id) if f.selected_note_id else (('sum-' ~ notes[0].id) if notes else (('saved-' ~ f.user_notes[0].id) if f.user_notes else none))) %}
 <link rel="stylesheet" href="/static/css/recording.css?v={{ workspace_asset_version }}">
 <link rel="stylesheet" href="/static/css/speaker-suggestions.css?v={{ workspace_asset_version }}">
-<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
-  <symbol id="i-rotate-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
-</svg>
 <div class="shell recording-shell" data-active-panel="{{ active_tab }}">
   {% set active_id = f.id %}
   <header class="detail-topbar ws-topbar">
@@ -89,8 +85,8 @@
       {% if notes or f.user_notes %}
       {# Plaud-style flat tab row: every note output is a workspace tab. The
          first carries the stable #recording-tab-notes id the panel points at. #}
-      {% for s in notes %}<button {% if loop.first %}id="recording-tab-notes" {% else %}id="recording-tab-note-{{ s.id }}" {% endif %}role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' and ('sum-' ~ s.id) == active_note_target else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' and ('sum-' ~ s.id) == active_note_target else '-1' }}" data-panel="notes" data-note-target="sum-{{ s.id }}" class="note-tab {% if active_tab == 'notes' and ('sum-' ~ s.id) == active_note_target %}on{% endif %}" title="{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.created_at %} · {{ s.created_at }}{% endif %}">{{ s.template_name }}{% if s.source in ('cloud', 'plaud') %} <span class="chip plaud-note-chip">Plaud</span>{% endif %}</button>{% endfor %}
-      {% for note in f.user_notes %}<button {% if loop.first and not notes %}id="recording-tab-notes" {% else %}id="recording-tab-saved-{{ note.id }}" {% endif %}role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' and ('saved-' ~ note.id) == active_note_target else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' and ('saved-' ~ note.id) == active_note_target else '-1' }}" data-panel="notes" data-note-target="saved-{{ note.id }}" class="note-tab saved-note-tab {% if active_tab == 'notes' and ('saved-' ~ note.id) == active_note_target %}on{% endif %}" title="{{ t('Editable note') }} · {{ note.title }}">{{ icon('pencil', 'xs') }}{{ note.title }}</button>{% endfor %}
+      {% for s in notes %}<button {% if loop.first %}id="recording-tab-notes" {% else %}id="recording-tab-note-{{ s.id }}" {% endif %}role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' and ('sum-' ~ s.id) == active_note_target else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' and ('sum-' ~ s.id) == active_note_target else '-1' }}" data-panel="notes" data-note-target="sum-{{ s.id }}" class="note-tab {% if active_tab == 'notes' and ('sum-' ~ s.id) == active_note_target %}on{% endif %}" title="{{ s.template_name }}{% if s.template_version %} · v{{ s.template_version }}{% endif %}{% if s.created_at %} · {{ s.created_at }}{% endif %}"><span class="note-tab-label">{{ s.template_name }}</span>{% if s.source in ('cloud', 'plaud') %} <span class="chip plaud-note-chip">Plaud</span>{% endif %}</button>{% endfor %}
+      {% for note in f.user_notes %}<button {% if loop.first and not notes %}id="recording-tab-notes" {% else %}id="recording-tab-saved-{{ note.id }}" {% endif %}role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' and ('saved-' ~ note.id) == active_note_target else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' and ('saved-' ~ note.id) == active_note_target else '-1' }}" data-panel="notes" data-note-target="saved-{{ note.id }}" class="note-tab saved-note-tab {% if active_tab == 'notes' and ('saved-' ~ note.id) == active_note_target %}on{% endif %}" title="{{ t('Editable note') }} · {{ note.title }}">{{ icon('pencil', 'xs') }}<span class="note-tab-label">{{ note.title }}</span></button>{% endfor %}
       {% else %}
       <button id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' else '-1' }}" data-panel="notes" class="{% if active_tab == 'notes' %}on{% endif %}">{{ t('Notes') }}</button>
       {% endif %}
@@ -468,12 +464,12 @@
       </select>
       <button class="btn sec" type="submit" style="padding:8px 12px">{{ t('Use profile') }}</button>
       <span class="sub" style="font-size:12px">{{ t('Pending stages use this profile on Resume. Rebuild reruns completed stages.') }}</span>
-      <div class="sub" style="font-size:11.5px;flex-basis:100%;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <div class="sub ws-provenance-chips">
         <span>{{ t('Resolved layers') }}:</span>
         {% for layer in f.profile_resolution.layer_provenance %}<span class="chip">{{ layer.kind|replace('_',' ') }}{% if layer.profile_key %} · {{ layer.profile_key }}@{{ layer.profile_version }}{% endif %}</span>{% endfor %}
       </div>
       {% if f.profile_resolution_error %}<div style="color:var(--red);font-size:12px;flex-basis:100%">{{ t('Profile resolution needs attention') }} · {{ f.profile_resolution_error }}</div>{% endif %}
-      <div id="resolved-stage-list" style="font-size:11.5px;flex-basis:100%;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <div id="resolved-stage-list" class="ws-provenance-chips">
         {% for stage, choice in f.profile_resolution.stages.items() %}<span class="chip">{{ stage }} · {{ choice.connection }}:{{ choice.model }}</span>{% endfor %}
       </div>
       {% if f.budget.ceiling_usd is not none %}<div class="sub" style="font-size:11.5px;flex-basis:100%">{{ t('Cost boundary') }} · {{ t('spent') }} ${{ f.budget.spent_usd }} · {{ t('remaining') }} ${{ f.budget.remaining_usd }} / {{ t('ceiling') }} ${{ f.budget.ceiling_usd }}{% if f.budget.exceeded %} · <span style="color:var(--red)">{{ t('ceiling exceeded; choose another profile before resuming') }}</span>{% endif %}</div>{% endif %}

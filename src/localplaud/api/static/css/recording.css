@@ -58,12 +58,14 @@
 /* Plaud flat tab row: Transcript · <each note> · Mind map · [+] (sticky). */
 .recording-shell .ws-tabrow {
   position: sticky; top: 0; z-index: 13; display: flex; align-items: center; gap: 12px; margin-top: 14px;
-  background: color-mix(in srgb, var(--panel) 96%, transparent); backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--c-bg, var(--panel)) 96%, transparent); backdrop-filter: blur(6px);
 }
 .recording-shell .ws-tabrow > .tabs { position: static !important; flex: 0 1 auto; min-width: 0; margin: 0; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 .recording-shell .tabs > button { flex: none; white-space: nowrap; }
 .recording-shell .tabs .note-tab { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; display: inline-flex; align-items: center; gap: 5px; }
 .recording-shell .tabs .note-tab .chip { font-size: 10.5px; padding: 0 5px; }
+.recording-shell .tabs .note-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.recording-shell .tabs .note-tab .chip { flex: none; }
 .recording-shell .ws-tab-add { position: relative; flex: none; }
 .recording-shell .ws-tab-add > summary { list-style: none; display: grid; place-items: center; width: 32px; height: 24px; border-radius: 5px; background: var(--c-subtle, #EBEBEB); color: var(--fg); cursor: pointer; }
 .recording-shell .ws-tab-add > summary::-webkit-details-marker { display: none; }
@@ -117,7 +119,7 @@ body:has(#persistent-player.ws-player) .toast-region { bottom: calc(var(--ws-pla
 .ws-player .player-toggle:focus-visible, .ws-player .player-skip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
 /* ------------------------------------------------------------- transcript */
-.recording-shell .transcript-toolbar { position: sticky; top: 42px; z-index: 12; padding: 8px 0; margin: 0 0 8px; background: var(--panel); }
+.recording-shell .transcript-toolbar { position: sticky; top: 42px; z-index: 12; padding: 8px 0; margin: 0 0 8px; background: var(--c-bg, var(--panel)); }
 .recording-shell .transcript-view-notice { border-radius: 999px; padding: 4px 11px; }
 /* Find & replace is a bar under the toolbar rather than a floating popover. */
 .recording-shell .transcript-tool:has(#transcript-find) { position: static; }
@@ -129,6 +131,9 @@ body:has(#persistent-player.ws-player) .toast-region { bottom: calc(var(--ws-pla
 .recording-shell .search-popover #replace-row, .recording-shell .search-popover #toggle-replace { grid-column: 1 / -1; }
 .recording-shell .search-popover #replace-row:not([hidden]) { display: flex !important; flex-wrap: wrap; align-items: center; gap: 8px; }
 .recording-shell .search-popover #transcript-replace { flex: 1 1 200px; }
+.recording-shell .search-popover #toggle-replace { justify-self: start; }
+.recording-shell .search-popover #replace-row label { display: inline-flex; align-items: center; gap: 6px; }
+.recording-shell .search-popover #replace-row label input { margin: 0; }
 
 .recording-shell .legend { align-items: center; gap: 6px; margin: 0 0 14px; }
 
@@ -157,7 +162,7 @@ body:has(#persistent-player.ws-player) .toast-region { bottom: calc(var(--ws-pla
 .recording-shell .seg-copy { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
 .recording-shell .seg-copy:hover, .recording-shell .seg-copy:focus-visible { background: var(--c-subtle, #EBEBEB); color: var(--fg); }
 .recording-shell .seg-copy :is(.nav-icon, .i) { width: 15px; height: 15px; }
-.recording-shell .seg .txt > .editbtn { top: -34px; right: 30px; }
+.recording-shell .seg .txt > .editbtn { top: -32px; right: 30px; }
 .recording-shell .seg .who:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .recording-shell .seg .who.who-none { background: var(--panel2); color: var(--muted); font-weight: 560; }
 .recording-shell .seg .ts {
@@ -309,7 +314,7 @@ body.ws-mm-full-open { overflow: hidden; }
 }
 .recording-shell .ask-dock #ask-chips + div { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; }
 .recording-shell .ask-dock #ask-chips + div .btn { min-height: 36px; border-radius: 5px; }
-.recording-shell .ask-dock .ask { position: sticky; top: 0; z-index: 2; padding-bottom: 8px; background: var(--panel); }
+.recording-shell .ask-dock .ask { position: sticky; top: 0; z-index: 2; padding-bottom: 8px; background: var(--c-bg, var(--panel)); }
 .recording-shell .ask-dock .ask input {
   min-height: 48px; border: 1.5px solid transparent; border-radius: 8px;
   background: linear-gradient(var(--panel), var(--panel)) padding-box, var(--ws-ai-gradient) border-box;
@@ -386,7 +391,7 @@ body.ws-mm-full-open { overflow: hidden; }
   .recording-shell .pane-inner { padding: 8px var(--ws-gutter) 24px !important; }
   .ws-head #recording-title-display { font-size: 24px; font-weight: 400; -webkit-line-clamp: 4; }
   .ws-head .title-edit { opacity: 1; }
-  .recording-shell .ws-tabrow { top: 52px; z-index: 30; margin-top: 10px; backdrop-filter: none; background: var(--panel); }
+  .recording-shell .ws-tabrow { top: 52px; z-index: 30; margin-top: 10px; backdrop-filter: none; background: var(--c-bg, var(--panel)); }
   .recording-shell .ws-tab-add > summary { width: 44px; height: 36px; }
   .recording-shell .ws-tab-add .note-add-popover { position: fixed !important; left: 12px !important; right: 12px !important; top: auto !important; bottom: calc(var(--ws-player-h) + 16px) !important; width: auto !important; z-index: 60; box-shadow: 0 -8px 32px rgba(0,0,0,.18); }
   .recording-shell .ws-tab-add .note-add-popover button { min-height: 48px; font-size: 15px; }
@@ -439,7 +444,8 @@ body.ws-mm-full-open { overflow: hidden; }
   .recording-shell .ask-dock .ask-dock-header { justify-content: space-between; margin: 0 0 8px; }
   .recording-shell .ask-dock .ask-dock-title, .recording-shell .ask-dock .ask-dock-close { display: inline-flex; }
   .recording-shell .ask-dock .ask-dock-close { width: 44px; height: 44px; }
-  .recording-shell .ask-dock .ask { order: 10; top: auto; bottom: 0; margin: auto 0 0; padding: 8px 0 0; }
+  .recording-shell .ask-dock .ask-dock-actions > .icon-action { min-height: 44px; }
+  .recording-shell .ask-dock .ask { order: 10; top: auto; bottom: 0; margin: auto 0 0; padding: 8px 0 0; background: var(--panel); }
   .recording-shell .ask-dock .ask input { min-height: 46px; border-radius: 12px; font-size: 16px; }
   body:has(.ask-dock:not([hidden])) .ws-ask-pin { visibility: hidden; }
   body:has(.recording-shell .ask-dock:not([hidden])) #persistent-player.ws-player { position: fixed; left: 0; right: 0; z-index: 75; }
@@ -500,7 +506,8 @@ body.ws-mm-full-open { overflow: hidden; }
 @media (max-width: 820px) {
   .recording-shell .seg { scroll-margin-top: 150px; padding: 14px 4px; }
   .recording-shell .seg-actions { opacity: 1; }
-  .recording-shell .seg .txt > .editbtn { top: -40px; right: 34px; }
+  /* 44px edit target centred on the 40px copy button beside it. */
+  .recording-shell .seg .txt > .editbtn { top: -46px; right: 42px; }
   .recording-shell .seg-copy { width: 40px; height: 40px; }
   .ws-topbar #open-find, .ws-topbar .ws-divider { display: none; }
   .ws-name-head .sub { margin-left: 20px; flex-basis: 100%; }
@@ -511,7 +518,7 @@ body.ws-mm-full-open { overflow: hidden; }
    right of the reading column like Plaud's 325px find panel. */
 @media (min-width: 821px) {
   .recording-shell .transcript-tool:has(#transcript-find) > summary { display: none; }
-  .recording-shell .transcript-popover.search-popover { left: auto; right: 0; width: 360px; box-shadow: 0 0 32px rgba(0, 0, 0, .10); border-color: var(--c-border-ui, #E5E7EB); border-radius: 5px; }
+  .recording-shell .transcript-popover.search-popover { left: auto; right: 0; width: 360px; padding-right: 12px; box-shadow: 0 0 32px rgba(0, 0, 0, .10); border-color: var(--c-border-ui, #E5E7EB); border-radius: 5px; }
 }
 .ws-template-card .chip { justify-self: start; }
 /* Production reading layout: the notes view carries its own reading title, so
@@ -526,6 +533,11 @@ body.ws-mm-full-open { overflow: hidden; }
 .recording-shell .cloud-import-empty { max-width: 420px; display: grid; justify-items: center; gap: 6px; }
 .recording-shell #reprocess-msg { margin-inline: auto !important; }
 .recording-shell:has(.ask-dock-open) .ws-head, .recording-shell:has(.ask-dock-open) .ws-tabrow { margin-left: max(0px, calc((100% - 360px - 760px) / 2)); }
+/* With the Ask dock open the reading column is 100% - 360px wide; keep the
+   heading and sticky tab row inside it so they never run under the dock. */
+@media (min-width: 1200px) {
+  .recording-shell:has(.ask-dock-open) .ws-head, .recording-shell:has(.ask-dock-open) .ws-tabrow { max-width: min(760px, calc(100% - 362px)); }
+}
 
 /* Generate sheet: Auto vs Custom, provider privacy boundary. */
 .ws-gen-modes { display: grid; gap: 8px; }
@@ -610,6 +622,12 @@ body.ws-mm-full-open { overflow: hidden; }
 .ws-head .recording-meta .st { padding: 1px 7px; font-size: 11px; line-height: 16px; border-radius: 999px; }
 .ws-head .recording-org .chip { border: 1px solid var(--c-border, #EBEBEB); background: var(--c-surface-2, #F7F7F7); color: var(--c-text-body, #3D3D3D); font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 5px; box-shadow: none; }
 .ws-head .recording-org .chip.on { color: var(--c-text, #000); }
+/* Chips are separated by their own borders; a leading "·" only orphans at the
+   start of the line once many tags wrap below the date row. */
+.ws-head .recording-org:has(.chip)::before { content: none; }
+/* Tag chips are inline flex boxes, where text-overflow never applies; make
+   them plain blocks so a long tag ends in an ellipsis instead of a hard cut. */
+.ws-head .recording-org .chip { display: inline-block; }
 
 @media (max-width: 820px) {
   /* (a) the desktop list toggle has no place on the pushed phone screen */
@@ -624,7 +642,10 @@ body.ws-mm-full-open { overflow: hidden; }
   .recording-shell .ws-tabrow > .tabs > button.on { border-bottom-color: var(--c-text, #000) !important; }
   .recording-shell .ws-tabrow > .tabs > button[hidden], .recording-shell #recording-tab-ask { display: none !important; }
   /* (e) compact meta line */
-  .ws-head .recording-context { flex-direction: column; align-items: flex-start; gap: 6px; }
+  /* A wrapping column sizes each line to its max-content, which pushed a long
+     tag row past the phone edge; one line keeps the chips inside the column. */
+  .ws-head .recording-context { flex-direction: column; flex-wrap: nowrap; align-items: flex-start; gap: 6px; }
+  .ws-head .recording-org { max-width: 100%; }
   .ws-head .recording-meta { width: 100%; font-size: 12.5px; gap: 5px; }
 }
 
@@ -752,3 +773,8 @@ fieldset.ws-speech-field > label { display: flex; align-items: center; flex-wrap
 
 /* Dark appearance */
 :root[data-appearance="dark"] .ws-toc-dash { background:var(--c-border-strong); }
+
+/* Processing details: profile layer / stage provenance chips carry long
+   connection:model ids; let them wrap inside the column on phones. */
+.ws-provenance-chips { flex-basis: 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; }
+.ws-provenance-chips .chip { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: left; height: auto; }
