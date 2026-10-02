@@ -388,7 +388,7 @@ input:focus-visible + .swatch { outline: 2px solid var(--c-focus); outline-offse
 .batch-bar .btn { min-height: 32px; padding: 0 12px; font-size: 12px; background: var(--c-surface); color: var(--c-text); border-color: var(--c-border); }
 .batch-bar .btn:hover { background: var(--c-hover); }
 .batch-bar .btn.danger { color: var(--c-danger); }
-.batch-bar .batch-cancel { margin-left: auto; }
+.batch-bar .batch-cancel { margin-left: auto; min-height: 32px; }
 
 /* -------------------------------------------------- 11 tabs and segmented */
 .tabbar { display: flex; align-items: center; gap: 28px; min-height: 48px; overflow-x: auto; scrollbar-width: none; }
@@ -995,6 +995,7 @@ body.progressive-failed .progressive-error { display: flex; }
     background: var(--c-surface); box-shadow: var(--shadow-dialog); padding: 10px; gap: 6px; }
   .batch-bar .batch-count { width: 100%; margin: 0 0 2px; }
   .batch-bar .btn { flex: 1 1 auto; min-height: 44px; }
+  .batch-bar .batch-cancel { min-height: 44px; }
   .home-section + .home-section { margin-top: 40px; }
   .section-head { margin-bottom: 12px; }
   .page-title, .t-display, h1.page { font-size: clamp(28px, 8vw, 34px); }
