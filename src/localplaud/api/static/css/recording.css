@@ -534,11 +534,14 @@ body.ws-mm-full-open { overflow: hidden; }
 .recording-shell .note-generation-settings .ws-notes-toolbar { margin-top: 6px; }
 .recording-shell .cloud-import-empty { max-width: 420px; display: grid; justify-items: center; gap: 6px; }
 .recording-shell #reprocess-msg { margin-inline: auto !important; }
-.recording-shell:has(.ask-dock-open) .ws-head, .recording-shell:has(.ask-dock-open) .ws-tabrow { margin-left: max(0px, calc((100% - 360px - 760px) / 2)); }
+.recording-shell:has(.ask-dock-open) .ws-head, .recording-shell:has(.ask-dock-open) .ws-tabrow,
+.recording-shell:has(.ask-dock-open) .pane-inner > .recording-alert, .recording-shell:has(.ask-dock-open) .ws-advanced-wrap { margin-left: max(0px, calc((100% - 360px - 760px) / 2)); }
+.recording-shell:has(.ask-dock-open) #reprocess-msg { margin-left: max(0px, calc((100% - 360px - 760px) / 2)) !important; }
 /* With the Ask dock open the reading column is 100% - 360px wide; keep the
    heading and sticky tab row inside it so they never run under the dock. */
 @media (min-width: 1200px) {
-  .recording-shell:has(.ask-dock-open) .ws-head, .recording-shell:has(.ask-dock-open) .ws-tabrow { max-width: min(760px, calc(100% - 362px)); }
+  .recording-shell:has(.ask-dock-open) .ws-head, .recording-shell:has(.ask-dock-open) .ws-tabrow, .recording-shell:has(.ask-dock-open) #reprocess-msg,
+  .recording-shell:has(.ask-dock-open) .pane-inner > .recording-alert, .recording-shell:has(.ask-dock-open) .ws-advanced-wrap { max-width: min(760px, calc(100% - 362px)); }
 }
 
 /* Generate sheet: Auto vs Custom, provider privacy boundary. */
