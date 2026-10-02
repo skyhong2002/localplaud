@@ -294,7 +294,7 @@ body:has(#persistent-player.ws-player) .toast-region { bottom: calc(var(--ws-pla
 .ws-dialog-actions .btn:disabled { opacity: .45; cursor: not-allowed; }
 
 /* ------------------------------------------------------------- mind map */
-.recording-shell .mindmap-viewport { touch-action: none; }
+.recording-shell .mindmap-viewport { touch-action: none; overscroll-behavior: contain; }
 .recording-shell .mindmap-viewport:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .recording-shell .mindmap-tree { justify-content: safe center; }
 .recording-shell .mm-label { position: relative; border-color: color-mix(in srgb, var(--mm-branch, var(--border2)) 45%, var(--border2)); }
