@@ -409,7 +409,7 @@ def test_group_speaker_segments_projects_turns_onto_corrected_text():
     assert detail["unsafe_mixed_segments"] == 0
 
 
-def test_group_speaker_segments_keeps_text_whole_when_projection_is_unsafe():
+def test_group_speaker_segments_rewritten_text_keeps_every_word():
     a, b = "SPEAKER_00", "SPEAKER_01"
     source = _qwen_window("我们先看。好的。", [a] * 4 + [b] * 2)
     rewritten = Segment(
@@ -420,12 +420,34 @@ def test_group_speaker_segments_keeps_text_whole_when_projection_is_unsafe():
         words=source.words,
     )
 
-    grouped, detail = diarize_module.group_speaker_segments(
+    grouped, _detail = diarize_module.group_speaker_segments(
         Transcript(has_speakers=True, segments=[rewritten]), source_texts=[source.text]
     )
 
-    assert [segment.text for segment in grouped.segments] == ["完全不同"]
-    assert detail["unsafe_mixed_segments"] == 1
+    assert "".join(segment.text for segment in grouped.segments) == "完全不同"
+    assert sum(len(segment.words) for segment in grouped.segments) == 6
+
+
+def test_projection_folds_turn_deleted_by_correction_into_neighbour():
+    a, b = "SPEAKER_00", "SPEAKER_01"
+    source = _qwen_window("我们先看。就是呃，那好吧。", [a] * 4 + [b] * 3 + [a] * 3)
+    corrected = Segment(
+        text="我們先看。那好吧。",
+        start=source.start,
+        end=source.end,
+        speaker=a,
+        words=source.words,
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(
+        Transcript(has_speakers=True, segments=[corrected]), source_texts=[source.text]
+    )
+
+    assert [(segment.speaker, segment.text) for segment in grouped.segments] == [
+        (a, "我們先看。那好吧。")
+    ]
+    assert len(grouped.segments[0].words) == 10
+    assert detail["unsafe_mixed_segments"] == 0
 
 
 def test_group_speaker_segments_caps_continuous_monologues():
@@ -478,3 +500,22 @@ def test_projected_turns_keep_leading_punctuation_of_corrected_text():
     )
 
     assert [segment.text for segment in grouped.segments] == ["……我們先看。", "好的。"]
+
+
+def test_projection_ignores_simplified_to_traditional_script_changes():
+    a, b = "SPEAKER_00", "SPEAKER_01"
+    source = _qwen_window("这个没办法，为什么还没说。对的。", [a] * 11 + [b] * 2)
+    corrected = Segment(
+        text="這個沒辦法，為什麼還沒說。對的。",
+        start=source.start,
+        end=source.end,
+        speaker=a,
+        words=source.words,
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(
+        Transcript(has_speakers=True, segments=[corrected]), source_texts=[source.text]
+    )
+
+    assert [segment.text for segment in grouped.segments] == ["這個沒辦法，為什麼還沒說。", "對的。"]
+    assert detail["unsafe_mixed_segments"] == 0

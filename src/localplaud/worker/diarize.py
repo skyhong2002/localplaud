@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import unicodedata
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from ..asr.base import Segment, Transcript, Word
@@ -185,17 +186,33 @@ def _clause_turns(
     return turns
 
 
-def _project_offsets(source: str, target: str, offsets: list[int]) -> list[int] | None:
+@lru_cache(maxsize=8192)
+def _folded_char(char: str) -> str:
+    from ..zh import fold_script
+
+    folded = fold_script(char)
+    return folded if len(folded) == 1 else char
+
+
+def _script_key(text: str) -> list[str]:
+    """Per-character Simplified/Traditional-insensitive comparison key."""
+    return [_folded_char(char) for char in text]
+
+
+def _project_offsets(source: str, target: str, offsets: list[int]) -> list[int]:
     """Carry cut offsets from ``source`` into an edited copy of it.
 
     Corrected text keeps the aligned words' timing but not their exact
-    spelling, so cuts move through a character diff. A cut inside a rewritten
-    span snaps to its nearer edge; trailing punctuation stays with the
-    earlier turn. Returns ``None`` if any projected turn would lose all text.
+    spelling or script, so cuts move through a script-folded character diff.
+    A cut inside a rewritten span snaps to its nearer edge; trailing
+    punctuation stays with the earlier turn. Offsets never decrease, but a
+    turn whose words the correction deleted (a filler clause) can be empty.
     """
     from difflib import SequenceMatcher
 
-    blocks = SequenceMatcher(None, source, target, autojunk=False).get_opcodes()
+    blocks = SequenceMatcher(
+        None, _script_key(source), _script_key(target), autojunk=False
+    ).get_opcodes()
     projected = []
     for offset in offsets:
         _tag, i1, i2, j1, j2 = next(block for block in blocks if block[1] <= offset <= block[2])
@@ -207,13 +224,7 @@ def _project_offsets(source: str, target: str, offsets: list[int]) -> list[int] 
             target[position] in _CLAUSE_MARKS or target[position].isspace()
         ):
             position += 1
-        projected.append(position)
-    bounds = [*projected, len(target)]
-    if any(
-        right <= left or not any(char.isalnum() for char in target[left:right])
-        for left, right in zip(bounds, bounds[1:], strict=False)
-    ):
-        return None
+        projected.append(max(position, projected[-1]) if projected else position)
     return projected
 
 
@@ -251,12 +262,10 @@ def _speaker_runs(
     turns = _clause_turns(segment.text, words, segment.speaker, pause_seconds)
     if turns is None and source_text:
         source_turns = _clause_turns(source_text, words, segment.speaker, pause_seconds)
-        offsets = (
-            _project_offsets(source_text, segment.text, [offset for _, offset, _ in source_turns])
-            if source_turns is not None
-            else None
-        )
-        if offsets is not None:
+        if source_turns is not None:
+            offsets = _project_offsets(
+                source_text, segment.text, [offset for _, offset, _ in source_turns]
+            )
             turns = [
                 (first, offset, speaker)
                 for (first, _, speaker), offset in zip(source_turns, offsets, strict=True)
@@ -281,21 +290,41 @@ def _speaker_runs(
             True,
         )
 
-    runs = []
+    runs: list[_SpeakerRun] = []
+    # Words (and punctuation) of leading turns whose text a correction removed.
+    pending_words: list[Word] = []
+    pending_text = ""
     bounds = [*turns, (len(words), len(segment.text), None)]
     for (first, offset, speaker), (last, end, _speaker) in zip(bounds, bounds[1:], strict=False):
+        text = segment.text[offset:end].strip()
         owned = words[first:last]
+        if not any(char.isalnum() for char in text):
+            # A correction deleted this turn's words (a filler clause). Its
+            # timing joins a neighbouring turn so no word or mark is lost.
+            if runs:
+                previous = runs[-1].segment
+                previous.text += text
+                previous.words.extend(owned)
+                previous.end = max(previous.end, owned[-1].end)
+            else:
+                pending_words.extend(owned)
+                pending_text += text
+            continue
+        owned = [*pending_words, *owned]
         runs.append(
             _SpeakerRun(
                 Segment(
-                    text=segment.text[offset:end].strip(),
+                    text=pending_text + text,
                     start=owned[0].start,
                     end=owned[-1].end,
                     speaker=speaker,
-                    words=list(owned),
+                    words=owned,
                 )
             )
         )
+        pending_words, pending_text = [], ""
+    if not runs:
+        return [_SpeakerRun(segment, mergeable=False)], True
     return runs, False
 
 
