@@ -464,12 +464,12 @@
       </select>
       <button class="btn sec" type="submit" style="padding:8px 12px">{{ t('Use profile') }}</button>
       <span class="sub" style="font-size:12px">{{ t('Pending stages use this profile on Resume. Rebuild reruns completed stages.') }}</span>
-      <div class="sub" style="font-size:11.5px;flex-basis:100%;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <div class="sub ws-provenance-chips">
         <span>{{ t('Resolved layers') }}:</span>
         {% for layer in f.profile_resolution.layer_provenance %}<span class="chip">{{ layer.kind|replace('_',' ') }}{% if layer.profile_key %} · {{ layer.profile_key }}@{{ layer.profile_version }}{% endif %}</span>{% endfor %}
       </div>
       {% if f.profile_resolution_error %}<div style="color:var(--red);font-size:12px;flex-basis:100%">{{ t('Profile resolution needs attention') }} · {{ f.profile_resolution_error }}</div>{% endif %}
-      <div id="resolved-stage-list" style="font-size:11.5px;flex-basis:100%;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <div id="resolved-stage-list" class="ws-provenance-chips">
         {% for stage, choice in f.profile_resolution.stages.items() %}<span class="chip">{{ stage }} · {{ choice.connection }}:{{ choice.model }}</span>{% endfor %}
       </div>
       {% if f.budget.ceiling_usd is not none %}<div class="sub" style="font-size:11.5px;flex-basis:100%">{{ t('Cost boundary') }} · {{ t('spent') }} ${{ f.budget.spent_usd }} · {{ t('remaining') }} ${{ f.budget.remaining_usd }} / {{ t('ceiling') }} ${{ f.budget.ceiling_usd }}{% if f.budget.exceeded %} · <span style="color:var(--red)">{{ t('ceiling exceeded; choose another profile before resuming') }}</span>{% endif %}</div>{% endif %}
