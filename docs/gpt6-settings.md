@@ -71,3 +71,59 @@ uses `timeout_seconds = 1800`, `polish_chunk_chars = 8000`, and
 batch after prompt and context overhead). Correction requests that still time out
 are split and retried. Changing timeout or quota settings does not invalidate
 completed stages; changing a chunk budget re-runs only the stage that uses it.
+
+## Central AI gateway (2026-10-02)
+
+Text stages now reach the model through the sky-mini AI gateway
+(`~/Projects/ai-gateway`, CLIProxyAPI on `127.0.0.1:8317`) instead of spawning
+`codex exec`. Profiles select the semantic alias, never a concrete model:
+
+| Stage | Alias | Why |
+|---|---|---|
+| `correct` | `sky-quality` | the corrected transcript is the canonical text a person reads and edits |
+| `summarize` | `sky-quality` | notes are read directly |
+| `mind_map` (and outline) | `sky-quality` | read directly |
+| `ask` | `sky-quality` | answers are read directly and must stay grounded |
+
+`sky-quality` currently resolves to `gpt-6.1-sol`, the model these stages already
+used, so the migration changes the route, not the model. `sky-fast` is catalogued
+but not selected.
+
+- **Connection** `llm:ai-gateway` (`provider_type = "ai-gateway"`, cloud, egress).
+  The client key is `secret_ref = env:LOCALPLAUD_AI_GATEWAY_KEY` in the gitignored
+  `.env`. Connection settings carry over the GPT-6.1 limits: high reasoning,
+  Responses streaming, `timeout_seconds = 1800` per call without SDK retries,
+  `polish_chunk_chars = 8000`, `summary_chunk_chars = 32000`.
+- **Subscription reserve.** The gateway's only upstream is the same ChatGPT Pro
+  account as `~/.codex`. Before every call the adapter reads that login's window
+  through `codex app-server` (`account/rateLimits/read`) and refuses below 5% + 2%
+  headroom, exactly like `codex-local`. `quota_account_id` pins the login to the
+  gateway's account; a different login fails closed. A reported secondary window
+  is honoured when it is tighter.
+- **Provenance.** Stage attempts store the requested alias as `model` and the
+  answering model under `usage.resolved_models` (also `stage_runs.detail`); Ask
+  messages store it in `usage.ask.resolved_models`.
+- **Reuse.** Each resolved profile records `alias_resolution` (policy revision and
+  the alias's target, read from `model-policy.json`). Artifact reuse compares the
+  target: remapping `sky-quality` invalidates reuse; a revision bump that leaves it
+  alone does not; an unreadable policy never vouches for reuse.
+- Embeddings, ASR, alignment and diarization are unchanged.
+
+Production migration (2026-10-02, after the in-flight recovery run finished and
+an online backup to `data/backups/localplaud-pre-ai-gateway-20261002.db`): nine
+profile versions (53–61) copy versions 44–52 with only the four text stages moved
+to `llm:ai-gateway`/`sky-quality`; `qwen-nemotron` v6 is the system default and the
+374 recording overrides moved from `qwen-nemotron` v3 to v5. All 961 recordings
+resolve every text stage to the gateway. Older profiles, the `codex-local`
+connection and catalog, and all existing artifact attribution are unchanged. A
+leaked dispatch reservation of a dead recovery process was closed through
+`recover_provider_dispatch_reservations` first; it had blocked profile changes.
+
+Verification: derived regeneration of one 2.8-minute recording whose text stages
+had failed on the old Codex quota completed correction, notes and mind map through
+the gateway. Each attempt records `provider = ai-gateway`, `model = sky-quality`
+and `usage.resolved_models = {"sky-quality": ["gpt-6.1-sol"]}`; the new notes'
+snapshots carry `alias_resolution = {"revision": "2026-10-02", "model":
+"gpt-6.1-sol"}`. Model health for both aliases reported the shared window (37%
+remaining, 5% protected); the same connection with a 50% reserve refused before
+any request.
