@@ -616,6 +616,9 @@ a.home-card:hover { background: var(--c-hover); }
 .orgbox > .org-manage, .orgbox > .org-status { margin-left: 90px; }
 .org-status { min-height: 16px; font-size: 11px; }
 /* Empty: leave the grid flow (no phantom gap) but stay in the a11y tree as a live region. */
+/* Text buttons in the chip column: align their label with the chip edge, not their hover padding. */
+.orgrow > .quickadd:first-child { margin-left: -6px; }
+.orgbox > .org-manage { margin-left: 84px; }
 .org-status:empty { position: absolute; width: 1px; height: 1px; min-height: 0; margin: 0; overflow: hidden; clip-path: inset(50%); }
 .range-filter { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--c-border); }
 .range-filter fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
@@ -1010,6 +1013,7 @@ body.progressive-failed .progressive-error { display: flex; }
   .orgbox > .org-manage, .orgbox > .org-status { margin-left: 0; }
   .mobile-library-controls { display: flex; align-items: center; gap: 12px; padding: 4px 0 8px; }
   .mobile-library-controls .t-meta { margin-right: auto; }
+  .orgbox > .org-manage { margin-left: -6px; }
   .mobile-sort-label { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--c-text-body); }
   .mobile-sort { min-width: 0; max-width: 170px; border: 0; background: transparent; color: var(--c-text-body); padding: 0 4px; }
   .mobile-select-all { display: none; align-items: center; gap: 8px; min-height: 44px; color: var(--c-text-body); font-size: 14px; }
