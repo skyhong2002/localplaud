@@ -749,3 +749,6 @@ fieldset.ws-speech-field { border: 1px solid var(--border); border-radius: 8px; 
 fieldset.ws-speech-field > label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 44px; }
 .ws-speech-form .ws-speech-count { width: 5.5em !important; flex: none; display: inline-block; }
 .ws-speech-form .ws-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+
+/* Dark appearance */
+:root[data-appearance="dark"] .ws-toc-dash { background:var(--c-border-strong); }

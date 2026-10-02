@@ -413,3 +413,20 @@
   .share-options label { min-height:36px;font-size:14px; }
   .lp-recording-actions-body .btn { min-height:42px; }
 }
+
+/* Dark appearance: legacy workspace surfaces that used literal light colors. */
+:root[data-appearance="dark"] .card:hover { background:var(--c-hover); }
+:root[data-appearance="dark"] .card.on { background:var(--c-subtle); }
+:root[data-appearance="dark"] .recording-alert { border-color:color-mix(in srgb,var(--c-warn) 40%,transparent);background:var(--c-warn-soft); }
+:root[data-appearance="dark"] .technical-error>div { background:rgba(0,0,0,.28); }
+:root[data-appearance="dark"] .player-toggle { color:var(--c-on-primary); }
+:root[data-appearance="dark"] .player-toggle:hover { background:var(--c-primary-hover); }
+:root[data-appearance="dark"] .seg.active { background:var(--c-hover); }
+:root[data-appearance="dark"] .tabs { background:color-mix(in srgb,var(--c-bg) 98%,transparent); }
+:root[data-appearance="dark"] .notes-toolbar { background:var(--c-surface-2); }
+:root[data-appearance="dark"] .btn.danger { border-color:color-mix(in srgb,var(--c-danger) 45%,var(--c-border)); }
+:root[data-appearance="dark"] .mindmap-viewport { background:var(--c-bg-sidebar); }
+:root[data-appearance="dark"] .mm-label { background:var(--c-surface);box-shadow:none; }
+:root[data-appearance="dark"] .mm-root>.mm-label { border-color:var(--c-primary);background:var(--c-primary);color:var(--c-on-primary); }
+:root[data-appearance="dark"] .mm-children::before { border-left-color:var(--c-border-strong); }
+:root[data-appearance="dark"] .mm-child::before { border-top-color:var(--c-border-strong); }

@@ -86,7 +86,7 @@
   --c-hover: #2A2A2A; --c-hover-ui: rgba(255,255,255,.08); --c-subtle: #303030;
   --c-border: #2C2C2C; --c-border-ui: #333333; --c-border-strong: #4A4A4A;
   --c-scrim: rgba(0,0,0,.62);
-  --c-text: #F5F5F5; --c-text-body: #D6D6D6; --c-text-2: #A0A0A0; --c-text-3: #6E6E6E;
+  --c-text: #F5F5F5; --c-text-body: #D6D6D6; --c-text-2: #A0A0A0; --c-text-3: #8C8C8C; /* AA on surfaces */
   --c-primary: #F2F2F2; --c-on-primary: #111111; --c-primary-hover: #FFFFFF;
   --c-accent: #4BA3FF; --c-accent-soft: #10243A; --c-accent-border: #1E3E62;
   --c-danger: #FF6B5E; --c-danger-soft: #3A1714;
@@ -1040,3 +1040,7 @@ body.progressive-failed .progressive-error { display: flex; }
   body.has-tabbar.has-mini-player #app-view { padding-bottom: calc(var(--tabbar-h) + 76px + var(--safe-bottom)); }
   body.has-mini-player .toast-region { bottom: calc(var(--tabbar-h) + 84px + var(--safe-bottom)); }
 }
+
+/* ------------------------------------------------------- dark refinements */
+/* Count badges keep white text on a deeper red so the count stays AA. */
+:root[data-appearance="dark"] .badge { background: #C93A2E; }
