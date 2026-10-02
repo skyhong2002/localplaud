@@ -9,6 +9,7 @@ speaker who overlaps it most.
 from __future__ import annotations
 
 import logging
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,11 @@ log = logging.getLogger(__name__)
 DEFAULT_SPEAKER_GROUP_GAP_SECONDS = 3.0
 DEFAULT_SPEAKER_GROUP_MAX_CHARS = 1_200
 DEFAULT_SPEAKER_GROUP_MAX_DURATION_SECONDS = 120.0
+DEFAULT_SPEAKER_TURN_PAUSE_SECONDS = 1.0
+_MIN_PAUSE_CLAUSE_CHARS = 2
+SPEAKER_TURN_STRATEGY = "clause-majority/v1"
+_CLAUSE_MARKS = frozenset("，。！？；：、…,.!?;:")
+_OPENING_MARKS = frozenset("([{「『【《（“‘")
 
 
 def _is_cjk(value: str) -> bool:
@@ -73,8 +79,155 @@ class _SpeakerRun:
     mergeable: bool = True
 
 
-def _speaker_runs(segment: Segment) -> tuple[list[_SpeakerRun], bool]:
-    """Split a mixed-speaker ASR segment at word-level speaker boundaries."""
+def _fold(char: str) -> str:
+    return unicodedata.normalize("NFKC", char).casefold()
+
+
+def _word_spans(text: str, words: list[Word]) -> list[tuple[int, int]] | None:
+    """Locate each word's letters and digits, in order, inside ``text``.
+
+    Forced aligners drop the punctuation and spacing that ASR text keeps, so
+    words rarely concatenate back to the segment text. Matching only lexical
+    characters still proves each word owns its own span and that no text is
+    unaccounted for. Returns ``None`` when the words cannot reproduce the text.
+    """
+    position = 0
+    spans: list[tuple[int, int]] = []
+    for word in words:
+        key = "".join(_fold(char) for char in word.text if char.isalnum())
+        start = None
+        matched = ""
+        while matched != key:
+            if position >= len(text):
+                return None
+            char = text[position]
+            if char.isalnum():
+                matched += _fold(char)
+                if not key.startswith(matched):
+                    return None
+                if start is None:
+                    start = position
+            position += 1
+        spans.append((position, position) if start is None else (start, position))
+    if any(char.isalnum() for char in text[position:]):
+        return None
+    return spans
+
+
+def _cut_position(text: str, left: tuple[int, int], right: tuple[int, int]) -> int | None:
+    """Where text between two words divides, or ``None`` inside a Latin token.
+
+    Trailing punctuation and spacing stay with the earlier word; an opening
+    bracket or quote moves with the later one.
+    """
+    gap = range(left[1], right[0])
+    if not gap and not (
+        left[1] > left[0] and _is_cjk(text[left[1] - 1])
+        or right[1] > right[0] and _is_cjk(text[right[0]])
+    ):
+        return None
+    return next((index for index in gap if text[index] in _OPENING_MARKS), right[0])
+
+
+def _lexical_run(text: str, offset: int, step: int) -> int:
+    """Letters and digits from ``offset`` to the nearest clause mark."""
+    count = 0
+    index = offset if step > 0 else offset - 1
+    while 0 <= index < len(text) and text[index] not in _CLAUSE_MARKS:
+        count += text[index].isalnum()
+        index += step
+    return count
+
+
+def _clause_speaker(words: list[Word], fallback: str | None) -> str | None:
+    weights: dict[str, float] = {}
+    for word in words:
+        speaker = word.speaker or fallback
+        if speaker:
+            # A small per-word weight keeps zero-length timestamps meaningful.
+            weights[speaker] = weights.get(speaker, 0.0) + max(0.0, word.end - word.start) + 0.01
+    return max(weights, key=weights.get) if weights else fallback
+
+
+def _clause_turns(
+    text: str, words: list[Word], fallback: str | None, pause_seconds: float
+) -> list[tuple[int, int, str | None]] | None:
+    """Speaker turns as ``(first word index, text offset, speaker)``.
+
+    Diarization boundaries and word timestamps come from independent models,
+    so individual words near a turn change often flicker between speakers.
+    Speakers are therefore chosen per clause (punctuation or a long pause), by
+    the speaker who holds most of that clause's speech.
+    """
+    spans = _word_spans(text, words)
+    if spans is None:
+        return None
+    clauses = [(0, 0)]
+    for index in range(1, len(words)):
+        cut = _cut_position(text, spans[index - 1], spans[index])
+        if cut is None:
+            continue
+        gap = text[spans[index - 1][1] : spans[index][0]]
+        if any(char in _CLAUSE_MARKS for char in gap) or (
+            words[index].start - words[index - 1].end >= pause_seconds
+            # A pause must not strand a fragment of an unpunctuated phrase.
+            and _lexical_run(text, cut, -1) >= _MIN_PAUSE_CLAUSE_CHARS
+            and _lexical_run(text, cut, 1) >= _MIN_PAUSE_CLAUSE_CHARS
+        ):
+            clauses.append((index, cut))
+    turns: list[tuple[int, int, str | None]] = []
+    for (first, offset), (last, _offset) in zip(
+        clauses, [*clauses[1:], (len(words), len(text))], strict=True
+    ):
+        speaker = _clause_speaker(words[first:last], fallback)
+        if not turns or turns[-1][2] != speaker:
+            turns.append((first, offset, speaker))
+    return turns
+
+
+def _project_offsets(source: str, target: str, offsets: list[int]) -> list[int] | None:
+    """Carry cut offsets from ``source`` into an edited copy of it.
+
+    Corrected text keeps the aligned words' timing but not their exact
+    spelling, so cuts move through a character diff. A cut inside a rewritten
+    span snaps to its nearer edge; trailing punctuation stays with the
+    earlier turn. Returns ``None`` if any projected turn would lose all text.
+    """
+    from difflib import SequenceMatcher
+
+    blocks = SequenceMatcher(None, source, target, autojunk=False).get_opcodes()
+    projected = []
+    for offset in offsets:
+        _tag, i1, i2, j1, j2 = next(block for block in blocks if block[1] <= offset <= block[2])
+        if i2 - i1 == j2 - j1:
+            position = j1 + offset - i1
+        else:
+            position = j1 if offset - i1 <= i2 - offset else j2
+        while offset and position < len(target) and (
+            target[position] in _CLAUSE_MARKS or target[position].isspace()
+        ):
+            position += 1
+        projected.append(position)
+    bounds = [*projected, len(target)]
+    if any(
+        right <= left or not any(char.isalnum() for char in target[left:right])
+        for left, right in zip(bounds, bounds[1:], strict=False)
+    ):
+        return None
+    return projected
+
+
+def _speaker_runs(
+    segment: Segment,
+    *,
+    source_text: str | None = None,
+    pause_seconds: float = DEFAULT_SPEAKER_TURN_PAUSE_SECONDS,
+) -> tuple[list[_SpeakerRun], bool]:
+    """Split a mixed-speaker ASR segment into clause-level speaker turns.
+
+    ``source_text`` is the text the words were aligned against, for a segment
+    whose own text has since been corrected.
+    """
     if not segment.words:
         return [_SpeakerRun(segment)], False
     speakers = [word.speaker or segment.speaker for word in segment.words]
@@ -94,10 +247,24 @@ def _speaker_runs(segment: Segment) -> tuple[list[_SpeakerRun], bool]:
             False,
         )
 
+    words = segment.words
+    turns = _clause_turns(segment.text, words, segment.speaker, pause_seconds)
+    if turns is None and source_text:
+        source_turns = _clause_turns(source_text, words, segment.speaker, pause_seconds)
+        offsets = (
+            _project_offsets(source_text, segment.text, [offset for _, offset, _ in source_turns])
+            if source_turns is not None
+            else None
+        )
+        if offsets is not None:
+            turns = [
+                (first, offset, speaker)
+                for (first, _, speaker), offset in zip(source_turns, offsets, strict=True)
+            ]
     # If alignment words cannot reproduce the original text, splitting would
     # silently lose or rewrite content. Keep the mixed segment as a standalone
     # paragraph instead of merging it under the majority speaker.
-    if _words_text(segment.words) != segment.text.strip():
+    if turns is None:
         return (
             [
                 _SpeakerRun(
@@ -106,7 +273,7 @@ def _speaker_runs(segment: Segment) -> tuple[list[_SpeakerRun], bool]:
                         start=segment.start,
                         end=segment.end,
                         speaker=_dominant_speaker(segment),
-                        words=list(segment.words),
+                        words=list(words),
                     ),
                     mergeable=False,
                 )
@@ -114,24 +281,21 @@ def _speaker_runs(segment: Segment) -> tuple[list[_SpeakerRun], bool]:
             True,
         )
 
-    runs: list[_SpeakerRun] = []
-    start = 0
-    for index in range(1, len(segment.words) + 1):
-        if index < len(segment.words) and speakers[index] == speakers[start]:
-            continue
-        words = segment.words[start:index]
+    runs = []
+    bounds = [*turns, (len(words), len(segment.text), None)]
+    for (first, offset, speaker), (last, end, _speaker) in zip(bounds, bounds[1:], strict=False):
+        owned = words[first:last]
         runs.append(
             _SpeakerRun(
                 Segment(
-                    text=_words_text(words),
-                    start=words[0].start,
-                    end=words[-1].end,
-                    speaker=speakers[start],
-                    words=list(words),
+                    text=segment.text[offset:end].strip(),
+                    start=owned[0].start,
+                    end=owned[-1].end,
+                    speaker=speaker,
+                    words=list(owned),
                 )
             )
         )
-        start = index
     return runs, False
 
 
@@ -141,12 +305,14 @@ def group_speaker_segments(
     max_gap_seconds: float = DEFAULT_SPEAKER_GROUP_GAP_SECONDS,
     max_chars: int = DEFAULT_SPEAKER_GROUP_MAX_CHARS,
     max_duration_seconds: float = DEFAULT_SPEAKER_GROUP_MAX_DURATION_SECONDS,
+    source_texts: list[str | None] | None = None,
 ) -> tuple[Transcript, dict]:
     """Build readable speaker paragraphs without losing word timestamps.
 
-    Word-level speaker changes split an ASR segment first. Consecutive runs are
-    then merged only when the speaker is known, unchanged, and the silence gap
-    does not exceed ``max_gap_seconds``.
+    Clause-level speaker changes split an ASR segment first. Consecutive runs
+    are then merged only when the speaker is known, unchanged, and the silence
+    gap does not exceed ``max_gap_seconds``. ``source_texts`` optionally gives,
+    per segment, the text its words were aligned against before correction.
     """
     if max_gap_seconds < 0:
         raise ValueError("speaker grouping gap must be non-negative")
@@ -156,8 +322,10 @@ def group_speaker_segments(
     runs: list[_SpeakerRun] = []
     split_boundaries = 0
     unsafe_mixed_segments = 0
-    for segment in transcript.segments:
-        segment_runs, unsafe = _speaker_runs(segment)
+    for index, segment in enumerate(transcript.segments):
+        segment_runs, unsafe = _speaker_runs(
+            segment, source_text=source_texts[index] if source_texts else None
+        )
         runs.extend(segment_runs)
         split_boundaries += max(0, len(segment_runs) - 1)
         unsafe_mixed_segments += int(unsafe)
@@ -225,6 +393,7 @@ def group_speaker_segments(
     )
     return result, {
         "strategy": "consecutive-speaker-runs",
+        "turn_strategy": SPEAKER_TURN_STRATEGY,
         "max_gap_seconds": max_gap_seconds,
         "max_chars": max_chars,
         "max_duration_seconds": max_duration_seconds,

@@ -200,12 +200,12 @@ def test_group_speaker_segments_splits_word_level_turn_then_merges_next_run():
         has_speakers=True,
         segments=[
             Segment(
-                text="hello yes",
+                text="hello. yes",
                 start=0.0,
                 end=1.8,
                 speaker="SPEAKER_00",
                 words=[
-                    Word("hello", 0.0, 0.8, "SPEAKER_00"),
+                    Word("hello.", 0.0, 0.8, "SPEAKER_00"),
                     Word("yes", 1.0, 1.8, "SPEAKER_01"),
                 ],
             ),
@@ -222,7 +222,7 @@ def test_group_speaker_segments_splits_word_level_turn_then_merges_next_run():
     grouped, detail = diarize_module.group_speaker_segments(transcript)
 
     assert [(segment.speaker, segment.text) for segment in grouped.segments] == [
-        ("SPEAKER_00", "hello"),
+        ("SPEAKER_00", "hello."),
         ("SPEAKER_01", "yes indeed"),
     ]
     assert detail["split_boundaries"] == 1
@@ -255,8 +255,8 @@ def test_group_speaker_segments_preserves_unsafe_mixed_text_as_a_barrier():
                 end=2.0,
                 speaker="SPEAKER_00",
                 words=[
-                    Word("punctuation", 0.0, 0.8, "SPEAKER_00"),
-                    Word("must remain", 1.0, 2.0, "SPEAKER_01"),
+                    Word("punctuation,", 0.0, 0.8, "SPEAKER_00"),
+                    Word("must stay", 1.0, 2.0, "SPEAKER_01"),
                 ],
             ),
             Segment(text="next", start=2.1, end=2.5, speaker="SPEAKER_00"),
@@ -290,7 +290,7 @@ def test_group_speaker_segments_is_idempotent():
     assert twice == once
 
 
-def test_group_speaker_segments_requires_exact_whitespace_reconstruction():
+def test_group_speaker_segments_never_splits_inside_a_latin_token():
     transcript = Transcript(
         has_speakers=True,
         segments=[
@@ -309,8 +309,122 @@ def test_group_speaker_segments_requires_exact_whitespace_reconstruction():
 
     grouped, detail = diarize_module.group_speaker_segments(transcript)
 
-    assert grouped.segments[0].text == "NewYork"
-    assert grouped.segments[0].speaker == "SPEAKER_01"
+    assert [(segment.speaker, segment.text) for segment in grouped.segments] == [
+        ("SPEAKER_01", "NewYork")
+    ]
+    assert detail["unsafe_mixed_segments"] == 0
+
+
+def _qwen_window(text, speakers, *, start=0.0, step=0.25):
+    """A long ASR window whose aligner words omit the text's punctuation."""
+    lexical = [char for char in text if char.isalnum()]
+    assert len(lexical) == len(speakers)
+    words = [
+        Word(char, start + index * step, start + (index + 1) * step, speaker)
+        for index, (char, speaker) in enumerate(zip(lexical, speakers, strict=True))
+    ]
+    return Segment(text=text, start=start, end=words[-1].end, speaker=speakers[0], words=words)
+
+
+def test_group_speaker_segments_splits_unpunctuated_aligner_words_at_clauses():
+    a, b = "SPEAKER_00", "SPEAKER_01"
+    transcript = Transcript(
+        has_speakers=True,
+        segments=[
+            _qwen_window(
+                "我們先看這個。好，可以。那就這樣吧？",
+                [a] * 6 + [b] * 3 + [a] * 5,
+            )
+        ],
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(transcript)
+
+    assert [(segment.speaker, segment.text) for segment in grouped.segments] == [
+        (a, "我們先看這個。"),
+        (b, "好，可以。"),
+        (a, "那就這樣吧？"),
+    ]
+    assert [len(segment.words) for segment in grouped.segments] == [6, 3, 5]
+    assert grouped.segments[1].start == 1.5
+    assert detail["unsafe_mixed_segments"] == 0
+    assert detail["turn_strategy"] == "clause-majority/v1"
+
+
+def test_group_speaker_segments_smooths_word_flicker_within_a_clause():
+    a, b = "SPEAKER_00", "SPEAKER_01"
+    transcript = Transcript(
+        has_speakers=True,
+        segments=[_qwen_window("這是一個很長的句子，對。", [a, a, b, a, a, a, a, a, b, b])],
+    )
+
+    grouped, _detail = diarize_module.group_speaker_segments(transcript)
+
+    assert [(segment.speaker, segment.text) for segment in grouped.segments] == [
+        (a, "這是一個很長的句子，"),
+        (b, "對。"),
+    ]
+
+
+def test_group_speaker_segments_splits_at_long_unpunctuated_pause():
+    a, b = "SPEAKER_00", "SPEAKER_01"
+    words = [
+        Word("ok", 0.0, 0.5, a),
+        Word("sure", 0.6, 1.0, a),
+        Word("right", 2.5, 3.0, b),
+    ]
+    transcript = Transcript(
+        has_speakers=True,
+        segments=[Segment(text="ok sure right", start=0.0, end=3.0, speaker=a, words=words)],
+    )
+
+    grouped, _detail = diarize_module.group_speaker_segments(transcript)
+
+    assert [(segment.speaker, segment.text) for segment in grouped.segments] == [
+        (a, "ok sure"),
+        (b, "right"),
+    ]
+
+
+def test_group_speaker_segments_projects_turns_onto_corrected_text():
+    a, b = "SPEAKER_00", "SPEAKER_01"
+    source = _qwen_window("我们先看这个。好，可以。", [a] * 6 + [b] * 3)
+    corrected = Segment(
+        text="我們先看這一個。好的，可以。",
+        start=source.start,
+        end=source.end,
+        speaker=source.speaker,
+        words=source.words,
+    )
+    transcript = Transcript(has_speakers=True, segments=[corrected])
+
+    grouped, detail = diarize_module.group_speaker_segments(
+        transcript, source_texts=[source.text]
+    )
+
+    assert [(segment.speaker, segment.text) for segment in grouped.segments] == [
+        (a, "我們先看這一個。"),
+        (b, "好的，可以。"),
+    ]
+    assert detail["unsafe_mixed_segments"] == 0
+
+
+def test_group_speaker_segments_keeps_text_whole_when_projection_is_unsafe():
+    a, b = "SPEAKER_00", "SPEAKER_01"
+    source = _qwen_window("我们先看。好的。", [a] * 4 + [b] * 2)
+    rewritten = Segment(
+        text="完全不同",
+        start=source.start,
+        end=source.end,
+        speaker=a,
+        words=source.words,
+    )
+
+    grouped, detail = diarize_module.group_speaker_segments(
+        Transcript(has_speakers=True, segments=[rewritten]), source_texts=[source.text]
+    )
+
+    assert [segment.text for segment in grouped.segments] == ["完全不同"]
     assert detail["unsafe_mixed_segments"] == 1
 
 
@@ -330,3 +444,37 @@ def test_group_speaker_segments_caps_continuous_monologues():
 
     assert [segment.text for segment in grouped.segments] == ["aaaa bbbb", "cccc"]
     assert detail["limit_boundaries"] == 1
+
+
+def test_group_speaker_segments_pause_never_strands_a_single_character():
+    a, b = "SPEAKER_00", "SPEAKER_01"
+    segment = _qwen_window("都是小事。哦。", [a, a, a, b, b])
+    segment.words[3].start, segment.words[3].end = 3.0, 3.2
+    segment.words[4].start, segment.words[4].end = 3.3, 3.5
+
+    grouped, _detail = diarize_module.group_speaker_segments(
+        Transcript(has_speakers=True, segments=[segment])
+    )
+
+    assert [(segment.speaker, segment.text) for segment in grouped.segments] == [
+        (a, "都是小事。"),
+        (b, "哦。"),
+    ]
+
+
+def test_projected_turns_keep_leading_punctuation_of_corrected_text():
+    a, b = "SPEAKER_00", "SPEAKER_01"
+    source = _qwen_window("我们先看。好的。", [a] * 4 + [b] * 2)
+    corrected = Segment(
+        text="……我們先看。好的。",
+        start=source.start,
+        end=source.end,
+        speaker=a,
+        words=source.words,
+    )
+
+    grouped, _detail = diarize_module.group_speaker_segments(
+        Transcript(has_speakers=True, segments=[corrected]), source_texts=[source.text]
+    )
+
+    assert [segment.text for segment in grouped.segments] == ["……我們先看。", "好的。"]
