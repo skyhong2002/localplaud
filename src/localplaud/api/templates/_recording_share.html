@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/static/recording-share.css?v=2">
+<link rel="stylesheet" href="/static/recording-share.css?v=4">
 {% macro share_row(label, icon, view='', id='', disabled=false, copy=false) %}
 <button class="share-menu-row" type="button" {% if id %}id="{{ id }}"{% endif %} {% if view %}data-share-view="{{ view }}"{% endif %} {% if disabled %}disabled{% endif %}>
   <span class="nav-icon" style="--nav-icon:url('/static/lucide/{{ icon }}.svg')"></span><span>{{ t(label) }}</span><span class="share-row-end" aria-hidden="true">{% if copy %}<span class="nav-icon" style="--nav-icon:url('/static/lucide/copy.svg')"></span>{% else %}›{% endif %}</span>

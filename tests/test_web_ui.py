@@ -1961,8 +1961,8 @@ def test_share_sheet_is_available_in_progressive_workspace(monkeypatch, tmp_path
     assert 'id="export-backdrop"' not in page.text
     assert '/static/recording-share.js?v=3' in page.text
     # HTMX retains the outer shell: its old CSS must not size the new sheet.
-    assert '<link rel="stylesheet" href="/static/recording-share.css?v=2">' in page.text
-    stylesheet = client.get('/static/recording-share.css?v=2')
+    assert '<link rel="stylesheet" href="/static/recording-share.css?v=4">' in page.text
+    stylesheet = client.get('/static/recording-share.css?v=4')
     assert stylesheet.status_code == 200
     assert stylesheet.headers['content-type'].startswith('text/css')
     # Fanboy Social's generic ##.share-body rule hides essential app controls.
