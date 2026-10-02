@@ -441,7 +441,10 @@
 .sf-autoflow-intro { display:flex;gap:14px;align-items:flex-start;margin-bottom:16px; }
 .sf-autoflow-tile { flex:none;width:48px;height:48px;border:1px solid var(--c-border,var(--border));border-radius:var(--radius-md,8px);display:grid;place-items:center;background:var(--c-surface,var(--panel)); }
 .sf-autoflow-intro .sf-section-title { margin-bottom:4px; }
-.sf-policy { margin-top:6px;display:flex;align-items:center;gap:5px;flex-wrap:wrap; }
+.sf-policy { margin-top:6px; }
+.sf-policy .i { vertical-align:-2px; }
+.sf-ask-firstrun { display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:18px; }
+.sf-ask-firstrun .btn { display:inline-flex;align-items:center;gap:6px; }
 .sf-policy a { color:var(--c-accent,var(--blue)); }
 .sf-rule-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px; }
 .sf-rule-card { display:flex;flex-direction:column;gap:7px;padding:14px 16px;border:1px solid var(--c-border,var(--border));border-radius:var(--radius,5px);background:var(--c-surface,var(--panel));min-width:0; }

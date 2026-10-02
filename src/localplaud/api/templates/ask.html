@@ -47,11 +47,15 @@
             <h2 class="sf-large-title sf-ask-hero">{{ t('What’s on your mind?') }}</h2>
             <p class="sf-ask-lede">{{ t('Ask about your recordings, notes, or any topic in your library. Every answer cites the moments it used.') }}</p>
             <p class="sf-ask-coverage">{{ index_stats.indexed_recordings }} / {{ index_stats.total_recordings }} {{ t('recordings indexed for Ask') }}</p>
+            {% if not index_stats.total_recordings %}
+            <div class="sf-ask-firstrun"><p class="sf-muted">{{ t('Your library is empty. Import audio or sync from Plaud, and Ask can answer once recordings are processed.') }}</p><button class="btn" type="button" data-open-import="device">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button></div>
+            {% else %}
             <div class="sf-suggest" role="list" aria-label="{{ t('Suggested questions') }}">
               {% for chip in ["What decisions were made recently?", "Show action items across recordings", "What themes keep recurring?"] %}
               <button type="button" class="sf-suggest-item" role="listitem" data-sf-ask="{{ t(chip) }}">{{ t(chip) }}</button>
               {% endfor %}
             </div>
+            {% endif %}
           </div>
           {% endif %}
         </div>
@@ -61,7 +65,7 @@
 
     <div class="sf-composer-wrap">
       <div class="sf-quick" role="group" aria-label="{{ t('Quick actions') }}">
-        {% for skill in ask_skills %}<button type="button" class="sf-quick-chip sf-quick-{{ loop.index0 % 4 }}" data-sf-skill="{{ skill.key }}" data-sf-skill-name="{{ skill.name }}" title="{{ skill.description }}">{{ skill.name }}</button>{% endfor %}
+        {% for skill in ask_skills %}<button type="button" class="sf-quick-chip sf-quick-{{ loop.index0 % 4 }}" data-sf-skill="{{ skill.key }}" data-sf-skill-name="{{ t(skill.name) }}" title="{{ t(skill.description) }}">{{ t(skill.name) }}</button>{% endfor %}
         <span class="sf-quick-note">{{ t('creates an Ask thread; recordings and notes stay unchanged') }}</span>
       </div>
       <form class="sf-composer" id="sf-ask-form" data-sf-ask-form autocomplete="off">

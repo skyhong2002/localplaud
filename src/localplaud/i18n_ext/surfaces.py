@@ -108,6 +108,7 @@ ZH_HANT_TW: dict[str, str] = {
     "Transcribe and summarize with these choices, then organize the recording.": "依這些選擇轉錄並生成筆記，再整理錄音。",
     "Trigger and actions": "觸發條件與動作",
     "available": "可用",
+    "Your library is empty. Import audio or sync from Plaud, and Ask can answer once recordings are processed.": "錄音庫目前是空的。匯入音訊或從 Plaud 同步，錄音處理完成後即可詢問。",
     # --- Settings ---
     "ASR & diarization": "語音辨識與講者分離",
     "Account & security": "帳號與安全",
