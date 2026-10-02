@@ -544,18 +544,6 @@
 </style>
 <script>
 (()=>{
-  // Keep the active section link visible inside the sticky, internally scrolling index.
-  const nav=document.querySelector('.settings-nav');
-  if(!nav||!('MutationObserver' in window))return;
-  new MutationObserver(()=>{
-    const link=nav.querySelector('a[aria-current]');
-    if(!link||nav.scrollHeight<=nav.clientHeight)return;
-    const top=link.getBoundingClientRect().top-nav.getBoundingClientRect().top+nav.scrollTop, bottom=top+link.offsetHeight;
-    if(top<nav.scrollTop+8)nav.scrollTop=Math.max(0,top-40);
-    else if(bottom>nav.scrollTop+nav.clientHeight-8)nav.scrollTop=bottom-nav.clientHeight+40;
-  }).observe(nav,{subtree:true,attributes:true,attributeFilter:['aria-current']});
-})();
-(()=>{
 const CONNECTIONS={{ connections|tojson }};
 const MODELS={{ models|tojson }};
 const PROFILES={{ profiles|tojson }};
@@ -752,6 +740,20 @@ async function deleteEmail(id){if(!confirm(tr('Delete this email authorization? 
 document.getElementById('email-form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target),recipients=String(f.get('to_addresses')).split(',').map(value=>value.trim()).filter(Boolean),body={name:f.get('name'),smtp_host:f.get('smtp_host'),smtp_port:Number(f.get('smtp_port')),security:f.get('security'),allow_insecure_private:f.get('allow_insecure_private')==='on',username:f.get('username')||null,password_ref:f.get('password_ref')||null,from_address:f.get('from_address'),to_addresses:recipients,subject_prefix:f.get('subject_prefix'),scopes:f.getAll('scope'),enabled:f.get('enabled')==='on'};const r=await fetch('/api/integrations/emails',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),data=await r.json(),out=document.getElementById('email-result');if(r.ok){out.textContent=tr('Authorized. Reloading…');location.reload();}else out.textContent=data.detail?.[0]?.msg||data.detail||tr('Could not authorize email');});
 document.querySelectorAll('.session-revoke').forEach(button=>button.addEventListener('click',async()=>{if(!confirm(tr('Revoke this browser session?')))return;const response=await fetch(`/api/sessions/${button.dataset.id}/revoke`,{method:'POST'});if(response.ok){if(button.dataset.current==='true')location.assign('/login');else location.reload();}else{const data=await response.json();alert(data.detail||tr('Could not revoke session'));}}));
 Object.assign(window,{editVocabulary,deleteVocabulary,editNoteTemplate,archiveNoteTemplate,removeItem,editConnection,editModel,newProfileVersion,testHealth,testModel,testWorker,testWebhook,deleteWebhook,testEmail,deleteEmail});
+})();
+</script>
+<script>
+(()=>{
+  // Keep the active section link visible inside the sticky, internally scrolling index.
+  const nav=document.querySelector('.settings-nav');
+  if(!nav||!('MutationObserver' in window))return;
+  new MutationObserver(()=>{
+    const link=nav.querySelector('a[aria-current]');
+    if(!link||nav.scrollHeight<=nav.clientHeight)return;
+    const top=link.getBoundingClientRect().top-nav.getBoundingClientRect().top+nav.scrollTop, bottom=top+link.offsetHeight;
+    if(top<nav.scrollTop+8)nav.scrollTop=Math.max(0,top-40);
+    else if(bottom>nav.scrollTop+nav.clientHeight-8)nav.scrollTop=bottom-nav.clientHeight+40;
+  }).observe(nav,{subtree:true,attributes:true,attributeFilter:['aria-current']});
 })();
 </script>
 {% endblock %}
