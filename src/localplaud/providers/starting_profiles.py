@@ -16,7 +16,6 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import get_settings
 from ..db.models import ModelCatalogEntry, ProviderConnection, RemoteWorker
 from .contracts import ProviderStage
 
@@ -130,13 +129,15 @@ def install_starting_profile(
         raise ValueError("confirm what data leaves this host before creating this profile")
     replacements: dict[str, tuple[str, str]] = {}
     if kind == "openai-cloud":
+        if not (model or "").strip():
+            raise ValueError("enter the OpenAI model identifier to use")
         selection = _text_connection(
             session,
             "llm:openai-cloud",
             "OpenAI Cloud",
             "https://api.openai.com/v1",
             _env_ref(secret_env or "OPENAI_API_KEY"),
-            (model or "").strip() or get_settings().llm.openai.model,
+            model.strip(),
         )
         replacements = dict.fromkeys(TEXT_STAGES, selection)
     elif kind == "openai-compatible":

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 # --------------------------------------------------------------------------- #
@@ -314,7 +314,10 @@ class OllamaConfig(BaseModel):
 class OpenAILlmConfig(BaseModel):
     api_key: str | None = None
     base_url: str | None = None
-    model: str = "gpt-4o-mini"
+    # No default: a concrete model here would bypass the AI gateway's aliases.
+    # Profiles always pass their selected model; the legacy global ``[llm]``
+    # provider must name one explicitly.
+    model: str | None = None
     # Leave unset for legacy/OpenAI-compatible endpoints. Reasoning models use
     # max_completion_tokens and do not receive sampling temperature.
     reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] | None = None
@@ -348,34 +351,23 @@ class OpenCodeGoLlmConfig(BaseModel):
     polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
 
 
-class CodexLocalLlmConfig(BaseModel):
-    """Trusted single-user Codex CLI boundary; Codex owns its credentials."""
+class CodexQuotaConfig(BaseModel):
+    """Read a ChatGPT subscription window through a local Codex login.
+
+    Used only to protect a reserve before another client (the AI gateway)
+    spends the same subscription. Codex owns the credentials; nothing here runs
+    a model.
+    """
 
     executable: str = "codex"
-    model: str = "gpt-6.1-sol"
-    codex_home: str = "~/.localplaud/codex"
-    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] = "high"
-    timeout_seconds: int = Field(default=900, ge=30, le=1800)
-    # Codex has enough context for large maps, but a correction response is
-    # about as long as its input and high-effort turns on ~19k CJK characters
-    # exceed the per-call timeout. Keep each request well inside it; structural
-    # failures and timeouts are bisected by the correction stage, while
-    # transport failures fail immediately instead of multiplying calls.
-    polish_chunk_chars: int = Field(default=8_000, ge=1_000, le=60_000)
-    # GPT-6 Sol has a large context window. Larger full-coverage map chunks
-    # preserve more discourse structure while spending far fewer subscription
-    # turns than the 6k local-model default.
-    summary_chunk_chars: int = Field(default=240_000, ge=6_000, le=240_000)
-    require_chatgpt_login: bool = True
-    # Codex exposes the current subscription window through its local app-server.
+    codex_home: str = "~/.codex"
     # Fail closed before every inference call when the remaining allowance is too
     # close to the user's reserve.  The extra headroom accounts for the call that
     # is about to start, so a large response cannot consume the protected floor.
     quota_reserve_percent: int = Field(default=5, ge=3, le=50)
     quota_call_headroom_percent: int = Field(default=2, ge=0, le=20)
-    # The desktop app-server can still be draining the previous GPT response
-    # when a mind-map call follows a summary immediately. Give the local quota
-    # RPC enough time to answer instead of needlessly falling back to Ollama.
+    # The app-server can still be draining a previous response; give the local
+    # quota RPC enough time to answer instead of failing the call.
     quota_check_timeout_seconds: int = Field(default=20, ge=2, le=30)
 
 
@@ -385,8 +377,8 @@ class AiGatewayLlmConfig(BaseModel):
     ``model`` is an alias such as ``sky-quality``; the gateway's policy decides
     which concrete model answers, and each response's model is recorded as
     provenance. The gateway spends the ChatGPT subscription whose Codex login
-    lives in ``quota_codex_home``, so that login's usage window is checked before
-    every call with the same reserve as the Codex CLI adapter.
+    lives in ``quota_codex_home``; that login's usage window is checked before
+    every call so the protected reserve is never spent.
     """
 
     api_key: str | None = None
@@ -416,24 +408,13 @@ class AiGatewayLlmConfig(BaseModel):
 
 class LlmConfig(BaseModel):
     provider: Literal[
-        "ollama", "openai", "anthropic", "opencode-go", "codex-local", "ai-gateway"
+        "ollama", "openai", "anthropic", "opencode-go", "ai-gateway"
     ] = "ollama"
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     openai: OpenAILlmConfig = Field(default_factory=OpenAILlmConfig)
     anthropic: AnthropicLlmConfig = Field(default_factory=AnthropicLlmConfig)
     opencode_go: OpenCodeGoLlmConfig = Field(default_factory=OpenCodeGoLlmConfig)
-    codex_local: CodexLocalLlmConfig = Field(default_factory=CodexLocalLlmConfig)
     ai_gateway: AiGatewayLlmConfig = Field(default_factory=AiGatewayLlmConfig)
-
-    @model_validator(mode="after")
-    def codex_is_profile_scoped(self) -> LlmConfig:
-        if self.provider == "codex-local":
-            raise ValueError(
-                "codex-local is profile-scoped; select it only for supported text "
-                "stages in an execution profile instead of using it as the global "
-                "LLM provider"
-            )
-        return self
 
 
 # ---- Embeddings (Q&A / search) ------------------------------------------- #

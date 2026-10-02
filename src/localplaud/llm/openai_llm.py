@@ -30,7 +30,7 @@ class OpenAILLM:
         self.cfg = cfg
 
     @property
-    def model(self) -> str:
+    def model(self) -> str | None:
         return self.cfg.model
 
     @property
@@ -38,8 +38,8 @@ class OpenAILLM:
         return self.cfg.polish_chunk_chars
 
     def available(self) -> bool:
-        """True if an API key is configured."""
-        return bool(self.cfg.api_key)
+        """True if an API key and an explicit model are configured."""
+        return bool(self.cfg.api_key and self.cfg.model)
 
     def _client(self, openai_class):
         return openai_class(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None)
@@ -58,6 +58,8 @@ class OpenAILLM:
     ) -> str:
         if not self.cfg.api_key:
             raise LLMUnavailable("OpenAI LLM: no API key configured")
+        if not self.cfg.model:
+            raise LLMUnavailable("OpenAI LLM: no model configured; select one explicitly")
         try:
             from openai import OpenAI
         except ImportError as exc:

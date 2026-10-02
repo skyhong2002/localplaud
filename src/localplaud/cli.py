@@ -673,14 +673,6 @@ def doctor():
         except Exception as exc:  # noqa: BLE001
             row("correct:opencode-go", False, str(exc)[:60])
 
-        try:
-            from .llm.codex_local import CodexLocalLLM
-
-            ok, detail = CodexLocalLLM(settings.llm.codex_local).health()
-            row("text:codex-local", ok, detail)
-        except Exception as exc:  # noqa: BLE001
-            row("text:codex-local", False, str(exc)[:60])
-
     try:
         from .embeddings.base import build_embedder
 

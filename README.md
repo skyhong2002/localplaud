@@ -238,7 +238,7 @@ command; embedding uses Ollama's batch `/api/embed` endpoint when available.
 Transcript correction is an explicit stage-scoped LLM selection. The initial profile
 uses the configured `[llm]` provider, while later profile versions may select any
 catalog model that advertises the `correct` capability, including Ollama, OpenAI,
-Anthropic, OpenCode Go, or the experimental Codex CLI adapter. The resolved connection,
+Anthropic, OpenCode Go, or the AI gateway. The resolved connection,
 model, non-secret configuration,
 privacy boundary, and secret reference are persisted before dispatch; unavailable
 providers fail visibly unless the profile declares an allowed fallback. For OpenCode
@@ -250,48 +250,21 @@ omitted or emptied segments; only malformed JSON, duplicate/unknown IDs, or an
 explicit context limit can bisect a batch. Transport and quota failures are never
 converted into additional split calls.
 
-The `codex-local` adapter is an explicit trusted-single-user option for transcript
-correction, generated notes, mind maps, and grounded Ask. It invokes `codex exec` through stdin in an ephemeral, read-only,
-temporary workspace with strict, fail-closed flags that disable the supported shell,
-browser, computer-use, app, plugin, multi-agent, and workspace tools. localplaud never
-reads or copies Codex credentials. Its
-configured `CODEX_HOME` must be signed in normally with ChatGPT before the provider is
-healthy; API-key login is rejected by default so the UI cannot misrepresent API
-billing as included Codex subscription usage. Before every model turn, the adapter
-reads Codex's local subscription-window snapshot without inference and fails closed
-unless the configured reserve plus call headroom remains. It is cloud inference and
-must not be used as an unattended public or multi-user default.
-
-Either use the already active user-owned Codex login (`codex_home = "~/.codex"`) or
-set up an isolated login interactively on the trusted local host:
-
-```bash
-mkdir -p ~/.localplaud/codex
-CODEX_HOME=~/.localplaud/codex codex login
-CODEX_HOME=~/.localplaud/codex codex login status
-.venv/bin/localplaud doctor
-```
-
-The health check confirms ChatGPT authentication and reports the current remaining
-Codex window without spending a model turn. Create a new immutable execution-profile
-version and select `correct:codex-local` only for the explicitly approved `correct`,
-`summarize`, `mind_map`, and/or `ask` stages. Both single-recording and library Ask
-retain retrieval scope, playable citations, provenance, and the same per-call
-subscription reserve. `codex-local` remains rejected as the global `[llm]` provider;
-select it through an execution profile with explicit cloud egress. The shipped local profile protects 5% and
-requires another 2% of pre-call headroom, keeping the user's requested 3% floor
-outside the callable range.
-
-The `ai-gateway` adapter sends the same text stages to a central OpenAI-compatible
-gateway that maps semantic aliases (for example `sky-quality`) to concrete models.
-Profiles select the alias, never a concrete model. Each stage attempt records the
+The `ai-gateway` adapter sends transcript correction, notes, mind maps and Ask to a
+central OpenAI-compatible gateway that maps semantic aliases (for example
+`sky-quality`) to concrete models. Profiles select the alias, never a concrete model. Each stage attempt records the
 alias it requested and the model that answered, and each resolved profile records the
 alias's current target from the gateway's policy file, so a remapped alias is not
 treated as the model that produced an existing artifact. When the gateway spends a
 ChatGPT subscription, the adapter reads that subscription's window through a Codex
 login (`quota_codex_home`, optionally pinned with `quota_account_id`) before every
-call and fails closed with the same reserve as `codex-local`. The client key is a
+call and fails closed unless the configured reserve plus call headroom remains (5% +
+2% by default); the read spends no model turn. The client key is a
 `secret_ref` environment reference. See [docs/gpt6-settings.md](docs/gpt6-settings.md).
+The earlier `codex-local` backend, which ran `codex exec` per call, has been removed:
+profile versions and artifacts that name it stay readable with their provenance, but
+new profiles, connections and catalog models cannot select it. The generic `openai`
+provider has no default model; name one explicitly when it is used.
 
 Recording notes default to an evidence workflow: timestamped facts, source-based
 extraction checks, topic planning, section drafting and a separate verification

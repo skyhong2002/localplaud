@@ -1,11 +1,11 @@
 # GPT-6 text-stage configuration
 
-The Codex subscription adapter defaults to `gpt-6.1-sol` with high reasoning effort.
-It can be explicitly selected for `correct`, `summarize`, `mind_map`, and `ask`.
-Ask keeps the existing single-recording/library retrieval boundary, playable
-citations, profile provenance, and durable provider-cost reservations. All four
-stages use the same ephemeral no-tools invocation and subscription reserve.
-The adapter remains profile-scoped and requires explicit cloud egress.
+Text stages (`correct`, `summarize`, `mind_map`, `ask`) run through the
+`ai-gateway` provider and select the semantic alias `sky-quality`; the gateway
+policy in `~/Projects/ai-gateway` decides which concrete model answers. No OpenAI or
+Codex text path carries a concrete default model. The sections below record how the
+workspace got here; the `codex-local` adapter they describe was removed on
+2026-10-03 (see the last section).
 
 GPT-6 is a text-generation selection, not an ASR, alignment, diarization or
 embedding model. Keep those stages on models that advertise the required
@@ -97,7 +97,7 @@ but not selected.
 - **Subscription reserve.** The gateway's only upstream is the same ChatGPT Pro
   account as `~/.codex`. Before every call the adapter reads that login's window
   through `codex app-server` (`account/rateLimits/read`) and refuses below 5% + 2%
-  headroom, exactly like `codex-local`. `quota_account_id` pins the login to the
+  headroom (the reserve the old `codex-local` adapter used). `quota_account_id` pins the login to the
   gateway's account; a different login fails closed. A reported secondary window
   is honoured when it is tighter.
 - **Provenance.** Stage attempts store the requested alias as `model` and the
@@ -127,3 +127,25 @@ snapshots carry `alias_resolution = {"revision": "2026-10-02", "model":
 "gpt-6.1-sol"}`. Model health for both aliases reported the shared window (37%
 remaining, 5% protected); the same connection with a 50% reserve refused before
 any request.
+
+## Codex CLI text backend removed (2026-10-03)
+
+With every text stage on the gateway, the `codex-local` text provider (one
+`codex exec` per call, defaulting to a concrete `gpt-6.1-sol` model) was a dead
+path that could bypass the alias policy. It was removed:
+
+- `[llm.codex_local]` and `codex-local` as an `[llm].provider` are gone; an old
+  `[llm.codex_local]` section in `config.toml` is ignored. Bootstrap no longer
+  catalogs a Codex model.
+- New connections, catalog models, profile selections and fallbacks cannot use
+  `codex-local`. A stage that still resolves to it fails visibly with a message to
+  select `llm:ai-gateway`.
+- Kept: the subscription-window read through `codex app-server`
+  (`account/rateLimits/read`), now `localplaud.llm.codex_quota.CodexQuotaReader`,
+  which the gateway reserve depends on. The historical `correct:codex-local`
+  connection, its catalog rows, profile versions up to 52 and all artifact and
+  stage-attempt provenance naming `codex-local` are unchanged and still load.
+
+The generic `openai` text provider stays (it backs OpenAI-compatible endpoints and
+the gateway adapter) but no longer defaults to `gpt-4o-mini`: the global
+`[llm.openai].model` and the OpenAI Cloud starting profile require an explicit model.

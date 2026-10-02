@@ -211,8 +211,8 @@ def test_ensure_generated_title_runs_at_transcript_boundary(monkeypatch, tmp_pat
     snapshot = {
         "stages": {
             "summarize": {
-                "provider_type": "codex-local",
-                "model": "gpt-5.6-sol",
+                "provider_type": "ai-gateway",
+                "model": "sky-quality",
             }
         }
     }
@@ -220,8 +220,8 @@ def test_ensure_generated_title_runs_at_transcript_boundary(monkeypatch, tmp_pat
     with session_scope() as session:
         row = session.get(PlaudFile, "fresh")
         assert row.generated_title == "口琴社暑期演出規劃"
-        assert row.generated_title_provider == "codex-local"
-        assert row.generated_title_model == "gpt-5.6-sol"
+        assert row.generated_title_provider == "ai-gateway"
+        assert row.generated_title_model == "sky-quality"
         assert row.generated_title_at is not None
 
 

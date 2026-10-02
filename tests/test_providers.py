@@ -123,26 +123,18 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
         second = bootstrap_default_profile(session, Settings())
         session.commit()
         assert second.id == first_id
-        assert len(list_connections(session)) == 7
-        assert len(list_models(session)) == 7
+        assert len(list_connections(session)) == 6
+        assert len(list_models(session)) == 6
         forced = next(
             model for model in list_models(session) if model["connection_key"] == "align:whisperx"
         )
         assert forced["model_key"] == "wav2vec2-auto"
         assert forced["capabilities"]["metadata"]["forced_alignment"] is True
-        codex = next(
-            model
-            for model in list_models(session)
-            if model["connection_key"] == "correct:codex-local"
+        # Bootstrap catalogs no concrete Codex/OpenAI text model.
+        assert all(
+            connection["provider_type"] != "codex-local"
+            for connection in list_connections(session)
         )
-        assert codex["model_key"] == "gpt-6.1-sol"
-        assert codex["capabilities"]["metadata"]["trusted_single_user_only"] is True
-        assert [stage["stage"] for stage in codex["capabilities"]["stages"]] == [
-            "correct",
-            "summarize",
-            "mind_map",
-            "ask",
-        ]
         profiles = list_profiles(session)
         assert len(profiles) == 1
         assert set(profiles[0]["stages"]) == {stage.value for stage in ProviderStage}
@@ -160,13 +152,18 @@ def test_models_bootstrap_and_services_are_idempotent(tmp_path):
         assert resolved["layers"][-1] == "recording:recording"
 
 
-def test_bootstrap_rejects_codex_as_a_general_llm_provider(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'codex-scope.db'}")
+def test_bootstrap_requires_an_explicit_openai_text_model(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'openai-model.db'}")
     Base.metadata.create_all(engine)
     settings = Settings()
-    settings.llm.provider = "codex-local"
-    with Session(engine) as session, pytest.raises(ValueError, match="profile-scoped"):
+    settings.llm.provider = "openai"
+    with Session(engine) as session, pytest.raises(ValueError, match="model is not set"):
         bootstrap_default_profile(session, settings)
+    settings.llm.openai.model = "explicit-model"
+    with Session(engine) as session:
+        profile = bootstrap_default_profile(session, settings)
+        selection = next(item for item in profile.stage_selections if item.stage == "summarize")
+        assert session.get(ModelCatalogEntry, selection.model_id).model_key == "explicit-model"
 
 
 def test_recording_embed_profile_change_durably_requeues_transcript_index(tmp_path):
@@ -297,146 +294,131 @@ def test_provider_mutation_rejects_active_dispatch_but_recovers_expired_lease(
         assert lock_recording_profile_change(session, "dispatch-recording") is not None
 
 
-def test_codex_local_is_rejected_outside_supported_text_stages(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'codex-profile-scope.db'}")
+def test_removed_codex_text_provider_keeps_history_but_cannot_be_selected(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'codex-retired.db'}")
     Base.metadata.create_all(engine)
-    broad_capability = _cap(ProviderStage.correct, ProviderStage.embed, egress=True).model_dump(
-        mode="json"
-    )
-    with Session(engine) as session:
-        with pytest.raises(ValueError, match="requires cloud execution with data egress"):
-            save_connection(
-                session,
-                {
-                    "key": "invalid:codex",
-                    "name": "Invalid Codex",
-                    "provider_type": "codex-local",
-                    "execution_target": "local",
-                    "data_egress": False,
-                    "config": {},
-                },
-            )
-        connection = ProviderConnection(
-            key="custom:codex",
-            name="Custom Codex",
-            provider_type="codex-local",
-            execution_target="cloud",
-            data_egress=True,
-        )
-        session.add(connection)
-        session.flush()
-        with pytest.raises(ValueError, match="supports only.*embed"):
-            save_model(
-                session,
-                {
-                    "connection_id": connection.id,
-                    "model_key": "gpt-test",
-                    "display_name": "gpt-test",
-                    "capabilities": broad_capability,
-                    "enabled": True,
-                },
-            )
-        correction_only_but_local = _cap(ProviderStage.correct).model_dump(mode="json")
-        with pytest.raises(ValueError, match="requires cloud execution with data egress"):
-            save_model(
-                session,
-                {
-                    "connection_id": connection.id,
-                    "model_key": "gpt-test",
-                    "display_name": "gpt-test",
-                    "capabilities": correction_only_but_local,
-                    "enabled": True,
-                },
-            )
-
-    capability_catalog = {
-        ("custom:codex", "gpt-test"): broad_capability,
-        ("local", "summary"): _cap(ProviderStage.embed),
-    }
-    connections = {
-        "custom:codex": {
-            "provider_type": "codex-local",
-            "execution_target": "cloud",
-            "data_egress": True,
-        },
-        "local": {
-            "provider_type": "ollama",
-            "execution_target": "local",
-            "data_egress": False,
-        },
-    }
-    primary = {"stages": {"embed": {"connection": "custom:codex", "model": "gpt-test"}}}
-    with pytest.raises(ResolutionError, match="supports only.*embed"):
-        resolve_profile([primary], capability_catalog, connections)
-
-    fallback = {
-        "stages": {"embed": {"connection": "local", "model": "summary"}},
-        "policy": {
-            "fallback_policy": {
-                "stages": {"embed": [{"connection": "custom:codex", "model": "gpt-test"}]}
-            }
-        },
-    }
-    with pytest.raises(ResolutionError, match="supports only.*embed"):
-        resolve_profile([fallback], capability_catalog, connections)
-
-    supported_capability = _cap(
+    text_capability = _cap(
         ProviderStage.correct,
         ProviderStage.summarize,
         ProviderStage.mind_map,
         ProviderStage.ask,
         egress=True,
     ).model_dump(mode="json")
-    supported = resolve_profile(
-        [
-            {
-                "stages": {
-                    "summarize": {
-                        "connection": "custom:codex",
-                        "model": "gpt-supported",
-                    },
-                    "ask": {
-                        "connection": "custom:codex",
-                        "model": "gpt-supported",
-                    },
-                    "mind_map": {
-                        "connection": "custom:codex",
-                        "model": "gpt-supported",
-                    },
-                }
-            }
-        ],
-        {("custom:codex", "gpt-supported"): supported_capability},
-        connections,
-    )
-    supported_snapshot = supported.to_dict()
-    assert supported_snapshot["stages"]["summarize"]["provider_type"] == "codex-local"
-    assert supported_snapshot["stages"]["mind_map"]["model"] == "gpt-supported"
-
-    assert supported_snapshot["stages"]["ask"]["provider_type"] == "codex-local"
-    ask_settings = _settings_for_stage(Settings(), supported_snapshot, "ask")
-    assert ask_settings.llm.codex_local.model == "gpt-supported"
-    assert ask_settings.llm.provider == "codex-local"
-
-    lied_capability = _cap(ProviderStage.correct).model_dump(mode="json")
-    correction = {
-        "policy": {"no_egress": True},
-        "stages": {"correct": {"connection": "custom:codex", "model": "gpt-correction"}},
-    }
-    with pytest.raises(ResolutionError, match="no-egress"):
-        resolve_profile(
-            [correction],
-            {("custom:codex", "gpt-correction"): lied_capability},
-            connections,
+    with Session(engine) as session:
+        bootstrap_default_profile(session, Settings())
+        # A deployed database keeps the historical connection, model and profile.
+        connection = ProviderConnection(
+            key="correct:codex-local",
+            name="Codex CLI (experimental)",
+            provider_type="codex-local",
+            execution_target="cloud",
+            data_egress=True,
         )
+        session.add(connection)
+        session.flush()
+        model = ModelCatalogEntry(
+            connection_id=connection.id,
+            model_key="gpt-6.1-sol",
+            display_name="Codex gpt-6.1-sol (experimental)",
+            capabilities=text_capability,
+        )
+        session.add(model)
+        session.flush()
+        old = ExecutionProfile(key="old-codex", name="Old Codex", version=1)
+        old.stage_selections.append(
+            ProfileStageSelection(
+                stage="summarize", connection_id=connection.id, model_id=model.id, options={}
+            )
+        )
+        session.add(old)
+        session.flush()
+
+        listed = next(item for item in list_profiles(session) if item["key"] == "old-codex")
+        assert listed["stages"]["summarize"]["connection"] == "correct:codex-local"
+        assert any(item["model_key"] == "gpt-6.1-sol" for item in list_models(session))
+        # Editing the historical rows (for example disabling them) stays possible.
+        save_connection(session, {"name": "Codex CLI (removed)"}, connection.id)
+        save_model(session, {"enabled": False}, model.id)
+
+        with pytest.raises(ValueError, match="codex-local text provider was removed"):
+            save_connection(
+                session,
+                {
+                    "key": "custom:codex",
+                    "name": "Custom Codex",
+                    "provider_type": "codex-local",
+                    "execution_target": "cloud",
+                    "data_egress": True,
+                    "config": {},
+                },
+            )
+        with pytest.raises(ValueError, match="codex-local text provider was removed"):
+            save_model(
+                session,
+                {
+                    "connection_id": connection.id,
+                    "model_key": "gpt-new",
+                    "display_name": "gpt-new",
+                    "capabilities": text_capability,
+                },
+            )
+        with pytest.raises(ValueError, match="codex-local text provider was removed"):
+            create_profile_version(
+                session,
+                {
+                    "key": "new-codex",
+                    "name": "New Codex",
+                    "stages": {
+                        "summarize": {"connection": "correct:codex-local", "model": "gpt-6.1-sol"}
+                    },
+                },
+            )
+        default = next(item for item in list_profiles(session) if item["is_system_default"])
+        with pytest.raises(ValueError, match="codex-local text provider was removed"):
+            create_profile_version(
+                session,
+                {
+                    "key": "codex-fallback",
+                    "name": "Codex fallback",
+                    "stages": {
+                        stage: {"connection": item["connection"], "model": item["model"]}
+                        for stage, item in default["stages"].items()
+                    },
+                    "fallback_policy": {
+                        "stages": {
+                            "summarize": [
+                                {"connection": "correct:codex-local", "model": "gpt-6.1-sol"}
+                            ]
+                        }
+                    },
+                },
+            )
 
 
-def test_runtime_projection_rejects_codex_non_text_snapshot():
+def test_historical_codex_snapshot_fails_visibly_at_dispatch():
+    from localplaud.llm.base import LLMUnavailable, build_llm
+
+    snapshot = {
+        "stages": {
+            "summarize": {
+                "connection": "correct:codex-local",
+                "provider_type": "codex-local",
+                "model": "gpt-6.1-sol",
+                "configuration": {"polish_chunk_chars": 8000, "timeout_seconds": 1800},
+            }
+        }
+    }
+    selected = _settings_for_stage(Settings(), snapshot, "summarize")
+    with pytest.raises(LLMUnavailable, match="select the ai-gateway"):
+        build_llm(selected.llm)
+
+
+def test_runtime_projection_rejects_gateway_non_text_snapshot():
     snapshot = {
         "stages": {
             "embed": {
-                "connection": "custom:codex",
-                "provider_type": "codex-local",
+                "connection": "llm:ai-gateway",
+                "provider_type": "ai-gateway",
                 "model": "gpt-test",
             }
         }
@@ -450,9 +432,9 @@ def test_runtime_projection_revalidates_provider_chunk_budget(invalid_budget):
     snapshot = {
         "stages": {
             "correct": {
-                "connection": "correct:codex-local",
-                "provider_type": "codex-local",
-                "model": "gpt-test",
+                "connection": "llm:ai-gateway",
+                "provider_type": "ai-gateway",
+                "model": "sky-quality",
                 "configuration": {"polish_chunk_chars": invalid_budget},
             }
         }
@@ -747,7 +729,7 @@ def test_partial_default_profile_reuses_deployed_connections_and_fills_all_stage
         assert {item.stage for item in upgraded.stage_selections} == {
             stage.value for stage in ProviderStage
         }
-        assert session.query(ProviderConnection).count() == 6
+        assert session.query(ProviderConnection).count() == 5
         assert {item.connection.key for item in upgraded.stage_selections} == {
             "mlx-whisper",
             "pyannote",
@@ -1191,7 +1173,7 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
         model_health = client.post(f"/api/providers/models/{model.json()['id']}/health")
         assert model_health.json()["status"] == "healthy"
 
-        codex_connection = client.post(
+        rejected_codex = client.post(
             "/api/providers/connections",
             json={
                 "key": "correct:test-codex",
@@ -1202,45 +1184,8 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
                 "config": {},
             },
         )
-        assert codex_connection.status_code == 201
-        codex_connection_id = codex_connection.json()["id"]
-        codex_capability = _cap(ProviderStage.correct, egress=True).model_dump(mode="json")
-        codex_model = client.post(
-            "/api/providers/models",
-            json={
-                "connection_id": codex_connection_id,
-                "model_key": "gpt-test",
-                "display_name": "Codex test",
-                "capabilities": codex_capability,
-            },
-        )
-        assert codex_model.status_code == 201
-        invalid_codex_capability = _cap(
-            ProviderStage.correct, ProviderStage.embed, egress=True
-        ).model_dump(mode="json")
-        rejected_codex_create = client.post(
-            "/api/providers/models",
-            json={
-                "connection_id": codex_connection_id,
-                "model_key": "gpt-invalid",
-                "display_name": "Invalid Codex",
-                "capabilities": invalid_codex_capability,
-            },
-        )
-        assert rejected_codex_create.status_code == 422
-        assert "supports only" in rejected_codex_create.json()["detail"]
-        rejected_codex_update = client.put(
-            f"/api/providers/models/{codex_model.json()['id']}",
-            json={
-                "connection_id": codex_connection_id,
-                "model_key": "gpt-test",
-                "display_name": "Codex test",
-                "capabilities": invalid_codex_capability,
-                "enabled": True,
-            },
-        )
-        assert rejected_codex_update.status_code == 422
-        assert "supports only" in rejected_codex_update.json()["detail"]
+        assert rejected_codex.status_code == 422
+        assert "codex-local text provider was removed" in rejected_codex.json()["detail"]
 
         profile = client.post(
             "/api/providers/profiles",
@@ -1261,8 +1206,6 @@ def test_provider_crud_api_rejects_secrets_and_validates_profiles(monkeypatch, t
         assert profile.status_code == 201
         profile_id = profile.json()["id"]
         assert client.delete(f"/api/providers/profiles/{profile_id}").status_code == 204
-        assert client.delete(f"/api/providers/models/{codex_model.json()['id']}").status_code == 204
-        assert client.delete(f"/api/providers/connections/{codex_connection_id}").status_code == 204
         assert client.delete(f"/api/providers/models/{model.json()['id']}").status_code == 204
         assert client.delete(f"/api/providers/connections/{connection_id}").status_code == 204
 

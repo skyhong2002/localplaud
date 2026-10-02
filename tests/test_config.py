@@ -59,21 +59,27 @@ def test_defaults_without_env(monkeypatch, tmp_path):
     assert s.pipeline.cloud_import_enabled is False
     assert s.pipeline.polish_chunk_chars == 12_000
     assert s.llm.ollama.polish_chunk_chars == 2_000
-    assert s.llm.codex_local.polish_chunk_chars == 8_000
-    assert s.llm.codex_local.summary_chunk_chars == 240_000
-    assert s.llm.codex_local.model == "gpt-6.1-sol"
-    assert s.llm.codex_local.reasoning_effort == "high"
-    assert s.llm.codex_local.quota_reserve_percent == 5
-    assert s.llm.codex_local.quota_check_timeout_seconds == 20
+    # Text models come from profiles or gateway aliases, never a concrete default.
+    assert s.llm.openai.model is None
+    assert s.llm.ai_gateway.model == "sky-quality"
+    assert s.llm.ai_gateway.quota_reserve_percent == 5
+    assert s.llm.ai_gateway.quota_check_timeout_seconds == 20
+    assert not hasattr(s.llm, "codex_local")
     assert s.diarize.provider == "pyannote"
     assert s.diarize.model == "pyannote/speaker-diarization-community-1"
 
 
-def test_codex_local_cannot_become_the_global_llm_provider(monkeypatch, tmp_path):
+def test_removed_codex_text_provider_is_not_a_valid_llm_provider(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("LOCALPLAUD_LLM__PROVIDER", "codex-local")
-    with pytest.raises(ValidationError, match="profile-scoped"):
+    with pytest.raises(ValidationError, match="ai-gateway"):
         Settings()
+
+
+def test_legacy_codex_local_section_is_ignored(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_LLM__CODEX_LOCAL__MODEL", "gpt-6.1-sol")
+    assert not hasattr(Settings().llm, "codex_local")
 
 
 def test_cloud_import_requires_explicit_migration_mode(monkeypatch, tmp_path):
