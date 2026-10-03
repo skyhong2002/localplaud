@@ -32,3 +32,18 @@ def render_markdown(value: str | None) -> Markup:
     # The cloud note panel explains the missing asset; never render a dead URI.
     value = re.sub(r"(?m)^\[\]\(plaud://image\?[^)\n]*\)[ \t]*$", "", value or "")
     return Markup(_MARKDOWN.render(value))
+
+
+def render_markdown_blocks(value: str | None) -> Markup:
+    """Render Markdown, tagging each top-level block with its source lines.
+
+    ``data-md="start:end"`` (zero-based, end exclusive) lets the in-place note
+    editor keep every block the user did not touch byte-for-byte, so only
+    edited blocks are re-serialized from the page.
+    """
+    source = re.sub(r"(?m)^\[\]\(plaud://image\?[^)\n]*\)[ \t]*$", "", value or "")
+    tokens = _MARKDOWN.parse(source)
+    for token in tokens:
+        if token.level == 0 and token.nesting in (0, 1) and token.map and token.block:
+            token.attrSet("data-md", f"{token.map[0]}:{token.map[1]}")
+    return Markup(_MARKDOWN.renderer.render(tokens, _MARKDOWN.options, {}))

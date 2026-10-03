@@ -563,7 +563,8 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert 'id="note-profile-select"' in r.text
     assert 'name="profile_id"' in r.text
     assert "data-summary-edit" in r.text
-    assert "edit_note=${data.id}" in r.text
+    # Editing a generated note opens its editable copy for in-place editing.
+    assert "focus_note=${data.id}" in r.text
     assert "base_version:Number(data.get('base_version'))" in r.text
     assert "workspaceNoteDirty" in r.text and "beforeunload" in r.text
     assert "Discard unsaved note changes?" in r.text
@@ -632,6 +633,12 @@ def test_workspace_generated_note_edit_reuses_copy_and_opens_inline_editor(
     assert f'data-note-edit="{first["id"]}"' in page.text
     assert "new URLSearchParams(location.search).get('edit_note')" in page.text
     assert 'form.elements.content_md.focus()' in page.text
+    # The rendered copy is itself the editor; blocks carry their source lines.
+    body = page.text.split("data-workspace-note-body", 1)[1].split("</div>", 1)[0]
+    assert f'data-note-editable="{first["id"]}"' in body
+    assert 'data-md="0:' in body
+    assert "/static/js/note-editor.js?v=" in page.text
+    assert "data-note-find" in page.text
     assert "url.searchParams.set('note',target)" in r.text
     assert "url.searchParams.set('note_id',target.slice(6))" in r.text
     assert "window.addEventListener('popstate',syncWorkspaceLocation" in r.text

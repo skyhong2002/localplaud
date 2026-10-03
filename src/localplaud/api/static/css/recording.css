@@ -798,3 +798,24 @@ fieldset.ws-speech-field > label { display: flex; align-items: center; flex-wrap
    connection:model ids; let them wrap inside the column on phones. */
 .ws-provenance-chips { flex-basis: 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; }
 .ws-provenance-chips .chip { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: left; height: auto; }
+
+/* In-place note editing: the rendered note is the editor. */
+.note-editable { cursor: text; margin: 0 -10px; padding: 6px 10px; border-radius: 10px; outline: none; transition: box-shadow .15s ease; }
+.note-editable:hover { box-shadow: inset 0 0 0 1px var(--c-border); }
+.note-editable:focus { box-shadow: inset 0 0 0 1px var(--c-accent-border); }
+.note-editable a { cursor: pointer; }
+.note-editable[contenteditable="false"] { cursor: default; opacity: .72; }
+.note-save-state:empty { display: none; }
+.note-save-state { font-size: 12px; align-self: center; margin-right: 4px; }
+.note-save-state[data-state="error"] { color: var(--c-warn); }
+
+/* Find and replace inside a note. */
+.note-find { scroll-margin-top: 64px; display: grid; gap: 7px; margin: 0 0 12px; padding: 9px 10px; border: 1px solid var(--c-border); border-radius: 12px; background: var(--c-surface); }
+.note-find-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.note-find-row .search-input { flex: 1 1 0; min-width: 0; }
+@media (max-width: 520px) { .note-find-row [data-find-replacement] { flex-basis: 100%; } }
+.note-find-row .btn { padding: 6px 10px; }
+.note-find-count { min-width: 3.5em; font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.note-find-case { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+::highlight(note-find) { background-color: rgba(255, 196, 0, .32); color: inherit; }
+::highlight(note-find-current) { background-color: #FFA64D; color: #1a1a1a; }

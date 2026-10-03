@@ -73,6 +73,7 @@ from ..db.session import init_db, session_scope
 from ..error_redaction import sanitize_error
 from ..i18n import SUPPORTED_LOCALES, catalog, translator
 from ..markdown import render_markdown as _render_markdown
+from ..markdown import render_markdown_blocks as _render_markdown_blocks
 from ..note_history import content_fingerprint, restore_summary_version
 from ..preferences import (
     get_workspace_preferences,
@@ -398,6 +399,7 @@ templates.env.filters["dt"] = _fmt_dt
 templates.env.filters["dur"] = _fmt_dur
 templates.env.filters["mmss"] = _mmss
 templates.env.filters["markdown"] = _render_markdown
+templates.env.filters["markdown_blocks"] = _render_markdown_blocks
 
 
 def _static_asset_version(*names: str) -> str:
@@ -413,7 +415,7 @@ def _static_asset_version(*names: str) -> str:
 
 
 templates.env.globals["workspace_asset_version"] = _static_asset_version(
-    "css/recording.css", "js/workspace.js"
+    "css/recording.css", "js/workspace.js", "js/note-editor.js"
 )
 
 _NOTE_ASSET_NAME = re.compile(r"[0-9a-f]{16}\.(?:png|jpe?g|gif|webp)")
