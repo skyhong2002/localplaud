@@ -15,7 +15,10 @@ retained. Inputs that hit the generation limit are bisected and retried without
 repeating successful regions; the split history is recorded. Private ASR chunk
 checkpoints in `data/speech-checkpoints` are keyed by audio bytes and configuration,
 so a worker restart can reuse completed decoding. These files contain transcript
-text and must remain private alongside the other local recording artifacts. Irreducible token
+text and must remain private alongside the other local recording artifacts. When an isolated Qwen or Nemotron process fails, the stage error stays
+sanitized to the exception name, and the tail of that process's private log is kept
+owner-only under `data/speech-runtime-failures` on the machine that ran it (newest 20),
+so the real cause can be read there without exposing transcript text in the Web App. Irreducible token
 limits or incomplete alignment fail the stage rather than storing partial text.
 Original audio is unchanged; this does not create a shortened playback file.
 

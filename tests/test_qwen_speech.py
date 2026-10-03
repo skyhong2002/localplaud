@@ -17,7 +17,10 @@ def test_runtime_dependency_errors_are_actionable_without_private_logs():
     assert "requires soynlp for Korean" in runtime_error("qwen", known)
     assert "rebuild" in runtime_error("qwen", known)
     assert "nagisa" in runtime_error("qwen", ModuleNotFoundError(name="nagisa"))
-    assert runtime_error("qwen", ImportError("private transcript")) == "qwen runtime failed: ImportError"
+    assert (
+        runtime_error("qwen", ImportError("private transcript"))
+        == "qwen runtime failed: ImportError"
+    )
     assert runtime_error("qwen", ValueError("secret/path")) == "qwen runtime failed: ValueError"
 
 
@@ -392,10 +395,37 @@ def test_unsupported_alignment_language_preserves_asr_and_reports_degraded():
 
 def test_checkpoint_reuses_empty_speech_output(tmp_path):
     from localplaud.asr.speech_checkpoint import SpeechCheckpoint
-    audio = tmp_path/'silence.wav'
-    audio.write_bytes(b'silence')
-    cfg = AsrConfig(provider='qwen').model_dump(mode='json')
-    cfg['qwen']['checkpoint_dir'] = str(tmp_path/'cache')
-    checkpoint = SpeechCheckpoint(audio,cfg)
-    checkpoint.write(0,1,{'transcription':'','language':None})
-    assert checkpoint.read(0,1) == {'transcription':'','language':None}
+
+    audio = tmp_path / "silence.wav"
+    audio.write_bytes(b"silence")
+    cfg = AsrConfig(provider="qwen").model_dump(mode="json")
+    cfg["qwen"]["checkpoint_dir"] = str(tmp_path / "cache")
+    checkpoint = SpeechCheckpoint(audio, cfg)
+    checkpoint.write(0, 1, {"transcription": "", "language": None})
+    assert checkpoint.read(0, 1) == {"transcription": "", "language": None}
+
+
+def test_failed_speech_process_keeps_private_runtime_log(monkeypatch, tmp_path):
+    import os
+    import subprocess
+
+    from localplaud.asr import qwen_provider
+
+    def fake_run(args, *, stdout, stderr, timeout, check):
+        stdout.write("Traceback\nRuntimeError: real cause 你好\n")
+        return subprocess.CompletedProcess(args, 1)
+
+    monkeypatch.setattr(qwen_provider.subprocess, "run", fake_run)
+    monkeypatch.setattr(qwen_provider, "FAILURE_LOG_DIR", tmp_path / "failures")
+    monkeypatch.setattr(qwen_provider, "FAILURE_LOG_KEEP", 2)
+    for _ in range(3):
+        with pytest.raises(AsrError) as excinfo:
+            qwen_provider.run_speech_process("nemotron", Path("raw.wav"), {}, "", 10)
+    message = str(excinfo.value)
+    assert message.startswith("nemotron GPU process failed (exit 1); runtime log kept")
+    assert "real cause" not in message
+    logs = sorted((tmp_path / "failures").glob("*.log"))
+    assert len(logs) == 2
+    assert "RuntimeError: real cause 你好" in logs[-1].read_text()
+    assert oct(os.stat(logs[-1]).st_mode & 0o777) == "0o600"
+    assert oct(os.stat(tmp_path / "failures").st_mode & 0o777) == "0o700"
