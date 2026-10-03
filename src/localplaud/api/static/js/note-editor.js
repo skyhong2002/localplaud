@@ -19,6 +19,7 @@
   const appView = document.getElementById('app-view');
   appView?.addEventListener('htmx:beforeCleanupElement', event => { if (event.target === appView) controller.abort(); }, { signal });
   const on = (target, type, handler, options = {}) => target?.addEventListener(type, handler, { signal, ...options });
+  const fileId = JSON.parse(document.getElementById('ws-config')?.textContent || '{}').fileId || location.pathname.split('/')[2];
 
   /* ---------- Markdown serialization of edited blocks ---------- */
 
@@ -143,13 +144,19 @@
   const editors = new Map();
   const panelOf = body => body.closest('.note-panel');
 
+  // A generated note is never changed in place: its first edit creates (once)
+  // the recording's editable copy of it, and every save goes to that copy.
+  class ExistingCopy extends Error {}
   const createEditor = body => {
-    const id = body.dataset.noteEditable;
+    let id = body.dataset.noteEditable || null;
+    const summaryId = body.dataset.summaryEditable;
     const panel = panelOf(body);
     const form = panel.querySelector('[data-workspace-note-form]');
     const status = panel.querySelector('[data-note-save-state]');
     const sources = new WeakMap();
-    let version = Number(body.dataset.noteVersion);
+    const originalHTML = body.innerHTML;
+    let version = Number(body.dataset.noteVersion || 0);
+    let title = form?.elements.title.value || '';
     // The exact stored source: a <textarea> would drop a leading newline and
     // shift every block's line range.
     let lastSaved = JSON.parse(panel.querySelector('script[data-note-markdown]')?.textContent || 'null') ?? form.elements.content_md.value;
@@ -188,7 +195,7 @@
     const request = (content, baseVersion, keepalive = false) => fetch(`/api/notes/${id}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: form.elements.title.value, content_md: content, base_version: baseVersion }),
+      body: JSON.stringify({ title: form ? form.elements.title.value : title, content_md: content, base_version: baseVersion }),
       keepalive,
       credentials: 'same-origin',
     });
@@ -198,8 +205,23 @@
       status.textContent = text;
       status.dataset.state = state;
     };
+    const adoptCopy = async () => {
+      const response = await fetch(`/api/files/${encodeURIComponent(fileId)}/summaries/${summaryId}/editable-copy`, { method: 'POST', credentials: 'same-origin' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof result.detail === 'string' ? tr(result.detail) : tr('Could not save'));
+      // An existing copy may hold earlier edits; never overwrite it with this text.
+      if (result.content_md !== lastSaved) throw new ExistingCopy(String(result.id));
+      id = String(result.id);
+      version = result.version;
+      title = result.title;
+      const url = new URL(location.href);
+      url.searchParams.delete('note');
+      url.searchParams.set('note_id', id);
+      history.replaceState(history.state, '', url);
+    };
     const syncChrome = () => {
       body.dataset.noteVersion = String(version);
+      if (!form) return;
       form.elements.base_version.value = String(version);
       form.elements.content_md.value = lastSaved;
       form.dataset.originalContent = lastSaved;
@@ -220,6 +242,7 @@
       setStatus(tr('Saving…'), 'saving');
       saving = (async () => {
         try {
+          if (!id) await adoptCopy();
           const response = await request(content, version);
           const result = await response.json().catch(() => ({}));
           if (response.ok) {
@@ -238,6 +261,17 @@
           }
           throw new Error(typeof result.detail === 'string' ? result.detail : tr('Could not save'));
         } catch (error) {
+          if (error instanceof ExistingCopy) {
+            conflict = true;
+            body.innerHTML = originalHTML;
+            body.contentEditable = 'false';
+            setStatus(tr('This note already has an edited copy.'), 'error');
+            const link = document.createElement('a');
+            link.href = `/file/${encodeURIComponent(fileId)}?tab=notes&note_id=${encodeURIComponent(error.message)}`;
+            link.textContent = tr('Open it');
+            status?.append(' ', link);
+            return;
+          }
           dirty = true;
           failed = true;
           setStatus(tr('Could not save. Retrying…'), 'error');
@@ -310,7 +344,7 @@
     return editor;
   };
 
-  document.querySelectorAll('[data-note-editable]').forEach(createEditor);
+  document.querySelectorAll('[data-note-editable], [data-summary-editable]').forEach(createEditor);
 
   // Markdown source editing reads the form, so finish any in-place save first.
   on(document, 'click', async event => {

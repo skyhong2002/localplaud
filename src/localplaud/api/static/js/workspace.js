@@ -1102,7 +1102,6 @@
       openFind();
     }
   });
-  on(document.getElementById('recording-title-display'), 'click', () => document.getElementById('edit-recording-title')?.click());
 
   // Keyboard shortcut reference.
   on(document.getElementById('player-shortcuts'), 'click', () => {

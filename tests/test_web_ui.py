@@ -562,7 +562,8 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert 'id="manual-note-backdrop"' in r.text
     assert 'id="note-profile-select"' in r.text
     assert 'name="profile_id"' in r.text
-    assert "data-summary-edit" in r.text
+    # Generated notes are edited in place; the first edit creates the copy.
+    assert "data-summary-editable=" in r.text
     # Editing a generated note opens its editable copy for in-place editing.
     assert "focus_note=${data.id}" in r.text
     assert "base_version:Number(data.get('base_version'))" in r.text
@@ -1019,15 +1020,16 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert "zoom:var(--mm-scale)" in r_assets
     assert 'id="subscription-independence"' in r_assets
     assert "Subscription independence" in r_assets
-    assert 'data-summary-edit=' in r_assets
+    assert 'data-summary-editable=' in r_assets
     assert 'id="open-share"' in r_assets and 'id="share-backdrop" data-file-id="r1" hidden' in r_assets
     assert 'id="generate-notes"' in r_assets
     assert "Choose a template, then generate notes and mind map." not in r.text
     assert 'id="generate-backdrop"' not in r.text  # transcript exists — no pre-generation dialog
     assert '<details class="speaker-pill">' in r_assets
     assert '<form class="speaker-editor" method="post" action="/file/r1/speakers">' in r_assets
-    assert '<h1 id="recording-title-display" title="Weekly Sync">Weekly Sync</h1>' in r_assets
-    assert 'id="recording-title-display"' in r_assets and 'id="edit-recording-title"' in r_assets
+    assert '<h1 id="recording-title-display" class="title-editable" title="Weekly Sync" contenteditable="plaintext-only" role="textbox" aria-label="Recording title" spellcheck="false" data-title-saved="Weekly Sync">Weekly Sync</h1>' in r_assets
+    # The title is edited in place; there is no separate edit button or form.
+    assert 'id="edit-recording-title"' not in r_assets and 'id="recording-title-form"' not in r_assets
     assert "Transcript polished." in r_assets and "View raw transcript" in r_assets
     assert '<p class="seg-text">' in c.get("/file/r1/transcript-page").text
     raw = c.get("/file/r1?view=raw")
@@ -1134,7 +1136,6 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
     assert "if(label)label.textContent=tr('Importing…')" in page.text
     assert "out.textContent=tr('Checking recording signals…')" in page.text
     for text in (
-        "儲存標題",
         "繼續處理",
         "全部重建",
         "本機資料",
@@ -1922,8 +1923,8 @@ def test_recording_reading_and_share_entrypoints(monkeypatch, tmp_path):
     page = client.get("/file/r1")
     assert page.status_code == 200
     html = page.text
-    assert re.search(r'<h2 class="recording-reading-title"[^>]*>Weekly Sync</h2>', html)
-    assert 'class="recording-reading-title" title="Weekly Sync"' in html
+    assert re.search(r'<h2 class="recording-reading-title[^"]*"[^>]*>Weekly Sync</h2>', html)
+    assert 'class="recording-reading-title title-editable" title="Weekly Sync" contenteditable="plaintext-only"' in html
     disclosure = re.search(r'<details[^>]+id="note-generation-settings"[^>]*>', html)
     assert disclosure and 'open' not in disclosure.group()
     assert 'id="menu-edit-title"' in html
