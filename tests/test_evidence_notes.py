@@ -1,6 +1,7 @@
 """Contract tests with scripted completions; these do not prove model accuracy."""
 
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -586,3 +587,148 @@ def test_quote_verification_ignores_chinese_script_but_not_wording():
     assert _quote_matches("對，等等這樣子。", source)
     assert _quote_matches("对，等等这样子。", source)
     assert not _quote_matches("對，然後這樣子。", source)
+
+
+# --------------------------------------------------------------------------- #
+# Overlapping calls: faster, never different
+# --------------------------------------------------------------------------- #
+
+
+def many_source_transcript(count=12):
+    return Transcript(
+        segments=[
+            Segment(
+                f"事件 {i} 發生在第 {i} 週，" + "細節" * 280,
+                i * 10,
+                i * 10 + 9,
+                speaker=f"S{i % 2}",
+            )
+            for i in range(count)
+        ]
+    )
+
+
+def parallel_settings(parallelism):
+    return SimpleNamespace(
+        pipeline=SimpleNamespace(
+            note_evidence_chunk_chars=24000,
+            note_repair_attempts=2,
+            note_parallelism=parallelism,
+        ),
+        llm=SimpleNamespace(provider="fake"),
+    )
+
+
+class Concurrent(Fake):
+    """Declares overlap safe and records the highest number of calls in flight."""
+
+    supports_parallel_calls = True
+
+    def __init__(self, *, stagger=True, **kwargs):
+        super().__init__(**kwargs)
+        import threading
+
+        self._guard = threading.Lock()
+        self.in_flight = 0
+        self.peak = 0
+        self.stagger = stagger
+
+    def complete(self, prompt, **kwargs):
+        import time
+
+        with self._guard:
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+        try:
+            if self.stagger:
+                # Earlier chunks finish last so out-of-order completion is real.
+                digits = [int(x) for x in re.findall(r"事件 (\d+) 發生", prompt)]
+                time.sleep(0.05 * (12 - (digits[0] if digits else 0)) / 12 + 0.01)
+            return super().complete(prompt, **kwargs)
+        finally:
+            with self._guard:
+                self.in_flight -= 1
+
+
+def run_notes(llm, parallelism, **kwargs):
+    return generate_evidence_notes(
+        many_source_transcript(), parallel_settings(parallelism), llm, TEMPLATE, **kwargs
+    )
+
+
+def test_parallel_notes_match_sequential_notes_exactly():
+    sequential = run_notes(Concurrent(stagger=False), 1)
+    parallel_llm = Concurrent()
+    parallel = run_notes(parallel_llm, 4)
+    assert parallel_llm.peak >= 2
+    assert sequential["content_md"] == parallel["content_md"]
+    assert sequential["title"] == parallel["title"]
+    assert sequential["tags"] == parallel["tags"]
+    seq_facts = sequential["template_snapshot"]["evidence"]["facts"]
+    par_facts = parallel["template_snapshot"]["evidence"]["facts"]
+    assert [f["id"] for f in par_facts] == [f"f{i + 1}" for i in range(len(par_facts))]
+    assert seq_facts == par_facts
+    assert (
+        sequential["template_snapshot"]["evidence"]["chunks"]
+        == (parallel["template_snapshot"]["evidence"]["chunks"])
+    )
+    for key in ("chunks", "requests", "input_chars", "output_chars"):
+        assert sequential["coverage"][key] == parallel["coverage"][key]
+    assert sequential["coverage"]["chunks"] >= 3
+
+
+def test_parallelism_is_bounded_and_needs_provider_opt_in():
+    llm = Concurrent()
+    run_notes(llm, 2)
+    assert 2 <= llm.peak <= 2
+
+    class SingleServer(Concurrent):
+        supports_parallel_calls = False
+
+    single = SingleServer()
+    run_notes(single, 6)
+    assert single.peak == 1
+
+
+def test_progress_does_not_move_backwards_while_chunks_finish_out_of_order():
+    seen = []
+    run_notes(Concurrent(), 4, progress=seen.append)
+    last = {}
+    for event in seen:
+        assert event["current"] >= last.get(event["phase"], 0), event
+        last[event["phase"]] = event["current"]
+    assert {"extract", "audit", "plan", "draft", "verify"} <= set(last)
+
+
+def test_unresolved_objections_are_reported_in_source_order_when_parallel():
+    class Doubtful(Concurrent):
+        def complete(self, prompt, **kwargs):
+            result = super().complete(prompt, **kwargs)
+            if "逐項完整掃描" in prompt:
+                value = json.loads(result)
+                chunk = re.search(r"事件 (\d+) 發生", prompt)
+                value["issues"] = [f"疑點 {chunk.group(1)}"] if chunk else []
+                return json.dumps(value, ensure_ascii=False)
+            return result
+
+    result = run_notes(Doubtful(), 4)
+    unresolved = result["coverage"]["unresolved_review_issues"]
+    batches = [item["batch"] for item in unresolved if item["phase"] == "audit"]
+    assert batches == sorted(batches) and len(batches) >= 3
+    assert result["coverage"]["review_status"] == "accepted_with_issues"
+
+
+def test_failure_in_one_parallel_chunk_propagates_and_keeps_finished_work(tmp_path):
+    class Breaks(Concurrent):
+        def complete(self, prompt, **kwargs):
+            if "事件 7 發生" in prompt and prompt.startswith("從 target"):
+                raise RuntimeError("transport outage")
+            return super().complete(prompt, **kwargs)
+
+    with pytest.raises(RuntimeError, match="transport outage"):
+        run_notes(Breaks(), 4, checkpoint_dir=tmp_path)
+    assert list(tmp_path.glob("*.json"))
+    resumed = Concurrent()
+    result = run_notes(resumed, 4, checkpoint_dir=tmp_path)
+    assert result["coverage"]["cache_hits"] > 0
+    assert result["title"]

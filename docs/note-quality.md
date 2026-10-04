@@ -59,7 +59,17 @@ audio verification and can share the generator's mistakes.
 note_quality = "evidence"       # default; "legacy" explicitly selects the v1 algorithm
 note_evidence_chunk_chars = 120000 # complete request budget, capped by provider capability
 note_repair_attempts = 2        # 0..2; never an unbounded repair loop
+note_parallelism = 3            # 1..8; only for providers that declare overlapping calls safe
 ```
+
+Evidence chunks, plan groups and draft batches are independent calls, so they run up to
+`note_parallelism` at a time on providers that declare `supports_parallel_calls` (the
+OpenAI-compatible clients, including the AI gateway). Results are merged in source order,
+so fact ids, citations, ledger and note text are identical to a sequential run; only wall
+time changes, and total subscription use does not. A local single-model server (Ollama, the
+remote GPU worker) stays sequential. The gateway client reuses a subscription reserve
+reading for 10 seconds across overlapping calls and never caches a failed or exhausted
+reading.
 
 Review objections that survive the bounded repairs do not fail the stage. The
 pipeline is designed to finish without a person: the best extraction or draft is

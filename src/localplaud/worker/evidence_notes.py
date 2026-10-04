@@ -6,13 +6,16 @@ No provider is constructed here: the caller's resolved, policy-checked LLM is us
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import os
 import re
 import tempfile
+import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ..llm.base import LLMOutputInvalid
@@ -261,6 +264,33 @@ _DRAFT_TASK = "撰寫各 heading 對應的筆記段落；本批所有事實必�
 _VERIFY_TASK = "比對草稿與原始支持來源及事實，不只比對引用。檢查遺漏、否定/條件翻轉、事件數字錯配、虛構負責人/期限、示範與真正決議、錯誤引用，以及寫入 support 中但未列在本批 fact 的獨立資訊；即使原文有該資訊，也不可在這批搶先重複撰寫。回 issues 與 warnings，沒有問題時兩者為空。\n"
 
 
+def _run_ordered(items, work, parallelism):
+    """Run ``work(index, item)`` for every item; results keep item order.
+
+    Items are independent model calls, so overlapping them only shortens wall
+    time. The first failure in item order is raised after running calls finish,
+    and the durable per-call checkpoints keep whatever already completed.
+    """
+    items = list(items)
+    if parallelism <= 1 or len(items) <= 1:
+        return [work(index, item) for index, item in enumerate(items)]
+    with ThreadPoolExecutor(
+        max_workers=min(parallelism, len(items)), thread_name_prefix="evidence-notes"
+    ) as pool:
+        # Each task runs in a copy of the caller's context so usage capture and
+        # the processing claim keep applying inside the worker threads.
+        futures = [
+            pool.submit(contextvars.copy_context().run, work, index, item)
+            for index, item in enumerate(items)
+        ]
+        try:
+            return [future.result() for future in futures]
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+
+
 class _Calls:
     def __init__(self, settings, llm, context, directory, progress):
         self.llm, self.directory, self.progress = llm, directory, progress
@@ -270,10 +300,43 @@ class _Calls:
         self.context = context or {}
         self.requests = self.input_chars = self.output_chars = self.cache_hits = 0
         self.phases = {}
-        self.last_paths = {}
+        # Counters, phase usage and progress are shared by overlapping calls.
+        self._lock = threading.Lock()
+        self._local = threading.local()
+        self._progress_high = {}
         if directory is not None:
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(directory, 0o700)
+
+    @property
+    def last_paths(self):
+        """Checkpoint path of this thread's latest call per phase."""
+        paths = getattr(self._local, "paths", None)
+        if paths is None:
+            paths = self._local.paths = {}
+        return paths
+
+    def _phase(self, phase):
+        return self.phases.setdefault(
+            phase,
+            {
+                "provider": self.provider,
+                "model": self.model,
+                "requests": 0,
+                "cache_hits": 0,
+                "latency_ms": 0,
+            },
+        )
+
+    def _report(self, phase, current, total):
+        """Progress never moves backwards while chunks finish out of order."""
+        if not self.progress:
+            return
+        with self._lock:
+            if current < self._progress_high.get(phase, 0):
+                return
+            self._progress_high[phase] = current
+            self.progress({"phase": phase, "current": current, "total": total})
 
     def repair_path(self, phase, inputs):
         if self.directory is None:
@@ -312,39 +375,18 @@ class _Calls:
 
     def reuse_reviewed(self, phases, current, total):
         for phase in phases:
-            usage = self.phases.setdefault(
-                phase,
-                {
-                    "provider": self.provider,
-                    "model": self.model,
-                    "requests": 0,
-                    "cache_hits": 0,
-                    "latency_ms": 0,
-                },
-            )
-            usage["cache_hits"] += 1
-            self.cache_hits += 1
-            if self.progress:
-                self.progress({"phase": phase, "current": current, "total": total})
+            with self._lock:
+                self._phase(phase)["cache_hits"] += 1
+                self.cache_hits += 1
+            self._report(phase, current, total)
 
     def call(self, phase, prompt, system, schema, validate, *, current=1, total=1, max_tokens=3000):
         started = time.monotonic()
-        phase_usage = self.phases.setdefault(
-            phase,
-            {
-                "provider": self.provider,
-                "model": self.model,
-                "requests": 0,
-                "cache_hits": 0,
-                "latency_ms": 0,
-            },
-        )
         system += "\n引用說話者或歸屬行動時保留來源完整 Speaker N 標籤，不翻譯、不重新編號、不推測人名或職稱。"
         metadata = {k: self.context[k] for k in ("recorded_at", "timezone") if k in self.context}
         if metadata:
             system += "\n錄音時間背景（相對日期仍保留原話，不推測期限）：" + _json(metadata)
-        if self.progress:
-            self.progress({"phase": phase, "current": current, "total": total})
+        self._report(phase, current, total)
         if self.budget is not None and len(prompt) + len(system) + len(_json(schema)) > self.budget:
             _fail(phase, "來源與 JSON 輸入超過模型容量，請提高 note_evidence_chunk_chars")
         key = _hash(
@@ -365,19 +407,22 @@ class _Calls:
         if path and path.is_file():
             try:
                 value = validate(json.loads(path.read_text(encoding="utf-8")))
-                self.cache_hits += 1
-                phase_usage["cache_hits"] += 1
+                with self._lock:
+                    self.cache_hits += 1
+                    self._phase(phase)["cache_hits"] += 1
                 return value
             except (ValueError, TypeError, KeyError, LLMOutputInvalid, json.JSONDecodeError):
                 pass
-        self.requests += 1
-        phase_usage["requests"] += 1
+        with self._lock:
+            self.requests += 1
+            self._phase(phase)["requests"] += 1
         raw = self.llm.complete(
             prompt, system=system, temperature=0.1, max_tokens=max_tokens, json_schema=schema
         )
-        phase_usage["latency_ms"] += round((time.monotonic() - started) * 1000)
-        self.input_chars += len(prompt) + len(system) + len(_json(schema))
-        self.output_chars += len(raw)
+        with self._lock:
+            self._phase(phase)["latency_ms"] += round((time.monotonic() - started) * 1000)
+            self.input_chars += len(prompt) + len(system) + len(_json(schema))
+            self.output_chars += len(raw)
         try:
             parsed = json.loads(raw)
         except (TypeError, json.JSONDecodeError):
@@ -723,6 +768,13 @@ def generate_evidence_notes(
         min(requested, advertised) if isinstance(advertised, int) and advertised > 0 else requested
     )
     repairs = max(0, int(getattr(pipeline, "note_repair_attempts", 2) or 0))
+    # Only providers that declare overlapping requests safe run concurrently; a
+    # single local model server would just queue them and risk request timeouts.
+    parallelism = (
+        max(1, int(getattr(pipeline, "note_parallelism", 1) or 1))
+        if getattr(llm, "supports_parallel_calls", False)
+        else 1
+    )
     calls = _Calls(settings, llm, context, checkpoint_dir, progress)
     calls.budget = budget
     parts, segment_count = _parts(transcript, budget)
@@ -800,7 +852,9 @@ def generate_evidence_notes(
     )
     coverage["review_warnings"] = []
     ledger = []
-    for i, scope in enumerate(chunks):
+
+    def extract_chunk(i, scope):
+        unresolved = False
         repair_path = calls.repair_path(
             "extract",
             [
@@ -876,8 +930,21 @@ def generate_evidence_notes(
                 # Bounded repairs are exhausted. Nobody is going to review this by
                 # hand, so publish the best extraction and carry the reviewer's
                 # remaining objections forward as visible caveats instead of
-                # leaving the recording without notes.
-                _accept_with_issues(coverage, "audit", i + 1, issues)
+                # leaving the recording without notes (recorded when merging).
+                unresolved = True
+        return {
+            "extracted": extracted,
+            "audit": audit,
+            "issues": list(issues),
+            "unresolved": unresolved,
+        }
+
+    for i, (scope, result) in enumerate(
+        zip(chunks, _run_ordered(chunks, extract_chunk, parallelism), strict=True)
+    ):
+        extracted, audit, issues = result["extracted"], result["audit"], result["issues"]
+        if result["unresolved"]:
+            _accept_with_issues(coverage, "audit", i + 1, issues)
         evidence["chunks"].append(
             {
                 "target_ids": [x["id"] for x in scope["target"]],
@@ -927,10 +994,10 @@ def generate_evidence_notes(
     # If the complete ledger cannot fit, plan bounded groups without dropping facts.
     plan_limit = max(256, budget - len(planning_system) - len(_json(PLAN_SCHEMA)) - 500)
     fact_groups = _batches(ledger, plan_limit)
-    plans = []
-    for i, group in enumerate(fact_groups):
+
+    def plan_group(i, group):
         prompt = "規劃這批全部事實。多批時可用接續段落；不要聲稱語意去重。\n" + _json(group)
-        plan = calls.call(
+        return calls.call(
             "plan",
             prompt,
             planning_system,
@@ -939,7 +1006,8 @@ def generate_evidence_notes(
             current=i + 1,
             total=len(fact_groups),
         )
-        plans.append(plan)
+
+    plans = _run_ordered(fact_groups, plan_group, parallelism)
     title = plans[0]["title"]
     if len(plans) > 1:
         from .title_policy import TITLE_INSTRUCTIONS
@@ -1004,7 +1072,9 @@ def generate_evidence_notes(
     batches = _batches(fact_items, batch_limit)
     coverage["draft_batches"] = len(batches)
     coverage["planned_sections"] = len(sections)
-    for bi, batch in enumerate(batches):
+
+    def draft_batch(bi, batch):
+        unresolved = False
         ids = {item["fact"]["id"] for item in batch}
         repair_path = calls.repair_path(
             "draft",
@@ -1068,7 +1138,13 @@ def generate_evidence_notes(
             if not issues:
                 break
             if attempt == repairs:
-                _accept_with_issues(coverage, "verify", bi + 1, issues)
+                unresolved = True
+        return {"draft": draft, "review": review, "issues": list(issues), "unresolved": unresolved}
+
+    for bi, result in enumerate(_run_ordered(batches, draft_batch, parallelism)):
+        draft, review = result["draft"], result["review"]
+        if result["unresolved"]:
+            _accept_with_issues(coverage, "verify", bi + 1, result["issues"])
         coverage["review_warnings"].extend(
             {"phase": "verify", "batch": bi + 1, "message": warning}
             for warning in review["warnings"]

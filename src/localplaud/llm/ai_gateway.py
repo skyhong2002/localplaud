@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -42,6 +44,8 @@ class AiGatewayLLM(OpenAILLM):
 
     def __init__(self, cfg: AiGatewayLlmConfig) -> None:
         super().__init__(cfg)  # type: ignore[arg-type]
+        self._reserve_lock = threading.Lock()
+        self._reserve_checked_at: float | None = None
 
     @property
     def summary_chunk_chars(self) -> int:
@@ -73,6 +77,17 @@ class AiGatewayLLM(OpenAILLM):
             expected_account_id=self.cfg.quota_account_id,
         )
 
+    _RESERVE_REUSE_SECONDS = 10.0
+
+    def _ensure_reserve_cached(self) -> None:
+        with self._reserve_lock:
+            checked = self._reserve_checked_at
+            if checked is not None and time.monotonic() - checked < self._RESERVE_REUSE_SECONDS:
+                return
+            self._reserve_checked_at = None
+            self._quota_reader()._ensure_quota_reserve()
+            self._reserve_checked_at = time.monotonic()
+
     def health(self) -> tuple[bool, str]:
         if not self.available():
             return False, "gateway base URL or client key is not configured"
@@ -95,8 +110,10 @@ class AiGatewayLLM(OpenAILLM):
     ) -> str:
         if not self.available():
             raise LLMUnavailable("AI gateway: base URL or client key is not configured")
-        # Fail closed before spending the shared subscription.
-        self._quota_reader()._ensure_quota_reserve()
+        # Fail closed before spending the shared subscription. A reading this
+        # fresh is reused so overlapping calls do not each start a Codex process;
+        # a failed or exhausted reading is never cached.
+        self._ensure_reserve_cached()
         try:
             import openai
         except ImportError as exc:
@@ -156,9 +173,7 @@ def alias_policy(path: str | None) -> dict:
     aliases = raw.get("aliases") if isinstance(raw, dict) else None
     policy = {
         "revision": raw.get("revision") if isinstance(raw, dict) else None,
-        "aliases": {
-            str(key): str(value) for key, value in (aliases or {}).items() if value
-        }
+        "aliases": {str(key): str(value) for key, value in (aliases or {}).items() if value}
         if isinstance(aliases, dict)
         else {},
     }

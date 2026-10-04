@@ -39,9 +39,7 @@ SCHEMA = {
 
 
 def _config(**updates) -> AiGatewayLlmConfig:
-    return AiGatewayLlmConfig(
-        api_key="client-key", base_url="http://gateway.test/v1", **updates
-    )
+    return AiGatewayLlmConfig(api_key="client-key", base_url="http://gateway.test/v1", **updates)
 
 
 def _fake_openai(monkeypatch, events=None, error=None):
@@ -139,8 +137,10 @@ def test_quota_login_must_report_the_configured_account():
     [
         (openai.APITimeoutError(request=httpx.Request("POST", "http://g")), LLMTimeout),
         (httpx.ReadTimeout("stalled"), LLMTimeout),
-        (openai.APIError("stream broke", request=httpx.Request("POST", "http://g"), body=None),
-         LLMTransientError),
+        (
+            openai.APIError("stream broke", request=httpx.Request("POST", "http://g"), body=None),
+            LLMTransientError,
+        ),
         (
             openai.RateLimitError(
                 "limit",
@@ -190,7 +190,9 @@ def test_profile_projection_uses_alias_and_secret_reference(monkeypatch):
     assert resolved.ai_gateway.api_key == "client-key"
     assert resolved.ai_gateway.timeout_seconds == 900
     with pytest.raises(ValueError, match="supports only"):
-        _settings_for_stage(Settings(), {"stages": {"embed": snapshot["stages"]["summarize"]}}, "embed")
+        _settings_for_stage(
+            Settings(), {"stages": {"embed": snapshot["stages"]["summarize"]}}, "embed"
+        )
 
 
 def _resolve(target, revision="r1"):
@@ -256,3 +258,41 @@ def test_reserve_uses_the_tighter_reported_window():
     assert CodexQuotaReader._remaining_from_rate_limit_result(result) == 5
     result["rateLimits"]["secondary"] = None
     assert CodexQuotaReader._remaining_from_rate_limit_result(result) == 60
+
+
+def test_fresh_quota_reading_is_shared_by_overlapping_calls_but_failures_never_are(monkeypatch):
+    import threading
+
+    calls, _clients = _fake_openai(
+        monkeypatch,
+        [SimpleNamespace(type="response.output_text.delta", delta='{"ok":true}'), _completed("m")],
+    )
+    remaining = {"value": 60}
+    reads: list[int] = []
+
+    def read(self):
+        reads.append(remaining["value"])
+        return remaining["value"]
+
+    monkeypatch.setattr(CodexQuotaReader, "_remaining_quota_percent", read)
+    provider = AiGatewayLLM(_config())
+    assert provider.supports_parallel_calls is True
+
+    threads = [threading.Thread(target=provider.complete, args=("text",)) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(calls) == 6 and len(reads) == 1
+
+    # A reading older than the reuse window is taken again, and an exhausted
+    # subscription blocks the very next call instead of being remembered as fine.
+    monkeypatch.setattr(AiGatewayLLM, "_RESERVE_REUSE_SECONDS", 0.0)
+    remaining["value"] = 7
+    with pytest.raises(LLMQuotaExhausted, match="reserve protected"):
+        provider.complete("text")
+    assert len(calls) == 6
+    monkeypatch.setattr(AiGatewayLLM, "_RESERVE_REUSE_SECONDS", 10.0)
+    with pytest.raises(LLMQuotaExhausted, match="reserve protected"):
+        provider.complete("text")
+    assert len(calls) == 6

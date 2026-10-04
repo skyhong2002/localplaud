@@ -86,6 +86,7 @@ summary_chunk_chars = 12000      # full transcript is hierarchically summarized 
 note_quality = "evidence"       # facts -> source review -> outline -> cited notes -> review
 note_evidence_chunk_chars = 120000 # also bounded by the selected provider's context
 note_repair_attempts = 2         # bounded repairs; unresolved reviewer objections are published as caveats
+note_parallelism = 3              # concurrent evidence chunks/drafts on gateway-style providers; output is identical to 1
 polish_chunk_chars = 12000       # contiguous segment context sent per correction call
 summary_template = "plaud-autopilot" # Plaud Web Autopilot; also: default | meeting | call | lecture | personal
 # "independent" (default) accepts only raw audio + metadata from Plaud and

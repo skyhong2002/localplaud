@@ -25,6 +25,8 @@ class OpenAILLM:
     any OpenAI-compatible server."""
 
     name = "openai"
+    # Each call builds its own client, so independent calls may overlap.
+    supports_parallel_calls = True
 
     def __init__(self, cfg: OpenAILlmConfig) -> None:
         self.cfg = cfg
@@ -63,9 +65,7 @@ class OpenAILLM:
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise LLMUnavailable(
-                "OpenAI LLM: the 'openai' package is not installed"
-            ) from exc
+            raise LLMUnavailable("OpenAI LLM: the 'openai' package is not installed") from exc
 
         if is_real_openai_base_url(self.cfg.base_url):
             try:

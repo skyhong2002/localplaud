@@ -163,6 +163,10 @@ class PipelineConfig(BaseModel):
     note_quality: Literal["evidence", "legacy"] = "evidence"
     note_evidence_chunk_chars: int = Field(default=120_000, ge=2_000, le=120_000)
     note_repair_attempts: int = Field(default=2, ge=0, le=2)
+    # Independent evidence chunks, plan groups and draft batches may run at once
+    # on providers that tolerate concurrent requests (remote subscription gateways).
+    # Output is merged in source order, so this changes wall time, never content.
+    note_parallelism: int = Field(default=3, ge=1, le=8)
     polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
     # Which summary template to use. The Plaud Web Autopilot snapshot is the
     # default; legacy or unknown keys fall back to this captured Plaud prompt.
