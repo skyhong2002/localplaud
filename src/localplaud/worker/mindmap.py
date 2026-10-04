@@ -15,12 +15,14 @@ from ..asr.base import Transcript as AsrTranscript
 from ..config import Settings
 from ..llm.base import build_llm
 from .summarize import (
+    _TIGHTEN_SUFFIX,
     _chunk_text,
     _group_notes,
     _llm_provider_model,
     _reduction_max_tokens,
     _render_transcript,
     _summary_chunk_chars,
+    reduce_notes,
 )
 
 log = logging.getLogger(__name__)
@@ -49,7 +51,8 @@ _REDUCE_PROMPT = """\
 Consolidate these ordered outline notes into a shorter set of outline notes.
 Merge duplicate topics but preserve every distinct decision, fact, name,
 number, question, and action item. Output only an indented Markdown bullet
-list. Do not invent information.
+list. Do not invent information. Hard length limit: the whole reply must stay
+under {limit} characters, so merge overlapping nodes instead of listing them twice.
 
 Outline notes:
 ---
@@ -125,6 +128,34 @@ def _normalize_outline(raw: str) -> str:
     return "\n".join([f"# {root or 'Mind map'}", *out])
 
 
+def merge_outlines(outlines: list[str]) -> str:
+    """Join per-part outlines into one tree without another model call.
+
+    The first part's root names the map. Each later part becomes a top-level
+    branch under its own root label, so distinct topics from every part of a
+    long recording stay present and in order. Identical branch labels are kept
+    once.
+    """
+    roots: list[str] = []
+    branches: list[str] = []
+    seen: set[str] = set()
+    for outline in outlines:
+        lines = outline.splitlines()
+        root = lines[0][2:].strip() if lines and lines[0].startswith("# ") else "Mind map"
+        roots.append(root)
+        body = [line for line in lines[1:] if line.strip()]
+        if len(outlines) > 1:
+            body = [f"- {root}", *(f"  {line}" for line in body)]
+        key = "\n".join(body)
+        if key in seen:
+            continue
+        seen.add(key)
+        branches.extend(body)
+    if not branches:
+        raise ValueError("merged mind map has no nodes")
+    return "\n".join([f"# {roots[0]}", *branches])
+
+
 def _count_nodes(content_md: str) -> int:
     """Bullet nodes plus the root topic."""
     return 1 + sum(1 for line in content_md.splitlines() if line.lstrip().startswith("- "))
@@ -162,40 +193,58 @@ def generate_mind_map(
                 )
             )
             map_calls += 1
-        reduction_rounds = 0
         reduction_max_tokens = _reduction_max_tokens(chunk_chars)
-        while len("\n\n".join(notes)) > chunk_chars:
-            reduction_rounds += 1
-            if reduction_rounds > 8:
-                raise RuntimeError(
-                    "hierarchical mind map did not converge within 8 reduction rounds"
-                )
-            groups = _group_notes(notes, chunk_chars)
-            notes = [
-                llm.complete(
-                    _REDUCE_PROMPT.format(text=group),
-                    system=_SYSTEM,
-                    temperature=0.1,
-                    max_tokens=reduction_max_tokens,
-                )
-                for group in groups
-            ]
-            reduce_calls += len(groups)
-        source_text = (
-            "The following are ordered outline notes derived from every part of the "
-            "complete transcript:\n\n" + "\n\n".join(notes)
-        )
+
+        def reduce(group: str, limit: int, previous: int | None) -> str:
+            prompt = _REDUCE_PROMPT.format(text=group, limit=limit)
+            if previous is not None:
+                prompt += _TIGHTEN_SUFFIX.format(previous=previous, limit=limit)
+            return llm.complete(
+                prompt, system=_SYSTEM, temperature=0.1, max_tokens=reduction_max_tokens
+            )
+
+        notes, reduction = reduce_notes(notes, chunk_chars, reduce)
+        reduce_calls += reduction["reduce_calls"]
+        if not reduction["fits"]:
+            # The provider ignores output limits, so the notes cannot be squeezed
+            # into one call. Build one outline per bounded group and merge the
+            # trees deterministically: complete coverage, guaranteed to finish.
+            strategy = "hierarchical-merged"
+            source_text = None
+        else:
+            source_text = (
+                "The following are ordered outline notes derived from every part of the "
+                "complete transcript:\n\n" + "\n\n".join(notes)
+            )
 
     context = ""
     if summary_md and summary_md.strip():
         context = _SUMMARY_CONTEXT.format(summary=summary_md.strip())
-    raw = llm.complete(
-        _OUTLINE_PROMPT.format(context=context, text=source_text),
-        system=_SYSTEM,
-        temperature=0.2,
-        max_tokens=1500,
-    )
-    content = _normalize_outline(raw)
+    if source_text is not None:
+        raw = llm.complete(
+            _OUTLINE_PROMPT.format(context=context, text=source_text),
+            system=_SYSTEM,
+            temperature=0.2,
+            max_tokens=1500,
+        )
+        content = _normalize_outline(raw)
+    else:
+        outlines = []
+        for group in _group_notes(notes, chunk_chars):
+            raw = llm.complete(
+                _OUTLINE_PROMPT.format(
+                    context=context,
+                    text=(
+                        "Ordered outline notes from one consecutive part of the "
+                        "complete transcript:\n\n" + group
+                    ),
+                ),
+                system=_SYSTEM,
+                temperature=0.2,
+                max_tokens=1500,
+            )
+            outlines.append(_normalize_outline(raw))
+        content = merge_outlines(outlines)
     provider, model = _llm_provider_model(settings)
     return {
         "template": "mind_map",
@@ -210,5 +259,8 @@ def generate_mind_map(
             "map_calls": map_calls,
             "reduce_calls": reduce_calls,
             "outline_nodes": _count_nodes(content),
+            "merged_parts": len(_group_notes(notes, chunk_chars))
+            if strategy == "hierarchical-merged"
+            else None,
         },
     }

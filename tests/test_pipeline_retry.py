@@ -46,6 +46,11 @@ def test_retry_schedule_is_exponential_and_bounded(monkeypatch, tmp_path):
     assert row.pipeline_next_retry_at >= datetime.now(UTC) + timedelta(seconds=19)
     _schedule_pipeline_retry(row, settings)
     assert row.pipeline_retry_count == 3
+    # Past the fast budget the recording keeps a slow, unattended cadence.
+    slow = settings.pipeline.retry_exhausted_interval_seconds
+    assert row.pipeline_next_retry_at >= datetime.now(UTC) + timedelta(seconds=slow - 1)
+    settings.pipeline.retry_exhausted_interval_seconds = 0
+    _schedule_pipeline_retry(row, settings)
     assert row.pipeline_next_retry_at is None
     reset_pipeline_retry(row)
     assert row.pipeline_retry_count == 0
@@ -783,28 +788,46 @@ def test_newest_recording_keeps_priority_after_failure(monkeypatch, tmp_path):
     from localplaud.db.models import FileStatus, PlaudFile
     from localplaud.db.session import session_scope
     from localplaud.worker import pipeline
-    audio = tmp_path / 'queue.wav'
-    audio.write_bytes(b'RIFF')
+
+    audio = tmp_path / "queue.wav"
+    audio.write_bytes(b"RIFF")
     now = datetime.now(UTC)
     with session_scope() as session:
-        session.add_all([
-            PlaudFile(id='latest', status=FileStatus.partial, audio_path=str(audio),
-                      start_time_ms=int(now.timestamp()*1000), pipeline_retry_count=1,
-                      pipeline_next_retry_at=now-timedelta(hours=1)),
-            PlaudFile(id='old', status=FileStatus.partial, audio_path=str(audio),
-                      start_time_ms=int((now-timedelta(days=30)).timestamp()*1000),
-                      pipeline_retry_count=1, pipeline_next_retry_at=now-timedelta(seconds=1)),
-        ])
-    seen=[]
-    monkeypatch.setattr(pipeline, 'process_file', lambda fid,*a,**kw: seen.append(fid))
-    assert pipeline.process_pending(settings, limit=1)==1
-    assert seen==['latest']
+        session.add_all(
+            [
+                PlaudFile(
+                    id="latest",
+                    status=FileStatus.partial,
+                    audio_path=str(audio),
+                    start_time_ms=int(now.timestamp() * 1000),
+                    pipeline_retry_count=1,
+                    pipeline_next_retry_at=now - timedelta(hours=1),
+                ),
+                PlaudFile(
+                    id="old",
+                    status=FileStatus.partial,
+                    audio_path=str(audio),
+                    start_time_ms=int((now - timedelta(days=30)).timestamp() * 1000),
+                    pipeline_retry_count=1,
+                    pipeline_next_retry_at=now - timedelta(seconds=1),
+                ),
+            ]
+        )
+    seen = []
+    monkeypatch.setattr(pipeline, "process_file", lambda fid, *a, **kw: seen.append(fid))
+    assert pipeline.process_pending(settings, limit=1) == 1
+    assert seen == ["latest"]
 
 
-@pytest.mark.parametrize('source,completed,expected', [('local',False,0),('cloud',False,1),(None,True,0),(None,False,1)])
-def test_untranscribed_only_excludes_local_work_but_not_cloud_imports(monkeypatch,tmp_path,source,completed,expected):
-    settings=_reset(monkeypatch,tmp_path)
-    settings.pipeline.auto_process_untranscribed_only=True
+@pytest.mark.parametrize(
+    "source,completed,expected",
+    [("local", False, 0), ("cloud", False, 1), (None, True, 0), (None, False, 1)],
+)
+def test_untranscribed_only_excludes_local_work_but_not_cloud_imports(
+    monkeypatch, tmp_path, source, completed, expected
+):
+    settings = _reset(monkeypatch, tmp_path)
+    settings.pipeline.auto_process_untranscribed_only = True
     from localplaud.db.models import (
         FileStatus,
         PlaudFile,
@@ -815,33 +838,38 @@ def test_untranscribed_only_excludes_local_work_but_not_cloud_imports(monkeypatc
     )
     from localplaud.db.session import session_scope
     from localplaud.worker import pipeline
-    audio=tmp_path/'audio.wav'
-    audio.write_bytes(b'RIFF')
+
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF")
     with session_scope() as s:
-        r=PlaudFile(id='recording',status=FileStatus.downloaded,audio_path=str(audio))
+        r = PlaudFile(id="recording", status=FileStatus.downloaded, audio_path=str(audio))
         if source:
-            r.transcripts=[Transcript(source=source,provider='test',text='transcript')]
+            r.transcripts = [Transcript(source=source, provider="test", text="transcript")]
         if completed:
-            r.stage_runs=[StageRun(stage=StageName.transcribe,status=StageStatus.completed)]
+            r.stage_runs = [StageRun(stage=StageName.transcribe, status=StageStatus.completed)]
         s.add(r)
-    seen=[]
-    monkeypatch.setattr(pipeline,'process_file',lambda fid,*a,**k:seen.append(fid))
-    assert pipeline.process_pending(settings,limit=1)==expected
-    assert len(seen)==expected
+    seen = []
+    monkeypatch.setattr(pipeline, "process_file", lambda fid, *a, **k: seen.append(fid))
+    assert pipeline.process_pending(settings, limit=1) == expected
+    assert len(seen) == expected
 
 
-def test_untranscribed_only_does_not_drain_old_index_backlogs(monkeypatch,tmp_path):
-    settings=_reset(monkeypatch,tmp_path)
-    settings.pipeline.auto_process_untranscribed_only=True
+def test_untranscribed_only_does_not_drain_old_index_backlogs(monkeypatch, tmp_path):
+    settings = _reset(monkeypatch, tmp_path)
+    settings.pipeline.auto_process_untranscribed_only = True
     from localplaud import cli
-    monkeypatch.setattr('localplaud.worker.pipeline.process_pending',lambda *a,**k:1)
-    def forbidden(*a,**k):
-        pytest.fail('historical backfill must stay paused')
+
+    monkeypatch.setattr("localplaud.worker.pipeline.process_pending", lambda *a, **k: 1)
+
+    def forbidden(*a, **k):
+        pytest.fail("historical backfill must stay paused")
+
     calls = []
-    monkeypatch.setattr('localplaud.worker.reindex.process_pending_reindexes',
-                        lambda *a, **k: calls.append(k))
-    monkeypatch.setattr('localplaud.worker.knowledge_index.process_pending_documents',forbidden)
-    assert cli.process_automatic_pending(settings)==1
+    monkeypatch.setattr(
+        "localplaud.worker.reindex.process_pending_reindexes", lambda *a, **k: calls.append(k)
+    )
+    monkeypatch.setattr("localplaud.worker.knowledge_index.process_pending_documents", forbidden)
+    assert cli.process_automatic_pending(settings) == 1
     assert calls == [{"limit": settings.pipeline.files_per_cycle, "recent_only": True}]
 
 
@@ -916,3 +944,26 @@ def test_untranscribed_only_resumes_recent_recording_interrupted_by_restart(monk
     monkeypatch.setattr(pipeline, "process_file", lambda fid, *a, **k: seen.append(fid))
     assert pipeline.process_pending(settings) == 1
     assert seen == ["recent"]
+
+
+def test_retry_gate_keeps_legacy_stopped_rows_stopped(monkeypatch, tmp_path):
+    settings = _reset(monkeypatch, tmp_path)
+    from localplaud.worker.pipeline import _retry_not_due
+
+    now = datetime.now(UTC)
+    maximum = settings.pipeline.retry_max_attempts
+    assert _retry_not_due(maximum, None, settings, now) is True
+    assert _retry_not_due(maximum + 2, None, settings, now) is True
+    assert _retry_not_due(maximum, now - timedelta(seconds=1), settings, now) is False
+    assert _retry_not_due(maximum, now + timedelta(seconds=60), settings, now) is True
+    assert _retry_not_due(0, None, settings, now) is False
+
+
+def test_fallback_title_prefers_note_text_then_recording_date():
+    from localplaud.worker.pipeline import _fallback_title_text
+
+    result = {"content_md": "## 覆核備註\n- x\n\n討論黑客松成果與下一步規劃。其他細節。"}
+    assert _fallback_title_text(result, None) == "討論黑客松成果與下一步規劃"
+    started = datetime(2026, 10, 3, 6, 0, tzinfo=UTC)
+    assert _fallback_title_text({"content_md": "短"}, started).endswith("錄音")
+    assert _fallback_title_text({}, None) == "未命名錄音"

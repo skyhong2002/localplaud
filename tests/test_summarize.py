@@ -106,7 +106,9 @@ def test_long_transcript_uses_every_chunk_before_final_summary(monkeypatch):
             for idx in range(4)
         )
     )
-    settings = _legacy_settings(pipeline={"summary_chunk_chars": 50, "summary_template": "plaud-meeting-minutes"})
+    settings = _legacy_settings(
+        pipeline={"summary_chunk_chars": 50, "summary_template": "plaud-meeting-minutes"}
+    )
     result = summarize(transcript, settings)
 
     map_prompts = [p for p, _ in calls if p.startswith("Extract faithful coverage notes")]
@@ -145,7 +147,12 @@ def test_large_context_provider_reduces_map_calls_without_dropping_text(monkeypa
         Segment(text="B" * 59_000, start=1, end=2),
     )
 
-    result = summarize(transcript, _legacy_settings(pipeline={"summary_chunk_chars": 6_000, "summary_template": "plaud-meeting-minutes"}))
+    result = summarize(
+        transcript,
+        _legacy_settings(
+            pipeline={"summary_chunk_chars": 6_000, "summary_template": "plaud-meeting-minutes"}
+        ),
+    )
 
     assert result["coverage"]["chunks"] == 2
     map_prompts = [p for p in llm.prompts if p.startswith("Extract faithful coverage notes")]
@@ -162,7 +169,9 @@ def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
             return "# Result\n\n## Summary\nGrounded."
 
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: FakeLlm())
-    settings = _legacy_settings(llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-tested"}})
+    settings = _legacy_settings(
+        llm={"provider": "opencode-go", "opencode_go": {"model": "qwen-tested"}}
+    )
 
     result = summarize(_transcript(Segment(text="evidence", start=0, end=1)), settings)
 
@@ -184,7 +193,12 @@ def test_reducer_converges_when_model_fills_each_token_budget(monkeypatch):
         *(Segment(text="x" * 5_990, start=idx, end=idx + 1) for idx in range(12))
     )
 
-    result = summarize(transcript, _legacy_settings(pipeline={"summary_chunk_chars": 6_000, "summary_template": "plaud-meeting-minutes"}))
+    result = summarize(
+        transcript,
+        _legacy_settings(
+            pipeline={"summary_chunk_chars": 6_000, "summary_template": "plaud-meeting-minutes"}
+        ),
+    )
 
     assert result["coverage"]["chunks"] >= 12
     assert result["coverage"]["reduce_calls"] > result["coverage"]["chunks"]
@@ -303,7 +317,9 @@ def test_title_repair_covers_tail_and_excludes_contaminated_note(monkeypatch):
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
     title = repair_recording_title(
         _transcript(Segment(text="hello " * 900 + "TAIL_DECISION", start=0, end=90)),
-        "CONTAMINATED_TEMPLATE_DESCRIPTION", "Autopilot 模板總結", _legacy_settings(),
+        "CONTAMINATED_TEMPLATE_DESCRIPTION",
+        "Autopilot 模板總結",
+        _legacy_settings(),
     )
     assert title == "Launch rollout decision"
     assert "TAIL_DECISION" in "".join(calls)
@@ -322,12 +338,19 @@ def test_summary_repairs_template_title_without_rewriting_note(monkeypatch):
         def complete(self, prompt, **kwargs):
             calls.append((prompt, kwargs))
             if len(calls) == 1:
-                return json.dumps({"title": "Autopilot 模板總結：部署", "content_md": note,
-                                   "tags": {"topics": ["部署"], "people": [], "orgs": []}})
+                return json.dumps(
+                    {
+                        "title": "Autopilot 模板總結：部署",
+                        "content_md": note,
+                        "tags": {"topics": ["部署"], "people": [], "orgs": []},
+                    }
+                )
             return '{"title":"新版部署：週五上線與驗收安排"}'
 
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
-    result = summarize(_transcript(Segment(text="週五部署新版", start=0, end=1)), _legacy_settings())
+    result = summarize(
+        _transcript(Segment(text="週五部署新版", start=0, end=1)), _legacy_settings()
+    )
     assert result["title"] == "新版部署：週五上線與驗收安排"
     assert result["content_md"] == note
     assert result["coverage"]["title_repair_calls"] == 1
@@ -349,7 +372,7 @@ def test_title_evidence_ignores_short_asr_loops_but_preserves_substantive_tail(m
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
     transcript = _transcript(
         Segment(text="牛肉清湯與青菜各點一份", start=0, end=1),
-        *(Segment(text="字幕署名", start=i, end=i+1) for i in range(1, 100)),
+        *(Segment(text="字幕署名", start=i, end=i + 1) for i in range(1, 100)),
         Segment(text="最後確認下週表演的場地安排", start=100, end=101),
     )
     assert generate_recording_title(transcript, _legacy_settings()) == "晚餐點菜與場地安排"
@@ -370,8 +393,13 @@ def test_title_only_failure_returns_usable_note_for_persistence(monkeypatch):
             self.calls += 1
             if self.calls > 1:
                 raise TimeoutError("unavailable")
-            return json.dumps({"title": "Autopilot 模板總結", "content_md": "## 決策\n週五發布",
-                               "tags": {"topics": [], "people": [], "orgs": []}})
+            return json.dumps(
+                {
+                    "title": "Autopilot 模板總結",
+                    "content_md": "## 決策\n週五發布",
+                    "tags": {"topics": [], "people": [], "orgs": []},
+                }
+            )
 
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
     result = summarize(_transcript(Segment(text="週五發布", start=0, end=1)), _legacy_settings())
@@ -392,30 +420,35 @@ def test_autopilot_keeps_early_and_late_details_outside_lossy_overview(monkeypat
         def complete(self, prompt, **kwargs):
             calls.append((prompt, kwargs))
             if prompt.startswith(SECTION_INSTRUCTIONS):
-                if 'TAIL_ACTION' in prompt:
-                    return '## Permissions\n- [ ] Owner B must confirm write access.'
-                return '## Testing\nProposed five trials; no date was agreed.'
-            if prompt.startswith('Extract brief evidence for an overview'):
-                return 'Discussed testing.'  # Deliberately loses the tail in the overview.
-            return json.dumps({'title': 'Testing and permissions', 'content_md': 'Discussed testing.',
-                               'tags': {'topics': ['testing'], 'people': [], 'orgs': []}})
+                if "TAIL_ACTION" in prompt:
+                    return "## Permissions\n- [ ] Owner B must confirm write access."
+                return "## Testing\nProposed five trials; no date was agreed."
+            if prompt.startswith("Extract brief evidence for an overview"):
+                return "Discussed testing."  # Deliberately loses the tail in the overview.
+            return json.dumps(
+                {
+                    "title": "Testing and permissions",
+                    "content_md": "Discussed testing.",
+                    "tags": {"topics": ["testing"], "people": [], "orgs": []},
+                }
+            )
 
-    monkeypatch.setattr('localplaud.worker.summarize.build_llm', lambda _: Llm())
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
     transcript = _transcript(
-        Segment(text='EARLY_PROPOSAL ' + 'x' * 60, start=0, end=30),
-        Segment(text='TAIL_ACTION', start=30, end=60),
+        Segment(text="EARLY_PROPOSAL " + "x" * 60, start=0, end=30),
+        Segment(text="TAIL_ACTION", start=30, end=60),
     )
     before = transcript.text
-    result = summarize(transcript, _legacy_settings(pipeline={'summary_chunk_chars': 80}))
-    assert result['coverage']['strategy'] == 'sectioned'
-    assert result['coverage']['detail_sections'] == 2
-    assert 'Proposed five trials; no date was agreed.' in result['content_md']
-    assert 'Owner B must confirm write access.' in result['content_md']
-    assert result['coverage']['note_prompt_version'] == NOTE_PROMPT_VERSION
-    assert result['template_snapshot']['instructions'] == TEMPLATES['plaud-autopilot'].instructions
-    assert result['template_snapshot']['execution']['version'] == NOTE_PROMPT_VERSION
+    result = summarize(transcript, _legacy_settings(pipeline={"summary_chunk_chars": 80}))
+    assert result["coverage"]["strategy"] == "sectioned"
+    assert result["coverage"]["detail_sections"] == 2
+    assert "Proposed five trials; no date was agreed." in result["content_md"]
+    assert "Owner B must confirm write access." in result["content_md"]
+    assert result["coverage"]["note_prompt_version"] == NOTE_PROMPT_VERSION
+    assert result["template_snapshot"]["instructions"] == TEMPLATES["plaud-autopilot"].instructions
+    assert result["template_snapshot"]["execution"]["version"] == NOTE_PROMPT_VERSION
     assert transcript.text == before
-    assert 'ONLY a short substantive overview' in calls[-1][1]['system']
+    assert "ONLY a short substantive overview" in calls[-1][1]["system"]
 
 
 def test_custom_template_keeps_its_layout_and_has_execution_provenance(monkeypatch):
@@ -428,19 +461,30 @@ def test_custom_template_keeps_its_layout_and_has_execution_provenance(monkeypat
     class Llm:
         def complete(self, prompt, **kwargs):
             calls.append((prompt, kwargs))
-            return json.dumps({'title': 'Metrics', 'content_md': '| Count |\n| --- |\n| 5 |',
-                               'tags': {'topics': [], 'people': [], 'orgs': []}})
+            return json.dumps(
+                {
+                    "title": "Metrics",
+                    "content_md": "| Count |\n| --- |\n| 5 |",
+                    "tags": {"topics": [], "people": [], "orgs": []},
+                }
+            )
 
-    monkeypatch.setattr('localplaud.worker.summarize.build_llm', lambda _: Llm())
-    template = {'key': 'my-table', 'version': 3, 'instructions': 'Return only a metrics table.',
-                'prompt_mode': 'direct', 'provenance': 'user'}
-    result = summarize(_transcript(Segment(text='Count is five.', start=0, end=5)),
-                       _legacy_settings(), template)
-    assert result['content_md'].startswith('| Count |')
-    assert template['instructions'] in calls[0][0]
-    assert 'descriptive ## topic headings' not in calls[0][1]['system']
-    assert result['template_snapshot']['version'] == 3
-    assert result['template_snapshot']['execution']['section_instructions'] is None
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
+    template = {
+        "key": "my-table",
+        "version": 3,
+        "instructions": "Return only a metrics table.",
+        "prompt_mode": "direct",
+        "provenance": "user",
+    }
+    result = summarize(
+        _transcript(Segment(text="Count is five.", start=0, end=5)), _legacy_settings(), template
+    )
+    assert result["content_md"].startswith("| Count |")
+    assert template["instructions"] in calls[0][0]
+    assert "descriptive ## topic headings" not in calls[0][1]["system"]
+    assert result["template_snapshot"]["version"] == 3
+    assert result["template_snapshot"]["execution"]["section_instructions"] is None
 
 
 def test_incomplete_structured_note_is_never_saved_as_markdown():
@@ -449,12 +493,12 @@ def test_incomplete_structured_note_is_never_saved_as_markdown():
     from localplaud.llm.base import LLMOutputInvalid
 
     for raw in ('{"title":"Planning","content_md":"unfinished', '{"content_md":""}'):
-        with pytest.raises(LLMOutputInvalid, match='Summary returned'):
+        with pytest.raises(LLMOutputInvalid, match="Summary returned"):
             _summary_output(raw)
 
 
 def test_markdown_fallback_can_start_with_timestamp_or_link():
-    raw = '[00:30] Budget review\n- Approved the trial.'
+    raw = "[00:30] Budget review\n- Approved the trial."
     assert _summary_output(raw)[1] == raw
 
 
@@ -467,25 +511,57 @@ def test_sectioned_overview_contracts_even_when_reducer_fills_budget(monkeypatch
     class Llm:
         def complete(self, prompt, **kwargs):
             if prompt.startswith(SECTION_INSTRUCTIONS):
-                return 'x' * 90
-            if prompt.startswith('Extract brief evidence for an overview'):
-                return 'x' * (4 * kwargs['max_tokens'])
-            return json.dumps({'title': 'Trial plan', 'content_md': 'Overview.',
-                               'tags': {'topics': [], 'people': [], 'orgs': []}})
+                return "x" * 90
+            if prompt.startswith("Extract brief evidence for an overview"):
+                return "x" * (4 * kwargs["max_tokens"])
+            return json.dumps(
+                {
+                    "title": "Trial plan",
+                    "content_md": "Overview.",
+                    "tags": {"topics": [], "people": [], "orgs": []},
+                }
+            )
 
-    monkeypatch.setattr('localplaud.worker.summarize.build_llm', lambda _: Llm())
-    result = summarize(_transcript(Segment(text='e' * 600, start=0, end=60)),
-                       _legacy_settings(pipeline={'summary_chunk_chars': 100}))
-    assert result['coverage']['detail_sections'] == 6
-    assert result['coverage']['reduce_calls'] > 0
-    assert result['content_md'].count('x' * 90) == 6
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: Llm())
+    result = summarize(
+        _transcript(Segment(text="e" * 600, start=0, end=60)),
+        _legacy_settings(pipeline={"summary_chunk_chars": 100}),
+    )
+    assert result["coverage"]["detail_sections"] == 6
+    assert result["coverage"]["reduce_calls"] > 0
+    assert result["content_md"].count("x" * 90) == 6
 
 
 def test_ollama_summary_cap_wins_over_global_chunk_budget():
     from localplaud.llm.ollama import OllamaProvider
     from localplaud.worker.summarize import _summary_chunk_chars
 
-    settings = _legacy_settings(pipeline={'summary_chunk_chars': 6000})
+    settings = _legacy_settings(pipeline={"summary_chunk_chars": 6000})
     assert _summary_chunk_chars(settings, OllamaProvider(settings.llm.ollama)) == 3000
     settings.pipeline.summary_chunk_chars = 1500
     assert _summary_chunk_chars(settings, OllamaProvider(settings.llm.ollama)) == 1500
+
+
+def test_reduce_notes_tightens_then_stops_without_truncating():
+    from localplaud.worker.summarize import reduce_notes, reduction_char_limit
+
+    seen: list[tuple[int, int | None]] = []
+
+    def stubborn(group, limit, previous):
+        seen.append((limit, previous))
+        return group + "!"
+
+    notes = ["a" * 40, "b" * 40, "c" * 40]
+    reduced, detail = reduce_notes(notes, 50, stubborn, max_rounds=8)
+    assert detail["fits"] is False
+    assert detail["reduction_rounds"] == 1  # every group stalled twice: stop early
+    assert detail["stalled_groups"] == 3 and detail["reduce_calls"] == 6
+    assert all(limit == reduction_char_limit(40) for limit, _ in seen)
+    assert [previous is not None for _, previous in seen] == [False, True] * 3
+    assert "".join(reduced).count("a") == 40  # content preserved, never cut
+
+    def cooperative(group, limit, previous):
+        return group[: max(1, len(group) // 4)]
+
+    reduced, detail = reduce_notes(notes, 50, cooperative)
+    assert detail["fits"] is True and detail["stalled_groups"] == 0

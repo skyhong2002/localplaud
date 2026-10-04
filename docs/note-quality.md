@@ -61,6 +61,15 @@ note_evidence_chunk_chars = 120000 # complete request budget, capped by provider
 note_repair_attempts = 2        # 0..2; never an unbounded repair loop
 ```
 
+Review objections that survive the bounded repairs do not fail the stage. The
+pipeline is designed to finish without a person: the best extraction or draft is
+published, every unresolved objection is kept in `coverage.unresolved_review_issues`
+and in the evidence ledger (`chunks[].audit_issues`), the coverage is marked
+`review_status = "accepted_with_issues"`, and a final `## 覆核備註` section lists the
+objections verbatim at the end of the note so a reader sees the doubt next to the
+content. Structurally invalid model output (bad JSON, unknown citations, quotes that
+are not in the transcript) is still rejected and left to the pipeline's retry policy.
+
 The existing stage-scoped provider profile still selects the model, egress policy,
 fallbacks and cost ceiling. This feature does not authorize a new provider or
 silently downgrade a model. The production GPT-6 configuration is documented in

@@ -34,8 +34,8 @@ without a local transcript or completed transcription stage. Each admitted recor
 still runs its normal enabled stages, including notes. A recording whose local
 transcription completed within `pipeline.untranscribed_only_retry_hours` (default
 72) keeps its bounded automatic retries, so a new recording whose correction or
-notes failed still finishes. Older failures require manual Resume; automatic
-old-note retries and standalone index backfills are paused. Existing artifacts and user edits remain intact.
+notes failed still finishes. Older failures wait for manual Resume or an explicit
+recovery queue; automatic old-note retries and standalone index backfills are paused. Existing artifacts and user edits remain intact.
 Disable any separately installed maintenance/reprocessing service as well: manual
 and maintenance calls are intentionally outside this automatic queue filter.
 

@@ -162,6 +162,39 @@ def _fail(phase, detail):
     raise LLMOutputInvalid(f"證據筆記的{phase}驗證失敗：{detail}。請檢查逐字稿與模型輸出後重試。")
 
 
+UNRESOLVED_REVIEW_HEADING = "## 覆核備註"
+
+
+def _accept_with_issues(coverage, phase, batch, issues):
+    """Record reviewer objections that bounded repairs could not clear.
+
+    The note is still published: the pipeline must finish without a person, and
+    an objection is more useful printed next to the notes than as a failed stage.
+    """
+    coverage["review_status"] = "accepted_with_issues"
+    coverage.setdefault("unresolved_review_issues", []).extend(
+        {"phase": phase, "batch": batch, "message": issue} for issue in issues
+    )
+
+
+def render_unresolved_review(items):
+    """Readable caveat section appended to notes whose review did not fully pass."""
+    lines = [
+        UNRESOLVED_REVIEW_HEADING,
+        "",
+        "自動覆核在有限修補後仍指出下列疑點。筆記其餘內容已依逐字稿產生；閱讀相關段落時請留意：",
+        "",
+    ]
+    seen = set()
+    for item in items:
+        message = item["message"].strip()
+        if message in seen:
+            continue
+        seen.add(message)
+        lines.append(f"- {message}")
+    return "\n".join(lines)
+
+
 def _config_identity(settings, llm):
     cfg = getattr(llm, "cfg", None)
     if hasattr(cfg, "model_dump"):
@@ -840,16 +873,17 @@ def generate_evidence_notes(
             if not issues:
                 break
             if attempt == repairs:
-                _fail(
-                    "擷取覆核",
-                    f"第 {i + 1} 批仍有 {len(issues)} 項問題：" + "；".join(issues)[:1200],
-                )
+                # Bounded repairs are exhausted. Nobody is going to review this by
+                # hand, so publish the best extraction and carry the reviewer's
+                # remaining objections forward as visible caveats instead of
+                # leaving the recording without notes.
+                _accept_with_issues(coverage, "audit", i + 1, issues)
         evidence["chunks"].append(
             {
                 "target_ids": [x["id"] for x in scope["target"]],
                 "context_ids": [x["id"] for x in scope["context"]],
                 "fact_count": len(extracted["facts"]),
-                "audit_issues": [],
+                "audit_issues": list(issues),
                 "skipped": extracted["skipped"],
                 "audit_warnings": audit["warnings"],
             }
@@ -1034,19 +1068,19 @@ def generate_evidence_notes(
             if not issues:
                 break
             if attempt == repairs:
-                _fail(
-                    "草稿覆核",
-                    f"第 {bi + 1} 批仍有 {len(issues)} 項問題：" + "；".join(issues)[:1200],
-                )
+                _accept_with_issues(coverage, "verify", bi + 1, issues)
         coverage["review_warnings"].extend(
             {"phase": "verify", "batch": bi + 1, "message": warning}
             for warning in review["warnings"]
         )
         rendered.append(draft["content_md"])
+
     def render_references(md):
         # References remain mandatory during validation and in the evidence
         # ledger, but playback markers are not part of readable note prose.
         return re.sub(r"[ \t]*\[\[f\d+\]\](?:[ \t]*\[\[f\d+\]\])*", "", md)
 
     body = "\n\n".join(render_references(md) for md in rendered)
+    if coverage.get("unresolved_review_issues"):
+        body += "\n\n" + render_unresolved_review(coverage["unresolved_review_issues"])
     return finish(title, body, tags)

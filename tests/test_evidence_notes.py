@@ -127,6 +127,26 @@ class Fake:
         raise AssertionError(prompt[:80])
 
 
+class FailOnRepair(Fake):
+    """Transport outage on the first extraction repair: the rejection is checkpointed."""
+
+    def complete(self, prompt, **kwargs):
+        if prompt.startswith("修補上一版擷取"):
+            self.calls.append((prompt, kwargs))
+            raise RuntimeError("transport outage")
+        return super().complete(prompt, **kwargs)
+
+
+class FailOnDraftRepair(Fake):
+    """Transport outage on the first draft repair: the rejected draft is checkpointed."""
+
+    def complete(self, prompt, **kwargs):
+        if prompt.startswith("撰寫") and "修正覆核問題" in prompt:
+            self.calls.append((prompt, kwargs))
+            raise RuntimeError("transport outage")
+        return super().complete(prompt, **kwargs)
+
+
 def note(llm, transcript=None, **kwargs):
     transcript = transcript or Transcript(
         segments=[Segment("事件 A 3m；提議事件 B 15m。", 0, 7, speaker="S0")]
@@ -165,11 +185,19 @@ def test_oversized_utterance_keeps_tail_and_all_part_ids():
     assert facts[-1]["sources"][0]["id"].startswith("s0p")
 
 
-def test_verifier_rejects_fabricated_owner_after_bounded_repairs():
+def test_unresolved_audit_issues_publish_notes_with_visible_caveats():
     llm = Fake(bad_owner=True)
-    with pytest.raises(LLMOutputInvalid, match="覆核.*虛構負責人"):
-        note(llm)
+    result = note(llm)
+    # Bounded repairs still run in full before the objection is carried forward.
     assert len([p for p, _ in llm.calls if p.startswith(("從 target", "修補上一版擷取"))]) == 3
+    assert result["coverage"]["review_status"] == "accepted_with_issues"
+    unresolved = result["coverage"]["unresolved_review_issues"]
+    assert unresolved and unresolved[0]["phase"] == "audit"
+    assert "虛構負責人" in unresolved[0]["message"]
+    assert "## 覆核備註" in result["content_md"]
+    assert result["content_md"].rstrip().endswith("- 虛構負責人")
+    chunk = result["template_snapshot"]["evidence"]["chunks"][0]
+    assert chunk["audit_issues"] == ["虛構負責人"]
 
 
 def test_unknown_or_missing_citation_rejected():
@@ -238,11 +266,19 @@ def test_distinct_event_numbers_and_proposals_reach_ledger_and_prompts():
     assert "3m" in prompts and "15m" in prompts and "proposed" in prompts
 
 
-def test_draft_reviewer_failure_is_bounded():
+def test_draft_reviewer_objections_are_bounded_then_published_as_caveats():
     llm = Fake(review_issues=True)
-    with pytest.raises(LLMOutputInvalid, match="草稿覆核"):
-        note(llm)
+    result = note(llm)
     assert len([p for p, _ in llm.calls if p.startswith("撰寫")]) == 3
+    assert result["coverage"]["review_status"] == "accepted_with_issues"
+    assert [item["phase"] for item in result["coverage"]["unresolved_review_issues"]] == ["verify"]
+    assert result["content_md"].count("## 覆核備註") == 1
+
+
+def test_clean_review_leaves_no_caveat_section():
+    result = note(Fake())
+    assert "review_status" not in result["coverage"]
+    assert "覆核備註" not in result["content_md"]
 
 
 def test_notes_have_no_display_timestamp_without_valid_file_id():
@@ -343,8 +379,8 @@ def test_nonblocking_review_warnings_are_preserved_in_provenance():
 
 
 def test_retry_continues_rejected_extraction_and_retains_reviewed_progress(tmp_path):
-    with pytest.raises(LLMOutputInvalid):
-        note(Fake(bad_owner=True), checkpoint_dir=tmp_path)
+    with pytest.raises(RuntimeError):
+        note(FailOnRepair(bad_owner=True), checkpoint_dir=tmp_path)
     resumed = Fake()
     result = note(resumed, checkpoint_dir=tmp_path)
     first_prompt = resumed.calls[0][0]
@@ -356,8 +392,8 @@ def test_retry_continues_rejected_extraction_and_retains_reviewed_progress(tmp_p
 
 
 def test_retry_continues_rejected_draft_without_reextracting(tmp_path):
-    with pytest.raises(LLMOutputInvalid):
-        note(Fake(review_issues=True), checkpoint_dir=tmp_path)
+    with pytest.raises(RuntimeError):
+        note(FailOnDraftRepair(review_issues=True), checkpoint_dir=tmp_path)
 
     class RepairDraft(Fake):
         def complete(self, prompt, **kwargs):
@@ -377,8 +413,8 @@ def test_retry_continues_rejected_draft_without_reextracting(tmp_path):
 
 
 def test_rejected_feedback_does_not_cross_model_or_source_boundaries(tmp_path):
-    with pytest.raises(LLMOutputInvalid):
-        note(Fake(bad_owner=True), checkpoint_dir=tmp_path)
+    with pytest.raises(RuntimeError):
+        note(FailOnRepair(bad_owner=True), checkpoint_dir=tmp_path)
     changed = Fake(model="different")
     note(changed, checkpoint_dir=tmp_path)
     assert "修補上一版擷取" not in changed.calls[0][0]
@@ -402,18 +438,12 @@ def test_each_explicit_retry_keeps_its_own_bounded_generation_budget(tmp_path):
     # manual retry can continue feedback, but cannot loop forever in this call.
     for _ in range(2):
         llm = Fake(bad_owner=True)
-        with pytest.raises(LLMOutputInvalid):
-            note(llm, checkpoint_dir=tmp_path)
-        assert (
-            len(
-                [
-                    prompt
-                    for prompt, _ in llm.calls
-                    if prompt.startswith(("從 target", "修補上一版擷取"))
-                ]
-            )
-            == 3
-        )
+        result = note(llm, checkpoint_dir=tmp_path)
+        assert result["coverage"]["review_status"] == "accepted_with_issues"
+        extraction_calls = [
+            prompt for prompt, _ in llm.calls if prompt.startswith(("從 target", "修補上一版擷取"))
+        ]
+        assert 1 <= len(extraction_calls) <= 3
 
 
 def test_targeted_fact_patch_keeps_unmentioned_facts_and_input_immutable():
@@ -481,16 +511,16 @@ def test_patch_cache_survives_transport_failure_before_review(tmp_path):
 
 
 def test_repair_reviews_receive_previous_issues_without_waiving_failures(tmp_path):
-    with pytest.raises(LLMOutputInvalid):
-        note(Fake(bad_owner=True), checkpoint_dir=tmp_path)
+    with pytest.raises(RuntimeError):
+        note(FailOnRepair(bad_owner=True), checkpoint_dir=tmp_path)
     resumed = Fake()
     note(resumed, checkpoint_dir=tmp_path)
     audit = next(p for p, _ in resumed.calls if "逐項完整掃描" in p)
     assert '"previous_issues":["虛構負責人"]' in audit
     assert "不得僅因已重試就放行" in audit
 
-    with pytest.raises(LLMOutputInvalid):
-        note(Fake(review_issues=True), checkpoint_dir=tmp_path / "draft")
+    with pytest.raises(RuntimeError):
+        note(FailOnDraftRepair(review_issues=True), checkpoint_dir=tmp_path / "draft")
 
     class ChangedDraft(Fake):
         def complete(self, prompt, **kwargs):
@@ -520,9 +550,12 @@ def test_bad_quote_retry_identifies_reference_and_keeps_exact_validation():
                 assert "不存在的引文" in prompt
                 payload = json.loads(prompt.split("\n", 1)[1])
                 data = json.loads(result)
-                data["replace"][0]["fact"]["sources"][0]["quote"] = payload["source"]["target"][0]["text"]
+                data["replace"][0]["fact"]["sources"][0]["quote"] = payload["source"]["target"][0][
+                    "text"
+                ]
                 return json.dumps(data, ensure_ascii=False)
             return result
+
     llm = QuoteRepair()
     assert note(llm)
     assert sum(p.startswith("從 target") for p, _ in llm.calls) == 1
@@ -538,6 +571,7 @@ def test_invalid_quote_is_not_published_when_repairs_keep_bad_reference(tmp_path
                 data["facts"][0]["sources"][0]["quote"] = "不存在的引文"
                 return json.dumps(data, ensure_ascii=False)
             return result
+
     llm = BadQuote()
     with pytest.raises(LLMOutputInvalid, match="逐字引文不符"):
         note(llm, checkpoint_dir=tmp_path)

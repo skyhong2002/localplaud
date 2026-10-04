@@ -133,6 +133,7 @@ class PipelineConfig(BaseModel):
         if self.auto_skip_duration_minutes is None:
             return None
         return self.auto_skip_duration_minutes * 60_000
+
     # Number of files processed concurrently by the worker.
     concurrency: int = 1
     # The daemon yields after a small newest-first batch so fresh recordings
@@ -150,6 +151,10 @@ class PipelineConfig(BaseModel):
     retry_max_attempts: int = Field(default=5, ge=0, le=50)
     retry_base_seconds: int = Field(default=300, ge=1, le=86_400)
     retry_max_seconds: int = Field(default=21_600, ge=1, le=604_800)
+    # After the fast retry budget, keep trying at this slower cadence instead of
+    # waiting for a person: provider outages and quota windows resolve on their own.
+    # 0 restores the old behaviour of stopping until a manual Resume.
+    retry_exhausted_interval_seconds: int = Field(default=86_400, ge=0, le=2_592_000)
     # Character budget per LLM call. Longer transcripts are covered through
     # hierarchical map/reduce notes instead of being truncated.
     summary_chunk_chars: int = 6_000
@@ -407,9 +412,7 @@ class AiGatewayLlmConfig(BaseModel):
 
 
 class LlmConfig(BaseModel):
-    provider: Literal[
-        "ollama", "openai", "anthropic", "opencode-go", "ai-gateway"
-    ] = "ollama"
+    provider: Literal["ollama", "openai", "anthropic", "opencode-go", "ai-gateway"] = "ollama"
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     openai: OpenAILlmConfig = Field(default_factory=OpenAILlmConfig)
     anthropic: AnthropicLlmConfig = Field(default_factory=AnthropicLlmConfig)

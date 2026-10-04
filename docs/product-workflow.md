@@ -430,9 +430,20 @@ their last valid input. The UI should expose friendly aggregate states while kee
 detailed diagnostics available.
 
 Failed and usable-partial processing cycles are retried with durable exponential
-backoff. Newly downloaded recordings remain ahead of retries in each bounded daemon
-batch; the recording UI shows the next retry or exhausted state, and an explicit
-Resume bypasses the delay and resets the consecutive-failure budget.
+backoff, then at a slow unattended cadence (`retry_exhausted_interval_seconds`,
+default daily) rather than stopping. Newly downloaded recordings remain ahead of
+retries in each bounded daemon batch; the recording UI shows the next retry, and an
+explicit Resume bypasses the delay and resets the consecutive-failure budget.
+
+The pipeline must reach a usable result without a person. The only expected manual
+step is renaming speakers, which propagates into existing notes and the index
+without regeneration. Derived stages therefore end in a published artifact, not a
+request for review: hierarchical reduction verifies that each round actually
+contracts and, when a provider ignores output limits, finishes from per-part outputs
+merged deterministically; evidence notes publish after bounded repairs with any
+remaining reviewer objections listed in a closing `## 覆核備註` section and in
+provenance; a recording whose model title attempts fail is named from its note text
+or recording date with `fallback` provenance.
 
 The first successful Plaud listing establishes a durable metadata-only catalog
 baseline, so connecting an established account never downloads its entire history by

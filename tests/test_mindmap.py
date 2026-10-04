@@ -185,7 +185,9 @@ def _install_fakes(monkeypatch, counters):
             "provider": "fake",
             "model": "m",
             "template": settings.pipeline.summary_template,
-            "template_snapshot": {"execution": {"version": "evidence-notes/v2", "note_quality": "evidence"}},
+            "template_snapshot": {
+                "execution": {"version": "evidence-notes/v2", "note_quality": "evidence"}
+            },
         }
 
     def fake_mindmap(transcript, settings, summary_md=None):
@@ -495,3 +497,41 @@ def test_mind_map_png_export_requires_local_mind_map(monkeypatch, tmp_path):
             )
         )
     assert c.get("/file/cloud-map/export/mind-map.png").status_code == 409
+
+
+def test_stalled_reduction_finishes_with_merged_per_part_outlines(monkeypatch):
+    """A provider that ignores output limits must still yield a complete map."""
+    from localplaud.config import Settings
+    from localplaud.worker.mindmap import merge_outlines
+
+    class StubbornLlm(_FakeLlm):
+        def complete(self, prompt, **kwargs):
+            self.calls.append(prompt)
+            self.options.append(kwargs)
+            if prompt.startswith("Extract hierarchical outline notes"):
+                return "- note " + "n" * 40
+            if prompt.startswith("Consolidate these ordered outline notes"):
+                # Never shorter than the input, whatever the limit says.
+                return "- " + "x" * (len(prompt) + 10)
+            part = len([p for p in self.calls if p.startswith("Build a mind map")])
+            return f"# Part {part}\n- topic {part}\n  - detail {part}"
+
+    llm = StubbornLlm()
+    monkeypatch.setattr("localplaud.worker.mindmap.build_llm", lambda cfg: llm)
+    transcript = _transcript(
+        *(
+            Segment(text=f"segment-{idx}-" + chr(65 + idx) * 35, start=idx, end=idx + 1)
+            for idx in range(4)
+        )
+    )
+    result = generate_mind_map(transcript, Settings(pipeline={"summary_chunk_chars": 50}), None)
+
+    assert result["detail"]["strategy"] == "hierarchical-merged"
+    assert result["detail"]["merged_parts"] >= 2
+    consolidations = [p for p in llm.calls if p.startswith("Consolidate")]
+    assert consolidations and all("under " in p for p in consolidations)
+    assert any("still too long" in p for p in consolidations)
+    assert result["content_md"].startswith("# Part 1")
+    assert "- Part 2\n  - topic 2\n    - detail 2" in result["content_md"]
+    assert result["detail"]["outline_nodes"] == 1 + 3 * result["detail"]["merged_parts"]
+    assert merge_outlines(["# Solo\n- a"]) == "# Solo\n- a"

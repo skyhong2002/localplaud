@@ -120,12 +120,78 @@ _REDUCE_PROMPT = """\
 Consolidate these ordered coverage notes into a shorter, faithful set of coverage
 notes. Preserve every distinct decision, fact, name, number, question, and action
 item. Do not invent information and do not produce the final formatted summary.
+Hard length limit: the whole reply must stay under {limit} characters, so merge
+overlapping points and drop restatements rather than any distinct information.
 
 Coverage notes:
 ---
 {text}
 ---
 """
+
+_TIGHTEN_SUFFIX = """
+
+Your previous consolidation was still too long ({previous} characters). Rewrite it
+in under {limit} characters. Keep every distinct decision, fact, name, number,
+question and action item as terse phrases; remove all explanation and repetition.
+"""
+
+
+def reduction_char_limit(group_chars: int) -> int:
+    """Explicit per-call output ceiling, independent of provider token limits."""
+    return max(200, group_chars // 3)
+
+
+def reduce_notes(
+    notes: list[str],
+    chunk_chars: int,
+    reduce,
+    *,
+    max_rounds: int = 8,
+) -> tuple[list[str], dict]:
+    """Shrink ordered notes until they fit one call, without trusting the model.
+
+    ``reduce(group, limit, previous_chars)`` returns the consolidated text for one
+    group with an explicit character ceiling. Some providers ignore output token
+    budgets entirely, so each round verifies that a group actually contracted and
+    asks once more with a tighter instruction when it did not. The loop always
+    terminates: after ``max_rounds`` the caller receives the current notes with
+    ``fits=False`` and must finish with a strategy that needs no further
+    contraction (for example per-group outputs merged afterwards). Nothing is
+    truncated at any point.
+    """
+    rounds = 0
+    calls = 0
+    stalled = 0
+    while len("\n\n".join(notes)) > chunk_chars and rounds < max_rounds:
+        rounds += 1
+        groups = _group_notes(notes, chunk_chars)
+        reduced = []
+        progressed = False
+        for group in groups:
+            limit = reduction_char_limit(len(group))
+            text = reduce(group, limit, None)
+            calls += 1
+            if len(text) > len(group) * 0.8:
+                text = reduce(group, limit, len(text))
+                calls += 1
+            if len(text) > len(group) * 0.8:
+                stalled += 1
+            else:
+                progressed = True
+            reduced.append(text)
+        notes = reduced
+        if not progressed:
+            # Every group refused to contract twice; another round would repeat it.
+            break
+    fits = len("\n\n".join(notes)) <= chunk_chars
+    return notes, {
+        "reduction_rounds": rounds,
+        "reduce_calls": calls,
+        "stalled_groups": stalled,
+        "fits": fits,
+    }
+
 
 _OVERVIEW_REDUCE_PROMPT = """\
 Extract brief evidence for an overview of this recording. The complete detailed
@@ -369,31 +435,32 @@ def _prepare_source(
             # Keep these sections verbatim. Only the overview/title evidence is
             # reduced; late details cannot disappear in a final compression pass.
             detail_sections.extend(notes)
-        reduction_rounds = 0
         reduction_max_tokens = (
             max(1, min(600, chunk_chars // 8))
             if detail_sections is not None
             else _reduction_max_tokens(chunk_chars)
         )
-        while len("\n\n".join(notes)) > chunk_chars:
-            reduction_rounds += 1
-            if reduction_rounds > 8:
-                raise RuntimeError(
-                    "hierarchical summary did not converge within 8 reduction rounds"
-                )
-            groups = _group_notes(notes, chunk_chars)
-            notes = [
-                llm.complete(
-                    (
-                        _OVERVIEW_REDUCE_PROMPT if detail_sections is not None else _REDUCE_PROMPT
-                    ).format(text=group),
-                    system="Preserve coverage while consolidating notes. Never invent facts.",
-                    temperature=0.1,
-                    max_tokens=reduction_max_tokens,
-                )
-                for group in groups
-            ]
-            reduce_calls += len(groups)
+
+        def reduce(group: str, limit: int, previous: int | None) -> str:
+            prompt = (
+                _OVERVIEW_REDUCE_PROMPT if detail_sections is not None else _REDUCE_PROMPT
+            ).format(text=group, limit=limit)
+            if previous is not None:
+                prompt += _TIGHTEN_SUFFIX.format(previous=previous, limit=limit)
+            return llm.complete(
+                prompt,
+                system="Preserve coverage while consolidating notes. Never invent facts.",
+                temperature=0.1,
+                max_tokens=reduction_max_tokens,
+            )
+
+        notes, reduction = reduce_notes(notes, chunk_chars, reduce)
+        reduce_calls += reduction["reduce_calls"]
+        if not reduction["fits"]:
+            # The provider would not contract its own output. The notes still
+            # cover every part of the transcript, so pass them whole rather than
+            # dropping the tail; the final call may exceed the conservative budget.
+            strategy = "hierarchical-overflow"
         source_text = (
             "The following are ordered coverage notes derived from every part of the "
             "complete transcript:\n\n" + "\n\n".join(notes)

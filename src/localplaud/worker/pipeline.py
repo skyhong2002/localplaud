@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import os
+import re
 import threading
 from contextlib import nullcontext
 from contextvars import ContextVar
@@ -1245,15 +1246,20 @@ def _schedule_pipeline_retry(row: PlaudFile, settings: Settings) -> None:
     now = datetime.now(UTC)
     row.pipeline_retry_count = (row.pipeline_retry_count or 0) + 1
     row.pipeline_last_failure_at = now
+    delay = _retry_delay_seconds(row.pipeline_retry_count, settings)
+    row.pipeline_next_retry_at = None if delay is None else now + timedelta(seconds=delay)
+
+
+def _retry_delay_seconds(count: int, settings: Settings) -> int | None:
+    """Exponential backoff, then an unattended slow cadence; None stops retrying."""
     maximum = settings.pipeline.retry_max_attempts
-    if maximum <= 0 or row.pipeline_retry_count >= maximum:
-        row.pipeline_next_retry_at = None
-        return
-    delay = min(
+    if maximum <= 0 or count >= maximum:
+        slow = settings.pipeline.retry_exhausted_interval_seconds
+        return slow if slow > 0 else None
+    return min(
         settings.pipeline.retry_max_seconds,
-        settings.pipeline.retry_base_seconds * (2 ** (row.pipeline_retry_count - 1)),
+        settings.pipeline.retry_base_seconds * (2 ** min(count - 1, 20)),
     )
-    row.pipeline_next_retry_at = now + timedelta(seconds=delay)
 
 
 def process_file(
@@ -1788,7 +1794,8 @@ def _process_file_claimed(
                         and align_run is not None
                         and align_run.status == StageStatus.completed
                         and (align_run.detail or {}).get("forced_alignment") is True
-                        and _canonical_digest(result.transcript) == _canonical_digest(alignment_input)
+                        and _canonical_digest(result.transcript)
+                        == _canonical_digest(alignment_input)
                     ):
                         # Validation consumes the same retained word timings; it
                         # is not a new alignment and must not erase their actual
@@ -1797,7 +1804,8 @@ def _process_file_claimed(
                             result.transcript,
                             align_run.provider,
                             align_run.model,
-                            dict(align_run.detail) | {
+                            dict(align_run.detail)
+                            | {
                                 "reused": True,
                                 "timing_validation": dict(result.detail),
                             },
@@ -2410,7 +2418,10 @@ def _note_speaker_transcript(file_id: str, settings: Settings) -> Transcript:
     if canonical is None:
         raise ValueError("a canonical transcript is required for generated speaker bindings")
     if canonical[1] != "local":
-        if settings.pipeline.artifact_mode == "migration" and settings.pipeline.prefer_cloud_artifacts:
+        if (
+            settings.pipeline.artifact_mode == "migration"
+            and settings.pipeline.prefer_cloud_artifacts
+        ):
             # Explicit migration keeps its original cloud lineage and labels.
             # Those identities cannot be bound to the local diarization lane.
             return canonical[0]
@@ -2441,7 +2452,9 @@ def _mind_map_operation(
         speaker_transcript = _note_speaker_transcript(file_id, settings)
         candidate_settings = _settings_for_stage(settings, candidate, "mind_map")
         candidate_settings.pipeline.summary_template = template_key
-        projected_usage = _llm_projected_usage(speaker_transcript, candidate_settings, stage="mind_map")
+        projected_usage = _llm_projected_usage(
+            speaker_transcript, candidate_settings, stage="mind_map"
+        )
         cost_budget = _cost_guard(file_id, "mind_map", candidate, projected_usage)
         summary_md, source_note = (
             source_input
@@ -2661,7 +2674,9 @@ def _outline_operation(
         else:
             candidate_settings = _settings_for_stage(settings, candidate, "mind_map")
             projected_usage = outline_stage.projected_usage(
-                transcript, candidate_settings, remote=bool(_remote_selection(candidate, "mind_map"))
+                transcript,
+                candidate_settings,
+                remote=bool(_remote_selection(candidate, "mind_map")),
             )
             cost_budget = _cost_guard(
                 file_id,
@@ -2674,9 +2689,14 @@ def _outline_operation(
                 remote_snapshot = copy.deepcopy(candidate)
                 remote_snapshot["stages"]["outline"] = remote_snapshot["stages"]["mind_map"]
                 result = _run_remote_stage(
-                    file_id, remote_snapshot, "outline",
+                    file_id,
+                    remote_snapshot,
+                    "outline",
                     [_remote_json_input("transcript", _transcript_payload(transcript))],
-                    options={"duration_ms": duration_ms, "prompt_version": outline_stage.PROMPT_VERSION},
+                    options={
+                        "duration_ms": duration_ms,
+                        "prompt_version": outline_stage.PROMPT_VERSION,
+                    },
                 )
                 end_ms = outline_stage._end_ms(outline_stage._segments(transcript), duration_ms)
                 outline_stage.validate_chapters(result["chapters"], end_ms)
@@ -2685,8 +2705,13 @@ def _outline_operation(
                 }
                 if any(chapter["start_ms"] not in valid_starts for chapter in result["chapters"]):
                     raise ValueError("remote outline returned a non-segment chapter boundary")
-                if result.get("method") != "llm" or result.get("prompt_version") != outline_stage.PROMPT_VERSION:
-                    raise ValueError("remote outline returned incompatible method or prompt version")
+                if (
+                    result.get("method") != "llm"
+                    or result.get("prompt_version") != outline_stage.PROMPT_VERSION
+                ):
+                    raise ValueError(
+                        "remote outline returned incompatible method or prompt version"
+                    )
                 result["provider"] = "remote-worker"
             else:
                 result = outline_stage.generate_outline(
@@ -2774,7 +2799,10 @@ def process_outline_only(
                 with session_scope() as session:
                     row = _assert_processing_claim_in_session(session, file_id)
                     _set_stage_in_session(
-                        session, file_id, StageName.outline, StageStatus.pending,
+                        session,
+                        file_id,
+                        StageName.outline,
+                        StageStatus.pending,
                         detail=previous_detail | {"outline_only": True, "outline_method": method},
                     )
                     template_key = row.note_template_key or settings.pipeline.summary_template
@@ -2838,15 +2866,16 @@ def _finish_outline_cycle(
         if error is not None:
             run = next(item for item in row.stage_runs if item.stage == StageName.outline)
             count = int(previous_detail.get("outline_retry_count") or 0) + 1
-            delay = min(
-                settings.pipeline.retry_base_seconds * 2 ** min(count - 1, 20),
-                settings.pipeline.retry_max_seconds,
-            )
+            delay = _retry_delay_seconds(count, settings)
             run.detail = dict(run.detail or {}) | {
                 "outline_only": True,
                 "outline_method": method,
                 "outline_retry_count": count,
-                "outline_next_retry_at": (datetime.now(UTC) + timedelta(seconds=delay)).isoformat(),
+                "outline_next_retry_at": (
+                    None
+                    if delay is None
+                    else (datetime.now(UTC) + timedelta(seconds=delay)).isoformat()
+                ),
             }
             return
         if row.status != FileStatus.partial:
@@ -3008,14 +3037,20 @@ def _run_derived_stages(
                             / _safe_id(file_id)
                         )
                         speaker_transcript = _note_speaker_transcript(file_id, candidate_settings)
-                        projected_usage = _llm_projected_usage(speaker_transcript, candidate_settings)
+                        projected_usage = _llm_projected_usage(
+                            speaker_transcript, candidate_settings
+                        )
                         cost_budget = _cost_guard(file_id, "summarize", candidate, projected_usage)
                         if _remote_selection(candidate, "summarize"):
                             result = _run_remote_stage(
                                 file_id,
                                 candidate,
                                 "summarize",
-                                [_remote_json_input("transcript", _transcript_payload(speaker_transcript))],
+                                [
+                                    _remote_json_input(
+                                        "transcript", _transcript_payload(speaker_transcript)
+                                    )
+                                ],
                                 options={
                                     "note_prompt_version": summarize.NOTE_PROMPT_VERSION,
                                     "note_context": note_context,
@@ -3095,7 +3130,10 @@ def _run_derived_stages(
                             note_settings=candidate_settings,
                         )
                         if not _has_generated_title(file_id):
-                            raise RuntimeError("AI summary returned no usable recording title")
+                            # Two model attempts produced no title. Notes are
+                            # complete, so name the recording deterministically
+                            # rather than leaving the stage failed for a person.
+                            _apply_fallback_title(file_id, result)
                         return {
                             "value": result,
                             "provider": result.get("provider"),
@@ -3379,17 +3417,10 @@ def _schedule_mind_map_retry(row: PlaudFile, run: StageRun, settings: Settings) 
     count = int(detail.get("mind_map_retry_count") or 0) + 1
     detail["mind_map_retry_count"] = count
     detail["mind_map_last_failure_at"] = datetime.now(UTC).isoformat()
-    maximum = settings.pipeline.retry_max_attempts
-    if maximum <= 0 or count >= maximum:
-        detail["mind_map_next_retry_at"] = None
-    else:
-        delay = min(
-            settings.pipeline.retry_base_seconds * (2 ** (count - 1)),
-            settings.pipeline.retry_max_seconds,
-        )
-        detail["mind_map_next_retry_at"] = (
-            datetime.now(UTC) + timedelta(seconds=delay)
-        ).isoformat()
+    delay = _retry_delay_seconds(count, settings)
+    detail["mind_map_next_retry_at"] = (
+        None if delay is None else (datetime.now(UTC) + timedelta(seconds=delay)).isoformat()
+    )
     run.detail = detail
 
 
@@ -3906,6 +3937,35 @@ def _generated_title_candidate(title: object, content_md: object = None) -> str 
     return None
 
 
+def _fallback_title_text(result: dict, started_at: datetime | None) -> str:
+    """Deterministic title from the note body, else the recording date."""
+    for line in str(result.get("content_md") or "").splitlines():
+        text = line.strip().lstrip("#-*• ").strip()
+        if len(text) < 6 or text.startswith(("自動覆核", "[[")):
+            continue
+        text = re.split(r"[。！？!?；;:：]", text)[0].strip()
+        if 6 <= len(text) <= 60:
+            return text
+    if started_at is not None:
+        return started_at.astimezone().strftime("%Y-%m-%d %H:%M 錄音")
+    return "未命名錄音"
+
+
+def _apply_fallback_title(file_id: str, result: dict) -> None:
+    with session_scope() as session:
+        row = _assert_processing_claim_in_session(session, file_id)
+        if _clean_generated_title(row.generated_title):
+            return
+        started = (
+            datetime.fromtimestamp(row.start_time_ms / 1000, tz=UTC) if row.start_time_ms else None
+        )
+        row.generated_title = _fallback_title_text(result, started)
+        row.generated_title_provider = "fallback"
+        row.generated_title_model = None
+        row.generated_title_at = datetime.now(UTC)
+        log.warning("Recording %s named by deterministic fallback title", file_id)
+
+
 def _has_generated_title(file_id: str) -> bool:
     with session_scope() as session:
         row = session.get(PlaudFile, file_id)
@@ -4151,6 +4211,7 @@ def _persist_summary(
             resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
         )
         from ..note_speakers import bind_generated_summary
+
         bind_generated_summary(session, replacement)
         displaced = list(
             session.scalars(
@@ -4318,10 +4379,8 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
     ):
         detail = outline_run.detail or {}
         due = _retry_snapshot_datetime(detail.get("outline_next_retry_at"))
-        if (
-            row.is_trash
-            or int(detail.get("outline_retry_count") or 0) >= settings.pipeline.retry_max_attempts
-            or (due is not None and due > now)
+        if row.is_trash or _retry_not_due(
+            int(detail.get("outline_retry_count") or 0), due, settings, now
         ):
             return None
         return "outline"
@@ -4410,23 +4469,37 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
             detail = map_run.detail or {}
             scoped_count = int(detail.get("mind_map_retry_count") or 0)
             scoped_due = _retry_snapshot_datetime(detail.get("mind_map_next_retry_at"))
-            if scoped_count >= settings.pipeline.retry_max_attempts or (
-                scoped_due is not None and scoped_due > now
-            ):
+            if _retry_not_due(scoped_count, scoped_due, settings, now):
                 return None
-        elif row.pipeline_retry_count >= settings.pipeline.retry_max_attempts or (
-            row.pipeline_next_retry_at is not None
-            and (
+        elif _retry_not_due(
+            row.pipeline_retry_count or 0,
+            (
                 row.pipeline_next_retry_at.replace(tzinfo=UTC)
-                if row.pipeline_next_retry_at.tzinfo is None
+                if row.pipeline_next_retry_at is not None
+                and row.pipeline_next_retry_at.tzinfo is None
                 else row.pipeline_next_retry_at
-            )
-            > now
+            ),
+            settings,
+            now,
         ):
             return None
     if row.audio_path is None and not (derived_only or mind_map_only):
         return None
     return "derived" if derived_only else ("mind_map" if mind_map_only else "full")
+
+
+def _retry_not_due(count: int, due: datetime | None, settings: Settings, now: datetime) -> bool:
+    """Whether a failed recording must keep waiting.
+
+    Past the fast retry budget a recording keeps a slow cadence unless that
+    cadence is disabled; a missing deadline past the budget means it stopped.
+    """
+    if due is not None:
+        return due > now
+    # No deadline past the budget means the recording stopped (the slow cadence
+    # is disabled, or it failed before this policy existed). It stays stopped
+    # until a manual Resume or an explicit recovery queue schedules it.
+    return count >= settings.pipeline.retry_max_attempts
 
 
 def new_recordings_waiting(session, settings: Settings, now: datetime) -> bool:
