@@ -176,6 +176,9 @@ class PipelineConfig(BaseModel):
     # Output is merged in source order, so this changes wall time, never content.
     note_parallelism: int = Field(default=3, ge=1, le=8)
     polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
+    # Independent correction chunks and review batches that may run at once on providers
+    # that tolerate overlapping requests. Output equals a sequential run.
+    polish_parallelism: int = Field(default=4, ge=1, le=8)
     # Which summary template to use. The Plaud Web Autopilot snapshot is the
     # default; legacy or unknown keys fall back to this captured Plaud prompt.
     summary_template: str = "plaud-autopilot"

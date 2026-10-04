@@ -5,12 +5,14 @@ from __future__ import annotations
 import copy
 import json
 import re
+import threading
 from collections.abc import Callable
 from dataclasses import asdict
 
 from ..asr.base import Segment, Transcript, Word
 from ..config import Settings
 from ..llm.base import LLMError, LLMOutputInvalid, LLMTimeout, build_llm
+from .concurrent import run_ordered
 
 PROMPT_VERSION = "transcript-polish/v5"
 SYSTEM_PROMPT = """You polish ASR transcript segments for downstream notes.
@@ -116,7 +118,6 @@ def _propose_corrections(
     kept_emptied = 0
     kept_invalid = 0
     remapped_chunks = 0
-    single_segment_retries: dict[int, int] = {}
     last_split_reason: str | None = None
     output_chars = 0
     request_input_chars = 0
@@ -129,9 +130,20 @@ def _propose_corrections(
         or not 1_000 <= chunk_chars <= 60_000
     ):
         raise LLMError("transcript polish chunk budget must be between 1000 and 60000")
-    pending = list(_chunks(source, chunk_chars))
+    ranges = list(_chunks(source, chunk_chars))
     target_segments_total = sum(bool(str(segment.get("text") or "").strip()) for segment in source)
     target_segments_completed = 0
+    # Chunks that are not finished yet, including ones in flight; a split replaces
+    # one chunk with two. Shared by every worker, like the counters above.
+    unfinished = len(ranges)
+    # Chunks are independent: context comes from the source, never from another
+    # chunk's output, so overlapping them cannot change what any one chunk returns.
+    parallelism = (
+        max(1, int(getattr(settings.pipeline, "polish_parallelism", 1) or 1))
+        if getattr(provider, "supports_parallel_calls", False)
+        else 1
+    )
+    lock = threading.Lock()
 
     def report_progress() -> None:
         if progress is None:
@@ -143,7 +155,7 @@ def _propose_corrections(
                 "target_segments_total": target_segments_total,
                 "target_segments_completed": target_segments_completed,
                 "chunks_completed": calls,
-                "chunks_total": calls + len(pending),
+                "chunks_total": calls + unfinished,
                 "attempts": attempts,
                 "split_retries": split_retries,
                 "kept_source_segments": kept_source,
@@ -152,153 +164,182 @@ def _propose_corrections(
         )
 
     report_progress()
-    while pending:
-        start, end = pending.pop(0)
-        target_indexes = [
-            index for index in range(start, end) if str(source[index].get("text") or "").strip()
-        ]
-        if not target_indexes:
-            continue
-        targets = [
-            {
-                "id": index,
-                "speaker": source[index].get("speaker"),
-                "text": source[index].get("text", ""),
-            }
-            for index in target_indexes
-        ]
-        request = {
-            "language": transcript.language,
-            "context_before": [
-                {
-                    "speaker": item.get("speaker"),
-                    "text": item.get("text", ""),
-                }
-                for item in source[max(0, start - 2) : start]
-            ],
-            "target_segments": targets,
-            "context_after": [
-                {
-                    "speaker": item.get("speaker"),
-                    "text": item.get("text", ""),
-                }
-                for item in source[end : min(len(source), end + 2)]
-            ],
-        }
-        request_json = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
-        attempts += 1
-        request_input_chars += len(SYSTEM_PROMPT) + len(request_json)
-        # The output is roughly the corrected input text plus JSON scaffolding.
-        # CJK text can reach ~2 tokens per character, so a flat budget truncates
-        # long chunks mid-string and the response fails to parse.
-        target_chars = sum(len(str(item["text"] or "")) for item in targets)
-        try:
-            raw_response = provider.complete(
-                request_json,
-                system=SYSTEM_PROMPT,
-                temperature=0.1,
-                max_tokens=max(2048, len(targets) * 80 + target_chars * 2),
-                json_schema=RESPONSE_SCHEMA,
-            )
-            response_output_chars += len(raw_response)
-            response = _json_completion(raw_response)
-            returned = response.get("segments")
-            if not isinstance(returned, list):
-                raise LLMOutputInvalid("transcript polish response has no segments array")
-            by_id: dict[int, str] = {}
-            for item in returned:
-                if not isinstance(item, dict) or not isinstance(item.get("id"), int):
-                    raise LLMOutputInvalid("transcript polish returned an invalid segment entry")
-                if not isinstance(item.get("text"), str):
-                    raise LLMOutputInvalid("transcript polish segment text must be a string")
-                item_id = item["id"]
-                if item_id in by_id:
-                    raise LLMOutputInvalid("transcript polish returned duplicate segment IDs")
-                by_id[item_id] = item["text"].strip()
-            expected = set(target_indexes)
-            unexpected = set(by_id) - expected
-            if unexpected:
-                # Local models sometimes ignore the given IDs and renumber the
-                # segments from 0 or 1. When the response is a complete,
-                # in-order renumbering, map it back positionally instead of
-                # discarding otherwise valid corrections.
-                returned_ids = [item["id"] for item in returned]
-                if len(returned_ids) == len(target_indexes) and returned_ids in (
-                    list(range(len(returned_ids))),
-                    list(range(1, len(returned_ids) + 1)),
-                ):
-                    by_id = {
-                        index: by_id[given]
-                        for index, given in zip(target_indexes, returned_ids, strict=True)
-                    }
-                    remapped_chunks += 1
-                else:
-                    raise LLMOutputInvalid("transcript polish returned unexpected segment IDs")
-            # A local model can omit a segment while otherwise returning valid
-            # corrections. Preserve those source segments instead of recursively
-            # rerunning the whole chunk: omission must never lose transcript text,
-            # and the successful corrections remain useful downstream.
-            missing = expected - set(by_id)
-            for index in missing:
-                by_id[index] = str(source[index].get("text") or "").strip()
-            kept_source += len(missing)
-            kept_missing += len(missing)
-            emptied = [
-                index
-                for index in target_indexes
-                if str(source[index].get("text") or "").strip() and not by_id[index]
+
+    def process_range(_index: int, first: tuple[int, int]) -> None:
+        nonlocal calls, attempts, split_retries, kept_source, kept_missing, kept_emptied
+        nonlocal kept_invalid, remapped_chunks, last_split_reason, output_chars
+        nonlocal request_input_chars, response_output_chars, target_segments_completed
+        nonlocal unfinished
+        stack = [first]
+        single_segment_retries: dict[int, int] = {}
+        while stack:
+            start, end = stack.pop(0)
+            target_indexes = [
+                index for index in range(start, end) if str(source[index].get("text") or "").strip()
             ]
-            if emptied:
-                # The model can legitimately empty filler-only segments, but it
-                # can also empty substantive text. In both cases the safest
-                # degradation is the original timed segment, not an expensive
-                # recursive retry that may repeat the same omission.
-                for index in emptied:
+            if not target_indexes:
+                with lock:
+                    unfinished -= 1
+                continue
+            targets = [
+                {
+                    "id": index,
+                    "speaker": source[index].get("speaker"),
+                    "text": source[index].get("text", ""),
+                }
+                for index in target_indexes
+            ]
+            request = {
+                "language": transcript.language,
+                "context_before": [
+                    {
+                        "speaker": item.get("speaker"),
+                        "text": item.get("text", ""),
+                    }
+                    for item in source[max(0, start - 2) : start]
+                ],
+                "target_segments": targets,
+                "context_after": [
+                    {
+                        "speaker": item.get("speaker"),
+                        "text": item.get("text", ""),
+                    }
+                    for item in source[end : min(len(source), end + 2)]
+                ],
+            }
+            request_json = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+            with lock:
+                attempts += 1
+                request_input_chars += len(SYSTEM_PROMPT) + len(request_json)
+            # The output is roughly the corrected input text plus JSON scaffolding.
+            # CJK text can reach ~2 tokens per character, so a flat budget truncates
+            # long chunks mid-string and the response fails to parse.
+            target_chars = sum(len(str(item["text"] or "")) for item in targets)
+            try:
+                raw_response = provider.complete(
+                    request_json,
+                    system=SYSTEM_PROMPT,
+                    temperature=0.1,
+                    max_tokens=max(2048, len(targets) * 80 + target_chars * 2),
+                    json_schema=RESPONSE_SCHEMA,
+                )
+                with lock:
+                    response_output_chars += len(raw_response)
+                response = _json_completion(raw_response)
+                returned = response.get("segments")
+                if not isinstance(returned, list):
+                    raise LLMOutputInvalid("transcript polish response has no segments array")
+                by_id: dict[int, str] = {}
+                for item in returned:
+                    if not isinstance(item, dict) or not isinstance(item.get("id"), int):
+                        raise LLMOutputInvalid(
+                            "transcript polish returned an invalid segment entry"
+                        )
+                    if not isinstance(item.get("text"), str):
+                        raise LLMOutputInvalid("transcript polish segment text must be a string")
+                    item_id = item["id"]
+                    if item_id in by_id:
+                        raise LLMOutputInvalid("transcript polish returned duplicate segment IDs")
+                    by_id[item_id] = item["text"].strip()
+                expected = set(target_indexes)
+                unexpected = set(by_id) - expected
+                renumbered = False
+                if unexpected:
+                    # Local models sometimes ignore the given IDs and renumber the
+                    # segments from 0 or 1. When the response is a complete,
+                    # in-order renumbering, map it back positionally instead of
+                    # discarding otherwise valid corrections.
+                    returned_ids = [item["id"] for item in returned]
+                    if len(returned_ids) == len(target_indexes) and returned_ids in (
+                        list(range(len(returned_ids))),
+                        list(range(1, len(returned_ids) + 1)),
+                    ):
+                        by_id = {
+                            index: by_id[given]
+                            for index, given in zip(target_indexes, returned_ids, strict=True)
+                        }
+                        renumbered = True
+                    else:
+                        raise LLMOutputInvalid("transcript polish returned unexpected segment IDs")
+                # A local model can omit a segment while otherwise returning valid
+                # corrections. Preserve those source segments instead of recursively
+                # rerunning the whole chunk: omission must never lose transcript text,
+                # and the successful corrections remain useful downstream.
+                missing = expected - set(by_id)
+                for index in missing:
                     by_id[index] = str(source[index].get("text") or "").strip()
-                kept_source += len(emptied)
-                kept_emptied += len(emptied)
-        except LLMTimeout as exc:
-            # A timeout on a multi-segment request is usually its size. Retry the
-            # same coverage as two smaller requests; a single segment that still
-            # times out is a provider failure and fails the stage for retry.
-            if end - start <= 1:
-                raise
-            midpoint = start + (end - start) // 2
-            pending[0:0] = [(start, midpoint), (midpoint, end)]
-            split_retries += 1
-            last_split_reason = str(exc)
-            report_progress()
-            continue
-        except LLMOutputInvalid as exc:
-            if end - start <= 1:
-                if single_segment_retries.get(start, 0) < 1:
-                    single_segment_retries[start] = 1
-                    pending[0:0] = [(start, end)]
+                emptied = [
+                    index
+                    for index in target_indexes
+                    if str(source[index].get("text") or "").strip() and not by_id[index]
+                ]
+                if emptied:
+                    # The model can legitimately empty filler-only segments, but it
+                    # can also empty substantive text. In both cases the safest
+                    # degradation is the original timed segment, not an expensive
+                    # recursive retry that may repeat the same omission.
+                    for index in emptied:
+                        by_id[index] = str(source[index].get("text") or "").strip()
+            except LLMTimeout as exc:
+                # A timeout on a multi-segment request is usually its size. Retry the
+                # same coverage as two smaller requests; a single segment that still
+                # times out is a provider failure and fails the stage for retry.
+                if end - start <= 1:
+                    raise
+                midpoint = start + (end - start) // 2
+                stack[0:0] = [(start, midpoint), (midpoint, end)]
+                with lock:
+                    unfinished += 1
                     split_retries += 1
                     last_split_reason = str(exc)
                     report_progress()
+                continue
+            except LLMOutputInvalid as exc:
+                if end - start <= 1:
+                    if single_segment_retries.get(start, 0) < 1:
+                        single_segment_retries[start] = 1
+                        stack[0:0] = [(start, end)]
+                        with lock:
+                            split_retries += 1
+                            last_split_reason = str(exc)
+                            report_progress()
+                        continue
+                    # One segment the model cannot return validly must not fail the
+                    # whole stage: keep the original timed text (already present in
+                    # ``polished``) and move on, recording the degradation.
+                    with lock:
+                        kept_source += len(target_indexes)
+                        kept_invalid += len(target_indexes)
+                        last_split_reason = str(exc)
+                        target_segments_completed += len(target_indexes)
+                        unfinished -= 1
+                        report_progress()
                     continue
-                # One segment the model cannot return validly must not fail the
-                # whole stage: keep the original timed text (already present in
-                # ``polished``) and move on, recording the degradation.
-                kept_source += len(target_indexes)
-                kept_invalid += len(target_indexes)
-                last_split_reason = str(exc)
+                midpoint = start + (end - start) // 2
+                stack[0:0] = [(start, midpoint), (midpoint, end)]
+                with lock:
+                    unfinished += 1
+                    split_retries += 1
+                    last_split_reason = str(exc)
+                    report_progress()
+                continue
+            chars = 0
+            for index in target_indexes:
+                polished[index]["text"] = by_id[index]
+                chars += len(by_id[index])
+            with lock:
+                if renumbered:
+                    remapped_chunks += 1
+                kept_source += len(missing) + len(emptied)
+                kept_missing += len(missing)
+                kept_emptied += len(emptied)
+                output_chars += chars
+                calls += 1
+                unfinished -= 1
                 target_segments_completed += len(target_indexes)
                 report_progress()
-                continue
-            midpoint = start + (end - start) // 2
-            pending[0:0] = [(start, midpoint), (midpoint, end)]
-            split_retries += 1
-            last_split_reason = str(exc)
-            report_progress()
-            continue
-        for index in target_indexes:
-            polished[index]["text"] = by_id[index]
-            output_chars += len(by_id[index])
-        calls += 1
-        target_segments_completed += len(target_indexes)
-        report_progress()
+
+    run_ordered(ranges, process_range, parallelism)
 
     result = Transcript(
         segments=[],
@@ -388,16 +429,20 @@ def polish_transcript(
                 return getattr(self.inner, name)
 
             def complete(self, prompt, **kwargs):
-                dispatch_guard(
-                    {
-                        "input_chars": len(prompt) + len(kwargs.get("system") or ""),
-                        "output_tokens": kwargs.get("max_tokens", 2048),
-                        "projection": True,
-                    }
-                )
+                # Reservations are one durable row per stage attempt, so concurrent
+                # calls take turns recording theirs; the model call itself overlaps.
+                with self.guard_lock:
+                    dispatch_guard(
+                        {
+                            "input_chars": len(prompt) + len(kwargs.get("system") or ""),
+                            "output_tokens": kwargs.get("max_tokens", 2048),
+                            "projection": True,
+                        }
+                    )
                 return self.inner.complete(prompt, **kwargs)
 
         guarded = BudgetedProvider()
+        guarded.guard_lock = threading.Lock()
         guarded.inner = provider
         provider = guarded
     result = _propose_corrections(transcript, settings, progress=progress, provider=provider)
@@ -407,6 +452,11 @@ def polish_transcript(
         provider,
         budget=result["detail"]["chunk_chars"],
         progress=progress,
+        parallelism=(
+            max(1, int(getattr(settings.pipeline, "polish_parallelism", 1) or 1))
+            if getattr(provider, "supports_parallel_calls", False)
+            else 1
+        ),
     )
     detail = result["detail"]
     detail["review"] = review

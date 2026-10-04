@@ -6,7 +6,6 @@ No provider is constructed here: the caller's resolved, policy-checked LLM is us
 
 from __future__ import annotations
 
-import contextvars
 import hashlib
 import json
 import os
@@ -15,10 +14,10 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ..llm.base import LLMOutputInvalid
+from .concurrent import run_ordered
 
 VERSION = "evidence-notes/v2"
 KINDS = {"fact", "proposal", "decision", "action", "question"}
@@ -262,33 +261,6 @@ _REPAIR_REVIEW_TASK = (
 _DRAFT_TASK = "撰寫各 heading 對應的筆記段落；本批所有事實必須出現並有引用，不重複解釋同一資訊。\n"
 
 _VERIFY_TASK = "比對草稿與原始支持來源及事實，不只比對引用。檢查遺漏、否定/條件翻轉、事件數字錯配、虛構負責人/期限、示範與真正決議、錯誤引用，以及寫入 support 中但未列在本批 fact 的獨立資訊；即使原文有該資訊，也不可在這批搶先重複撰寫。回 issues 與 warnings，沒有問題時兩者為空。\n"
-
-
-def _run_ordered(items, work, parallelism):
-    """Run ``work(index, item)`` for every item; results keep item order.
-
-    Items are independent model calls, so overlapping them only shortens wall
-    time. The first failure in item order is raised after running calls finish,
-    and the durable per-call checkpoints keep whatever already completed.
-    """
-    items = list(items)
-    if parallelism <= 1 or len(items) <= 1:
-        return [work(index, item) for index, item in enumerate(items)]
-    with ThreadPoolExecutor(
-        max_workers=min(parallelism, len(items)), thread_name_prefix="evidence-notes"
-    ) as pool:
-        # Each task runs in a copy of the caller's context so usage capture and
-        # the processing claim keep applying inside the worker threads.
-        futures = [
-            pool.submit(contextvars.copy_context().run, work, index, item)
-            for index, item in enumerate(items)
-        ]
-        try:
-            return [future.result() for future in futures]
-        except BaseException:
-            for future in futures:
-                future.cancel()
-            raise
 
 
 class _Calls:
@@ -940,7 +912,7 @@ def generate_evidence_notes(
         }
 
     for i, (scope, result) in enumerate(
-        zip(chunks, _run_ordered(chunks, extract_chunk, parallelism), strict=True)
+        zip(chunks, run_ordered(chunks, extract_chunk, parallelism), strict=True)
     ):
         extracted, audit, issues = result["extracted"], result["audit"], result["issues"]
         if result["unresolved"]:
@@ -1007,7 +979,7 @@ def generate_evidence_notes(
             total=len(fact_groups),
         )
 
-    plans = _run_ordered(fact_groups, plan_group, parallelism)
+    plans = run_ordered(fact_groups, plan_group, parallelism)
     title = plans[0]["title"]
     if len(plans) > 1:
         from .title_policy import TITLE_INSTRUCTIONS
@@ -1141,7 +1113,7 @@ def generate_evidence_notes(
                 unresolved = True
         return {"draft": draft, "review": review, "issues": list(issues), "unresolved": unresolved}
 
-    for bi, result in enumerate(_run_ordered(batches, draft_batch, parallelism)):
+    for bi, result in enumerate(run_ordered(batches, draft_batch, parallelism)):
         draft, review = result["draft"], result["review"]
         if result["unresolved"]:
             _accept_with_issues(coverage, "verify", bi + 1, result["issues"])

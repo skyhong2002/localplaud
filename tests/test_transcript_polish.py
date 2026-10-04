@@ -549,3 +549,187 @@ def test_gateway_polish_chunk_default_stays_below_timeout_scale():
     from localplaud.config import AiGatewayLlmConfig
 
     assert AiGatewayLlmConfig().polish_chunk_chars <= 12_000
+
+
+# --------------------------------------------------------------------------- #
+# Overlapping chunk and review calls: faster, never different
+# --------------------------------------------------------------------------- #
+
+
+class ConcurrentPolisher:
+    """Corrects 銀心 to 迎新 and approves every edit except those on ids divisible by 4."""
+
+    name = "gateway"
+    model = "scripted"
+    supports_parallel_calls = True
+    polish_chunk_chars = 1_000
+
+    def __init__(self, *, stagger=True, timeout_first_large=False):
+        import threading
+
+        self._guard = threading.Lock()
+        self.in_flight = 0
+        self.peak = 0
+        self.stagger = stagger
+        self.timeout_first_large = timeout_first_large
+        self.timed_out = False
+
+    def available(self):
+        return True
+
+    def complete(self, prompt, **kwargs):
+        import time
+
+        with self._guard:
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+        try:
+            body = json.loads(prompt)
+            if "target_segments" in body:
+                ids = [item["id"] for item in body["target_segments"]]
+                if self.timeout_first_large and len(ids) >= 2 and not self.timed_out:
+                    self.timed_out = True
+                    raise LLMTimeout("too large")
+                if self.stagger:
+                    time.sleep(0.04 * (30 - min(ids)) / 30 + 0.005)
+                return json.dumps(
+                    {
+                        "segments": [
+                            {"id": i["id"], "text": i["text"].replace("銀心", "迎新")}
+                            for i in body["target_segments"]
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+            if self.stagger:
+                time.sleep(0.02)
+            return json.dumps(
+                {
+                    "approved_ids": [p["id"] for p in body["proposals"] if p["id"] % 4],
+                    "rejected": [
+                        {"id": p["id"], "reason": "不支持此修改"}
+                        for p in body["proposals"]
+                        if not p["id"] % 4
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        finally:
+            with self._guard:
+                self.in_flight -= 1
+
+
+def _meeting(count=30):
+    return Transcript(
+        language="zh",
+        has_speakers=True,
+        segments=[
+            Segment(
+                text=f"第{i}段銀心派對討論" + "內容" * 150,
+                start=float(i),
+                end=i + 0.9,
+                speaker=f"S{i % 3}",
+            )
+            for i in range(count)
+        ],
+    )
+
+
+def _polish(provider, parallelism, monkeypatch, **kwargs):
+    from localplaud.worker.polish import polish_transcript as full_polish
+
+    monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
+    settings = Settings(pipeline={"polish_parallelism": parallelism})
+    return full_polish(_meeting(), settings, **kwargs)
+
+
+def test_parallel_correction_equals_sequential_correction(monkeypatch):
+    sequential = _polish(ConcurrentPolisher(stagger=False), 1, monkeypatch)
+    llm = ConcurrentPolisher()
+    parallel = _polish(llm, 4, monkeypatch)
+
+    assert llm.peak >= 2
+    assert [s.text for s in sequential["transcript"].segments] == [
+        s.text for s in parallel["transcript"].segments
+    ]
+    for key in (
+        "chunks",
+        "attempts",
+        "split_retries",
+        "kept_source_segments",
+        "changed_segment_ids",
+        "input_chars",
+        "output_chars",
+        "request_input_chars",
+        "response_output_chars",
+    ):
+        assert sequential["detail"][key] == parallel["detail"][key], key
+    seq_review, par_review = sequential["detail"]["review"], parallel["detail"]["review"]
+    assert seq_review["decisions"] == par_review["decisions"]
+    assert seq_review["proposals"] == par_review["proposals"]
+    assert seq_review["calls"] == par_review["calls"] and seq_review["calls"] >= 2
+    assert sequential["detail"]["chunks"] >= 5
+    # Some edits are approved and some rejected, so the merge order is exercised.
+    approved = {d["id"] for d in par_review["decisions"] if d["approve"]}
+    assert approved and approved != {d["id"] for d in par_review["decisions"]}
+
+
+def test_correction_overlap_is_bounded_and_needs_provider_opt_in(monkeypatch):
+    llm = ConcurrentPolisher()
+    _polish(llm, 2, monkeypatch)
+    assert llm.peak == 2
+
+    class SingleServer(ConcurrentPolisher):
+        supports_parallel_calls = False
+
+    single = SingleServer()
+    _polish(single, 6, monkeypatch)
+    assert single.peak == 1
+
+
+def test_split_after_timeout_inside_a_parallel_worker_keeps_full_coverage(monkeypatch):
+    llm = ConcurrentPolisher(timeout_first_large=True)
+    updates = []
+    result = _polish(llm, 4, monkeypatch, progress=updates.append)
+    reference = _polish(ConcurrentPolisher(stagger=False), 1, monkeypatch)
+
+    assert result["detail"]["split_retries"] == 1
+    assert [s.text for s in result["transcript"].segments] == [
+        s.text for s in reference["transcript"].segments
+    ]
+    assert len(result["transcript"].segments) == 30
+    assert all(s.text for s in result["transcript"].segments)
+    correction = [u for u in updates if u.get("strategy") == "contextual-segment-map"]
+    assert all(u["chunks_total"] >= u["chunks_completed"] for u in correction)
+    assert correction[-1]["target_segments_completed"] == 30
+    assert correction[-1]["chunks_completed"] == correction[-1]["chunks_total"]
+
+
+def test_budget_guard_runs_one_at_a_time_while_model_calls_overlap(monkeypatch):
+    import threading
+    import time
+
+    guard_lock = threading.Lock()
+    state = {"active": 0, "peak": 0, "calls": 0}
+
+    def guard(usage):
+        with guard_lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+            state["calls"] += 1
+        time.sleep(0.005)
+        with guard_lock:
+            state["active"] -= 1
+
+    llm = ConcurrentPolisher()
+    _polish(llm, 4, monkeypatch, dispatch_guard=guard)
+    assert llm.peak >= 2
+    assert state["peak"] == 1
+    assert state["calls"] >= 6
+
+
+def test_review_progress_never_moves_backwards_in_parallel(monkeypatch):
+    updates = []
+    _polish(ConcurrentPolisher(), 4, monkeypatch, progress=updates.append)
+    review = [u["current"] for u in updates if u.get("phase") == "review"]
+    assert review and review == sorted(review)

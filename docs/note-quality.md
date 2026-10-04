@@ -161,3 +161,16 @@ review failure preserves existing artifacts and defers new notes until a retry
 succeeds. Successful corrections invalidate dependent notes/maps/indexes and the
 same processing cycle rebuilds them from the canonical revision. See
 [speech-quality.md](speech-quality.md#automatic-correction-and-edit-review).
+
+## Transcript correction speed
+
+Correction proposes edits per chunk and then reviews every individual edit against the
+original text. Chunks take their context from the source transcript, and review batches
+judge their own edits independently, so neither depends on another's output. With
+`pipeline.polish_parallelism` (default 4) they run concurrently on providers that
+declare `supports_parallel_calls`, and results are merged in source order: the corrected
+transcript, decisions and counters equal a sequential run (asserted by tests); only wall
+time changes. Single-model local servers stay sequential. Budget reservations are still
+recorded one at a time, and progress never moves backwards while chunks finish out of
+order.
+
