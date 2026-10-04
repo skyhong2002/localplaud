@@ -226,7 +226,12 @@ def _execute(request: JobSubmitRequest) -> list[dict]:
 
             note_options = {
                 key: request.options[key]
-                for key in ("note_quality", "note_evidence_chunk_chars", "note_repair_attempts")
+                for key in (
+                    "note_quality",
+                    "note_single_pass_chars",
+                    "note_evidence_chunk_chars",
+                    "note_repair_attempts",
+                )
                 if key in request.options
             }
             settings.pipeline = PipelineConfig.model_validate(

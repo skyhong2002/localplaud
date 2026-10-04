@@ -19,9 +19,9 @@ from .summarize import (
     _chunk_text,
     _group_notes,
     _llm_provider_model,
+    _note_chunk_chars,
     _reduction_max_tokens,
     _render_transcript,
-    _summary_chunk_chars,
     reduce_notes,
 )
 
@@ -173,7 +173,7 @@ def generate_mind_map(
     """
     llm = build_llm(settings.llm)
     transcript_text = _render_transcript(transcript)
-    chunk_chars = _summary_chunk_chars(settings, llm)
+    chunk_chars = _note_chunk_chars(settings, llm)
     chunks = _chunk_text(transcript_text, chunk_chars)
     map_calls = 0
     reduce_calls = 0

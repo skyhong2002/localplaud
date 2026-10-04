@@ -22,6 +22,7 @@ def _reset(monkeypatch, tmp_path, *, diarize=False, summarize=True, mind_map=Tru
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__DIARIZE", str(diarize).lower())
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__POLISH", "false")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__NOTE_QUALITY", "evidence")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__SUMMARIZE", str(summarize).lower())
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__MIND_MAP", str(mind_map).lower())
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__INDEX", str(index).lower())

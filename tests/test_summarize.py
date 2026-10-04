@@ -565,3 +565,109 @@ def test_reduce_notes_tightens_then_stops_without_truncating():
 
     reduced, detail = reduce_notes(notes, 50, cooperative)
     assert detail["fits"] is True and detail["stalled_groups"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# standard mode: the whole transcript in one request
+# --------------------------------------------------------------------------- #
+
+
+def _standard_settings(**pipeline):
+    from localplaud.config import Settings
+
+    return Settings(pipeline={"note_quality": "standard", "summary_chunk_chars": 6_000, **pipeline})
+
+
+class _HostedLlm:
+    """A large-context provider: advertises a single-pass budget."""
+
+    name = "hosted"
+    single_pass_chars = 120_000
+    summary_chunk_chars = 32_000
+
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    def complete(self, prompt, **kwargs):
+        self.prompts.append(prompt)
+        return '{"title":"整場會議","content_md":"## 重點\\n- 完整涵蓋","tags":{"topics":[],"people":[],"orgs":[]}}'
+
+
+class _SmallLlm(_HostedLlm):
+    name = "small"
+    single_pass_chars = None
+    summary_chunk_chars = 3_000
+
+
+def _long_transcript(parts=40, size=1_900):
+    return _transcript(
+        *(
+            Segment(text=f"第{i}段內容" + "細節" * size, start=i, end=i + 1, speaker="S0")
+            for i in range(parts)
+        )
+    )
+
+
+def test_standard_default_and_budget_rules():
+    from localplaud.config import Settings
+    from localplaud.worker.summarize import _note_chunk_chars
+
+    assert Settings().pipeline.note_quality == "standard"
+    settings = _standard_settings()
+    # A hosted provider takes far more than the conservative chunk budget.
+    assert _note_chunk_chars(settings, _HostedLlm()) == 120_000
+    # The operator can only lower the provider's advertised ceiling, never raise it.
+    assert (
+        _note_chunk_chars(_standard_settings(note_single_pass_chars=50_000), _HostedLlm()) == 50_000
+    )
+    assert (
+        _note_chunk_chars(_standard_settings(note_single_pass_chars=400_000), _HostedLlm())
+        == 120_000
+    )
+    # Providers without that capability keep the bounded budget, and so do the
+    # explicit compatibility modes.
+    assert _note_chunk_chars(settings, _SmallLlm()) == 6_000
+    legacy = _legacy_settings(pipeline={"summary_chunk_chars": 6_000})
+    assert _note_chunk_chars(legacy, _HostedLlm()) == 32_000
+
+
+def test_standard_sends_a_long_transcript_in_one_request_without_dropping_the_tail(monkeypatch):
+    from localplaud.worker.summarize import summarize
+
+    llm = _HostedLlm()
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: llm)
+    transcript = _long_transcript(parts=25)
+    assert len(_render_transcript(transcript)) > 100_000 // 2
+
+    result = summarize(transcript, _standard_settings())
+
+    assert result["coverage"]["strategy"] == "direct"
+    assert result["coverage"]["map_calls"] == 0 and result["coverage"]["reduce_calls"] == 0
+    note_prompts = [p for p in llm.prompts if "第24段內容" in p]
+    assert len(note_prompts) == 1 and "第0段內容" in note_prompts[0]
+    assert result["template_snapshot"]["execution"]["note_quality"] == "standard"
+    assert result["template_snapshot"]["execution"]["chunk_chars"] == 120_000
+
+
+def test_standard_keeps_bounded_chunks_for_a_small_context_provider(monkeypatch):
+    from localplaud.worker.summarize import summarize
+
+    llm = _SmallLlm()
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: llm)
+    result = summarize(_long_transcript(parts=12, size=1_000), _standard_settings())
+    assert result["coverage"]["chunks"] > 1
+    assert result["coverage"]["strategy"] in {"hierarchical", "sectioned"}
+
+
+def test_standard_is_split_only_beyond_the_single_pass_budget(monkeypatch):
+    from localplaud.worker.summarize import summarize
+
+    llm = _HostedLlm()
+    monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _cfg: llm)
+    huge = _long_transcript(parts=200, size=1_900)
+    assert len(_render_transcript(huge)) > 120_000
+    result = summarize(huge, _standard_settings())
+    # Recordings longer than any single request still reach every part.
+    assert result["coverage"]["chunks"] > 1
+    joined = "\n".join(llm.prompts)
+    assert "第0段內容" in joined and "第199段內容" in joined

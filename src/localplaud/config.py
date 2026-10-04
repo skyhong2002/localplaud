@@ -160,7 +160,15 @@ class PipelineConfig(BaseModel):
     summary_chunk_chars: int = 6_000
     # Evidence extraction, source review and note review use the selected stage provider.
     # Legacy is an explicit compatibility mode, never an automatic fallback.
-    note_quality: Literal["evidence", "legacy"] = "evidence"
+    # standard: the whole transcript in one request when the provider has the
+    #   context (a Plaud-style, topic-organized note in minutes). Longer
+    #   recordings or small-context providers fall back to bounded chunks.
+    # evidence: audited fact ledger with citations; thorough but slow, opt-in.
+    # legacy: the original chunked algorithm, kept for explicit compatibility.
+    note_quality: Literal["standard", "evidence", "legacy"] = "standard"
+    # Largest transcript, in characters, sent as one note request to a provider that
+    # advertises a large context. Leave room for the template and the answer.
+    note_single_pass_chars: int = Field(default=120_000, ge=6_000, le=400_000)
     note_evidence_chunk_chars: int = Field(default=120_000, ge=2_000, le=120_000)
     note_repair_attempts: int = Field(default=2, ge=0, le=2)
     # Independent evidence chunks, plan groups and draft batches may run at once

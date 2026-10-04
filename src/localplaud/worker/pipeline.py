@@ -1099,6 +1099,9 @@ def _llm_projected_usage(
     chunk_chars = settings.pipeline.summary_chunk_chars
     if settings.llm.provider in {"ollama", "localplaud-worker"}:
         chunk_chars = min(chunk_chars, settings.llm.ollama.summary_chunk_chars)
+    elif settings.pipeline.note_quality == "standard":
+        # Hosted providers take the whole transcript in one request.
+        chunk_chars = max(chunk_chars, settings.pipeline.note_single_pass_chars)
     chunks = len(summarize._chunk_text(rendered, chunk_chars))
     reduce_calls = math.ceil(chunks / 8) if chunks > 1 else 0
     requests = chunks + reduce_calls + 1 if chunks > 1 else 1

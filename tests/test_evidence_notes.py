@@ -325,7 +325,8 @@ def test_default_summary_dispatches_to_evidence_without_plaud_artifacts(monkeypa
     fake = Fake()
     monkeypatch.setattr("localplaud.worker.summarize.build_llm", lambda _: fake)
     result = summarize(
-        Transcript(segments=[Segment("本地錄音提議事件 A，尚未同意。", 0, 5)]), Settings()
+        Transcript(segments=[Segment("本地錄音提議事件 A，尚未同意。", 0, 5)]),
+        Settings(pipeline={"note_quality": "evidence"}),
     )
     assert result["coverage"]["strategy"] == "evidence"
     assert result["coverage"]["transcript_quality"]["blocking"] is False

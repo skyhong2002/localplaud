@@ -14,6 +14,8 @@ def _reset_db(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALPLAUD_ASR__PROVIDER", "faster-whisper")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")  # skip ffmpeg
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__POLISH", "false")
+    # These tests persist evidence-mode notes and exercise reuse/resume, not the mode.
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__NOTE_QUALITY", "evidence")
     monkeypatch.setattr(db_session, "_engine", None)
     monkeypatch.setattr(db_session, "_Session", None)
     get_settings(reload=True)

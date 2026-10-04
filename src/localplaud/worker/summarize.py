@@ -93,6 +93,22 @@ def _reduction_max_tokens(chunk_chars: int) -> int:
     return max(32, min(600, chunk_chars // 12))
 
 
+def _note_chunk_chars(settings: Settings, llm) -> int:
+    """Budget for one note request.
+
+    In standard mode a provider that advertises a large context takes the whole
+    transcript at once, which is what makes minutes-long notes possible. Anything
+    else keeps the conservative chunked budget, and nothing is ever truncated.
+    """
+    budget = _summary_chunk_chars(settings, llm)
+    if settings.pipeline.note_quality != "standard":
+        return budget
+    single_pass = getattr(llm, "single_pass_chars", None)
+    if isinstance(single_pass, int) and single_pass > 0:
+        return max(budget, min(settings.pipeline.note_single_pass_chars, single_pass))
+    return budget
+
+
 def _summary_chunk_chars(settings: Settings, llm) -> int:
     """Use a provider's safe large-context budget when it advertises one."""
     provider_limit = getattr(llm, "summary_max_chunk_chars", None)
@@ -391,7 +407,7 @@ def _prepare_source(
             seen.add(text)
             lines.append(f"{seg.speaker}: {text}" if seg.speaker else text)
         transcript_text = "\n".join(lines)
-    chunk_chars = _summary_chunk_chars(settings, llm)
+    chunk_chars = _note_chunk_chars(settings, llm)
     chunks = _chunk_text(transcript_text, chunk_chars)
     map_calls = 0
     reduce_calls = 0
@@ -564,12 +580,12 @@ def summarize(
         coverage["detail_sections"] = len(sections)
     execution = {
         "version": NOTE_PROMPT_VERSION,
-        "note_quality": "legacy",
+        "note_quality": settings.pipeline.note_quality,
         "instructions": body_policy,
         "section_instructions": SECTION_INSTRUCTIONS if sections else None,
         "output_tokens": output_tokens,
         "section_output_tokens": 2400 if sections else None,
-        "chunk_chars": _summary_chunk_chars(settings, llm),
+        "chunk_chars": _note_chunk_chars(settings, llm),
         "context_tokens": getattr(getattr(llm, "cfg", None), "context_tokens", None),
     }
     # Also enforce this on remote workers, before the result reaches the controller.

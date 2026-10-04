@@ -52,11 +52,28 @@ provider/model. Coverage and phase usage describe executed checks; they are not
 measurements of semantic accuracy. A model reviewer is not independent human or
 audio verification and can share the generator's mistakes.
 
+## Modes
+
+| `note_quality` | What it does | Typical time for a 70 minute meeting |
+| --- | --- | --- |
+| `standard` (default) | The whole transcript goes to the model in one request and the model chooses what matters: meeting information, topic sections, action items and suggestions. Providers that advertise a large context (`single_pass_chars`, the OpenAI-compatible clients including the AI gateway) take up to `note_single_pass_chars`; others and longer recordings keep the bounded chunked path, so no part of a recording is ever dropped. | about 3 to 4 minutes |
+| `evidence` | Opt-in audited fact ledger: chunked extraction, review, planning, drafting and verification with citations for every fact. Thorough and traceable, but a 70 minute meeting needs about 180 requests and produces a note roughly as long as the transcript. | 60 to 100 minutes |
+| `legacy` | The original chunked algorithm, kept for explicit compatibility. | varies |
+
+Why `standard` is the default: on the same 80 minute recording, a Plaud note was about
+3,000 characters in 8 topic sections plus action items, the evidence engine produced
+about 22,000 characters in 142 narrow sections, and one standard request produced about
+5,000 characters in 9 topic sections plus action items in 3.5 minutes. A note is for
+deciding and following up, so selecting what matters is the feature. Use `evidence` when
+a recording needs every claim traced to its source. Switching modes does not delete
+existing notes; a recording regenerated under a new mode keeps its earlier revisions.
+
 ## Configuration
 
 ```toml
 [pipeline]
-note_quality = "evidence"       # default; "legacy" explicitly selects the v1 algorithm
+note_quality = "standard"       # default; "evidence" selects the audited ledger, "legacy" the v1 algorithm
+note_single_pass_chars = 120000 # one-request budget for large-context providers
 note_evidence_chunk_chars = 120000 # complete request budget, capped by provider capability
 note_repair_attempts = 2        # 0..2; never an unbounded repair loop
 note_parallelism = 3            # 1..8; only for providers that declare overlapping calls safe

@@ -27,6 +27,9 @@ class OpenAILLM:
     name = "openai"
     # Each call builds its own client, so independent calls may overlap.
     supports_parallel_calls = True
+    # Hosted OpenAI-compatible models take a whole meeting transcript in one
+    # request; pipeline.note_single_pass_chars may lower this, never raise it.
+    single_pass_chars = 120_000
 
     def __init__(self, cfg: OpenAILlmConfig) -> None:
         self.cfg = cfg

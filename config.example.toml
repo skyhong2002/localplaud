@@ -83,7 +83,8 @@ retry_base_seconds = 300         # exponential delay: 5m, 10m, 20m, …
 retry_max_seconds = 21600        # cap fast retry delay at 6h
 retry_exhausted_interval_seconds = 86400 # keep retrying daily after that; 0 stops until manual Resume
 summary_chunk_chars = 12000      # full transcript is hierarchically summarized above this size
-note_quality = "evidence"       # facts -> source review -> outline -> cited notes -> review
+note_quality = "standard"       # whole transcript in one request: a topic-organized note in minutes. "evidence" = audited fact ledger (slow, thorough); "legacy" = original chunked
+note_single_pass_chars = 120000  # largest transcript sent as one note request to a large-context provider
 note_evidence_chunk_chars = 120000 # also bounded by the selected provider's context
 note_repair_attempts = 2         # bounded repairs; unresolved reviewer objections are published as caveats
 note_parallelism = 3              # concurrent evidence chunks/drafts on gateway-style providers; output is identical to 1
