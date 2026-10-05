@@ -60,6 +60,26 @@ def _normalize_cloud_markdown(markdown: str) -> str:
     return "\n".join(normalized).strip()
 
 
+def _unwrap_cloud_note_body(raw: str) -> str:
+    """Return the Markdown body of a Plaud note entry.
+
+    Plaud's v2 summaries arrive as a JSON object whose ``ai_content`` field holds
+    the Markdown (alongside ``category``/``summary_id``/``state`` metadata);
+    older notes are bare Markdown. Anything that is not that wrapper is returned
+    unchanged, so a note that merely starts with ``{`` is never altered.
+    """
+    stripped = raw.strip()
+    if not stripped.startswith("{"):
+        return raw
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return raw
+    if isinstance(parsed, dict) and isinstance(parsed.get("ai_content"), str):
+        return parsed["ai_content"]
+    return raw
+
+
 def _outline_markdown(raw: str) -> str | None:
     """Render Plaud's chapter outline JSON as a timestamped Markdown list."""
     try:
@@ -120,7 +140,7 @@ def _cloud_notes(detail: dict) -> list[dict]:
         markdown = item.get("data_content")
         if not markdown:
             continue
-        markdown = _normalize_cloud_markdown(str(markdown))
+        markdown = _normalize_cloud_markdown(_unwrap_cloud_note_body(str(markdown)))
         if not markdown:
             continue
         heading = re.search(r"^# (.+?)\s*$", markdown, flags=re.MULTILINE)

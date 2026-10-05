@@ -414,6 +414,53 @@ def test_download_audio_uses_presigned_url(tmp_path, monkeypatch):
 
 
 @respx.mock
+def test_cloud_v2_note_wrapper_is_unwrapped_to_markdown(tmp_path):
+    """Plaud v2 notes are ``{"ai_content": <markdown>, ...}``; the mirror must
+    store the Markdown, never the JSON envelope or its metadata."""
+    _write_tokens(tmp_path / "tokens.json")
+    fid = "v2wrap"
+    markdown = "## 專案與論文方向\n本次會議聚焦…\n- [ ] 後續行動"
+    wrapper = json.dumps(
+        {
+            "ai_content": markdown,
+            "category": "Reasoning Summary",
+            "summary_id": "20251205153717-v2@872ed3e2fb5df65dd96759-1",
+            "original_category": "Reasoning Summary",
+            "state": 10,
+        }
+    )
+    detail = _detail(
+        fid,
+        note_list=[
+            {"data_type": "auto_sum_note", "data_title": "Summary", "data_content": wrapper},
+            {"data_type": "sum_multi_note", "data_id": "n2", "data_content": wrapper},
+        ],
+    )
+    respx.get(f"{API}/open/third-party/files/{fid}").mock(
+        return_value=httpx.Response(200, json=detail)
+    )
+    with PlaudOfficialClient(_cfg(tmp_path)) as c:
+        assert c.get_cloud_summary_md(fid) == markdown
+        notes = c.get_cloud_notes(fid)
+    assert [n["markdown"] for n in notes] == [markdown, markdown]
+    assert all("ai_content" not in n["markdown"] for n in notes)
+
+
+def test_cloud_note_body_unwrap_leaves_other_content_alone():
+    from localplaud.plaud.official import _cloud_notes, _unwrap_cloud_note_body
+
+    assert _unwrap_cloud_note_body("# Title\n\nbody") == "# Title\n\nbody"
+    # JSON that is not the v2 envelope is user/Plaud content, not ours to rewrite.
+    other = '{"title": "x", "content_md": "y"}'
+    assert _unwrap_cloud_note_body(other) == other
+    assert _unwrap_cloud_note_body('{"ai_content": 3}') == '{"ai_content": 3}'
+    assert _unwrap_cloud_note_body("{not json") == "{not json"
+    # An envelope with no body must not be mirrored as an empty/JSON note.
+    empty = json.dumps({"ai_content": "  ", "state": 10})
+    assert _cloud_notes({"note_list": [{"data_type": "auto_sum_note", "data_content": empty}]}) == []
+
+
+@respx.mock
 def test_cloud_artifacts_extracted_from_detail(tmp_path):
     _write_tokens(tmp_path / "tokens.json")
     fid = "withart"
