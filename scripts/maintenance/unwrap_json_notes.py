@@ -10,8 +10,9 @@ every original body it will rewrite, then replaces only ``content_md`` (and a mi
 JSON-quoted ``title`` for local notes). Local notes are archived as a note version first
 so the original stays restorable; cloud mirrors are replaced in place (the export keeps
 the original). Rows that are not exactly one of the envelopes above are left alone, and
-a local envelope whose inner body is not Markdown (empty, or an unrendered transcript) is
-reported for regeneration instead of being rewritten. Run it while the daemon is idle or
+a local envelope whose inner body is not usable Markdown (empty, an unrendered
+transcript, or cut off mid-string by the model's output limit) is reported for
+regeneration instead of being rewritten. Run it while the daemon is idle or
 accept a short wait on database locks.
 """
 
@@ -59,7 +60,13 @@ def plan(row: Summary) -> tuple[str, str, str | None] | None:
         return ("cloud", body, None)
     if row.source == "local":
         data = _load(row.content_md)
-        if data is None or not isinstance(data.get("content_md"), str) or "ai_content" in data:
+        if data is None:
+            # Early small-model runs hit the output limit mid-string: the envelope is
+            # unterminated, so the note body is cut off and cannot be recovered.
+            if row.content_md.lstrip().startswith("{") and '"content_md"' in row.content_md:
+                return ("review", "truncated JSON envelope; note body is incomplete", None)
+            return None
+        if not isinstance(data.get("content_md"), str) or "ai_content" in data:
             return None
         body = data["content_md"].strip()
         if not body:

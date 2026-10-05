@@ -65,6 +65,7 @@ def _seed():
                 _row("plaud-autopilot", "local", local, title=None),
                 _row("meeting", "local", "# 已是 Markdown\n\n不要動"),
                 _row("notes", "local", transcripty),
+                _row("cut", "local", '{\n  "title": "問卷設計",\n  "content_md": "# 問卷設計\\n\\n- 將研究問題轉化為具體'),
                 _row("blob", "local", '{"unrelated": true}'),
             ]
         )
@@ -81,8 +82,9 @@ def test_dry_run_changes_nothing_and_flags_transcript_bodies(db, script, monkeyp
     monkeypatch.setattr(sys, "argv", ["unwrap_json_notes.py"])
     assert script.main() == 0
     out = capsys.readouterr().out
-    assert "rewritable: 2 (cloud 1, local 1); needs regeneration instead: 1" in out
+    assert "rewritable: 2 (cloud 1, local 1); needs regeneration instead: 2" in out
     assert "inner body is transcript text" in out
+    assert "truncated JSON envelope" in out
     assert _bodies() == before
     assert not (db / "backups").exists()
 
@@ -101,6 +103,7 @@ def test_apply_unwraps_backs_up_and_archives_local_original(db, script, monkeypa
     assert after["blob"][0] == '{"unrelated": true}'
     assert after["outline"][0] == "- [0:00] 章節"
     assert after["notes"][0].startswith('{"title"')
+    assert after["cut"][0].startswith('{\n  "title"')  # truncated: left for regeneration
 
     with session_scope() as s:
         versions = list(s.query(SummaryRevision))
