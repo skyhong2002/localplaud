@@ -635,11 +635,13 @@ def _meeting(count=30):
     )
 
 
-def _polish(provider, parallelism, monkeypatch, **kwargs):
+def _polish(provider, parallelism, monkeypatch, review_chars=1_000, **kwargs):
     from localplaud.worker.polish import polish_transcript as full_polish
 
     monkeypatch.setattr("localplaud.worker.polish.build_llm", lambda _cfg: provider)
-    settings = Settings(pipeline={"polish_parallelism": parallelism})
+    settings = Settings(
+        pipeline={"polish_parallelism": parallelism, "polish_review_chars": review_chars}
+    )
     return full_polish(_meeting(), settings, **kwargs)
 
 
@@ -733,3 +735,62 @@ def test_review_progress_never_moves_backwards_in_parallel(monkeypatch):
     _polish(ConcurrentPolisher(), 4, monkeypatch, progress=updates.append)
     review = [u["current"] for u in updates if u.get("phase") == "review"]
     assert review and review == sorted(review)
+
+
+def test_large_review_batches_cut_requests_without_changing_any_decision(monkeypatch):
+    small = _polish(ConcurrentPolisher(stagger=False), 1, monkeypatch, review_chars=1_000)
+    llm = ConcurrentPolisher(stagger=False)
+    large = _polish(llm, 1, monkeypatch, review_chars=60_000)
+
+    small_review, large_review = small["detail"]["review"], large["detail"]["review"]
+    assert small_review["calls"] >= 6
+    assert large_review["calls"] == 1 == large_review["batches"]
+    assert large_review["input_chars"] < small_review["input_chars"] / 2
+    assert large_review["decisions"] == small_review["decisions"]
+    assert [s.text for s in large["transcript"].segments] == [
+        s.text for s in small["transcript"].segments
+    ]
+
+
+def test_non_hosted_providers_keep_the_conservative_review_budget(monkeypatch):
+    class Local(ConcurrentPolisher):
+        supports_parallel_calls = False
+
+    result = _polish(Local(stagger=False), 1, monkeypatch, review_chars=240_000)
+    assert result["detail"]["review"]["calls"] >= 6
+
+
+def test_malformed_large_review_batch_is_halved_not_skipped(monkeypatch):
+    class DropsDecisions(ConcurrentPolisher):
+        def complete(self, prompt, **kwargs):
+            body = json.loads(prompt)
+            if "proposals" in body and len(body["proposals"]) > 8:
+                # Large answer silently loses one edit: invalid, must be split.
+                return json.dumps(
+                    {"approved_ids": [p["id"] for p in body["proposals"][1:]], "rejected": []}
+                )
+            return super().complete(prompt, **kwargs)
+
+    reference = _polish(ConcurrentPolisher(stagger=False), 1, monkeypatch, review_chars=60_000)
+    result = _polish(DropsDecisions(stagger=False), 1, monkeypatch, review_chars=60_000)
+    review = result["detail"]["review"]
+    assert review["split_retries"] >= 1 and review["calls"] > review["batches"]
+    assert len(review["decisions"]) == len(review["proposals"])
+    assert [d["id"] for d in review["decisions"]] == [p["id"] for p in review["proposals"]]
+    assert [s.text for s in result["transcript"].segments] == [
+        s.text for s in reference["transcript"].segments
+    ]
+
+
+def test_a_single_edit_that_cannot_be_reviewed_still_fails_the_stage(monkeypatch):
+    from localplaud.llm.base import LLMOutputInvalid
+
+    class NeverAnswers(ConcurrentPolisher):
+        def complete(self, prompt, **kwargs):
+            body = json.loads(prompt)
+            if "proposals" in body:
+                return json.dumps({"approved_ids": [], "rejected": []})
+            return super().complete(prompt, **kwargs)
+
+    with pytest.raises(LLMOutputInvalid):
+        _polish(NeverAnswers(stagger=False), 1, monkeypatch, review_chars=60_000)

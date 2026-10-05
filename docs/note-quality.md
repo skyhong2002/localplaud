@@ -174,3 +174,22 @@ time changes. Single-model local servers stay sequential. Budget reservations ar
 recorded one at a time, and progress never moves backwards while chunks finish out of
 order.
 
+Review requests are the larger part of correction: every proposed edit is judged against
+its neighbouring original text, and with the conservative 8,000 character batches a
+202 minute recording needed 217 review requests (2.6 million characters sent, 93% of the
+stage) to judge 1,033 edits. Hosted large-context providers now take
+`pipeline.polish_review_chars` (default 60,000) characters per review request. A batch the
+model answers incompletely, or that times out, is halved and retried, never skipped; one
+edit that still cannot be decided fails the stage as before. Local single-model servers
+keep the conservative budget.
+
+Measured on those 1,033 real edits with the production gateway: 4 requests instead of 217,
+0.2 million characters instead of 2.6 million, about 4 minutes instead of about 30. The
+decisions are not bit-identical, because model answers vary between runs: two identical
+large-batch runs disagreed on 2.4% of edits, large batches disagreed with the stored small
+batches on 4% to 5%, and net approvals rose by about 1% (957 to 963 and 968). Edits that
+flipped consistently were mostly insertions of 的, punctuation and context-supported
+renderings, and large batches also rejected number and English-fragment edits that small
+batches had approved. Review has no acoustic ground truth, so this is evidence of
+comparable judgement, not proof of better judgement.
+

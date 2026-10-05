@@ -179,6 +179,9 @@ class PipelineConfig(BaseModel):
     # Independent correction chunks and review batches that may run at once on providers
     # that tolerate overlapping requests. Output equals a sequential run.
     polish_parallelism: int = Field(default=4, ge=1, le=8)
+    # Characters per edit-review request on large-context providers. Review judges each
+    # edit independently, so larger batches only avoid resending shared context.
+    polish_review_chars: int = Field(default=60_000, ge=1_000, le=240_000)
     # Which summary template to use. The Plaud Web Autopilot snapshot is the
     # default; legacy or unknown keys fall back to this captured Plaud prompt.
     summary_template: str = "plaud-autopilot"

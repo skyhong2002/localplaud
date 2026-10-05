@@ -446,16 +446,21 @@ def polish_transcript(
         guarded.inner = provider
         provider = guarded
     result = _propose_corrections(transcript, settings, progress=progress, provider=provider)
+    hosted = bool(getattr(provider, "supports_parallel_calls", False))
     review = review_corrections(
         transcript,
         result["transcript"],
         provider,
-        budget=result["detail"]["chunk_chars"],
+        # A hosted large-context provider takes many edits per request, which stops
+        # the same neighbouring text being resent for every handful of edits.
+        budget=(
+            max(result["detail"]["chunk_chars"], settings.pipeline.polish_review_chars)
+            if hosted
+            else result["detail"]["chunk_chars"]
+        ),
         progress=progress,
         parallelism=(
-            max(1, int(getattr(settings.pipeline, "polish_parallelism", 1) or 1))
-            if getattr(provider, "supports_parallel_calls", False)
-            else 1
+            max(1, int(getattr(settings.pipeline, "polish_parallelism", 1) or 1)) if hosted else 1
         ),
     )
     detail = result["detail"]

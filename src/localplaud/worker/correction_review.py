@@ -7,7 +7,7 @@ import re
 import threading
 from difflib import SequenceMatcher
 
-from ..llm.base import LLMOutputInvalid
+from ..llm.base import LLMOutputInvalid, LLMTimeout
 from .concurrent import run_ordered
 
 SYSTEM = """Review individual proposed ASR spelling edits against ORIGINAL dialogue.
@@ -142,15 +142,7 @@ def review_corrections(
     reported = 0
     report_lock = threading.Lock()
 
-    def review_batch(index, batch):
-        nonlocal reported
-        number = index + 1
-        if progress:
-            with report_lock:
-                # Batches finish out of order; progress never moves backwards.
-                if number > reported:
-                    reported = number
-                    progress({"phase": "review", "current": number, "total": len(batches)})
+    def ask(batch):
         prompt = payload(batch)
         response = provider.complete(
             prompt,
@@ -183,12 +175,50 @@ def review_corrections(
             raise LLMOutputInvalid("correction review did not cover every proposed edit")
         return items, len(SYSTEM) + len(prompt), len(response)
 
+    def review_with_split(batch):
+        """Review one batch; a malformed or timed-out large batch is halved, never skipped.
+
+        Every edit still needs an explicit decision, so a single edit that cannot be
+        reviewed fails the stage exactly as before.
+        """
+        try:
+            return [ask(batch)], 1
+        except (LLMOutputInvalid, LLMTimeout):
+            if len(batch) <= 1:
+                raise
+            middle = len(batch) // 2
+            left, left_splits = review_with_split(batch[:middle])
+            right, right_splits = review_with_split(batch[middle:])
+            return left + right, 1 + left_splits + right_splits
+
+    def review_batch(index, batch):
+        nonlocal reported
+        number = index + 1
+        if progress:
+            with report_lock:
+                # Batches finish out of order; progress never moves backwards.
+                if number > reported:
+                    reported = number
+                    progress({"phase": "review", "current": number, "total": len(batches)})
+        parts, splits = review_with_split(batch)
+        items = [item for part, _, _ in parts for item in part]
+        return (
+            items,
+            sum(chars for _, chars, _ in parts),
+            sum(chars for _, _, chars in parts),
+            len(parts),
+            splits - 1,
+        )
+
     # Each batch judges its own edits against the original text, so batches are
     # independent; results are merged in batch order.
     reviewed = run_ordered(batches, review_batch, parallelism)
-    decisions = [item for items, _, _ in reviewed for item in items]
-    input_chars = sum(chars for _, chars, _ in reviewed)
-    output_chars = sum(chars for _, _, chars in reviewed)
+    # Stable, batch-size-independent order: by proposal id.
+    decisions = sorted((item for items, *_ in reviewed for item in items), key=lambda d: d["id"])
+    input_chars = sum(chars for _, chars, *_ in reviewed)
+    output_chars = sum(chars for _, _, chars, *_ in reviewed)
+    request_count = sum(count for *_, count, _ in reviewed)
+    split_count = sum(splits for *_, splits in reviewed)
     accepted = {d["id"] for d in decisions if d["approve"]}
     # Rebuild from source only after ALL batches validate. Rejected edits cannot
     # erase unrelated accepted corrections, and offsets always address raw text.
@@ -203,7 +233,9 @@ def review_corrections(
         "response_format": "compact-decisions/v1",
         "proposals": edits,
         "decisions": decisions,
-        "calls": len(batches),
+        "calls": request_count,
+        "batches": len(batches),
+        "split_retries": split_count,
         "input_chars": input_chars,
         "output_chars": output_chars,
         "rejected_segment_ids": sorted({e["segment_id"] for e in edits if e["id"] not in accepted}),
