@@ -794,3 +794,117 @@ def test_a_single_edit_that_cannot_be_reviewed_still_fails_the_stage(monkeypatch
 
     with pytest.raises(LLMOutputInvalid):
         _polish(NeverAnswers(stagger=False), 1, monkeypatch, review_chars=60_000)
+
+
+# --------------------------------------------------------------------------- #
+# Correction reasoning effort: lowered for this stage only
+# --------------------------------------------------------------------------- #
+
+
+def _gateway(effort="high"):
+    from localplaud.config import AiGatewayLlmConfig
+    from localplaud.llm.ai_gateway import AiGatewayLLM
+
+    return AiGatewayLLM(
+        AiGatewayLlmConfig(api_key="k", base_url="http://gateway.test/v1", reasoning_effort=effort)
+    )
+
+
+def test_correction_lowers_but_never_raises_the_provider_reasoning_effort():
+    from localplaud.worker.polish import _with_correction_effort
+
+    settings = Settings()
+    assert settings.pipeline.polish_reasoning_effort == "medium"
+
+    lowered = _with_correction_effort(_gateway("high"), settings)
+    assert lowered.cfg.reasoning_effort == "medium"
+
+    for configured in ("medium", "low", "none"):
+        kept = _with_correction_effort(_gateway(configured), settings)
+        assert kept.cfg.reasoning_effort == configured
+
+    xhigh = _with_correction_effort(
+        _gateway("xhigh"), Settings(pipeline={"polish_reasoning_effort": "low"})
+    )
+    assert xhigh.cfg.reasoning_effort == "low"
+
+
+def test_correction_effort_can_be_disabled_and_skips_providers_without_effort():
+    from localplaud.worker.polish import _with_correction_effort
+
+    off = Settings(pipeline={"polish_reasoning_effort": None})
+    assert _with_correction_effort(_gateway("high"), off).cfg.reasoning_effort == "high"
+
+    class Local:
+        name = "ollama"
+        cfg = None
+
+    local = Local()
+    assert _with_correction_effort(local, Settings()) is local
+    assert local.cfg is None
+
+
+def test_lowering_correction_effort_does_not_touch_shared_settings_or_other_stages():
+    from localplaud.worker.polish import _with_correction_effort
+
+    settings = Settings(llm={"provider": "ai-gateway", "ai_gateway": {"api_key": "k"}})
+    shared = settings.llm.ai_gateway
+    assert shared.reasoning_effort == "high"
+    from localplaud.llm.base import build_llm
+
+    notes_provider = build_llm(settings.llm)
+    correction_provider = _with_correction_effort(build_llm(settings.llm), settings)
+
+    assert correction_provider.cfg.reasoning_effort == "medium"
+    assert shared.reasoning_effort == "high"
+    assert notes_provider.cfg.reasoning_effort == "high"
+
+
+def test_full_correction_requests_carry_the_lowered_effort(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import openai
+
+    from localplaud.llm.codex_quota import CodexQuotaReader
+    from localplaud.worker.polish import polish_transcript as full_polish
+
+    requests = []
+
+    class Responses:
+        def create(self, **kwargs):
+            requests.append(kwargs)
+            body = json.loads(kwargs["input"][-1]["content"])
+            if "target_segments" in body:
+                text = json.dumps(
+                    {
+                        "segments": [
+                            {"id": i["id"], "text": i["text"]} for i in body["target_segments"]
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+            else:
+                text = json.dumps({"approved_ids": [], "rejected": []})
+            return iter(
+                [
+                    SimpleNamespace(type="response.output_text.delta", delta=text),
+                    SimpleNamespace(type="response.completed", response=SimpleNamespace(model="m")),
+                ]
+            )
+
+    module = SimpleNamespace(**{name: getattr(openai, name) for name in dir(openai)})
+    module.OpenAI = lambda **kw: SimpleNamespace(responses=Responses())
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setattr(CodexQuotaReader, "_remaining_quota_percent", lambda self: 80)
+    settings = Settings(
+        llm={"provider": "ai-gateway", "ai_gateway": {"api_key": "k", "base_url": "http://g/v1"}}
+    )
+    transcript = Transcript(
+        language="zh", segments=[Segment(text="今天開會", start=0.0, end=1.0, speaker="S0")]
+    )
+
+    full_polish(transcript, settings)
+
+    assert requests and all(r["reasoning"] == {"effort": "medium"} for r in requests)
+    assert settings.llm.ai_gateway.reasoning_effort == "high"

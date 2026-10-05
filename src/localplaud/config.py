@@ -182,6 +182,10 @@ class PipelineConfig(BaseModel):
     # Characters per edit-review request on large-context providers. Review judges each
     # edit independently, so larger batches only avoid resending shared context.
     polish_review_chars: int = Field(default=60_000, ge=1_000, le=240_000)
+    # Reasoning effort for correction requests only (proposals and edit review). Each is
+    # a narrow lexical judgement, so it needs less deliberation than notes. This can
+    # lower a provider's configured effort, never raise it; None keeps the provider's.
+    polish_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] | None = "medium"
     # Which summary template to use. The Plaud Web Autopilot snapshot is the
     # default; legacy or unknown keys fall back to this captured Plaud prompt.
     summary_template: str = "plaud-autopilot"

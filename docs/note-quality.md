@@ -193,3 +193,25 @@ renderings, and large batches also rejected number and English-fragment edits th
 batches had approved. Review has no acoustic ground truth, so this is evidence of
 comparable judgement, not proof of better judgement.
 
+Correction requests (proposals and edit review) are narrow lexical judgements, so
+`pipeline.polish_reasoning_effort` (default `medium`) lowers a provider's configured
+reasoning effort for this stage only. It can lower the effort, never raise it, and notes,
+mind maps and Ask keep their own. A 79 minute recording, same transcript, offline:
+
+| Proposal run | Seconds | Requests | Approved edits |
+| --- | --- | --- | --- |
+| high, 8,000 characters (twice) | 617, 619 | 40 | 985, 997 |
+| medium, 8,000 characters | 429 | 40 | 1,015 |
+| medium, 24,000 characters | 407 | 13 | 1,216 |
+| high, 24,000 characters | 535 | 13 | 1,005 |
+
+Two identical high runs approved edit sets that overlap only 68% (182 edits differ,
+mostly insertions), so model variation is large. Medium at the same chunk size is within
+it (overlap 60% to 72% with the high runs, covers 89% of the edits both high runs
+approved). Larger chunks, at either effort, move away from the baseline (about 50%
+overlap) and add many insertions, so they are not used. Edit identity is compared by
+exact offsets and text, which counts a trailing-space variant of the same fix as a
+different edit; treat the percentages as a conservative bound. This was one recording
+and no acoustic ground truth: it shows medium is not detectably different from high, not
+that it is better.
+

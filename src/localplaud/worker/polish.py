@@ -412,6 +412,26 @@ def _normalize_script(transcript: Transcript) -> Transcript:
     return result
 
 
+_EFFORT_RANK = {"none": 0, "low": 1, "medium": 2, "high": 3, "xhigh": 4}
+
+
+def _with_correction_effort(provider, settings: Settings):
+    """Lower the provider's reasoning effort for correction, never raise it.
+
+    The provider keeps a private copy of its configuration, so the shared settings
+    and every other stage (notes, mind map, Ask) keep their own effort.
+    """
+    wanted = settings.pipeline.polish_reasoning_effort
+    cfg = getattr(provider, "cfg", None)
+    current = getattr(cfg, "reasoning_effort", None)
+    if wanted is None or current is None or not hasattr(cfg, "model_copy"):
+        return provider
+    if _EFFORT_RANK.get(wanted, 99) >= _EFFORT_RANK.get(current, 0):
+        return provider
+    provider.cfg = cfg.model_copy(update={"reasoning_effort": wanted})
+    return provider
+
+
 def polish_transcript(
     transcript: Transcript, settings: Settings, *, progress=None, dispatch_guard=None
 ) -> dict:
@@ -421,7 +441,7 @@ def polish_transcript(
     original = transcript
     transcript = _normalize_script(transcript)
 
-    provider = build_llm(settings.llm)
+    provider = _with_correction_effort(build_llm(settings.llm), settings)
     if dispatch_guard is not None:
 
         class BudgetedProvider:
