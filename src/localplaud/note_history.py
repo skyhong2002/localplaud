@@ -15,10 +15,18 @@ import json
 import secrets
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from .db.models import StageName, StageRun, StageStatus, Summary, SummaryRevision
+from .db.models import (
+    NoteTemplate,
+    StageName,
+    StageRun,
+    StageStatus,
+    Summary,
+    SummaryRevision,
+    UserNote,
+)
 
 # Attributes copied verbatim between the live row and an archived version.
 SNAPSHOT_FIELDS: tuple[str, ...] = (
@@ -129,9 +137,100 @@ def archive_summary(
     return archived
 
 
-def restore_summary_version(
-    session: Session, row: Summary, target: SummaryRevision
-) -> bool:
+def legacy_note_templates(session: Session) -> set[str]:
+    """Template keys that live local notes carry but no current catalog offers.
+
+    A key is legacy when it is neither a built-in catalog template nor an active
+    personal template. The mind map is its own artifact and is never legacy.
+    """
+    from .worker.summary_templates import TEMPLATES
+
+    active = set(session.scalars(select(NoteTemplate.key).where(NoteTemplate.is_active.is_(True))))
+    held = set(
+        session.scalars(select(Summary.template).where(Summary.source == "local").distinct())
+    )
+    return {key for key in held if key not in TEMPLATES and key not in active} - {
+        "mind_map",
+        "outline",
+    }
+
+
+def retire_legacy_notes(
+    session: Session,
+    file_id: str,
+    *,
+    keep_history: bool = True,
+    only: set[str] | None = None,
+) -> list[int]:
+    """Remove a recording's notes written under retired template keys.
+
+    Only when the recording already has a live local note under a current catalog
+    template, so retiring never leaves it without a note. With ``keep_history`` each
+    retired note is first preserved as an immutable version (the normal displacement
+    rule); without it the note and its archived versions are deleted outright, which
+    only an explicit operator decision should do. Editable copies keep their text and
+    lose only the link to the removed source note. Returns the retired summary ids.
+    """
+    from .worker.knowledge_index import lock_summary_for_mutation
+    from .worker.summary_templates import TEMPLATES
+
+    current = session.scalar(
+        select(Summary.id)
+        .where(
+            Summary.file_id == file_id,
+            Summary.source == "local",
+            Summary.template.in_(list(TEMPLATES)),
+        )
+        .limit(1)
+    )
+    if current is None:
+        return []
+    legacy = legacy_note_templates(session)
+    if only is not None:
+        legacy &= only
+    if not legacy:
+        return []
+    rows = list(
+        session.scalars(
+            select(Summary)
+            .where(
+                Summary.file_id == file_id,
+                Summary.source == "local",
+                Summary.template.in_(legacy),
+            )
+            .order_by(Summary.id)
+        )
+    )
+    retired: list[int] = []
+    for row in rows:
+        locked = lock_summary_for_mutation(session, row.id, file_id)
+        if locked is None:
+            continue
+        if keep_history:
+            archive_summary(session, locked, reason="retired-template")
+        else:
+            for version in session.scalars(
+                select(SummaryRevision).where(
+                    SummaryRevision.file_id == file_id,
+                    SummaryRevision.template == locked.template,
+                    SummaryRevision.source == "local",
+                )
+            ):
+                session.delete(version)
+        # Deployed SQLite libraries may not enforce foreign keys, so the editable
+        # copy's link is cleared explicitly; its own text is never touched.
+        session.execute(
+            update(UserNote)
+            .where(UserNote.source_summary_id == locked.id)
+            .values(source_summary_id=None)
+        )
+        retired.append(locked.id)
+        session.delete(locked)
+    session.flush()
+    return retired
+
+
+def restore_summary_version(session: Session, row: Summary, target: SummaryRevision) -> bool:
     """Make ``target`` the live content of ``row``, preserving what it displaces.
 
     The displaced current version is archived first, then the live row is
@@ -203,9 +302,7 @@ def _mark_dependent_mind_map_stale(session: Session, restored: Summary) -> bool:
         )
     )
     if run is None:
-        run = StageRun(
-            file_id=restored.file_id, stage=StageName.mind_map, attempts=0, detail={}
-        )
+        run = StageRun(file_id=restored.file_id, stage=StageName.mind_map, attempts=0, detail={})
         session.add(run)
     run.status = StageStatus.pending
     run.error = None

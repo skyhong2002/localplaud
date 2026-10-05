@@ -4268,9 +4268,14 @@ def _persist_summary(
         from .knowledge_index import sync_summary_document
 
         sync_summary_document(session, replacement, allow_running_stage=True)
-        from ..note_history import _mark_dependent_mind_map_stale
+        from ..note_history import _mark_dependent_mind_map_stale, retire_legacy_notes
 
         _mark_dependent_mind_map_stale(session, replacement)
+        # A current-template note now exists, so notes left under retired template
+        # keys (an older model's English "Default" note, for instance) stop appearing
+        # beside it. They are archived as versions, not deleted.
+        if template in summary_templates.TEMPLATES:
+            retire_legacy_notes(session, file_id)
 
 
 def _persist_chunks(

@@ -215,3 +215,20 @@ different edit; treat the percentages as a conservative bound. This was one reco
 and no acoustic ground truth: it shows medium is not detectably different from high, not
 that it is better.
 
+## Retired note templates
+
+Some libraries still hold local notes written under template keys no current catalog
+offers (for example the July `default` template run by a small local model, often in
+English and written from part of the recording). They show beside the current note as
+out-of-date copies. When a note under a current catalog template is persisted, a
+recording's notes under retired keys are archived as immutable versions
+(`archive_reason = retired-template`) and leave the live list; the mind map, cloud
+mirrors, personal templates and active user templates are never retired, and nothing is
+retired for a recording that has no current note. Editable copies keep their text and
+lose only the link to the removed source note.
+
+`scripts/maintenance/retire_legacy_notes.py --template default` lists what would be
+removed; `--apply` first writes a full SQLite backup and a JSON export under
+`data/backups/`, then deletes those notes and their archived versions outright. Only run
+the second form as an explicit operator decision.
+
