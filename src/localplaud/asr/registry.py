@@ -80,6 +80,4 @@ def transcribe_with_fallback(audio_path, cfg: AsrConfig) -> Transcript:
             log.warning("ASR provider %s unavailable mid-run: %s", name, exc)
             last_err = exc
             continue
-    raise AsrUnavailable(
-        f"no ASR provider could transcribe (tried {order}): {last_err}"
-    )
+    raise AsrUnavailable(f"no ASR provider could transcribe (tried {order}): {last_err}")

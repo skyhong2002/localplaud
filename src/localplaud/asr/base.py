@@ -63,6 +63,14 @@ class AsrError(RuntimeError):
     """Raised when a provider fails to transcribe."""
 
 
+class AsrResourceError(AsrError):
+    """The speech process was killed or ran out of memory, so another attempt can succeed.
+
+    Distinct from a deterministic failure (bad audio, missing dependency): the same
+    request often completes once other work on the machine has released memory.
+    """
+
+
 class AsrUnavailable(AsrError):
     """Raised when a provider can't run in this environment (missing GPU,
     model, dependency, or API key). Triggers fallback to the next provider."""

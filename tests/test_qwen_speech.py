@@ -429,3 +429,38 @@ def test_failed_speech_process_keeps_private_runtime_log(monkeypatch, tmp_path):
     assert "RuntimeError: real cause 你好" in logs[-1].read_text()
     assert oct(os.stat(logs[-1]).st_mode & 0o777) == "0o600"
     assert oct(os.stat(tmp_path / "failures").st_mode & 0o777) == "0o700"
+
+
+@pytest.mark.parametrize(
+    ("returncode", "payload", "resource"),
+    [
+        (-9, None, True),  # SIGKILL from the kernel's out-of-memory killer
+        (
+            1,
+            '{"error": "nemotron ran out of memory; free worker memory and retry this stage"}',
+            True,
+        ),
+        (1, '{"error": "qwen runtime failed: ImportError"}', False),
+        (1, None, False),
+    ],
+)
+def test_speech_process_failure_is_classified_as_resource_or_deterministic(
+    monkeypatch, tmp_path, returncode, payload, resource
+):
+    import subprocess
+
+    from localplaud.asr import qwen_provider
+    from localplaud.asr.base import AsrResourceError
+
+    def fake_run(args, *, stdout, stderr, timeout, check):
+        if payload is not None:
+            from pathlib import Path
+
+            Path(args[-1]).write_text(payload)
+        return subprocess.CompletedProcess(args, returncode)
+
+    monkeypatch.setattr(qwen_provider.subprocess, "run", fake_run)
+    monkeypatch.setattr(qwen_provider, "FAILURE_LOG_DIR", tmp_path / "failures")
+    with pytest.raises(AsrError) as excinfo:
+        qwen_provider.run_speech_process("nemotron", Path("raw.wav"), {}, "", 10)
+    assert isinstance(excinfo.value, AsrResourceError) is resource

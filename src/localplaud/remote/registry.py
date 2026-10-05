@@ -130,9 +130,7 @@ def check_worker(session: Session, worker_id: int) -> dict:
             "last_healthy_at": checked_at,
             "detail": handshake.worker_id,
             # Older workers omit runtime facts; the UI renders "not reported".
-            "runtime": (
-                handshake.runtime.model_dump(mode="json") if handshake.runtime else None
-            ),
+            "runtime": (handshake.runtime.model_dump(mode="json") if handshake.runtime else None),
         }
         connection = session.scalar(
             select(ProviderConnection).where(ProviderConnection.key == f"worker:{row.key}")
@@ -196,9 +194,7 @@ def delete_worker(session: Session, worker_id: int) -> None:
 
         for model in list(
             session.scalars(
-                select(ModelCatalogEntry).where(
-                    ModelCatalogEntry.connection_id == connection.id
-                )
+                select(ModelCatalogEntry).where(ModelCatalogEntry.connection_id == connection.id)
             )
         ):
             delete_model(session, model.id)

@@ -37,9 +37,7 @@ class OpenAIProvider:
 
         if is_real_openai_base_url(self.cfg.base_url):
             try:
-                assert_openai_free_pool(
-                    get_settings(), model=self.cfg.model, projected_tokens=0
-                )
+                assert_openai_free_pool(get_settings(), model=self.cfg.model, projected_tokens=0)
             except OpenAIBudgetBlocked as exc:
                 raise AsrError(str(exc)) from exc
 

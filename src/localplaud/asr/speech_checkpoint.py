@@ -45,8 +45,10 @@ class SpeechCheckpoint:
             result = json.loads(path.read_text())
             if result.get("token_limited") is True:
                 return result
-            if isinstance(result.get("transcription"), str) and "language" in result and (
-                result["language"] is None or isinstance(result["language"], str)
+            if (
+                isinstance(result.get("transcription"), str)
+                and "language" in result
+                and (result["language"] is None or isinstance(result["language"], str))
             ):
                 return result
         except (OSError, ValueError, AttributeError):

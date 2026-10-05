@@ -30,9 +30,10 @@ def validate_provider_timeout(value: object, *, field: str) -> float:
 
 
 class RemoteWorkerError(RuntimeError):
-    def __init__(self, message: str, *, retryable: bool = False):
+    def __init__(self, message: str, *, retryable: bool = False, code: str | None = None):
         super().__init__(message)
         self.retryable = retryable
+        self.code = code
 
 
 class ArtifactChecksumError(RemoteWorkerError):
@@ -134,6 +135,7 @@ class RemoteWorkerClient:
             raise RemoteWorkerError(
                 error.message if error else f"remote job ended as {job.status}",
                 retryable=bool(error and error.retryable),
+                code=error.code if error else None,
             )
         artifacts: dict[str, bytes] = {}
         for descriptor in job.artifacts:
@@ -149,9 +151,7 @@ class RemoteWorkerClient:
         return RemoteResult(job=job, artifacts=artifacts)
 
     def submit_and_wait(self, request: JobSubmitRequest, **wait_options) -> RemoteResult:
-        timeout = validate_provider_timeout(
-            wait_options.pop("timeout", 600), field="job_timeout"
-        )
+        timeout = validate_provider_timeout(wait_options.pop("timeout", 600), field="job_timeout")
         deadline = time.monotonic() + timeout
         submit_timeout = min(self._request_timeout, max(0.0, deadline - time.monotonic()))
         if submit_timeout <= 0:

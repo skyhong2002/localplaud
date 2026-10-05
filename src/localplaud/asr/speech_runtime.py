@@ -275,6 +275,51 @@ def qwen(audio, cfg):
     return result
 
 
+FEATURE_CHUNK_FRAMES = 60_000  # 10 minutes of 10 ms frames per slab
+
+
+def chunked_features(preprocessor, signal, length, *, chunk_frames=FEATURE_CHUNK_FRAMES):
+    """Log-mel features identical to one whole-signal call, one slab at a time.
+
+    The preprocessor is a centred, fixed-window short-time transform without
+    whole-utterance normalization, so a frame depends only on the samples within
+    ``n_fft // 2`` of its centre (plus one preemphasis sample). Each slab therefore
+    runs on its frames plus a few real neighbouring frames of context, keeps only the
+    frames it owns, and the reflect padding that would otherwise distort a slab edge
+    only ever touches discarded context frames. Peak memory follows the slab size,
+    not the recording length: a five hour recording needs about 10 GB as one call.
+    """
+    import torch
+
+    featurizer = getattr(preprocessor, "featurizer", None)
+    hop = int(getattr(featurizer, "hop_length", 160))
+    n_fft = int(getattr(featurizer, "n_fft", 512))
+    context = -(-(n_fft // 2 + 1) // hop) * hop  # whole frames covering the window half
+    samples = signal.shape[-1]
+    if signal.shape[0] != 1 or samples <= (chunk_frames + 2 * context // hop) * hop:
+        return preprocessor(input_signal=signal, length=length)
+
+    slabs = []
+    first = 0  # global index of the first frame the next slab owns
+    while True:
+        start = max(0, first * hop - context)
+        reaches_end = (first + chunk_frames) * hop + context >= samples
+        end = samples if reaches_end else (first + chunk_frames) * hop + context
+        piece = signal[:, start:end]
+        features, lengths = preprocessor(
+            input_signal=piece, length=torch.tensor([end - start], dtype=torch.long)
+        )
+        offset = (first * hop - start) // hop
+        stop = int(lengths[0]) if reaches_end else offset + chunk_frames
+        owned = features[:, :, offset:stop].clone()
+        slabs.append(owned)
+        first += owned.shape[-1]
+        del features, piece
+        if reaches_end:
+            break
+    return torch.cat(slabs, dim=-1), torch.tensor([first], dtype=torch.long)
+
+
 def offload_long_audio_features(model, duration):
     """Keep a single global speaker cache without a recording-sized CUDA STFT."""
     if duration <= 600:
@@ -284,8 +329,8 @@ def offload_long_audio_features(model, duration):
     model.preprocessor.to("cpu")
 
     def process_signal(audio_signal, audio_signal_length):
-        features, lengths = model.preprocessor(
-            input_signal=audio_signal.cpu(), length=audio_signal_length.cpu()
+        features, lengths = chunked_features(
+            model.preprocessor, audio_signal.cpu(), audio_signal_length.cpu()
         )
         return features.to(model.device), lengths.to(model.device)
 

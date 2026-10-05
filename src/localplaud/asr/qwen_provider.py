@@ -10,7 +10,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .base import AsrError, Segment, Transcript, Word
+from .base import AsrError, AsrResourceError, Segment, Transcript, Word
 from .registry import register
 
 FAILURE_LOG_DIR = Path("data/speech-runtime-failures")
@@ -71,6 +71,11 @@ def run_speech_process(kind: str, audio: Path, config: dict, python: str, timeou
             saved = _keep_failure_log(kind, runtime_log)
             if saved is not None:
                 message += f"; runtime log kept on the speech worker as {saved.name}"
+            # A negative status is a signal: the kernel's out-of-memory killer sends
+            # SIGKILL (-9). That, or the runtime's own out-of-memory message, is a
+            # resource failure another attempt can survive.
+            if result.returncode < 0 or "ran out of memory" in message:
+                raise AsrResourceError(message)
             raise AsrError(message)
         return json.loads(output.read_text())
 

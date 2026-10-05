@@ -42,11 +42,7 @@ class AssemblyAIProvider:
         aai.settings.api_key = self.cfg.api_key
         config = aai.TranscriptionConfig(
             speaker_labels=self.cfg.speaker_labels,
-            **(
-                {"language_detection": True}
-                if language == "auto"
-                else {"language_code": language}
-            ),
+            **({"language_detection": True} if language == "auto" else {"language_code": language}),
         )
         log.info("Transcribing with AssemblyAI (speaker_labels=%s)", self.cfg.speaker_labels)
         try:

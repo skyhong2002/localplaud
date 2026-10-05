@@ -71,9 +71,7 @@ class DeepgramProvider:
                         start=_get(w, "start", 0.0),
                         end=_get(w, "end", 0.0),
                         speaker=(
-                            f"SPEAKER_{w_speaker_id:02d}"
-                            if w_speaker_id is not None
-                            else None
+                            f"SPEAKER_{w_speaker_id:02d}" if w_speaker_id is not None else None
                         ),
                         confidence=_get(w, "confidence"),
                     )

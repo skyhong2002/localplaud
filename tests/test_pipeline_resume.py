@@ -614,6 +614,79 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
         assert diarization.detail["reused_attempt"] == 1
 
 
+def test_diarization_killed_by_memory_pressure_is_retried_before_the_pipeline_moves_on(
+    monkeypatch, tmp_path
+):
+    _reset_db(monkeypatch, tmp_path)
+    from sqlalchemy import select
+
+    from localplaud.asr.base import AsrResourceError
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile, StageAttempt, StageName, StageStatus
+    from localplaud.db.models import Transcript as TranscriptRow
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker import pipeline
+
+    for stage in ("ALIGN", "SUMMARIZE", "MIND_MAP", "INDEX"):
+        monkeypatch.setenv(f"LOCALPLAUD_PIPELINE__{stage}", "false")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__SPEECH_RESOURCE_RETRY_SECONDS", "0")
+    get_settings(reload=True)
+    init_db()
+    audio = tmp_path / "long.wav"
+    audio.write_bytes(b"RIFFfake")
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="long", filename="long", status=FileStatus.downloaded, audio_path=str(audio)
+            )
+        )
+        session.add(
+            TranscriptRow(
+                file_id="long",
+                provider="fake-asr",
+                model="m",
+                source="local",
+                text="a\nb",
+                segments=[
+                    {"text": "a", "start": 0.0, "end": 0.5, "speaker": None},
+                    {"text": "b", "start": 0.5, "end": 1.0, "speaker": None},
+                ],
+                has_speakers=False,
+            )
+        )
+
+    calls = []
+
+    def flaky_diarize(_wav, transcript, _cfg):
+        calls.append(len(calls) + 1)
+        if len(calls) == 1:
+            raise AsrResourceError("nemotron GPU process failed (exit -9)")
+        for segment in transcript.segments:
+            segment.speaker = "SPEAKER_00"
+        transcript.has_speakers = True
+        return transcript
+
+    monkeypatch.setattr("localplaud.worker.pipeline.diarize", flaky_diarize)
+    monkeypatch.setattr(pipeline, "_renew_processing_claim", lambda file_id: None)
+
+    pipeline.process_file("long")
+
+    assert calls == [1, 2]
+    with session_scope() as session:
+        row = session.get(PlaudFile, "long")
+        diarization = next(run for run in row.stage_runs if run.stage == StageName.diarize)
+        assert diarization.status == StageStatus.completed
+        attempts = list(
+            session.scalars(
+                select(StageAttempt)
+                .where(StageAttempt.file_id == "long", StageAttempt.stage == StageName.diarize)
+                .order_by(StageAttempt.attempt)
+            )
+        )
+        assert [a.status for a in attempts] == [StageStatus.failed, StageStatus.completed]
+        assert row.local_transcript.has_speakers
+
+
 def test_ai_revision_reuse_requires_current_raw_structure():
     from localplaud.db.models import Transcript as TranscriptRow
     from localplaud.db.models import TranscriptRevision
@@ -1493,26 +1566,65 @@ def test_timestamp_validation_preserves_forced_evidence_only_for_reused_asr(
     init_db()
     audio = tmp_path / "original.wav"
     audio.write_bytes(b"retained raw audio")
-    segments = [{"text": "hello world", "start": 0, "end": 1,
-                 "words": [{"text": "hello", "start": 0, "end": .5},
-                           {"text": "world", "start": .5, "end": 1}]}]
+    segments = [
+        {
+            "text": "hello world",
+            "start": 0,
+            "end": 1,
+            "words": [
+                {"text": "hello", "start": 0, "end": 0.5},
+                {"text": "world", "start": 0.5, "end": 1},
+            ],
+        }
+    ]
     with session_scope() as session:
         session.add(PlaudFile(id="aligned", status=FileStatus.done, audio_path=str(audio)))
-        session.add(StoredTranscript(file_id="aligned", source="local", provider="mlx-whisper",
-                                    model="turbo", text="hello world", segments=segments))
-        session.add(StageRun(file_id="aligned", stage=StageName.align, status=StageStatus.completed,
-                             provider="whisperx", model="wav2vec2-auto",
-                             resolved_profile_snapshot={"stages": {"align": {"provider_type": "whisperx"}}},
-                             detail={"forced_alignment": True, "word_count": 2,
-                                     "implementation_version": "verified-version"}))
+        session.add(
+            StoredTranscript(
+                file_id="aligned",
+                source="local",
+                provider="mlx-whisper",
+                model="turbo",
+                text="hello world",
+                segments=segments,
+            )
+        )
+        session.add(
+            StageRun(
+                file_id="aligned",
+                stage=StageName.align,
+                status=StageStatus.completed,
+                provider="whisperx",
+                model="wav2vec2-auto",
+                resolved_profile_snapshot={"stages": {"align": {"provider_type": "whisperx"}}},
+                detail={
+                    "forced_alignment": True,
+                    "word_count": 2,
+                    "implementation_version": "verified-version",
+                },
+            )
+        )
     monkeypatch.setattr(pipeline, "_ensure_generated_title", lambda *a, **kw: None)
     calls = []
+
     def asr(*a, **kw):
         calls.append(1)
-        return Transcript(provider="mlx-whisper", model="turbo", segments=[
-            Segment(text="hello world", start=0, end=1,
-                    words=[Word(text="hello", start=0, end=.5), Word(text="world", start=.5, end=1)])
-        ])
+        return Transcript(
+            provider="mlx-whisper",
+            model="turbo",
+            segments=[
+                Segment(
+                    text="hello world",
+                    start=0,
+                    end=1,
+                    words=[
+                        Word(text="hello", start=0, end=0.5),
+                        Word(text="world", start=0.5, end=1),
+                    ],
+                )
+            ],
+        )
+
     monkeypatch.setattr(pipeline.transcribe, "run_asr", asr)
     pipeline.process_file("aligned", settings, force=force)
     with session_scope() as session:

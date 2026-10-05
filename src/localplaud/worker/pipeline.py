@@ -19,6 +19,7 @@ import math
 import os
 import re
 import threading
+import time
 from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import asdict
@@ -980,6 +981,40 @@ def _cost_guard(
 # Text stages can overlap across recordings; memory-heavy speech stages cannot.
 # Remote workers additionally enforce their own cross-request GPU lock.
 _SPEECH_STAGE_LOCK = threading.Lock()
+
+
+def _is_resource_failure(exc: BaseException) -> bool:
+    """A speech worker killed or out of memory, locally or reported by a remote worker."""
+    from ..asr.base import AsrResourceError
+
+    return isinstance(exc, AsrResourceError) or (
+        isinstance(exc, RemoteWorkerError) and exc.code == "worker_resource_exhausted"
+    )
+
+
+def _retry_resource_failures(file_id: str, settings: Settings, operation):
+    """Run a speech stage again, after a pause, when its worker ran out of memory.
+
+    Each attempt is a normal recorded stage attempt. Anything else, or running out of
+    attempts, raises exactly as before so the stage still degrades visibly. This keeps
+    the notes from being generated on a transcript that is about to gain its speakers.
+    """
+    attempts_left = settings.pipeline.speech_resource_retries
+    while True:
+        try:
+            return operation()
+        except Exception as exc:  # noqa: BLE001 - re-raised unless a resource failure
+            if attempts_left <= 0 or not _is_resource_failure(exc):
+                raise
+            attempts_left -= 1
+            log.warning(
+                "Speech stage for %s lost its worker to memory pressure; retrying in %ss (%s left)",
+                file_id,
+                settings.pipeline.speech_resource_retry_seconds,
+                attempts_left,
+            )
+            time.sleep(settings.pipeline.speech_resource_retry_seconds)
+            _renew_processing_claim(file_id)
 
 
 def _run_fallback_stage(
@@ -1960,8 +1995,12 @@ def _process_file_claimed(
                         },
                     }
 
-                transcript, _selected_snapshot = _run_fallback_stage(
-                    file_id, "diarize", StageName.diarize, snapshot, run_diarize
+                transcript, _selected_snapshot = _retry_resource_failures(
+                    file_id,
+                    settings,
+                    lambda: _run_fallback_stage(
+                        file_id, "diarize", StageName.diarize, snapshot, run_diarize
+                    ),
                 )
             except DiarizationUnavailable as exc:
                 log.warning("Diarization degraded for %s: %s", file_id, exc)

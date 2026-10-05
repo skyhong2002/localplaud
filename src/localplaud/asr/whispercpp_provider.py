@@ -40,10 +40,13 @@ class WhisperCppProvider:
             out_base = Path(tmpdir) / "transcript"
             cmd = [
                 binary,
-                "-m", str(self.cfg.model_path),
-                "-f", str(audio_path),
+                "-m",
+                str(self.cfg.model_path),
+                "-f",
+                str(audio_path),
                 "-oj",
-                "-of", str(out_base),
+                "-of",
+                str(out_base),
                 *self.cfg.extra_args,
             ]
             if language != "auto":

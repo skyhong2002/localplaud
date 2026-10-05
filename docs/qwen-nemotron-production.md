@@ -78,3 +78,26 @@ Failures remain in the durable stage ledger and normal bounded retries apply.
 A recording with an unreadable or missing raw file cannot be declared complete.
 To roll back, select the previous immutable profile and the original GPU image;
 do not restore a stale DB backup over newer user edits.
+
+## Long recordings and memory
+
+Nemotron diarization of a long recording needs the log-mel features of the whole
+recording on the host, because the speaker cache must not reset between chunks.
+Computed in one call that is about 2 GB of host memory per hour of audio: five hour
+recordings reached about 10 GB resident plus 2.2 GB shared on the 16 GB WSL worker and
+were killed by the kernel's out-of-memory killer (exit -9) whenever other work held a
+few GB. Features are now computed in 10 minute slabs, each with a few real neighbouring
+frames of context, and are bit-identical to one whole-signal call (maximum difference 0
+on the real preprocessor over 25 minutes of audio at three slab sizes; the test
+suite checks the same equality with a stand-in that reproduces the framing and padding).
+Peak host memory for a five hour recording fell from above 12 GB (the old path was killed
+in a replay on an otherwise quiet worker) to 5.3 GB, and diarization took 50 seconds.
+
+A speech process that is killed or runs out of memory is reported as resource
+exhaustion (`worker_resource_exhausted`, retryable). The controller then pauses
+(`pipeline.speech_resource_retry_seconds`, default 60) and attempts the diarize stage again
+up to `pipeline.speech_resource_retries` (default 2) times before it degrades the stage.
+Each attempt is a recorded stage attempt, and notes are not generated on a transcript that
+is about to gain its speakers. Deterministic failures and timeouts are never retried this
+way.
+

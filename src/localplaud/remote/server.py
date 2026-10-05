@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import defer
 
-from ..asr.base import Segment, Transcript, Word
+from ..asr.base import AsrResourceError, Segment, Transcript, Word
 from ..config import get_settings
 from ..db.models import RemoteJob
 from ..db.session import session_scope
@@ -325,10 +325,12 @@ def execute_job(job_id: str) -> None:
         with session_scope() as session:
             row = session.get(RemoteJob, job_id)
             row.status, row.progress = JobStatus.failed, 1.0
+            resource = isinstance(exc, AsrResourceError)
             row.error = WorkerError(
-                code="stage_execution_failed",
+                code="worker_resource_exhausted" if resource else "stage_execution_failed",
                 message=str(exc),
-                retryable=isinstance(
+                retryable=resource
+                or isinstance(
                     exc, (httpx.TimeoutException, LLMTransientError, LLMOutputInvalid, OSError)
                 ),
             ).model_dump(mode="json")
@@ -429,10 +431,13 @@ def capabilities():
             ),
             StageCapability(
                 stage="outline",
-                models=[getattr(
-                    getattr(settings.llm, settings.llm.provider.replace("-", "_")),
-                    "model", settings.llm.provider,
-                )],
+                models=[
+                    getattr(
+                        getattr(settings.llm, settings.llm.provider.replace("-", "_")),
+                        "model",
+                        settings.llm.provider,
+                    )
+                ],
             ),
             StageCapability(
                 stage="embed",

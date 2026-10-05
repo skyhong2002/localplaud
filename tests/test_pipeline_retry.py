@@ -967,3 +967,57 @@ def test_fallback_title_prefers_note_text_then_recording_date():
     started = datetime(2026, 10, 3, 6, 0, tzinfo=UTC)
     assert _fallback_title_text({"content_md": "短"}, started).endswith("錄音")
     assert _fallback_title_text({}, None) == "未命名錄音"
+
+
+def test_speech_stage_is_retried_after_a_resource_failure_and_nothing_else(monkeypatch, tmp_path):
+    settings = _reset(monkeypatch, tmp_path)
+    import localplaud.worker.pipeline as pipeline
+    from localplaud.asr.base import AsrError, AsrResourceError
+    from localplaud.remote.client import RemoteWorkerError
+
+    settings.pipeline.speech_resource_retries = 2
+    settings.pipeline.speech_resource_retry_seconds = 7
+    sleeps = []
+    monkeypatch.setattr(pipeline.time, "sleep", sleeps.append)
+    monkeypatch.setattr(pipeline, "_renew_processing_claim", lambda file_id: None)
+
+    def failing_then_ok(errors):
+        queue = list(errors)
+
+        def operation():
+            if queue:
+                raise queue.pop(0)
+            return "diarized"
+
+        return operation
+
+    killed = RemoteWorkerError("exit -9", retryable=True, code="worker_resource_exhausted")
+    assert pipeline._retry_resource_failures("f", settings, failing_then_ok([killed])) == "diarized"
+    assert sleeps == [7]
+
+    sleeps.clear()
+    local = AsrResourceError("killed")
+    assert (
+        pipeline._retry_resource_failures("f", settings, failing_then_ok([local, killed]))
+        == "diarized"
+    )
+    assert sleeps == [7, 7]
+
+    # A third consecutive failure is not retried again: the stage degrades as before.
+    with pytest.raises(AsrResourceError):
+        pipeline._retry_resource_failures("f", settings, failing_then_ok([local, local, local]))
+
+    # Deterministic and merely retryable (timeout) failures are never repeated here.
+    for error in (
+        AsrError("bad audio"),
+        RemoteWorkerError("timed out", retryable=True),
+        ValueError("x"),
+    ):
+        sleeps.clear()
+        with pytest.raises(type(error)):
+            pipeline._retry_resource_failures("f", settings, failing_then_ok([error]))
+        assert sleeps == []
+
+    settings.pipeline.speech_resource_retries = 0
+    with pytest.raises(RemoteWorkerError):
+        pipeline._retry_resource_failures("f", settings, failing_then_ok([killed]))

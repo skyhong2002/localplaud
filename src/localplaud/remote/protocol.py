@@ -82,8 +82,14 @@ class HandshakeResponse(BaseModel):
 
 
 _FORBIDDEN = {
-    "oauth", "authorization", "access_token", "refresh_token", "plaud_token",
-    "plaud_credentials", "cookie", "api_key",
+    "oauth",
+    "authorization",
+    "access_token",
+    "refresh_token",
+    "plaud_token",
+    "plaud_credentials",
+    "cookie",
+    "api_key",
 }
 
 

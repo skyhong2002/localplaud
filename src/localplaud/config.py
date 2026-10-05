@@ -175,6 +175,11 @@ class PipelineConfig(BaseModel):
     # on providers that tolerate concurrent requests (remote subscription gateways).
     # Output is merged in source order, so this changes wall time, never content.
     note_parallelism: int = Field(default=3, ge=1, le=8)
+    # A speech stage whose worker process was killed or ran out of memory is attempted
+    # again, after a pause for memory to clear, before the pipeline moves on. Without
+    # this the notes run on a transcript missing its speakers and are redone later.
+    speech_resource_retries: int = Field(default=2, ge=0, le=5)
+    speech_resource_retry_seconds: int = Field(default=60, ge=0, le=600)
     polish_chunk_chars: int = Field(default=12_000, ge=1_000, le=60_000)
     # Independent correction chunks and review batches that may run at once on providers
     # that tolerate overlapping requests. Output equals a sequential run.
