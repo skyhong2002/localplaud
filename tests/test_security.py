@@ -139,7 +139,9 @@ def test_favicon_is_public_and_served(monkeypatch, tmp_path):
 
     robots = client.get("/robots.txt")
     assert robots.status_code == 200
-    assert robots.text == "User-agent: *\nDisallow: /\n"
+    assert robots.text.endswith("User-agent: *\nDisallow: /\n")
+    assert "User-agent: ChatGPT-User\n" in robots.text
+    assert "Allow: /share/\n" in robots.text
     assert robots.headers["x-robots-tag"] == "noindex, nofollow"
 
     login = client.get("/login")

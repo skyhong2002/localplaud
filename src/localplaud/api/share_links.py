@@ -175,7 +175,7 @@ def revoke_share_link(file_id: str) -> dict:
     return {"ok": True}
 
 
-@router.get("/share/{token}", response_class=HTMLResponse)
+@router.api_route("/share/{token}", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def public_share(request: Request, token: str):
     with session_scope() as session:
         link = _public_link(session, token)

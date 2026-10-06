@@ -250,10 +250,23 @@ async def _auth_gate(request: Request, call_next):
     return response
 
 
+# User-initiated assistant fetchers, not bulk crawlers or training bots.
+_ASSISTANT_FETCHERS = ("ChatGPT-User", "Claude-User", "Perplexity-User", "MistralAI-User")
+_ROBOTS_TXT = (
+    "".join(f"User-agent: {agent}\n" for agent in _ASSISTANT_FETCHERS)
+    + "Allow: /share/\nDisallow: /\n\nUser-agent: *\nDisallow: /\n"
+)
+
+
 @app.get("/robots.txt", include_in_schema=False)
 def robots() -> Response:
-    """Tell crawlers that this private recording workspace is not indexable."""
-    return Response("User-agent: *\nDisallow: /\n", media_type="text/plain")
+    """Keep crawlers out, but let assistants fetch share links a user hands them.
+
+    User-triggered fetchers such as ChatGPT-User honour robots.txt, so a blanket
+    disallow made shared recordings unreadable when pasted into an assistant.
+    Share pages still send ``noindex`` so nothing ends up in search results.
+    """
+    return Response(_ROBOTS_TXT, media_type="text/plain")
 
 
 @app.get("/favicon.ico", include_in_schema=False)

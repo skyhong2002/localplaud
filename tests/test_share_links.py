@@ -198,6 +198,8 @@ def test_public_page_is_local_read_only_and_noindex(clients):
     assert "paint" in page.text and "data-start" in page.text
     assert "paid cloud note must stay private" not in page.text
     assert "cloud-derived local note must stay hidden" not in page.text
+    # Link-preview and assistant fetchers probe with HEAD before reading.
+    assert public.head(path).status_code == 200
     assert "stale map must stay hidden" not in page.text
     assert "Ask localplaud" not in page.text
 
