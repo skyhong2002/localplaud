@@ -74,6 +74,14 @@ class LLMOutputInvalid(LLMError):
     """Raised when a provider response cannot satisfy the stage contract."""
 
 
+class LLMContentFiltered(LLMOutputInvalid):
+    """The provider's safety filter stopped a response for this specific input.
+
+    Retrying the same request cannot help, but a smaller request that leaves out the
+    refused passage can. Stages therefore split and isolate instead of failing whole.
+    """
+
+
 class LLMInputTooLarge(LLMOutputInvalid):
     """Raised when a provider rejects a request that must be split smaller."""
 

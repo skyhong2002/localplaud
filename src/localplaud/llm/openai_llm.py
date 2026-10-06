@@ -12,7 +12,7 @@ from ..openai_budget import (
     assert_openai_free_pool,
     is_real_openai_base_url,
 )
-from .base import LLMError, LLMTimeout, LLMUnavailable, note_resolved_model
+from .base import LLMContentFiltered, LLMError, LLMTimeout, LLMUnavailable, note_resolved_model
 
 if TYPE_CHECKING:
     from ..config import OpenAILlmConfig
@@ -185,6 +185,8 @@ class OpenAILLM:
         if incomplete is not None:
             # Truncation here silently drops transcript, so it must not pass as
             # a usable completion.
+            if incomplete == "content_filter":
+                raise LLMContentFiltered("OpenAI LLM: response incomplete (content_filter)")
             raise LLMError(f"OpenAI LLM: response incomplete ({incomplete})")
         if not completed:
             raise LLMError("OpenAI LLM: response stream ended before completion")

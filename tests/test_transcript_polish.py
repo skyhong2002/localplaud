@@ -908,3 +908,117 @@ def test_full_correction_requests_carry_the_lowered_effort(monkeypatch):
 
     assert requests and all(r["reasoning"] == {"effort": "medium"} for r in requests)
     assert settings.llm.ai_gateway.reasoning_effort == "high"
+
+
+# --------------------------------------------------------------------------- #
+# Content-filtered responses are isolated, never fatal
+# --------------------------------------------------------------------------- #
+
+
+class FilteringPolisher(ConcurrentPolisher):
+    """The provider's safety filter refuses any request containing the marker text."""
+
+    MARKER = "第7段"
+
+    def __init__(self, *, marker=MARKER, **kwargs):
+        super().__init__(stagger=False, **kwargs)
+        self.marker = marker
+
+    def complete(self, prompt, **kwargs):
+        from localplaud.llm.base import LLMContentFiltered
+
+        body = json.loads(prompt)
+        if "target_segments" in body:
+            if self.marker and any(self.marker in item["text"] for item in body["target_segments"]):
+                raise LLMContentFiltered("OpenAI LLM: response incomplete (content_filter)")
+            return super().complete(prompt, **kwargs)
+        # Judge by segment, not by proposal number: numbers shift when an edit is absent.
+        return json.dumps(
+            {
+                "approved_ids": [p["id"] for p in body["proposals"] if p["segment_id"] % 4],
+                "rejected": [
+                    {"id": p["id"], "reason": "不支持此修改"}
+                    for p in body["proposals"]
+                    if not p["segment_id"] % 4
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+
+def test_content_filtered_segment_keeps_its_source_text_and_the_rest_is_corrected(monkeypatch):
+    reference = _polish(FilteringPolisher(marker=None), 1, monkeypatch)
+    result = _polish(FilteringPolisher(), 1, monkeypatch)
+    segments = result["transcript"].segments
+    expected = reference["transcript"].segments
+
+    # The refused passage keeps exactly its transcribed words ...
+    assert segments[7].text == _meeting().segments[7].text
+    # ... and every other segment ends up identical to an unfiltered run.
+    assert [s.text for i, s in enumerate(segments) if i != 7] == [
+        s.text for i, s in enumerate(expected) if i != 7
+    ]
+    assert result["detail"]["kept_invalid_segments"] == 1
+    assert result["detail"]["split_retries"] >= 2
+
+
+def test_content_filtered_review_edit_is_not_applied_and_other_edits_are(monkeypatch):
+    from localplaud.llm.base import LLMContentFiltered
+
+    class RefusesToJudgeSegmentSeven(FilteringPolisher):
+        def complete(self, prompt, **kwargs):
+            body = json.loads(prompt)
+            if "proposals" in body and any(p["segment_id"] == 7 for p in body["proposals"]):
+                raise LLMContentFiltered("OpenAI LLM: response incomplete (content_filter)")
+            return super().complete(prompt, **kwargs)
+
+    reference = _polish(FilteringPolisher(marker=None), 1, monkeypatch, review_chars=60_000)
+    result = _polish(RefusesToJudgeSegmentSeven(marker=None), 1, monkeypatch, review_chars=60_000)
+
+    review = result["detail"]["review"]
+    assert len(review["decisions"]) == len(review["proposals"])
+    declined = [d for d in review["decisions"] if "content filter" in d["reason"]]
+    assert len(declined) == 1 and declined[0]["approve"] is False
+    segments = result["transcript"].segments
+    assert segments[7].text == _meeting().segments[7].text  # the refused edit stayed unapplied
+    # Every other segment equals the run where nothing was refused.
+    assert [s.text for i, s in enumerate(segments) if i != 7] == [
+        s.text for i, s in enumerate(reference["transcript"].segments) if i != 7
+    ]
+    assert review["split_retries"] >= 1
+
+
+def test_content_filter_raises_a_splittable_error_from_the_openai_client(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import openai
+    import pytest
+
+    from localplaud.config import AiGatewayLlmConfig
+    from localplaud.llm.ai_gateway import AiGatewayLLM
+    from localplaud.llm.base import LLMContentFiltered, LLMOutputInvalid
+    from localplaud.llm.codex_quota import CodexQuotaReader
+
+    class Responses:
+        def create(self, **kwargs):
+            return iter(
+                [
+                    SimpleNamespace(
+                        type="response.incomplete",
+                        response=SimpleNamespace(
+                            incomplete_details=SimpleNamespace(reason="content_filter")
+                        ),
+                    )
+                ]
+            )
+
+    module = SimpleNamespace(**{name: getattr(openai, name) for name in dir(openai)})
+    module.OpenAI = lambda **kw: SimpleNamespace(responses=Responses())
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setattr(CodexQuotaReader, "_remaining_quota_percent", lambda self: 80)
+    provider = AiGatewayLLM(AiGatewayLlmConfig(api_key="k", base_url="http://g/v1"))
+    with pytest.raises(LLMContentFiltered) as excinfo:
+        provider.complete("text")
+    assert isinstance(excinfo.value, LLMOutputInvalid)  # so existing stages split on it
+    assert "content_filter" in str(excinfo.value)

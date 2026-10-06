@@ -232,3 +232,14 @@ removed; `--apply` first writes a full SQLite backup and a JSON export under
 `data/backups/`, then deletes those notes and their archived versions outright. Only run
 the second form as an explicit operator decision.
 
+## Provider content filters
+
+A hosted provider's safety filter can stop a response for one particular passage
+(`response incomplete (content_filter)`). Retrying the identical request cannot succeed,
+and failing the stage leaves a recording unfinished for a single sentence, so the client
+raises `LLMContentFiltered`, a splittable output error. Correction splits the refused chunk
+down to the single segment and keeps that segment's transcribed words; the edit review
+halves a refused batch and leaves an edit nobody could judge unapplied. Everything around
+the refused passage is processed normally and the stage records the split and the kept
+segment. Notes and mind maps still fail visibly if the provider refuses a whole request.
+

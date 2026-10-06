@@ -80,9 +80,7 @@ class OllamaProvider:
                 timeout=self.cfg.timeout_seconds,
             )
         except httpx.ConnectError as exc:
-            raise LLMUnavailable(
-                f"cannot reach Ollama at {self.cfg.host}: {exc}"
-            ) from exc
+            raise LLMUnavailable(f"cannot reach Ollama at {self.cfg.host}: {exc}") from exc
         except httpx.TimeoutException as exc:
             raise LLMTransientError(
                 f"Ollama did not answer within {self.cfg.timeout_seconds}s "
@@ -103,9 +101,7 @@ class OllamaProvider:
                         f"Ollama model {self.cfg.model!r} is not installed; "
                         f"run `ollama pull {self.cfg.model}`"
                     )
-            raise LLMError(
-                f"Ollama returned HTTP {resp.status_code}: {resp.text[:500]}"
-            )
+            raise LLMError(f"Ollama returned HTTP {resp.status_code}: {resp.text[:500]}")
         result = resp.json()
         if result.get("done_reason") == "length":
             raise LLMOutputInvalid(

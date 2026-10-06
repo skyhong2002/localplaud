@@ -7,7 +7,7 @@ import re
 import threading
 from difflib import SequenceMatcher
 
-from ..llm.base import LLMOutputInvalid, LLMTimeout
+from ..llm.base import LLMContentFiltered, LLMOutputInvalid, LLMTimeout
 from .concurrent import run_ordered
 
 SYSTEM = """Review individual proposed ASR spelling edits against ORIGINAL dialogue.
@@ -183,8 +183,17 @@ def review_corrections(
         """
         try:
             return [ask(batch)], 1
-        except (LLMOutputInvalid, LLMTimeout):
+        except (LLMOutputInvalid, LLMTimeout) as exc:
             if len(batch) <= 1:
+                if isinstance(exc, LLMContentFiltered):
+                    # The provider refuses to look at this one edit's text. An edit
+                    # nobody could review is not applied; the source wording stays.
+                    decision = {
+                        "id": batch[0]["id"],
+                        "approve": False,
+                        "reason": "Reviewer declined this passage (content filter); edit not applied.",
+                    }
+                    return [([decision], 0, 0)], 1
                 raise
             middle = len(batch) // 2
             left, left_splits = review_with_split(batch[:middle])

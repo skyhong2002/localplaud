@@ -39,9 +39,7 @@ class AnthropicLLM:
         try:
             import anthropic
         except ImportError as exc:
-            raise LLMUnavailable(
-                "Anthropic LLM: the 'anthropic' package is not installed"
-            ) from exc
+            raise LLMUnavailable("Anthropic LLM: the 'anthropic' package is not installed") from exc
 
         client = anthropic.Anthropic(api_key=self.cfg.api_key)
         resp = client.messages.create(
@@ -52,7 +50,5 @@ class AnthropicLLM:
             messages=[{"role": "user", "content": prompt}],
         )
         return "".join(
-            block.text
-            for block in resp.content
-            if getattr(block, "type", None) == "text"
+            block.text for block in resp.content if getattr(block, "type", None) == "text"
         )
