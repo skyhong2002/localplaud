@@ -428,6 +428,9 @@ class AiGatewayLlmConfig(BaseModel):
     # alias target is recorded in each resolved profile so a remap is not
     # mistaken for the model that produced an existing artifact.
     policy_file: str | None = None
+    # When false, calls are sent without reading the subscription window; the
+    # gateway's own rate-limit errors are then the only stop.
+    quota_guard: bool = True
     quota_executable: str = "codex"
     quota_codex_home: str = "~/.codex"
     # Optional ChatGPT account id the quota login must report; a different

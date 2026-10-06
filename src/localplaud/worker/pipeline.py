@@ -3580,6 +3580,7 @@ def _transcript_lineage(file_id: str, settings: Settings) -> dict | None:
 _EXECUTION_ONLY_KEYS = frozenset(
     {
         "timeout_seconds",
+        "quota_guard",
         "quota_reserve_percent",
         "quota_call_headroom_percent",
         "quota_check_timeout_seconds",

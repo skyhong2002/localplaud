@@ -80,6 +80,8 @@ class AiGatewayLLM(OpenAILLM):
     _RESERVE_REUSE_SECONDS = 10.0
 
     def _ensure_reserve_cached(self) -> None:
+        if not self.cfg.quota_guard:
+            return
         with self._reserve_lock:
             checked = self._reserve_checked_at
             if checked is not None and time.monotonic() - checked < self._RESERVE_REUSE_SECONDS:
@@ -91,6 +93,8 @@ class AiGatewayLLM(OpenAILLM):
     def health(self) -> tuple[bool, str]:
         if not self.available():
             return False, "gateway base URL or client key is not configured"
+        if not self.cfg.quota_guard:
+            return True, f"gateway alias {self.cfg.model}; subscription reserve guard is off"
         try:
             remaining = self._quota_reader()._ensure_quota_reserve()
         except (LLMUnavailable, LLMQuotaExhausted) as exc:

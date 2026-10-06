@@ -209,6 +209,7 @@ provider = "ollama"              # ollama | openai | anthropic | opencode-go | a
   polish_chunk_chars = 8000
   summary_chunk_chars = 32000
   policy_file = "~/Projects/ai-gateway/model-policy.json" # alias targets recorded in profiles
+  quota_guard = true             # false: never read the window; spend until the gateway refuses
   quota_codex_home = "~/.codex"  # Codex login of the subscription the gateway spends
   quota_reserve_percent = 5      # never spend the last 5% of the subscription window
   quota_call_headroom_percent = 2 # do not start a call too close to that floor

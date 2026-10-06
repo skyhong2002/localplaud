@@ -125,6 +125,20 @@ def test_gateway_reserve_blocks_before_any_request(monkeypatch):
     assert not healthy and "reserve protected" in detail
 
 
+def test_disabled_quota_guard_sends_without_reading_the_subscription(monkeypatch):
+    calls, _clients = _fake_openai(
+        monkeypatch, [SimpleNamespace(type="response.output_text.delta", delta="ok"), _completed("m")]
+    )
+    reads = _quota(monkeypatch, 0)
+    provider = AiGatewayLLM(_config(quota_guard=False))
+
+    assert provider.complete("text") == "ok"
+    assert len(calls) == 1
+    healthy, detail = provider.health()
+    assert healthy and "guard is off" in detail
+    assert reads == []
+
+
 def test_quota_login_must_report_the_configured_account():
     reader = AiGatewayLLM(_config(quota_account_id="account-a"))._quota_reader()
     reader._check_quota_account({"accountId": "account-a"})
