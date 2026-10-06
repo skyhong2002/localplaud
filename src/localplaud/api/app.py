@@ -3131,11 +3131,13 @@ def file_detail(
         labels = speaker_labels(session, r.id)
         fallback_names = speaker_labels(session, r.id, anonymous=True)
         speaker_stats = _speaker_talk_stats(canonical_segments)
-        from ..voice_suggestions import speaker_suggestions
+        from ..voice_suggestions import automatic_names, speaker_suggestions
 
         voice_suggestions = speaker_suggestions(session, r.id)
+        voice_automatic = automatic_names(session, r.id)
         speakers = [
             {"key": key, "name": speaker_names.get(key), "display_label": labels.get(key, key),
+             "automatic": voice_automatic.get(key),
              "suggestion": None if speaker_names.get(key) else voice_suggestions.get(key)}
             | speaker_stats.get(key, {"seconds": 0, "samples": []})
             for key in _speaker_keys_for_editing(session, r, canonical_segments)

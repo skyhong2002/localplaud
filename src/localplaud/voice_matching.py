@@ -11,6 +11,51 @@ REVISION = "0dc382f40121a5fbd34db10a2bb04d826c2be6a8"
 VERSION = "voice-identity/v1"
 
 
+# Calibrated confidence --------------------------------------------------------
+#
+# Raw similarity is not confidence: on this library a speaker who is NOT enrolled has
+# a best-match similarity around 0.60 (90% of them reach 0.69), so any absolute cutoff
+# in the usual 0.4-0.5 range accepts almost everyone. What separates a known person
+# from a stranger is how far the best name leads the runner-up and how many independent
+# recordings of that name agree. A logistic model over those three signals turns them
+# into the probability that the best name is right.
+#
+# Fitted on 2026-10-07 from the 406 enrolled voiceprints (26 names) of this library,
+# each scored against every other recording of the same name (known) and with its name
+# withheld entirely (stranger). Grouped 5-fold cross-validation: at p>=0.70 it names 71%
+# of known speakers at 98.3% precision and wrongly names 2.5% of strangers; at p>=0.50
+# 81% / 97.9% / 11.3%. Refit with scripts/maintenance/fit_voice_calibration.py.
+CALIBRATION = {
+    "version": "voice-calibration/v1",
+    "features": ["score", "margin", "log1p_files"],
+    "mean": [0.6491, 0.1172, 3.0195],
+    "scale": [0.1088, 0.0760, 1.5327],
+    "bias": -0.209,
+    "weights": [2.335, 0.082, 0.671],
+}
+# Guards the model never learned from: a best match below this similarity is never
+# named, and the best name must clearly lead the runner-up. Two names that are nearly
+# equally close (an alias pair, similar voices) are a coin flip however high the
+# similarity, and on this library the lead guard costs 0.5 points of coverage and no
+# precision at p>=0.70.
+SCORE_FLOOR = 0.5
+MIN_LEAD = 0.04
+POLICIES = ("strict", "calibrated")
+
+
+def calibrated_probability(score, runner_up, files, calibration=None) -> float:
+    """Probability that the best-matching name is correct (see ``CALIBRATION``)."""
+    model = calibration or CALIBRATION
+    values = [float(score), float(score) - float(runner_up or 0.0), math.log1p(max(0, int(files)))]
+    if not all(math.isfinite(v) for v in values):
+        return 0.0
+    z = model["bias"] + sum(
+        w * (v - m) / s
+        for w, v, m, s in zip(model["weights"], values, model["mean"], model["scale"], strict=True)
+    )
+    return 1.0 / (1.0 + math.exp(-max(-60.0, min(60.0, z))))
+
+
 def usable_name(name: str) -> bool:
     name = str(name or "").strip()
     return bool(
@@ -118,8 +163,21 @@ class VoiceMatcher:
             self.groups[ref["name"]][ref["file_id"]].append(index)
         self.matrix = np.asarray(centroids)
 
-    def match(self, query_vectors, *, threshold=0.75, margin=0.12, min_votes=2, query_file_id=None):
+    def match(
+        self,
+        query_vectors,
+        *,
+        threshold=0.75,
+        margin=0.12,
+        min_votes=2,
+        query_file_id=None,
+        policy="strict",
+        min_probability=0.7,
+    ):
         import numpy as np
+
+        if policy not in POLICIES:
+            raise ValueError(f"unknown voice matching policy: {policy}")
 
         empty = {
             "status": "insufficient",
@@ -175,7 +233,23 @@ class VoiceMatcher:
             "reference_sample_ids": [self.refs[i].get("sample_id") for i in supported],
             "votes": votes,
             "windows": len(query_vectors),
+            "files": files,
         }
+        if policy == "calibrated":
+            probability = calibrated_probability(score, second, files)
+            result["probability"] = round(probability, 4)
+            result["policy"] = "calibrated"
+            result["calibration"] = CALIBRATION["version"]
+            result["min_probability"] = min_probability
+            if (
+                score >= SCORE_FLOOR
+                and probability >= min_probability
+                and score - second >= MIN_LEAD
+            ):
+                result["status"] = "matched"
+            elif score >= SCORE_FLOOR:
+                result["status"] = "ambiguous"
+            return result
         if score < threshold:
             return result
         result["status"] = "ambiguous"
@@ -188,6 +262,38 @@ class VoiceMatcher:
         ):
             result["status"] = "matched"
         return result
+
+
+def resolve_name_conflicts(decisions: dict, taken: dict | None = None) -> None:
+    """Make one recording's speakers hold distinct names (mutates ``decisions``).
+
+    Two speakers in one recording are different people, so two cannot share a name.
+    ``decisions`` maps speaker key to a matcher decision; ``taken`` maps speaker key to
+    the name that speaker already holds (a person's choice or an earlier automatic
+    name). Of several matched speakers claiming one name only the most probable keeps
+    it; a name already held by a different speaker is unavailable to everyone else.
+    Losers become ``ambiguous`` and keep their candidate so it can still be suggested.
+    """
+    taken = taken or {}
+    claims = defaultdict(list)
+    for key, decision in decisions.items():
+        if decision.get("status") == "matched":
+            claims[decision["name"]].append(key)
+    for name, keys in claims.items():
+        holders = {k for k, held in taken.items() if held == name}
+        if holders:
+            winner = (
+                next(iter(holders)) if len(holders) == 1 and next(iter(holders)) in keys else None
+            )
+        else:
+            winner = max(
+                keys,
+                key=lambda k: (decisions[k].get("probability", decisions[k]["score"]), k),
+            )
+        for key in keys:
+            if key != winner:
+                decisions[key]["status"] = "ambiguous"
+                decisions[key]["demoted"] = "name_taken_in_recording"
 
 
 def match_voice(query_vectors, references, **kwargs):

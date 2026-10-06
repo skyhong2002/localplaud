@@ -21,9 +21,10 @@ labels were manually entered, and it preserves `plaud-reference` provenance.
 Anonymous and combined-person names are excluded. Inferred local names never
 become enrollment references. Different spellings/case are not silently merged.
 
-A match requires at least two query windows, agreement across at least two thirds
-of them, references from at least two OTHER recordings, a cosine threshold and a
-margin over other names. Scores are similarities, not accuracy percentages.
+The default `strict` policy requires at least two query windows, agreement across
+at least two thirds of them, references from at least two OTHER recordings, a cosine
+threshold and a margin over other names. Scores are similarities, not accuracy
+percentages; see "Calibrated confidence" for the policy that names more voices.
 Insufficient, ambiguous and unknown voices keep their existing labels. Reference
 windows with poor internal similarity are excluded. Human names, clears, and
 subsequent edits are protected; inferred names can be corrected in the existing
@@ -40,6 +41,47 @@ new-recording mode drains this reindex queue only for recordings transcribed wit
 `pipeline.untranscribed_only_retry_hours`; it does not resume historical backfills
 or spend LLM quota regenerating notes automatically after a name edit.
 
+## Calibrated confidence
+
+A raw similarity is not a confidence. On the library this was tuned on, a speaker who
+is **not** enrolled has a best-match similarity around 0.60 (90% of them reach 0.69),
+so a cutoff of 0.4 or 0.5 names nearly everyone. What separates a known person from a
+stranger is how far the best name leads the runner-up and how many independent
+recordings of that name agree. Profile `"policy": "calibrated"` turns those signals,
+plus the best similarity, into the probability that the best name is right (a logistic
+model, `voice_matching.CALIBRATION`) and names a speaker when that probability reaches
+`min_probability` (0.30 to 0.99, default 0.70). Three guards stay regardless: the best
+similarity must be at least 0.5, it must lead the runner-up by at least 0.04, and the
+name must not already belong to another speaker of the same recording. Of several
+speakers claiming one name only the most probable keeps it, and a name a person (or an
+earlier automatic pass) gave another speaker is unavailable. Unnamed candidates stay
+suggestions, now shown as "57% likely" instead of a similarity.
+
+Measured on the 406 enrolled voiceprints (26 names) with grouped cross-validation, scoring
+each as a known speaker and again with its name withheld (a stranger):
+
+| Policy | Known speakers named | Of those, correct | Strangers wrongly named |
+| --- | --- | --- | --- |
+| strict (0.75 similarity, 0.12 margin) | 32% | 98.5% | 0.5% |
+| calibrated p >= 0.80 | 64% | 98.5% | 1.7% |
+| calibrated p >= 0.70 | 72% | 98.6% | 2.5% |
+| calibrated p >= 0.50 | 81% | 98.2% | 10% |
+| calibrated p >= 0.40 | 85% | 98.0% | 18% |
+
+About four fifths of the anonymous speakers in the library are not enrolled, so the last
+column matters more than it looks: with that mix, roughly 12% of names applied at p >= 0.70
+would be wrong, 23% at p >= 0.60 and 36% at p >= 0.50 (better if fewer anonymous speakers
+are strangers). A wrong name in a meeting note is worse than "Speaker 3", so the
+production default is 0.70, the point where more coverage stops paying for itself; lower it
+only knowing that trade. `scripts/maintenance/fit_voice_calibration.py --profile PATH`
+refits the model and prints this table for the current references (read-only); more
+enrolled recordings per person raise coverage at no cost in precision.
+
+Every automatic name is recorded as `applied` with its probability, is marked in the
+speaker naming dialog ("Named automatically from the voice"), is never used as an
+enrollment reference, and is corrected by editing the name in that dialog; an edited or
+cleared name is never put back.
+
 ## Operation
 
 Example private `data/voice-identity/profile.json` (set the worker explicitly):
@@ -55,6 +97,8 @@ Example private `data/voice-identity/profile.json` (set the worker explicitly):
   "apply_names": false,
   "threshold": 0.75,
   "margin": 0.12,
+  "policy": "calibrated",
+  "min_probability": 0.7,
   "poll_seconds": 300
 }
 ```

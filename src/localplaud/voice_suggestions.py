@@ -43,7 +43,8 @@ def _suggestion(assignment: VoiceAssignment) -> dict | None:
         reason = "below_threshold"
     else:
         reason = "ambiguous"
-    return {
+    probability = _score(evidence.get("probability"))
+    suggestion = {
         "name": name.strip(),
         "score": round(score, 4),
         "runner_up": None if runner_up is None else round(runner_up, 4),
@@ -52,6 +53,10 @@ def _suggestion(assignment: VoiceAssignment) -> dict | None:
         "status": assignment.status,
         "reason": reason,
     }
+    if probability is not None:
+        # Present only for calibrated matches; the older shape is unchanged.
+        suggestion["probability"] = round(probability, 4)
+    return suggestion
 
 
 def speaker_suggestions(session, file_id: str) -> dict[str, dict]:
@@ -62,8 +67,7 @@ def speaker_suggestions(session, file_id: str) -> dict[str, dict]:
     if recording is None or recording.is_trash:
         return {}
     speakers = {
-        row.id: row
-        for row in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
+        row.id: row for row in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
     }
     suggestions = {}
     for assignment in session.scalars(
@@ -87,14 +91,11 @@ def record_confirmations(session, file_id: str, keys, saved_names: dict) -> list
     name as an explicit user-provided reference rather than an automatic match,
     and the audit trail keeps the score that prompted the suggestion.
     """
-    if not keys or not inspect(session.connection()).has_table(
-        VoiceAssignment.__tablename__
-    ):
+    if not keys or not inspect(session.connection()).has_table(VoiceAssignment.__tablename__):
         return []
     confirmed = []
     speakers = {
-        row.key: row
-        for row in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
+        row.key: row for row in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
     }
     for key in keys:
         speaker = speakers.get(key)
@@ -105,16 +106,52 @@ def record_confirmations(session, file_id: str, keys, saved_names: dict) -> list
         suggestion = _suggestion(assignment) if assignment is not None else None
         if suggestion is None or suggestion["name"] != name:
             continue
-        session.add(VoiceEvent(
-            speaker_id=speaker.id,
-            action="suggestion_confirmed",
-            detail={
-                "name": name,
-                "source": "user",
-                "origin": "voice_suggestion",
-                "suggestion": suggestion,
-            },
-        ))
+        session.add(
+            VoiceEvent(
+                speaker_id=speaker.id,
+                action="suggestion_confirmed",
+                detail={
+                    "name": name,
+                    "source": "user",
+                    "origin": "voice_suggestion",
+                    "suggestion": suggestion,
+                },
+            )
+        )
         assignment.status = "user_confirmed"
         confirmed.append(key)
     return confirmed
+
+
+def automatic_names(session, file_id: str) -> dict[str, dict]:
+    """Return ``{speaker_key: info}`` for names the voice matcher applied by itself.
+
+    Only names still equal to what was applied count; a later edit by a person makes
+    the name theirs. Used to mark inferred names in the naming dialog so they can be
+    reviewed and corrected, never to change anything.
+    """
+    if not inspect(session.connection()).has_table(VoiceAssignment.__tablename__):
+        return {}
+    speakers = {
+        row.id: row for row in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
+    }
+    result = {}
+    for assignment in session.scalars(
+        select(VoiceAssignment).where(
+            VoiceAssignment.file_id == file_id, VoiceAssignment.status == "applied"
+        )
+    ):
+        speaker = speakers.get(assignment.speaker_id)
+        if speaker is None or not assignment.applied_name:
+            continue
+        if (speaker.display_name or "").strip() != assignment.applied_name:
+            continue
+        evidence = assignment.evidence if isinstance(assignment.evidence, dict) else {}
+        probability = _score(evidence.get("probability"))
+        score = _score(evidence.get("score"))
+        result[speaker.key] = {
+            "name": assignment.applied_name,
+            "probability": None if probability is None else round(probability, 4),
+            "score": None if score is None else round(score, 4),
+        }
+    return result

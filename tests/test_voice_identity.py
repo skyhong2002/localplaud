@@ -442,10 +442,18 @@ def test_automatic_name_and_undo_update_notes_with_history_preserving_raw(databa
     session, row, speaker = database
     sample = inventory(session, row)[0]
     raw = copy.deepcopy(row.local_transcript.segments)
-    note = Summary(file_id=row.id, source="local", template="meeting", content_md="Speaker 1 owns follow-up.")
+    note = Summary(
+        file_id=row.id, source="local", template="meeting", content_md="Speaker 1 owns follow-up."
+    )
     session.add(note)
-    session.add(StageRun(file_id=row.id, stage=StageName.summarize,
-                         status=StageStatus.completed, detail={"stale": False}))
+    session.add(
+        StageRun(
+            file_id=row.id,
+            stage=StageName.summarize,
+            status=StageStatus.completed,
+            detail={"stale": False},
+        )
+    )
     session.commit()
     assert apply_match(session, sample, decision()) == "applied"
     session.commit()
@@ -469,10 +477,18 @@ def test_busy_note_index_preflight_never_partially_changes_identity_or_notes(dat
 
     session, row, speaker = database
     sample = inventory(session, row)[0]
-    notes = [Summary(file_id=row.id, source="local", template=template,
-                     input_transcript_id=row.local_transcript.id,
-                     input_transcript_revision=0, input_transcript_source="local",
-                     content_md="Speaker 1 owns follow-up.") for template in ("first", "busy")]
+    notes = [
+        Summary(
+            file_id=row.id,
+            source="local",
+            template=template,
+            input_transcript_id=row.local_transcript.id,
+            input_transcript_revision=0,
+            input_transcript_source="local",
+            content_md="Speaker 1 owns follow-up.",
+        )
+        for template in ("first", "busy")
+    ]
     session.add_all(notes)
     session.commit()
     if undo:
@@ -507,7 +523,9 @@ def test_uncertain_voice_match_does_not_name_or_rewrite_notes(database):
 
     session, row, speaker = database
     sample = inventory(session, row)[0]
-    note = Summary(file_id=row.id, source="local", template="meeting", content_md="Speaker 1 owns follow-up.")
+    note = Summary(
+        file_id=row.id, source="local", template="meeting", content_md="Speaker 1 owns follow-up."
+    )
     session.add(note)
     session.commit()
     unknown = decision() | {"status": "unknown", "name": None}
@@ -517,3 +535,216 @@ def test_uncertain_voice_match_does_not_name_or_rewrite_notes(database):
     assert note.content_md == "Speaker 1 owns follow-up."
     assert not list(session.scalars(select(SummaryRevision)))
     assert not list(session.scalars(select(StageRun)))
+
+
+# --------------------------------------------------------------------------- #
+# Calibrated confidence: probability, not raw similarity
+# --------------------------------------------------------------------------- #
+
+
+def _unit(angle_degrees, dims=8, axis=0):
+    import math as _math
+
+    angle = _math.radians(angle_degrees)
+    vector = [0.0] * dims
+    vector[axis], vector[axis + 1] = _math.cos(angle), _math.sin(angle)
+    return vector
+
+
+def _references(name, count, base_angle, noise=2.0):
+    return [
+        {
+            "name": name,
+            "file_id": f"{name}-{i}",
+            "speaker_key": "s",
+            "vectors": [_unit(base_angle + noise * j) for j in range(4)],
+            "sample_id": f"{name}-{i}",
+        }
+        for i in range(count)
+    ]
+
+
+def test_probability_rises_with_similarity_margin_and_independent_recordings():
+    from localplaud.voice_matching import calibrated_probability
+
+    base = calibrated_probability(0.70, 0.55, 8)
+    assert calibrated_probability(0.80, 0.55, 8) > base
+    assert calibrated_probability(0.70, 0.40, 8) > base
+    assert calibrated_probability(0.70, 0.55, 20) > base
+    assert calibrated_probability(0.70, 0.55, 1) < base
+    assert 0.0 <= calibrated_probability(0.2, 0.2, 1) < 0.1
+    assert 0.9 < calibrated_probability(0.85, 0.5, 40) <= 1.0
+    # Corrupt inputs never become confidence.
+    assert calibrated_probability(float("nan"), 0.1, 3) == 0.0
+
+
+def _axis_refs(name, files, axis, dims=8):
+    vector = [0.0] * dims
+    vector[axis] = 1.0
+    return [
+        {
+            "name": name,
+            "file_id": f"{name}-{i}",
+            "speaker_key": "s",
+            "vectors": [vector, vector, vector],
+            "sample_id": f"{name}-{i}",
+        }
+        for i in range(files)
+    ]
+
+
+def _query(*components, dims=8):
+    """A unit query whose cosine to each axis reference is the given component."""
+    import math as _math
+
+    values = list(components) + [0.0] * (dims - len(components))
+    norm = _math.sqrt(sum(v * v for v in values))
+    return [[v / norm for v in values]] * 4
+
+
+def test_two_names_almost_equally_close_are_never_named_however_similar():
+    from localplaud.voice_matching import MIN_LEAD, VoiceMatcher
+
+    refs = _references("Alice", 6, 0) + _references("Bob", 6, 10)
+    near_both = [_unit(5, axis=0) for _ in range(4)]
+    result = VoiceMatcher(refs).match(near_both, policy="calibrated", min_probability=0.3)
+    assert result["score"] - result["runner_up"] < MIN_LEAD
+    assert result["status"] == "ambiguous"
+
+
+def test_calibrated_policy_names_a_clear_lead_the_strict_rule_would_leave_ambiguous():
+    from localplaud.voice_matching import VoiceMatcher
+
+    # Alice is clearly closest (0.999) with a runner-up at 0.92: a lead of 0.08, below
+    # the strict rule's 0.12 margin but plenty for the calibrated probability.
+    refs = _references("Alice", 8, 0) + _references("Bob", 8, 25)
+    matcher = VoiceMatcher(refs)
+    query = [_unit(2) for _ in range(4)]
+    strict = matcher.match(query, threshold=0.75, margin=0.12)
+    calibrated = matcher.match(query, policy="calibrated", min_probability=0.7)
+    assert strict["status"] == "ambiguous"
+    assert calibrated["status"] == "matched" and calibrated["name"] == "Alice"
+    assert calibrated["probability"] >= 0.7 and calibrated["files"] == 8
+    assert calibrated["policy"] == "calibrated"
+    assert calibrated["calibration"] == "voice-calibration/v1"
+
+
+def test_calibrated_threshold_is_the_probability_the_user_chose():
+    from localplaud.voice_matching import VoiceMatcher
+
+    # Alice 0.66 vs Bob 0.53 with three recordings each: about a one in three chance.
+    refs = _axis_refs("Alice", 3, 0) + _axis_refs("Bob", 3, 1)
+    query = _query(0.66, 0.53, 0.53)
+    matcher = VoiceMatcher(refs)
+    loose = matcher.match(query, policy="calibrated", min_probability=0.3)
+    tight = matcher.match(query, policy="calibrated", min_probability=0.99)
+    assert loose["probability"] == tight["probability"]
+    assert 0.3 <= loose["probability"] < 0.5
+    assert loose["status"] == "matched" and loose["name"] == "Alice"
+    assert tight["status"] == "ambiguous"
+
+
+def test_similarity_floor_blocks_naming_whatever_the_model_says():
+    from localplaud.voice_matching import VoiceMatcher
+
+    refs = _references("Alice", 40, 0)
+    far = [_unit(75) for _ in range(4)]  # similarity ~0.26
+    result = VoiceMatcher(refs).match(far, policy="calibrated", min_probability=0.3)
+    assert result["status"] == "unknown"
+
+
+def test_unknown_policy_is_rejected():
+    from localplaud.voice_matching import VoiceMatcher
+
+    with pytest.raises(ValueError, match="policy"):
+        VoiceMatcher(_references("Alice", 3, 0)).match([_unit(0)] * 3, policy="reckless")
+
+
+def _matched(name, probability):
+    return {"status": "matched", "name": name, "score": 0.7, "probability": probability}
+
+
+def test_one_name_per_recording_keeps_only_the_most_probable_speaker():
+    from localplaud.voice_matching import resolve_name_conflicts
+
+    decisions = {
+        "s1": _matched("Sky", 0.95),
+        "s2": _matched("Sky", 0.72),
+        "s3": _matched("Grace", 0.8),
+        "s4": {"status": "unknown", "name": "Sky", "score": 0.4},
+    }
+    resolve_name_conflicts(decisions)
+    assert decisions["s1"]["status"] == "matched"
+    assert decisions["s2"]["status"] == "ambiguous"
+    assert decisions["s2"]["demoted"] == "name_taken_in_recording"
+    assert decisions["s2"]["name"] == "Sky"  # still available as a suggestion
+    assert decisions["s3"]["status"] == "matched"
+    assert decisions["s4"]["status"] == "unknown" and "demoted" not in decisions["s4"]
+
+
+def test_a_name_already_held_by_another_speaker_is_unavailable():
+    from localplaud.voice_matching import resolve_name_conflicts
+
+    decisions = {"s1": _matched("Sky", 0.99), "s2": _matched("Sky", 0.9)}
+    resolve_name_conflicts(decisions, taken={"s9": "Sky"})  # a person named s9 Sky
+    assert {d["status"] for d in decisions.values()} == {"ambiguous"}
+
+    # The holder itself keeps the name when the voice agrees.
+    decisions = {"s1": _matched("Sky", 0.6), "s2": _matched("Sky", 0.99)}
+    resolve_name_conflicts(decisions, taken={"s1": "Sky"})
+    assert decisions["s1"]["status"] == "matched"
+    assert decisions["s2"]["status"] == "ambiguous"
+
+
+@pytest.mark.parametrize(
+    ("profile", "ok"),
+    [
+        ({}, True),
+        ({"policy": "calibrated", "min_probability": 0.7}, True),
+        ({"policy": "calibrated", "min_probability": 0.5}, True),
+        ({"policy": "calibrated", "min_probability": 0.3}, True),
+        ({"policy": "calibrated", "min_probability": 0.2}, False),
+        ({"policy": "calibrated", "min_probability": 1.0}, False),
+        ({"policy": "calibrated", "min_probability": True}, False),
+        ({"policy": "calibrated", "min_probability": "0.7"}, False),
+        ({"policy": "yolo"}, False),
+        ({"threshold": 0.4}, False),
+    ],
+)
+def test_profile_limits_refuse_reckless_matching(profile, ok):
+    from localplaud.voice_service import validate_profile_thresholds
+
+    if ok:
+        validate_profile_thresholds(profile)
+    else:
+        with pytest.raises(ValueError):
+            validate_profile_thresholds(profile)
+
+
+def test_calibrated_name_is_applied_marked_automatic_and_a_person_can_override_it(database):
+    from localplaud.voice_suggestions import automatic_names
+
+    session, row, speaker = database
+    sample = inventory(session, row)[0]
+    calibrated = {
+        **decision(),
+        "policy": "calibrated",
+        "probability": 0.74,
+        "calibration": "voice-calibration/v1",
+        "min_probability": 0.7,
+    }
+    assert apply_match(session, sample, calibrated) == "applied"
+    session.commit()
+    assignment = session.get(VoiceAssignment, speaker.id)
+    assert assignment.status == "applied" and assignment.evidence["probability"] == 0.74
+    assert automatic_names(session, row.id) == {
+        "s": {"name": "Alice", "probability": 0.74, "score": 0.9}
+    }
+
+    # A person renames the speaker: it is theirs now, no longer automatic, and a later
+    # scan never puts the voice-matched name back.
+    speaker.display_name = "Alicia"
+    session.commit()
+    assert automatic_names(session, row.id) == {}
+    assert apply_match(session, inventory(session, row)[0], calibrated) == "manual"
+    assert speaker.display_name == "Alicia"

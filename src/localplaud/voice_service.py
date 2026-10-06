@@ -27,7 +27,7 @@ from pathlib import Path
 from sqlalchemy import exists, select
 
 from .config import get_settings
-from .db.models import PlaudFile, Transcript
+from .db.models import PlaudFile, Speaker, Transcript
 from .db.session import get_engine, session_scope
 from .voice_identity import (
     VoiceSample,
@@ -38,7 +38,14 @@ from .voice_identity import (
     validate_name_aliases,
     validate_plaud_enrollment,
 )
-from .voice_matching import MODEL, REVISION, VoiceMatcher, cosine
+from .voice_matching import (
+    MODEL,
+    POLICIES,
+    REVISION,
+    VoiceMatcher,
+    cosine,
+    resolve_name_conflicts,
+)
 
 
 class VoiceWorker:
@@ -324,24 +331,46 @@ def scan(profile, worker, report_path, *, limit=None):
     stats["reference_names"] = len({r["name"] for r in refs})
     stats["query_speakers"] = len(targets)
     threshold, margin = profile.get("threshold", 0.75), profile.get("margin", 0.12)
+    policy = profile.get("policy", "strict")
+    min_probability = profile.get("min_probability", 0.7)
     # Never use applied results as enrollment. The frozen reference set is rebuilt
     # from explicit manual/opt-in imported references on each full scan.
     matcher = VoiceMatcher(refs)
+    decided: dict[str, list] = {}
     for sample in targets:
         decision = matcher.match(
-            sample.vectors, threshold=threshold, margin=margin, query_file_id=sample.file_id
+            sample.vectors,
+            threshold=threshold,
+            margin=margin,
+            query_file_id=sample.file_id,
+            policy=policy,
+            min_probability=min_probability,
         )
         if enrollment is not None:
             decision["plaud_enrollment"] = {"id": enrollment["id"], "confirmed_manual": True}
         if name_aliases:
             decision["speaker_name_aliases"] = name_aliases
-        stats["match_" + decision["status"]] += 1
-        if profile.get("apply_names", False):
-            with session_scope() as session:
-                stats[
-                    "apply_"
-                    + apply_match(session, sample, decision, threshold=threshold, margin=margin)
-                ] += 1
+        decided.setdefault(sample.file_id, []).append((sample, decision))
+    for file_id, items in decided.items():
+        # Distinct speakers in one recording hold distinct names, counting names a
+        # person (or an earlier automatic pass) already gave to other speakers.
+        with session_scope() as session:
+            held = {
+                speaker.key: speaker.display_name.strip()
+                for speaker in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
+                if (speaker.display_name or "").strip()
+            }
+        resolve_name_conflicts({sample.speaker_key: decision for sample, decision in items}, held)
+        for sample, decision in items:
+            stats["match_" + decision["status"]] += 1
+            if decision.get("demoted"):
+                stats["match_demoted_name_taken"] += 1
+            if profile.get("apply_names", False):
+                with session_scope() as session:
+                    stats[
+                        "apply_"
+                        + apply_match(session, sample, decision, threshold=threshold, margin=margin)
+                    ] += 1
     # Cloud labels are a proxy, not ground-truth accuracy. Leave out the entire file.
     evaluation = Counter()
     for ref in refs[:200]:
@@ -378,12 +407,33 @@ def scan(profile, worker, report_path, *, limit=None):
         ),
         "threshold": threshold,
         "margin": margin,
+        "policy": policy,
+        "min_probability": min_probability if policy == "calibrated" else None,
     }
     report(report_path, receipt)
     print(json.dumps(receipt), flush=True)
     if client_holder[0] is not None and hasattr(client_holder[0], "close"):
         client_holder[0].close()
     return receipt
+
+
+def validate_profile_thresholds(profile):
+    """Refuse a profile whose matching limits could name people recklessly."""
+    if (
+        not 0.6 <= profile.get("threshold", 0.75) <= 1
+        or not 0.05 <= profile.get("margin", 0.12) <= 0.5
+    ):
+        raise ValueError("unsafe voice matching threshold or margin")
+    policy = profile.get("policy", "strict")
+    if policy not in POLICIES:
+        raise ValueError("unknown voice matching policy")
+    probability = profile.get("min_probability", 0.7)
+    if (
+        isinstance(probability, bool)
+        or not isinstance(probability, int | float)
+        or not 0.3 <= probability <= 0.99
+    ):
+        raise ValueError("unsafe voice matching probability: use 0.30 to 0.99")
 
 
 def main():
@@ -408,11 +458,7 @@ def main():
                     return
                 time.sleep(30)
                 continue
-            if (
-                not 0.6 <= profile.get("threshold", 0.75) <= 1
-                or not 0.05 <= profile.get("margin", 0.12) <= 0.5
-            ):
-                raise ValueError("unsafe voice matching threshold or margin")
+            validate_profile_thresholds(profile)
             worker = VoiceWorker(profile, folder / "runtime.log")
             try:
                 scan(profile, worker, folder / "receipt.json", limit=args.limit)

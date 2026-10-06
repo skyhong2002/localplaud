@@ -18,8 +18,15 @@ def _assignment(key, status, evidence, *, file_id="r1"):
     create_schema(get_engine())
     with session_scope() as s:
         speaker = s.scalar(select(Speaker).where(Speaker.file_id == file_id, Speaker.key == key))
-        s.add(VoiceAssignment(speaker_id=speaker.id, file_id=file_id, speaker_key=key,
-                              status=status, evidence=evidence))
+        s.add(
+            VoiceAssignment(
+                speaker_id=speaker.id,
+                file_id=file_id,
+                speaker_key=key,
+                status=status,
+                evidence=evidence,
+            )
+        )
 
 
 def _suggestions(file_id="r1"):
@@ -30,8 +37,15 @@ def _suggestions(file_id="r1"):
         return speaker_suggestions(s, file_id)
 
 
-UNKNOWN = {"status": "unknown", "name": "Avery", "score": 0.6842, "runner_up": 0.5513,
-           "votes": 1, "windows": 6, "threshold": 0.75}
+UNKNOWN = {
+    "status": "unknown",
+    "name": "Avery",
+    "score": 0.6842,
+    "runner_up": 0.5513,
+    "votes": 1,
+    "windows": 6,
+    "threshold": 0.75,
+}
 
 
 def test_no_voice_tables_means_no_suggestions(monkeypatch, tmp_path):
@@ -44,26 +58,46 @@ def test_unknown_candidate_is_suggested_with_reason(monkeypatch, tmp_path):
     _client(monkeypatch, tmp_path)
     _seed()
     _assignment("SPEAKER_00", "unknown", UNKNOWN)
-    assert _suggestions() == {"SPEAKER_00": {
-        "name": "Avery", "score": 0.6842, "runner_up": 0.5513, "margin": 0.1329,
-        "threshold": 0.75, "status": "unknown", "reason": "below_threshold",
-    }}
+    assert _suggestions() == {
+        "SPEAKER_00": {
+            "name": "Avery",
+            "score": 0.6842,
+            "runner_up": 0.5513,
+            "margin": 0.1329,
+            "threshold": 0.75,
+            "status": "unknown",
+            "reason": "below_threshold",
+        }
+    }
 
 
 def test_ambiguous_candidate_is_suggested(monkeypatch, tmp_path):
     _client(monkeypatch, tmp_path)
     _seed()
-    _assignment("SPEAKER_01", "ambiguous", UNKNOWN | {"status": "ambiguous", "score": 0.81,
-                                                      "runner_up": 0.79})
+    _assignment(
+        "SPEAKER_01",
+        "ambiguous",
+        UNKNOWN | {"status": "ambiguous", "score": 0.81, "runner_up": 0.79},
+    )
     result = _suggestions()["SPEAKER_01"]
     assert (result["status"], result["reason"]) == ("ambiguous", "ambiguous")
 
 
-@pytest.mark.parametrize("evidence", [
-    {}, {"name": "Avery"}, {"name": "Avery", "score": "0.7"}, {"name": "", "score": 0.7},
-    {"name": "Speaker 2", "score": 0.7}, {"name": ["Avery"], "score": 0.7},
-    {"name": "Avery", "score": float("nan")}, {"name": "Avery", "score": True}, [1, 2], None,
-])
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {},
+        {"name": "Avery"},
+        {"name": "Avery", "score": "0.7"},
+        {"name": "", "score": 0.7},
+        {"name": "Speaker 2", "score": 0.7},
+        {"name": ["Avery"], "score": 0.7},
+        {"name": "Avery", "score": float("nan")},
+        {"name": "Avery", "score": True},
+        [1, 2],
+        None,
+    ],
+)
 def test_malformed_evidence_is_no_suggestion(monkeypatch, tmp_path, evidence):
     _client(monkeypatch, tmp_path)
     _seed()
@@ -102,8 +136,10 @@ def test_confirming_suggestion_is_recorded_as_user_confirmed(monkeypatch, tmp_pa
     _assignment("SPEAKER_01", "ambiguous", UNKNOWN | {"name": "Lin"})
     response = c.post(
         "/file/r1/speakers",
-        data={"names": json.dumps({"SPEAKER_00": "Avery", "SPEAKER_01": "Lin Chen"}),
-              "suggested": json.dumps(["SPEAKER_00", "SPEAKER_01"])},
+        data={
+            "names": json.dumps({"SPEAKER_00": "Avery", "SPEAKER_01": "Lin Chen"}),
+            "suggested": json.dumps(["SPEAKER_00", "SPEAKER_01"]),
+        },
         headers={"accept": "application/json"},
     )
     assert response.status_code == 200, response.text
@@ -143,22 +179,43 @@ def test_suggested_keys_must_be_part_of_the_save(monkeypatch, tmp_path):
         assert response.status_code == 400
 
 
-@pytest.mark.parametrize("locale, expected", [
-    ("en", ["Possibly Avery · voice similarity 68%", "Below the auto-naming confidence threshold",
-            "1 suggested name", 'aria-label="Use suggested name Avery"',
-            "They are not confirmed identities"]),
-    ("zh-Hant-TW", ["可能是 Avery · 聲音相似度 68%", "低於自動命名的信心門檻", "1 個建議名稱",
-                    'aria-label="採用建議名稱 Avery"', "並非確認的身分"]),
-])
-def test_dialog_renders_suggestion_without_filling_the_field(monkeypatch, tmp_path, locale,
-                                                             expected):
+@pytest.mark.parametrize(
+    "locale, expected",
+    [
+        (
+            "en",
+            [
+                "Possibly Avery · voice similarity 68%",
+                "Below the auto-naming confidence threshold",
+                "1 suggested name",
+                'aria-label="Use suggested name Avery"',
+                "They are not confirmed identities",
+            ],
+        ),
+        (
+            "zh-Hant-TW",
+            [
+                "可能是 Avery · 聲音相似度 68%",
+                "低於自動命名的信心門檻",
+                "1 個建議名稱",
+                'aria-label="採用建議名稱 Avery"',
+                "並非確認的身分",
+            ],
+        ),
+    ],
+)
+def test_dialog_renders_suggestion_without_filling_the_field(
+    monkeypatch, tmp_path, locale, expected
+):
     c = _client(monkeypatch, tmp_path)
     _seed()
     _assignment("SPEAKER_00", "unknown", UNKNOWN)
     with c:
         preferences = c.get("/api/preferences/workspace").json()
-        assert c.put("/api/preferences/workspace",
-                     json=preferences | {"locale": locale}).status_code == 200
+        assert (
+            c.put("/api/preferences/workspace", json=preferences | {"locale": locale}).status_code
+            == 200
+        )
         page = c.get("/file/r1").text
     for text in expected:
         assert text in page
@@ -174,3 +231,88 @@ def test_no_hint_without_suggestions(monkeypatch, tmp_path):
     page = c.get("/file/r1").text
     assert "speaker-suggestion-hint" not in page
     assert "data-suggestion-for" not in page
+
+
+CALIBRATED = UNKNOWN | {
+    "status": "ambiguous",
+    "score": 0.6842,
+    "runner_up": 0.58,
+    "probability": 0.5712,
+    "policy": "calibrated",
+}
+
+
+def test_calibrated_suggestion_carries_its_probability(monkeypatch, tmp_path):
+    _client(monkeypatch, tmp_path)
+    _seed()
+    _assignment("SPEAKER_00", "ambiguous", CALIBRATED)
+    assert _suggestions()["SPEAKER_00"]["probability"] == 0.5712
+
+
+@pytest.mark.parametrize(
+    "locale, expected",
+    [
+        ("en", ["Possibly Avery · 57% likely"]),
+        ("zh-Hant-TW", ["可能是 Avery · 可能性 57%"]),
+    ],
+)
+def test_dialog_shows_probability_instead_of_similarity_for_calibrated_matches(
+    monkeypatch, tmp_path, locale, expected
+):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _assignment("SPEAKER_00", "ambiguous", CALIBRATED)
+    with c:
+        preferences = c.get("/api/preferences/workspace").json()
+        assert (
+            c.put("/api/preferences/workspace", json=preferences | {"locale": locale}).status_code
+            == 200
+        )
+        page = c.get("/file/r1").text
+    for text in expected:
+        assert text in page
+    # The rendered sentence must not fall back to raw similarity (68%).
+    assert "voice similarity 68%" not in page and "聲音相似度 68%" not in page
+
+
+@pytest.mark.parametrize(
+    "locale, expected",
+    [
+        ("en", ["Named automatically from the voice · 74% likely · Edit the name to correct it"]),
+        ("zh-Hant-TW", ["依聲音自動命名 · 可能性 74% · 名字不對可直接修改"]),
+    ],
+)
+def test_dialog_marks_names_the_matcher_applied_and_only_those(
+    monkeypatch, tmp_path, locale, expected
+):
+    from localplaud.db.models import Speaker
+    from localplaud.db.session import session_scope
+
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    _assignment("SPEAKER_00", "applied", {"name": "Avery", "score": 0.8, "probability": 0.74})
+    with session_scope() as s:
+        speaker = s.scalar(
+            select(Speaker).where(Speaker.file_id == "r1", Speaker.key == "SPEAKER_00")
+        )
+        speaker.display_name = "Avery"
+    from localplaud.voice_identity import VoiceAssignment
+
+    with session_scope() as s:
+        s.get(VoiceAssignment, speaker.id).applied_name = "Avery"
+    with c:
+        preferences = c.get("/api/preferences/workspace").json()
+        assert (
+            c.put("/api/preferences/workspace", json=preferences | {"locale": locale}).status_code
+            == 200
+        )
+        page = c.get("/file/r1").text
+    for text in expected:
+        assert text in page
+    assert page.count("data-automatic-for=") == 1
+
+    # A person edits the name: it stops being marked automatic.
+    with session_scope() as s:
+        s.get(Speaker, speaker.id).display_name = "Avery Chen"
+    with c:
+        assert "data-automatic-for=" not in c.get("/file/r1").text
