@@ -37,9 +37,11 @@ application/undo history. Original transcripts and audio are never changed.
 Name application uses the existing transcript mutation lock and invalidates notes,
 mind maps and search chunks through the same durable reindex queue as a manual
 speaker rename. Existing generated notes are retained as stale until regenerated. Restricted
-new-recording mode drains this reindex queue only for recordings transcribed within
-`pipeline.untranscribed_only_retry_hours`; it does not resume historical backfills
-or spend LLM quota regenerating notes automatically after a name edit.
+new-recording mode drains this reindex queue for recordings transcribed within
+`pipeline.untranscribed_only_retry_hours`, and name-only reindexes (a rename, this service,
+a regroup) for recordings of any age, because a recording whose chunks were dropped
+disappears from search and Ask until they are rebuilt. It does not resume other
+historical backfills or spend LLM quota regenerating notes automatically after a name edit.
 
 ## Calibrated confidence
 

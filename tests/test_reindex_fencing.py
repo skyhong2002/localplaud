@@ -646,8 +646,18 @@ def test_pending_scanner_recovers_abandoned_running_reindex(monkeypatch, tmp_pat
         assert all(attempt.completed_at is not None for attempt in attempts)
 
 
-@pytest.mark.parametrize("age_hours,expected", [(2, 1), (200, 0)])
-def test_restricted_reindex_resumes_recent_speaker_edits_only(monkeypatch, tmp_path, age_hours, expected):
+@pytest.mark.parametrize(
+    "age_hours,reason,expected",
+    [
+        (2, "canonical transcript changed", 1),
+        (200, "canonical transcript changed", 0),
+        (200, "speaker names changed", 1),
+        (200, "speaker_regroup", 1),
+    ],
+)
+def test_restricted_reindex_resumes_recent_edits_and_any_age_name_changes(
+    monkeypatch, tmp_path, age_hours, reason, expected
+):
     from datetime import UTC, datetime, timedelta
 
     from localplaud.db.models import StageName, StageRun, StageStatus
@@ -660,7 +670,7 @@ def test_restricted_reindex_resumes_recent_speaker_edits_only(monkeypatch, tmp_p
     with session_scope() as session:
         run = session.scalar(select(StageRun).where(StageRun.stage == StageName.index))
         run.status = StageStatus.pending
-        run.detail = {"reindex_only": True, "stale": True, "reason": "canonical transcript changed"}
+        run.detail = {"reindex_only": True, "stale": True, "reason": reason}
         session.add(StageRun(file_id="race", stage=StageName.transcribe, status=StageStatus.completed,
                              completed_at=datetime.now(UTC) - timedelta(hours=age_hours)))
     called = []

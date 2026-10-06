@@ -587,10 +587,20 @@ def _reindex_file_claimed(
     return False
 
 
+#: Reindexes caused only by speaker names changing (a rename, the voice service or a
+#: regroup). They re-chunk and re-embed the existing transcript, never spend LLM quota,
+#: and leave the recording out of search and Ask until they run, so restricted mode
+#: drains them for recordings of any age.
+NAME_REINDEX_REASONS = frozenset({"speaker names changed", "speaker_regroup"})
+
+
 def process_pending_reindexes(
     settings: Settings | None = None, *, limit: int = 20, recent_only: bool = False
 ) -> int:
-    """Run profile-change transcript reindexes from the durable stage queue."""
+    """Run profile-change transcript reindexes from the durable stage queue.
+
+    ``recent_only`` skips historical backfills, except name-only reindexes.
+    """
     settings = settings or get_settings()
     if not settings.pipeline.index:
         return 0
@@ -609,7 +619,11 @@ def process_pending_reindexes(
             recording = session.get(PlaudFile, run.file_id)
             if recording is None or processing_claim_active(recording):
                 continue
-            if recent_only and not _recently_transcribed(recording, settings, datetime.now(UTC)):
+            if (
+                recent_only
+                and (run.detail or {}).get("reason") not in NAME_REINDEX_REASONS
+                and not _recently_transcribed(recording, settings, datetime.now(UTC))
+            ):
                 continue
             queued.append(run.file_id)
             if len(queued) >= max(1, min(limit, 100)):
