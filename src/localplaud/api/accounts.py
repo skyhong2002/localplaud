@@ -136,9 +136,9 @@ def google_email_authoritative(claims):
 
 
 def render(request, name, **context):
-    from .app import templates
+    from .app import _base_ctx, templates
 
-    # Account pages have their own document shell, not the workspace's #app-view.
+    # Always load the complete account document, including its form behavior.
     # Older open tabs may still request these links as HTMX partial navigation.
     if (
         request.method == "GET"
@@ -149,6 +149,11 @@ def render(request, name, **context):
             request.url.path + ("?" + request.url.query if request.url.query else "")
         )
         return Response(headers={"HX-Redirect": destination})
+    user = context.get("account_user")
+    workspace = name in {"account.html", "account_users.html"} and user and user["status"] == "active"
+    if workspace:
+        context = {**_base_ctx(request, "settings"), **context, "partial_response": False}
+    context["account_workspace"] = bool(workspace)
     return templates.TemplateResponse(request=request, name=name, context=context)
 
 

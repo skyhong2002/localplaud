@@ -1,9 +1,12 @@
 'use strict';
 // Authentication pages end the previous workspace's client-side history.
-try { localStorage.removeItem('htmx-history-cache'); sessionStorage.clear(); } catch (_) {}
+if (document.body.classList.contains('auth-shell')) {
+  try { localStorage.removeItem('htmx-history-cache'); sessionStorage.clear(); } catch (_) {}
+}
 document.addEventListener('submit', event => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
+  if (!form.closest('.account-page, .auth-shell')) return;
   if (form.dataset.confirm && !window.confirm(form.dataset.confirm)) { event.preventDefault(); return; }
   const password = form.elements.namedItem('password');
   const confirmation = form.elements.namedItem('password_confirm');

@@ -7,11 +7,12 @@
   <title>{% block title %}帳號{% endblock %} · localplaud</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <script>try{const m=localStorage.getItem('localplaud:appearance')||'system';document.documentElement.dataset.appearance=m==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):m;}catch(e){}</script>
-  <link rel="stylesheet" href="/static/css/accounts.css?v=1">
-  <script src="/static/js/accounts.js?v=1" defer></script>
+  <link rel="stylesheet" href="/static/css/app.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/css/accounts.css?v={{ asset_version }}">
+  <script src="/static/js/accounts.js?v={{ asset_version }}" defer></script>
 </head>
-<body>
-  <a class="skip" href="#content">跳至主要內容</a>
+<body class="auth-shell">
+  <a class="skip-link" href="#content">跳至主要內容</a>
   <header class="account-header">
     <a class="brand" href="{{ '/home' if account_user is defined and account_user.status == 'active' else '/login' }}"><img src="/static/logo.svg" alt=""><span>local<b>plaud</b></span></a>
     {% if account_user is defined and account_user %}

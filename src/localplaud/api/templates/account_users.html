@@ -1,24 +1,23 @@
-{% extends "auth_base.html" %}
-{% block title %}帳號管理{% endblock %}
-{% block main_class %}account-main{% endblock %}
-{% block content %}
+{% extends "account_base.html" %}
+{% block title %}帳號管理{% if account_workspace %} · localplaud{% endif %}{% endblock %}
+{% block account_content %}
 {% set roles = {'owner':'擁有者', 'admin':'管理員', 'viewer':'唯讀成員'} %}
 {% set statuses = {'pending':'待核准', 'active':'已啟用', 'disabled':'已停用'} %}
-<div class="page-heading"><div><div class="eyebrow">工作區管理</div><h1>帳號管理</h1><p class="sub">核准新帳號、調整權限，或停用存取。</p></div><span class="badge">{{ users|length }} 個帳號</span></div>
+<div class="page-heading"><div><h1 class="page">帳號管理</h1><p class="sub">核准新帳號、調整權限，或停用存取。</p></div><span class="chip">{{ users|length }} 個帳號</span></div>
 <div class="alert">所有已核准的成員共用這個工作區的錄音與筆記。唯讀成員可瀏覽及匯出；管理員可編輯、生成與管理工作區。</div>
 {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
 {% if notice %}<div class="alert success" role="status">{{ notice }}</div>{% endif %}
 <section class="panel user-list" aria-label="使用者">
 {% for user in users %}
 <article class="user-row">
-<div class="user-info"><div class="user-name"><strong>{{ user.username }}</strong><span class="badge status-{{ user.status }}">{{ statuses.get(user.status, user.status) }}</span>{% if user.id == account_user.id %}<span class="you">你</span>{% endif %}</div><p>{{ user.email }}</p>{% if user.role == 'owner' %}<span class="field-help">擁有者 · 此帳號受保護</span>{% endif %}</div>
+<div class="user-info"><div class="user-name"><strong>{{ user.username }}</strong><span class="chip status-{{ user.status }}">{{ statuses.get(user.status, user.status) }}</span>{% if user.id == account_user.id %}<span class="you">你</span>{% endif %}</div><p>{{ user.email }}</p>{% if user.role == 'owner' %}<span class="field-help">擁有者 · 此帳號受保護</span>{% endif %}</div>
 {% if user.role != 'owner' and (account_user.role == 'owner' or user.role != 'admin') and user.id != account_user.id %}
 <form class="user-controls" action="/admin/users/{{ user.id }}" method="post" data-submit-label="儲存中…" data-confirm="變更會撤銷此帳號的既有登入；核准後可存取共用工作區。確定儲存？">
-<div><label for="role-{{ user.id }}">角色</label><select id="role-{{ user.id }}" name="role"><option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>唯讀成員</option>{% if account_user.role == 'owner' %}<option value="admin" {% if user.role == 'admin' %}selected{% endif %}>管理員</option>{% endif %}</select></div>
-<div><label for="status-{{ user.id }}">狀態</label><select id="status-{{ user.id }}" name="status">{% for value, label in statuses.items() %}<option value="{{ value }}" {% if user.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-<button class="button primary compact" type="submit">儲存</button>
+<div><label for="role-{{ user.id }}">角色</label><select class="input select" id="role-{{ user.id }}" name="role"><option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>唯讀成員</option>{% if account_user.role == 'owner' %}<option value="admin" {% if user.role == 'admin' %}selected{% endif %}>管理員</option>{% endif %}</select></div>
+<div><label for="status-{{ user.id }}">狀態</label><select class="input select" id="status-{{ user.id }}" name="status">{% for value, label in statuses.items() %}<option value="{{ value }}" {% if user.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+<button class="btn" type="submit">儲存</button>
 </form>
-{% else %}<span class="badge">{{ roles.get(user.role, user.role) }}</span>{% endif %}
+{% else %}<span class="chip">{{ roles.get(user.role, user.role) }}</span>{% endif %}
 </article>
 {% else %}<div class="empty-state"><h2>目前沒有其他帳號</h2><p class="sub">新帳號建立後，會出現在這裡等待核准。</p></div>{% endfor %}
 </section>

@@ -93,9 +93,31 @@ def test_account_navigation_leaves_workspace_shell(client, monkeypatch, path):
     full = client.get(path)
     assert full.status_code == 200
     assert "HX-Redirect" not in full.headers
-    assert '<main id="content"' in full.text
+    assert 'id="workspace-sidebar"' in full.text
+    assert 'id="app-view"' in full.text
+    assert 'id="account-content"' in full.text
     assert 'accounts.css' in full.text
     assert 'someone' in full.text
+
+
+def test_pending_account_keeps_workspace_metadata_out_of_page(client, monkeypatch):
+    from localplaud.api import app as web
+
+    create_user(status="pending")
+    login(client)
+    monkeypatch.setattr(auth, "render", render_account_page)
+
+    def forbidden_workspace_context(*args):
+        pytest.fail("Pending accounts must not query private workspace context")
+
+    monkeypatch.setattr(web, "_base_ctx", forbidden_workspace_context)
+    response = client.get("/account")
+    assert response.status_code == 200
+    assert "等待管理員核准" in response.text
+    assert 'id="workspace-sidebar"' not in response.text
+    assert 'id="account-content"' not in response.text
+    assert '/static/css/app.css' in response.text
+    assert 'action="/account/password"' in response.text
 
 
 def test_registration_reserves_owner_and_creates_pending(client):

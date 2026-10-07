@@ -66,6 +66,7 @@
     };
   </script>
   <script src="/static/js/app.js?v={{ asset_version }}"></script>
+  {% block page_head %}{% endblock %}
 </head>
 <body class="app{% if show_tabbar %} has-tabbar{% endif %}"{% if account_user|default(None) %} hx-history="false"{% endif %}>
   {% include "_icons.html" %}
@@ -178,7 +179,7 @@
       <button class="icon-btn" type="button" data-open-import="device" aria-label="{{ t('Add audio') }}">{{ icon('plus') }}</button>
     </header>
     {% endblock %}
-    {% if account_user|default(None) and account_user.role == 'viewer' %}<div role="status" style="padding:10px 20px;background:var(--c-bg-2);font-size:13px">唯讀模式：可瀏覽及匯出內容；編輯與生成需要管理員權限。 <a href="/account">我的帳號</a></div>{% endif %}
+    {% if account_user|default(None) and account_user.role == 'viewer' and not account_workspace|default(false) %}<div role="status" style="padding:10px 20px;background:var(--c-bg-2);font-size:13px">唯讀模式：可瀏覽及匯出內容；編輯與生成需要管理員權限。 <a href="/account">我的帳號</a></div>{% endif %}
     {% block body %}{% endblock %}
     {% if show_tabbar %}{% include "_tabbar.html" %}{% endif %}
     {% block scripts %}{% endblock %}
