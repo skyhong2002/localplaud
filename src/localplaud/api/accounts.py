@@ -138,6 +138,17 @@ def google_email_authoritative(claims):
 def render(request, name, **context):
     from .app import templates
 
+    # Account pages have their own document shell, not the workspace's #app-view.
+    # Older open tabs may still request these links as HTMX partial navigation.
+    if (
+        request.method == "GET"
+        and request.headers.get("hx-request", "").lower() == "true"
+        and request.headers.get("hx-target") == "app-view"
+    ):
+        destination = safe_next(
+            request.url.path + ("?" + request.url.query if request.url.query else "")
+        )
+        return Response(headers={"HX-Redirect": destination})
     return templates.TemplateResponse(request=request, name=name, context=context)
 
 

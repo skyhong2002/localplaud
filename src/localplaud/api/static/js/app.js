@@ -965,7 +965,7 @@
       if((link.getAttribute('href')||'').startsWith('#'))return false;
       const url=new URL(link.href,location.href);
       if(url.origin!==location.origin)return false;
-      return !/^\/(?:api|audio|static|login|logout|oauth)(?:\/|$)/.test(url.pathname)
+      return !/^\/(?:api|audio|static|login|logout|register|oauth|auth|account|admin)(?:\/|$)/.test(url.pathname)
         && !/\/(?:export|download)(?:\/|\.|$)/.test(url.pathname);
     };
     const prepareLinks=root=>{

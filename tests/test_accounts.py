@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, select, text
 
 from localplaud.api import accounts as auth
+from localplaud.api.accounts import render as render_account_page
 from localplaud.config import ApiConfig, get_settings
 from localplaud.db.models import AccountUser, AuthTransaction, Base, BrowserSession, OAuthIdentity
 from localplaud.db.session import session_scope
@@ -78,6 +79,23 @@ def login(client, username="someone"):
     result = client.post("/login", data={"identifier": username, "password": PASSWORD})
     assert result.status_code == 303
     return result
+
+
+@pytest.mark.parametrize("path", ["/account", "/admin/users?notice=updated"])
+def test_account_navigation_leaves_workspace_shell(client, monkeypatch, path):
+    create_user(role="owner")
+    login(client)
+    monkeypatch.setattr(auth, "render", render_account_page)
+    partial = client.get(path, headers={"HX-Request": "true", "HX-Target": "app-view"})
+    assert partial.status_code == 200
+    assert partial.headers["HX-Redirect"] == path
+    assert partial.content == b""
+    full = client.get(path)
+    assert full.status_code == 200
+    assert "HX-Redirect" not in full.headers
+    assert '<main id="content"' in full.text
+    assert 'accounts.css' in full.text
+    assert 'someone' in full.text
 
 
 def test_registration_reserves_owner_and_creates_pending(client):

@@ -40,6 +40,11 @@ Google is unavailable; first-time owner bootstrap requires Google. Disabling Goo
 configuration before the owner has a local password removes their ordinary login
 method. Local operator recovery below works once the owner exists.
 
+Account and user-management pages use full document navigation because their
+layout is separate from the recording workspace. Requests from an already-open
+workspace running older navigation code receive `HX-Redirect` to load that layout.
+If an older tab is already blank, reload it once or open `/account` directly.
+
 Account mode rejects the old shared password and all shared API-token access,
 including Bearer, `X-Auth-Token`, and `?token=`. Old sessions without a user are
 invalid. Remote workers retain their separate authenticated worker protocol;
