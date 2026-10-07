@@ -66,3 +66,25 @@ Executable regressions:
 uv run --no-project --with 'mcp<2' --with pytest python -m pytest \
   tests/test_account_reader.py tests/test_mcp_account_reader.py -q
 ```
+
+## Deployment verification — 2026-10-08
+
+Status: complete. The Mint deployment handoff confirms both installed script
+hashes match the delivered versions and the Hermes gateway was restarted and is
+active. Its configured interpreter initialized the real stdio MCP adapter and
+enumerated all six tools, preserving the four original names.
+
+Reconstructed transcript (71,176 bytes, two calls), notes (12,666 bytes), and
+combined recording (95,070 bytes, two calls) each matched the canonical export
+SHA-256 captured on the application host. Password login, session replacement
+after revocation, and preservation of existing Google sessions were verified
+there. Eleven reader/adapter regression tests passed.
+
+The completion watcher still reads 971 recordings; its notification configuration
+and baseline were preserved. This verifies deployed MCP protocol and complete
+content access, not an additional model-driven Discord conversation test.
+
+Private operational evidence is retained outside version control under
+`data/ops/hermes-account-handoff.md`, `data/ops/hermes-mcp-verification.json`, and
+`data/ops/hermes-sky-reader-verification.json`. Credentials and session cookies
+remain separate private files and are not part of this documentation.
