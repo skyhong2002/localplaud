@@ -56,6 +56,10 @@ _DAEMON_HEARTBEAT_TTL = timedelta(minutes=5)
 _DAEMON_HEARTBEAT_INTERVAL_SECONDS = 30
 _DOWNLOAD_RECOVERY_TTL = timedelta(hours=1)
 _DOWNLOAD_LEASE = timedelta(hours=1)
+# Statuses from which evicted raw audio may be fetched again without touching the
+# recording's status. A partial or failed recording still needs its audio to be
+# re-transcribed; in-flight states (discovered, downloading, processing) do not.
+AUDIO_RESTORABLE_STATUSES = (FileStatus.done, FileStatus.partial, FileStatus.error)
 _ACTIVE_DAEMON_OWNER: str | None = None
 _MAX_NOTE_ASSET_BYTES = 15 * 1024 * 1024
 _NOTE_ASSET_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
@@ -749,7 +753,7 @@ def _download_one(
                     [
                         PlaudFile.origin == "plaud",
                         PlaudFile.audio_path.is_(None),
-                        PlaudFile.status == FileStatus.done,
+                        PlaudFile.status.in_(AUDIO_RESTORABLE_STATUSES),
                         PlaudFile.processing_token.is_(None),
                     ]
                 )

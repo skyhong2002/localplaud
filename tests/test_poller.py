@@ -807,6 +807,53 @@ def test_cache_only_download_preserves_completed_status(monkeypatch, tmp_path):
         assert row.download_token is None and row.download_lease_until is None
 
 
+@pytest.mark.parametrize(
+    "status,restored",
+    [
+        ("partial", True),
+        ("error", True),
+        ("processing", False),
+        ("downloading", False),
+        ("discovered", False),
+    ],
+)
+def test_cache_only_download_restores_unfinished_recordings_only(
+    monkeypatch, tmp_path, status, restored
+):
+    monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "audio"))
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.poller.poll import _download_one
+
+    init_db()
+    with session_scope() as session:
+        session.add(
+            PlaudFile(
+                id="evicted",
+                filename="Evicted",
+                origin="plaud",
+                status=FileStatus(status),
+                raw={"id": "evicted", "filename": "Evicted"},
+            )
+        )
+
+    class Client:
+        def download_audio(self, _dto, destination):
+            path = destination / "audio.opus"
+            path.write_bytes(b"restored")
+            return path
+
+    assert (
+        _download_one(Client(), "evicted", {"id": "evicted"}, settings, cache_only=True) is restored
+    )
+    with session_scope() as session:
+        row = session.get(PlaudFile, "evicted")
+        # Restoring audio never changes where the recording is in its lifecycle.
+        assert row.status == FileStatus(status)
+        assert bool(row.audio_path) is restored
+
+
 def test_download_batch_propagates_daemon_owner_to_threads(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "audio"))
     settings = _reset_db(monkeypatch, tmp_path)

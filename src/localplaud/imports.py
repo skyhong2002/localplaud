@@ -17,7 +17,12 @@ from .config import Settings, get_settings
 from .db.models import FileStatus, ImportRun, PlaudFile, Summary, Transcript
 from .db.session import session_scope
 from .plaud import make_plaud_client
-from .poller.poll import _apply_dto, _download_one, refresh_cloud_artifacts_for
+from .poller.poll import (
+    AUDIO_RESTORABLE_STATUSES,
+    _apply_dto,
+    _download_one,
+    refresh_cloud_artifacts_for,
+)
 from .worker.convert import ConversionError, _raw_packet_count, to_wav
 
 _start_lock = threading.Lock()
@@ -325,7 +330,7 @@ def ensure_plaud_audio(
                 return path
             if (row.origin or "plaud") != "plaud":
                 raise ValueError("recording audio is unavailable and is not backed by Plaud")
-            if row.status != FileStatus.done:
+            if row.status not in AUDIO_RESTORABLE_STATUSES:
                 raise ValueError("recording audio has not been imported")
             if row.audio_path and path is not None and not path.exists():
                 row.audio_path = None
