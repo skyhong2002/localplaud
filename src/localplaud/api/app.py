@@ -87,6 +87,8 @@ from ..store.speakers import display_names, speaker_keys_from_segments, speaker_
 from .accounts import router as accounts_router
 from .automations import router as automations_router
 from .backups import router as backups_router
+from .completion_feed import PATH as completion_path
+from .completion_feed import router as completion_router
 from .imports import router as imports_router
 from .integrations import router as integrations_router
 from .media import audio_file_response
@@ -136,6 +138,7 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
+app.include_router(completion_router)
 app.include_router(accounts_router)
 app.include_router(providers_router)
 app.include_router(vocabulary_router)
@@ -210,6 +213,13 @@ def _login_context(next_path: str, error: bool) -> dict:
 async def _auth_gate(request: Request, call_next):
     """Protect the Web App with a revocable opaque session and APIs with a token."""
     settings = get_settings().api
+    if request.url.path == completion_path:
+        # This single read-only route validates its own scoped machine credential.
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Vary"] = "Authorization"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+        return response
     if settings.accounts_enabled:
         from .accounts import gate
 

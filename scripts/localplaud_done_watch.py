@@ -80,8 +80,8 @@ def fetch_files() -> list[dict]:
     if not token:
         raise SourceUnavailable("API 權杖檔是空的", transient=False)
     request = urllib.request.Request(
-        f"{BASE_URL}/api/files",
-        headers={"X-Auth-Token": token, "Accept": "application/json"},
+        f"{BASE_URL}/api/integrations/completion-status",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
     )
     for attempt in range(FETCH_ATTEMPTS):
         try:

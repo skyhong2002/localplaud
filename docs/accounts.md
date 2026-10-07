@@ -50,7 +50,9 @@ Account mode rejects the old shared password and all shared API-token access,
 including Bearer, `X-Auth-Token`, and `?token=`. Old sessions without a user are
 invalid. Remote workers retain their separate authenticated worker protocol;
 Plaud OAuth and provider API keys are unchanged. Check external API clients before
-cutover: this release does not issue new machine API credentials.
+cutover: general machine API credentials are not supported. The completion
+notification watcher has a separate, metadata-only credential described in
+`docs/completion-watcher.md`; it cannot access other API or browser routes.
 
 ## Account lifecycle and permissions
 

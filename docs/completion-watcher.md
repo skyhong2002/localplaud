@@ -10,6 +10,29 @@ Configuration uses `LOCALPLAUD_URL` (default `https://plaud.observe.tw`),
 `localplaud_api_token` and `cron/state/localplaud_done_watch.json` under
 `HERMES_HOME` (or `~/.hermes`). Keep token and state files outside the repository.
 
+## Credential and endpoint
+
+The watcher reads `GET /api/integrations/completion-status` using an
+`Authorization: Bearer` header. This dedicated machine credential works independently
+of Google/browser sessions and legacy authentication. The endpoint returns only
+non-trash recordings' IDs, display titles, processing statuses, start times, and
+durations. It cannot read transcripts, summaries, audio or settings, or mutate data.
+Responses are never cached. Without configuration the endpoint rejects all requests.
+
+Generate a new random token (at least 32 random bytes) and store it in the watcher's
+token file with mode `0600`. Put its lowercase SHA-256 hex digest in the server's
+private environment as `LOCALPLAUD_API__COMPLETION_TOKEN_SHA256`, then restart the
+server. Only the digest is needed on the server. The token must be distinct from
+the retired shared API key and all browser/worker credentials. To revoke or rotate
+it, remove or replace the digest and restart; update the watcher's file to match.
+
+When upgrading an existing watcher, replace its script and token file but retain
+the configured state path and contents. Account mode deliberately rejects the old
+`X-Auth-Token` on `/api/files`; leaving the old watcher in place produces HTTP 401.
+Update both ends before checking recovery. Do not reset the completion baseline.
+
+## Delivery and recovery
+
 A first successful poll establishes the baseline without announcing historical
 recordings. Later successful polls report transitions to `done`. The existing
 status-state format remains compatible. An advisory lock serializes overlapping

@@ -165,7 +165,8 @@ def test_pending_cannot_reach_any_private_route(client):
             if method == "OPTIONS":
                 continue
             response = client.request(method, path)
-            assert response.status_code == 403, (method, path, response.status_code)
+            expected = 401 if path == "/api/integrations/completion-status" else 403
+            assert response.status_code == expected, (method, path, response.status_code)
     response = client.get("/", headers={"HX-Request": "true"})
     assert response.headers["HX-Redirect"] == "/account"
 
@@ -741,3 +742,41 @@ def test_link_publication_serializes_with_concurrent_revocation(client, monkeypa
     assert client.get("/account").status_code == 401
     with session_scope() as db:
         assert db.scalar(select(BrowserSession).where(BrowserSession.user_id == user_id)) is None
+
+
+@pytest.mark.parametrize('account_mode', ['true', 'false'])
+def test_completion_machine_credential_is_narrow_and_revocable(client, monkeypatch, account_mode):
+    import hashlib
+
+    from localplaud.db.models import FileStatus, PlaudFile
+
+    path = '/api/integrations/completion-status'
+    token = 'synthetic-completion-only-token-123456789'
+    monkeypatch.setenv('LOCALPLAUD_API__ACCOUNTS_ENABLED', account_mode)
+    monkeypatch.setenv('LOCALPLAUD_API__COMPLETION_TOKEN_SHA256', hashlib.sha256(token.encode()).hexdigest())
+    get_settings(reload=True)
+    with session_scope() as db:
+        # No paid/cloud AI artifacts, local transcript or summaries required.
+        db.add(PlaudFile(id='raw', filename='Raw audio', status=FileStatus.downloaded))
+        db.add(PlaudFile(id='done', filename='Cloud name', generated_title='Generated',
+                         local_title='User title', status=FileStatus.done, duration_ms=12000))
+        db.add(PlaudFile(id='trash', filename='Deleted', status=FileStatus.done, is_trash=True))
+    headers = {'Authorization': f'Bearer {token}'}
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers={'Authorization': 'Bearer old-secret'}).status_code == 401
+    assert client.get(path, headers={'X-Auth-Token': token}).status_code == 401
+    assert client.get(path, params={'token': token}).status_code == 401
+    response = client.get(path, headers=headers)
+    assert response.status_code == 200
+    assert response.headers['Cache-Control'] == 'private, no-store'
+    files = response.json()['files']
+    assert [f['id'] for f in files] == ['done', 'raw']
+    assert files[0]['filename'] == 'User title'
+    assert files[1]['status'] == 'downloaded'
+    assert set(files[0]) == {'id', 'filename', 'status', 'duration_ms', 'start_time_ms'}
+    assert client.post(path, headers=headers).status_code == 405
+    for other in ['/api/files', '/admin/users', '/api/files/raw/usage', '/audio/raw', '/file/raw']:
+        assert client.get(other, headers=headers).status_code == 401
+    monkeypatch.setenv('LOCALPLAUD_API__COMPLETION_TOKEN_SHA256', hashlib.sha256(b'rotated').hexdigest())
+    get_settings(reload=True)
+    assert client.get(path, headers=headers).status_code == 401

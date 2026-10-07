@@ -32,8 +32,9 @@ def api(monkeypatch, tmp_path):
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            assert self.path == "/api/files"
-            assert self.headers["X-Auth-Token"] == "test-token"
+            assert self.path == "/api/integrations/completion-status"
+            assert self.headers["Authorization"] == "Bearer test-token"
+            assert self.headers["X-Auth-Token"] is None
             state["calls"] += 1
             status = state["status"]
             if isinstance(status, list):

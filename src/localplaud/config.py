@@ -497,6 +497,8 @@ class OpenAIBudgetConfig(BaseModel):
 
 
 class ApiConfig(BaseModel):
+    # SHA-256 of a dedicated random machine credential; completion metadata only.
+    completion_token_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     accounts_enabled: bool = False
     owner_email: str = ""
     owner_username: str = "sky"

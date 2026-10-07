@@ -250,5 +250,7 @@ port = 8080
 # LOCALPLAUD_API__GOOGLE_CLIENT_SECRET
 # session_max_age_seconds = 2592000
 # session_cookie_secure = true  # false only for isolated HTTP development
+# Completion notifications use a separate metadata-only machine credential:
+# LOCALPLAUD_API__COMPLETION_TOKEN_SHA256 (see docs/completion-watcher.md)
 # Legacy single-user mode (accounts_enabled=false) supports login_password and
 # auth_token. Account mode rejects BOTH, including Bearer/X-Auth-Token/?token=.
