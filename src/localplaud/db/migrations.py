@@ -1717,3 +1717,15 @@ def migrate_quality_floor_schema(engine: Engine) -> list[str]:
             "NOT NULL DEFAULT '{}'"
         ))
     return ["execution_profiles.quality_floor"]
+
+
+def migrate_account_sessions(engine: Engine) -> None:
+    """Add user binding; legacy sessions deliberately remain unbound."""
+    columns = {column["name"] for column in inspect(engine).get_columns("browser_sessions")}
+    with engine.begin() as connection:
+        if "user_id" not in columns:
+            connection.execute(text("ALTER TABLE browser_sessions ADD COLUMN user_id INTEGER REFERENCES account_users(id)"))
+        for column, ddl in (("auth_method", "VARCHAR(16)"), ("authenticated_at", "TIMESTAMP")):
+            if column not in columns:
+                connection.execute(text(f"ALTER TABLE browser_sessions ADD COLUMN {column} {ddl}"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_browser_sessions_user_id ON browser_sessions (user_id)"))

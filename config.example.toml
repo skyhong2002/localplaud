@@ -237,12 +237,18 @@ provider = "local"               # local (sentence-transformers) | ollama | open
 # overrides this to 0.0.0.0 (it sits behind Caddy).
 host = "127.0.0.1"
 port = 8080
-# Optional shared secret: when set, every request needs it as an X-Auth-Token
-# header or ?token= param. Prefer real auth (Caddy basic_auth) in front.
-# auth_token via LOCALPLAUD_API__AUTH_TOKEN
-# Web App login is separate from Plaud OAuth and API bearer auth. Keep these
-# secrets in environment variables rather than this file:
-# LOCALPLAUD_API__LOGIN_PASSWORD and LOCALPLAUD_API__SESSION_SECRET
+# Recommended Web App accounts (see docs/accounts.md). Google is optional for
+# existing local accounts. Bootstrap the owner with the configured Google email.
+# accounts_enabled = true
+# owner_username = "sky"
+# owner_email = "owner@example.com"
+# public_url = "https://plaud.example.com"
+# google_redirect_uri = "https://plaud.example.com/auth/google/callback"
+# Keep credentials in .env, never in this file:
+# LOCALPLAUD_API__SESSION_SECRET
+# LOCALPLAUD_API__GOOGLE_CLIENT_ID
+# LOCALPLAUD_API__GOOGLE_CLIENT_SECRET
 # session_max_age_seconds = 2592000
-# session_cookie_secure = true  # disable only for Tailnet-only HTTP development
-# public_url = "https://plaud.observe.tw"   # set to your domain behind the reverse proxy
+# session_cookie_secure = true  # false only for isolated HTTP development
+# Legacy single-user mode (accounts_enabled=false) supports login_password and
+# auth_token. Account mode rejects BOTH, including Bearer/X-Auth-Token/?token=.

@@ -1,0 +1,23 @@
+{% extends "auth_base.html" %}
+{% block title %}登入{% endblock %}
+{% block content %}
+<section class="auth-card" aria-labelledby="login-title">
+  <div class="eyebrow">歡迎回來</div>
+  <h1 id="login-title">登入 localplaud</h1>
+  <p class="sub">登入帳號，回到你的錄音與筆記。</p>
+  {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+  {% if google_enabled %}
+  <a class="button google" href="/auth/google?next={{ next|default('/')|urlencode }}"><span aria-hidden="true">G</span>使用 Google 登入</a>
+  <div class="divider"><span>或使用帳號登入</span></div>
+  {% endif %}
+  <form method="post" action="/login" class="stack" data-submit-label="登入中…">
+    <input type="hidden" name="next" value="{{ next|default('/') }}">
+    <div><label for="identifier">帳號或 Email</label><input id="identifier" name="identifier" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required></div>
+    <div><label for="password">密碼</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required></div>
+    <button class="button primary" type="submit">登入</button>
+  </form>
+  <p class="auth-switch">還沒有帳號？ <a href="/register">建立帳號</a></p>
+  <details class="help"><summary>忘記密碼？</summary><p>請聯絡這個工作區的管理員協助復原帳號。若已連結 Google，也可以使用 Google 登入後設定新密碼。</p></details>
+  <p class="fine-print">新帳號須經管理員核准，才能存取工作區。</p>
+</section>
+{% endblock %}

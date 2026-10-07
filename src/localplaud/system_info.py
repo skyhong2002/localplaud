@@ -41,7 +41,7 @@ def build_commit() -> str | None:
 
 def access_boundary(settings: Settings | None = None) -> dict:
     settings = settings or get_settings()
-    browser_login = bool(settings.api.login_password and settings.api.session_secret)
+    browser_login = bool((settings.api.accounts_enabled or settings.api.login_password) and settings.api.session_secret)
     active_sessions = 0
     if browser_login:
         with Session(get_engine()) as session:
@@ -51,7 +51,7 @@ def access_boundary(settings: Settings | None = None) -> dict:
                 )
             ) or 0
     return {
-        "application_token_configured": bool(settings.api.auth_token),
+        "application_token_configured": bool(settings.api.auth_token and not settings.api.accounts_enabled),
         "browser_login_configured": browser_login,
         "reverse_proxy": "external / not observable by localplaud",
         "active_sessions": active_sessions if browser_login else None,

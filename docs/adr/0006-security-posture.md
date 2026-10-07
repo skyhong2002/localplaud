@@ -5,21 +5,21 @@ Status: Accepted
 ## Context
 
 localplaud handles a user's private recordings, authenticates to the Plaud
-cloud with a pasted token, downloads bytes from URLs found in API responses,
+cloud through official OAuth, downloads bytes from URLs found in API responses,
 and serves a web UI. An independent review surfaced concrete risks worth
 addressing before wider use.
 
 ## Decision
 
-- **Web UI is loopback-by-default with an optional login page.** `api.host`
-  defaults to `127.0.0.1` so a stray `localplaud run` isn't exposed to the LAN.
-  Docker overrides it to `0.0.0.0` (the container sits behind Caddy and its port
-  isn't published). `api.login_password` plus `api.session_secret` enable the
-  built-in `/login` form and an opaque, expiring, HttpOnly, Secure, SameSite=Lax
-  cookie. Only a peppered token hash and bounded user-agent label are stored, so
-  Settings can enumerate and revoke sessions without retaining plaintext tokens.
-  `api.auth_token` independently supports `Authorization: Bearer`,
-  `X-Auth-Token`, or `?token=` for API clients. `/healthz` remains public.
+- **Web UI is loopback-by-default; remote deployments use individual accounts.**
+  `api.accounts_enabled` enables Google OIDC and local passwords, pending approval,
+  protected owner/admin/viewer roles and user-bound revocable sessions. See
+  [accounts](../accounts.md) for bootstrap, recovery and the shared-workspace
+  boundary. Account mode rejects legacy shared passwords and API tokens. Opaque
+  session cookies remain HttpOnly, Secure and SameSite=Lax; only peppered hashes
+  are stored. Unsafe browser requests require the trusted same origin. Worker
+  authentication remains separate. `/healthz` and explicitly issued public share
+  links remain public. Legacy shared login is available only with accounts disabled.
 - **Fetches are SSRF-guarded.** URLs pulled from API responses must be `https`
   and must not resolve to private/loopback/link-local/reserved IPs; redirects
   are not followed after the check. This blocks a compromised or MITM'd response

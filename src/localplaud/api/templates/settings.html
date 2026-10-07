@@ -97,7 +97,8 @@
       <div class="tile"><div class="k">{{ t('Reverse proxy') }}</div><div style="margin-top:4px">{{ t('External · not observable by localplaud') }}</div></div>
       <div class="tile"><div class="k">{{ t('Active sessions') }}</div><div style="margin-top:4px">{{ browser_sessions|length }}</div></div>
     </div>
-    <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t(about.access.session_detail) }}. {{ t('Configure login_password and session_secret before remote exposure; keep auth_token for API clients.') }}</p>
+    <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t(about.access.session_detail) }}. {% if accounts_enabled|default(false) %}帳號登入已啟用；共用密碼與 API token 無法存取此工作區。{% else %}{{ t('Configure login_password and session_secret before remote exposure; keep auth_token for API clients.') }}{% endif %}</p>
+    {% if accounts_enabled|default(false) %}<p style="margin:12px 0"><a class="btn btn-sm" href="/account">我的帳號與登入方式</a> <a class="btn btn-sm" href="/admin/users">管理使用者</a></p>{% endif %}
     {% if about.access.browser_login_configured %}<div style="display:grid;gap:8px;margin-top:13px" id="browser-session-list">
       {% for item in browser_sessions %}<div class="tile settings-session">
         <div class="settings-row-main"><strong>{{ t('This session') if item.current else t('Browser session') }}</strong>{% if item.current %} <span class="chip on">{{ t('current') }}</span>{% endif %}<div class="sub" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ item.user_agent }}">{{ item.user_agent }}</div><div class="sub" style="font-size:10.5px">{{ t('Last active') }}: {{ item.last_seen_at[:16]|replace('T',' · ') }} · {{ t('Expires') }}: {{ item.expires_at[:10] }}</div></div>
@@ -191,7 +192,7 @@
     <a class="sf-pref-row" href="/notifications"><span class="sf-pref-label">{{ t('Messages & notifications') }}</span><span class="sf-pref-value">{% if speech_prefs.unread_notifications %}{{ speech_prefs.unread_notifications }} {{ t('unread') }}<span class="sf-dot" aria-hidden="true"></span>{% endif %}</span>{{ icon('chevron-right', 'sm') }}</a>
     <h3 class="sf-pref-head">{{ t('Security') }}</h3>
     <a class="sf-pref-row" href="#access-security"><span class="sf-pref-label">{{ t('Web login') }}</span><span class="sf-pref-value">{{ t('On') if about.access.browser_login_configured else t('Off') }}</span>{{ icon('chevron-right', 'sm') }}</a>
-    <p class="sf-pref-help">{{ t('Protect this workspace with a password and revocable browser sessions.') }}</p>
+    <p class="sf-pref-help">{% if accounts_enabled|default(false) %}使用 Google 或本地密碼登入，並由管理員核准工作區權限。{% else %}{{ t('Protect this workspace with a password and revocable browser sessions.') }}{% endif %}</p>
     <a class="sf-pref-row" href="#privacy"><span class="sf-pref-label">{{ t('Privacy & data boundary') }}</span>{{ icon('chevron-right', 'sm') }}</a>
   </section>
   <section class="sf-settings-group" id="group-processing" data-sf-group="processing" aria-labelledby="group-processing-title">

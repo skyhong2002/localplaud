@@ -39,12 +39,70 @@ class Base(DeclarativeBase):
     pass
 
 
+class AccountUser(Base):
+    __tablename__ = "account_users"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True)
+    email: Mapped[str] = mapped_column(String(254), unique=True)
+    password_hash: Mapped[str | None] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(String(16), default="viewer")
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    # Unique nullable bootstrap slot prevents concurrent first-owner creation.
+    owner_slot: Mapped[str | None] = mapped_column(String(16), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    __table_args__ = (
+        CheckConstraint("role IN ('owner', 'admin', 'viewer')"),
+        CheckConstraint("status IN ('pending', 'active', 'disabled')"),
+    )
+
+
+class OAuthIdentity(Base):
+    __tablename__ = "oauth_identities"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("account_users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="google")
+    subject: Mapped[str] = mapped_column(String(255))
+    __table_args__ = (UniqueConstraint("provider", "subject"), UniqueConstraint("provider", "user_id"))
+
+
+class AuthTransaction(Base):
+    __tablename__ = "auth_transactions"
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    binding_hash: Mapped[str] = mapped_column(String(64))
+    nonce: Mapped[str] = mapped_column(String(128))
+    verifier: Mapped[str] = mapped_column(String(128))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("account_users.id"))
+    session_id: Mapped[int | None] = mapped_column(Integer)
+    next_path: Mapped[str] = mapped_column(String(2048), default="/")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AuthRateLimit(Base):
+    __tablename__ = "auth_rate_limits"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AccountAuditEvent(Base):
+    __tablename__ = "account_audit_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor_id: Mapped[int | None] = mapped_column(Integer)
+    user_id: Mapped[int] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String(40))
+    changes: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class BrowserSession(Base):
     """Revocable Web login session; the plaintext cookie is never stored."""
 
     __tablename__ = "browser_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("account_users.id"), index=True)
+    auth_method: Mapped[str | None] = mapped_column(String(16))
+    authenticated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     user_agent: Mapped[str] = mapped_column(String(256), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

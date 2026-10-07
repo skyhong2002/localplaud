@@ -84,6 +84,7 @@ from ..remote.server import resume_pending_jobs
 from ..remote.server import router as worker_router
 from ..store.files import _safe_id
 from ..store.speakers import display_names, speaker_keys_from_segments, speaker_labels
+from .accounts import router as accounts_router
 from .automations import router as automations_router
 from .backups import router as backups_router
 from .imports import router as imports_router
@@ -135,6 +136,7 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
+app.include_router(accounts_router)
 app.include_router(providers_router)
 app.include_router(vocabulary_router)
 app.include_router(note_templates_router)
@@ -208,6 +210,14 @@ def _login_context(next_path: str, error: bool) -> dict:
 async def _auth_gate(request: Request, call_next):
     """Protect the Web App with a revocable opaque session and APIs with a token."""
     settings = get_settings().api
+    if settings.accounts_enabled:
+        from .accounts import gate
+
+        response = await gate(request, call_next)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers.setdefault("Vary", "Cookie")
+        response.headers["Referrer-Policy"] = "same-origin"
+        return response
     token = settings.auth_token
     login_password = settings.login_password
     public_paths = {"/healthz", "/login", "/favicon.ico", "/robots.txt"}
@@ -285,6 +295,10 @@ def favicon() -> Response:
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/", error: str | None = None):
     settings = get_settings().api
+    if settings.accounts_enabled:
+        from .accounts import login_page as account_login_page
+
+        return account_login_page(request, next, error)
     if not settings.login_password:
         return RedirectResponse(url="/", status_code=303)
     if _browser_session(request.cookies.get(_SESSION_COOKIE), settings.session_secret):
@@ -298,9 +312,14 @@ def login_page(request: Request, next: str = "/", error: str | None = None):
 
 @app.post("/login")
 def login_submit(
-    request: Request, password: Annotated[str, Form()], next: Annotated[str, Form()] = "/"
+    request: Request, password: Annotated[str, Form()], next: Annotated[str, Form()] = "/",
+    identifier: Annotated[str, Form()] = ""
 ):
     settings = get_settings().api
+    if settings.accounts_enabled:
+        from .accounts import login_submit as account_login_submit
+
+        return account_login_submit(request, identifier, password, next)
     if not settings.login_password or not settings.session_secret:
         raise HTTPException(status_code=503, detail="Web login is not configured")
     if not hmac.compare_digest(password, settings.login_password):
@@ -362,7 +381,7 @@ def logout(request: Request) -> RedirectResponse:
 def revoke_browser_session(session_id: int, request: Request) -> dict:
     with session_scope() as session:
         row = session.get(BrowserSession, session_id)
-        if row is None:
+        if row is None or (get_settings().api.accounts_enabled and row.user_id != getattr(request.state, "account_user", {}).get("id")):
             raise HTTPException(status_code=404, detail="Session not found")
         session.delete(row)
     return {"ok": True, "current": getattr(request.state, "browser_session_id", None) == session_id}
@@ -698,7 +717,9 @@ def _base_ctx(request: Request, active: str) -> dict:
         "request": request,
         "active": active,
         "public_url": get_settings().api.public_url,
-        "web_login_configured": bool(get_settings().api.login_password),
+        "web_login_configured": bool(get_settings().api.accounts_enabled or get_settings().api.login_password),
+        "accounts_enabled": get_settings().api.accounts_enabled,
+        "account_user": getattr(request.state, "account_user", None),
         "unread_notifications": unread_notifications,
         "sidebar": {
             "folders": organization["folders"],
@@ -3652,6 +3673,7 @@ def settings_page(request: Request):
             session.scalars(
                 select(BrowserSession)
                 .where(BrowserSession.expires_at > now)
+                .where(BrowserSession.user_id == request.state.account_user["id"] if settings.api.accounts_enabled else True)
                 .order_by(BrowserSession.last_seen_at.desc())
             )
         )
