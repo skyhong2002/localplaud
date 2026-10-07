@@ -275,3 +275,22 @@ uv run localplaud run
 
 Put it behind your own reverse proxy, or run a standalone Caddy/nginx pointing
 at `:8080`.
+
+
+## Account rollout (2026-10-07)
+
+The reference controller now enables individual Web App accounts with Google OIDC
+and local passwords. See [accounts](accounts.md) for owner bootstrap and recovery.
+The release passed 1,610 tests in a clean checkout, plus desktop/mobile browser
+checks for registration, pending approval, role restrictions, password changes and
+long account details. A copy of the production database passed the additive
+migration twice with existing row counts preserved and SQLite `quick_check` OK.
+
+Production smoke checks confirmed health/login/registration, rejection of legacy
+Bearer/header tokens and cross-origin login, secure OAuth cookies, the configured
+callback and PKCE redirect, and invalid-callback rejection. Browser navigation
+reached Google's sign-in surface without a redirect-URI mismatch. The account
+holder's real Google authentication and first-owner creation still require their
+first login; the validation session did not possess their Google credentials.
+Private configuration and an online SQLite backup are retained outside Git. The
+previous automatic-processing preference was restored after the controller restart.
