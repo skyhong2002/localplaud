@@ -516,6 +516,23 @@ def migrate_legacy_stage_run_schema(engine: Engine) -> list[str]:
     return ["stage_runs"]
 
 
+def migrate_chunk_file_index(engine: Engine) -> list[str]:
+    """Index chunks by recording on databases created before the model declared it.
+
+    Without it every per-recording lookup scans the whole chunks table, which made
+    startup and each reindex take minutes once the library held a few GB of chunks.
+    """
+    if "chunks" not in inspect(engine).get_table_names():
+        return []
+    if any(
+        index["column_names"] == ["file_id"] for index in inspect(engine).get_indexes("chunks")
+    ):
+        return []
+    with engine.begin() as connection:
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_chunks_file_id ON chunks (file_id)"))
+    return ["chunks"]
+
+
 def migrate_share_link_options_schema(engine: Engine) -> list[str]:
     """Add per-link content selection to existing public share links."""
     if engine.dialect.name != "sqlite":

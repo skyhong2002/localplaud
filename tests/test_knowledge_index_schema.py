@@ -314,3 +314,44 @@ def test_concurrent_sqlite_startup_serializes_document_discovery(monkeypatch, tm
 def connection_scalar(engine, statement: str):
     with engine.connect() as connection:
         return connection.scalar(text(statement))
+
+
+def test_chunk_file_index_is_added_to_legacy_databases_once(tmp_path):
+    from localplaud.db.migrations import migrate_chunk_file_index
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-chunks.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE plaud_files (id VARCHAR(64) PRIMARY KEY)"))
+        connection.execute(
+            text(
+                "CREATE TABLE chunks (id INTEGER PRIMARY KEY, file_id VARCHAR(64) NOT NULL, "
+                "text TEXT)"
+            )
+        )
+    assert inspect(engine).get_indexes("chunks") == []
+
+    assert migrate_chunk_file_index(engine) == ["chunks"]
+    assert [i["column_names"] for i in inspect(engine).get_indexes("chunks")] == [["file_id"]]
+    assert migrate_chunk_file_index(engine) == []  # idempotent
+
+    # Per-recording lookups use the index instead of scanning the whole table.
+    with engine.connect() as connection:
+        plan = " ".join(
+            row[3]
+            for row in connection.execute(
+                text("EXPLAIN QUERY PLAN SELECT text FROM chunks WHERE file_id = 'x'")
+            )
+        )
+    assert "USING INDEX ix_chunks_file_id" in plan or "USING COVERING INDEX" in plan
+
+
+def test_chunk_file_index_skips_databases_without_chunks(tmp_path):
+    from localplaud.db.migrations import migrate_chunk_file_index
+
+    assert migrate_chunk_file_index(create_engine(f"sqlite:///{tmp_path / 'empty.db'}")) == []
+
+
+def test_new_databases_declare_the_chunk_file_index(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
+    Base.metadata.create_all(engine)
+    assert any(i["column_names"] == ["file_id"] for i in inspect(engine).get_indexes("chunks"))

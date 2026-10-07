@@ -1191,7 +1191,11 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    file_id: Mapped[str] = mapped_column(ForeignKey("plaud_files.id", ondelete="CASCADE"))
+    # Indexed: every reindex, search filter and startup profile check looks chunks up
+    # per recording, and an unindexed lookup scans the whole (multi-GB) table.
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), index=True
+    )
 
     idx: Mapped[int] = mapped_column(Integer, default=0)  # order within the file
     text: Mapped[str] = mapped_column(Text, default="")
