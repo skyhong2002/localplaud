@@ -268,13 +268,6 @@ body:has(#persistent-player.ws-player) .toast-region { bottom: calc(var(--ws-pla
 .ws-progress-bar span { display: block; width: 35%; height: 100%; border-radius: inherit; background: var(--ws-ai-gradient); animation: ws-progress 1.6s ease-in-out infinite; }
 @keyframes ws-progress { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 .ws-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 4px; }
-.ws-mindmap-card {
-  display: grid; gap: 4px; width: 100%; margin: 22px 0 6px; padding: 14px 16px; text-align: left; cursor: pointer;
-  border: 1px solid var(--border2); border-radius: 12px; background: var(--panel); color: var(--fg); font: inherit;
-}
-.ws-mindmap-card:hover { background: var(--panel2); }
-.ws-mindmap-card-head { display: flex; align-items: center; justify-content: space-between; }
-.ws-mindmap-card :is(.nav-icon, .i) { width: 16px; height: 16px; opacity: .6; }
 
 /* Template chooser dialog */
 .ws-note-dialog { width: min(620px, 100%); min-height: 0; }

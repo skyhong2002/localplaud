@@ -349,12 +349,6 @@
         {% endif %}
       </div>
       {% endif %}
-      {% if mindmaps %}
-      <button class="ws-mindmap-card" type="button" data-panel-link="mindmap">
-        <span class="ws-mindmap-card-head"><strong>{{ t('Mind map') }}</strong>{{ icon('share') }}</span>
-        <span class="sub">{{ t('Open the full mind map to pan, zoom, and collapse branches.') }}</span>
-      </button>
-      {% endif %}
     </div>
 
     <div class="tabpanel" id="recording-panel-mindmap" role="tabpanel" aria-labelledby="recording-tab-mindmap" data-panel="mindmap" {% if active_tab != 'mindmap' %}hidden{% endif %}>

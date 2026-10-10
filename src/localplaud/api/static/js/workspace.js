@@ -1073,12 +1073,6 @@
 
   // ------------------------------------------------- panels, sheets, menus
   on(document, 'click', event => {
-    const link = event.target.closest('[data-panel-link]');
-    if (!link) return;
-    document.querySelector(`.tabs>button[data-panel="${CSS.escape(link.dataset.panelLink)}"]`)?.click();
-    window.scrollTo({ top: 0, behavior: scrollBehavior() });
-  });
-  on(document, 'click', event => {
     if (!event.target.closest('[data-open-ask-sheet]')) return;
     document.getElementById('open-ask-dock')?.click();
     requestAnimationFrame(() => document.getElementById('ask-q')?.focus());

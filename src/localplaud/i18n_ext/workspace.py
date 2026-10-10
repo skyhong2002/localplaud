@@ -64,7 +64,6 @@ ZH_HANT_TW = {
     "No templates match.": "沒有符合的範本。",
     "Notes are generated from the full corrected local transcript. Existing notes are kept in version history.": "筆記會以完整的本機校正逐字稿生成，既有筆記會保留在版本紀錄中。",
     "Notes could not be generated": "無法生成筆記",
-    "Open the full mind map to pan, zoom, and collapse branches.": "開啟完整心智圖，可平移、縮放與收合分支。",
     "Paragraph reassigned": "已重新指派段落",
     "Play from": "從此處播放",
     "Playing from": "從以下時間播放",
