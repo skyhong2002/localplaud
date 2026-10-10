@@ -952,11 +952,17 @@
     const tree = document.getElementById('mindmap-tree');
     const viewport = document.getElementById('mindmap-viewport');
     const zoom = document.getElementById('mm-zoom');
+    // Open with only the first level showing; later refreshes keep the reader's expansion state.
+    let initialRender = true;
     state.refreshMindMap = markdown => {
       mindmapSource.textContent = markdown;
       const collapsed = $$('.mm-node', tree).map(node => node.classList.contains('collapsed'));
       tree.replaceChildren(render(parseMindMap(markdown)));
-      $$('.mm-node', tree).forEach((node, index) => { if (collapsed[index]) setCollapsed(node, true); });
+      $$('.mm-node', tree).forEach((node, index) => {
+        const branch = !node.classList.contains('mm-root') && node.querySelector('.mm-children');
+        if (branch && (initialRender || collapsed[index])) setCollapsed(node, true);
+      });
+      initialRender = false;
     };
     const setCollapsed = (node, collapsed) => {
       node.classList.toggle('collapsed', collapsed);

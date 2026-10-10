@@ -366,7 +366,7 @@
           <input id="mm-zoom" type="range" min="15" max="140" value="100" aria-label="{{ t('Mind map zoom') }}">
           <button class="icon-action icon-only" id="mm-zoom-in" type="button" aria-label="{{ t('Zoom in') }}">{{ icon('plus') }}</button>
           <button class="icon-action" id="mm-fit" type="button">{{ t('Fit') }}</button>
-          <button class="icon-action" id="mm-toggle-all" type="button" aria-pressed="false">{{ t('Collapse all') }}</button>
+          <button class="icon-action" id="mm-toggle-all" type="button" aria-pressed="true">{{ t('Expand all') }}</button>
           <button class="icon-action" id="mm-fullscreen" type="button" aria-pressed="false">{{ t('Full screen') }}</button>
           <a class="icon-action" href="/file/{{ f.id }}/export/mind-map.png">{{ icon('download') }}{{ t('Export') }}</a>
           {% set history_summary = mindmaps[-1] %}{% set history_tab = 'mindmap' %}{% include '_note_history.html' %}
