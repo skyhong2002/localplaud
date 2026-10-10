@@ -263,7 +263,9 @@ def run():
         os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
     settings = get_settings()
-    init_db()
+    # Serve as soon as the schema is ready; the daemon reconciles the note
+    # index in the background (see DaemonJobs.install).
+    init_db(reconcile_index=False)
     try:
         daemon_owner, previous_owner = register_daemon_owner()
     except RuntimeError as exc:

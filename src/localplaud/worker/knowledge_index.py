@@ -148,10 +148,13 @@ def _as_utc(value: datetime) -> datetime:
 
 def _lock_document(session, document_id: int) -> KnowledgeDocument | None:
     if session.get_bind().dialect.name == "sqlite":
+        # A no-op write takes SQLite's write lock. Nothing changes, so skip
+        # reconciling it against every object already in the session.
         session.execute(
             update(KnowledgeDocument)
             .where(KnowledgeDocument.id == document_id)
             .values(id=KnowledgeDocument.id)
+            .execution_options(synchronize_session=False)
         )
         return session.get(KnowledgeDocument, document_id)
     return session.scalar(
@@ -173,7 +176,10 @@ def _delete_document(session, document: KnowledgeDocument) -> None:
 def _lock_artifact(session, artifact):
     if session.get_bind().dialect.name == "sqlite":
         session.execute(
-            update(type(artifact)).where(type(artifact).id == artifact.id).values(id=artifact.id)
+            update(type(artifact))
+            .where(type(artifact).id == artifact.id)
+            .values(id=artifact.id)
+            .execution_options(synchronize_session=False)
         )
         session.refresh(artifact)
         return artifact
@@ -513,6 +519,55 @@ def sync_knowledge_documents(session, settings: Settings | None = None) -> list[
     lock_cost_budget(session, None)
     for file_id in session.scalars(select(PlaudFile.id).order_by(PlaudFile.id)):
         lock_cost_budget(session, file_id)
+    _delete_orphan_documents(session)
+    ids: list[int] = []
+    for summary in session.scalars(select(Summary).order_by(Summary.file_id, Summary.id)):
+        document = sync_summary_document(session, summary, settings, allow_running_stage=True)
+        if document is not None:
+            ids.append(document.id)
+    for note in session.scalars(select(UserNote).order_by(UserNote.file_id, UserNote.id)):
+        document = sync_user_note_document(session, note, settings)
+        if document is not None:
+            ids.append(document.id)
+    sync_transcript_index_profiles(session, settings=settings)
+    return ids
+
+
+def reconcile_knowledge_documents(settings: Settings | None = None) -> int:
+    """Background equivalent of :func:`sync_knowledge_documents` for every workspace.
+
+    Runs after the Web App is serving. Each recording is reconciled in its own
+    short transaction so edits and pipeline writes never wait behind a
+    library-wide lock. Returns the number of documents checked.
+    """
+    from ..db.tenancy import workspace_scope
+    from ..workspaces import all_workspace_ids
+
+    settings = settings or get_settings()
+    checked = 0
+    with session_scope() as session:
+        workspace_ids = all_workspace_ids(session)
+    for workspace_id in workspace_ids:
+        with workspace_scope(workspace_id):
+            with session_scope() as session:
+                lock_cost_budget(session, None)
+                _delete_orphan_documents(session)
+                for note in session.scalars(
+                    select(UserNote).where(UserNote.file_id.is_(None)).order_by(UserNote.id)
+                ):
+                    checked += sync_user_note_document(session, note, settings) is not None
+            with session_scope() as session:
+                file_ids = list(session.scalars(select(PlaudFile.id).order_by(PlaudFile.id)))
+            for file_id in file_ids:
+                try:
+                    with session_scope() as session:
+                        checked += len(sync_file_knowledge_documents(session, file_id, settings))
+                except Exception:  # noqa: BLE001 - one recording must not stop the rest
+                    log.exception("Knowledge reconcile failed for %s", file_id)
+    return checked
+
+
+def _delete_orphan_documents(session) -> None:
     # Some deployed SQLite libraries historically ran with foreign-key
     # enforcement disabled. Clean up bounded index metadata even when an
     # external/bulk artifact delete could not cascade at the database layer.
@@ -535,17 +590,6 @@ def sync_knowledge_documents(session, settings: Settings | None = None) -> list[
     )
     session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id.in_(orphan_ids)))
     session.execute(delete(KnowledgeDocument).where(KnowledgeDocument.id.in_(orphan_ids)))
-    ids: list[int] = []
-    for summary in session.scalars(select(Summary).order_by(Summary.file_id, Summary.id)):
-        document = sync_summary_document(session, summary, settings, allow_running_stage=True)
-        if document is not None:
-            ids.append(document.id)
-    for note in session.scalars(select(UserNote).order_by(UserNote.file_id, UserNote.id)):
-        document = sync_user_note_document(session, note, settings)
-        if document is not None:
-            ids.append(document.id)
-    sync_transcript_index_profiles(session, settings=settings)
-    return ids
 
 
 def invalidate_generated_documents(session, file_id: str) -> None:

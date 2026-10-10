@@ -145,7 +145,7 @@ def test_disabled_sync_still_schedules_local_recovery(monkeypatch):
     scheduler = Scheduler()
     jobs = DaemonJobs(settings, "owned", scheduler)
     jobs.install()
-    assert set(scheduler.jobs) == {"worker", "daemon-heartbeat"}
+    assert set(scheduler.jobs) == {"worker", "daemon-heartbeat", "index-reconcile"}
     assert scheduler.jobs["worker"][1]["seconds"] <= 30
     monkeypatch.setattr("localplaud.poller.poll.poll_once", lambda _: pytest.fail("sync disabled"))
     monkeypatch.setattr(cli, "process_automatic_pending", lambda *a, **k: 1)

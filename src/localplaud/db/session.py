@@ -112,14 +112,20 @@ def _schema_initialization_lock(engine: Engine):
         yield
 
 
-def init_db() -> dict[str, int] | None:
+def init_db(*, reconcile_index: bool = True) -> dict[str, int] | None:
+    """Create and migrate the schema and seed every workspace.
+
+    ``reconcile_index=False`` skips the library-wide note index reconcile so a
+    service can start serving quickly and run
+    ``knowledge_index.reconcile_knowledge_documents`` in the background.
+    """
     """Create tables and prepare legacy cloud-derived rows when required."""
     engine = get_engine()
     with _schema_initialization_lock(engine):
-        return _init_db_locked(engine)
+        return _init_db_locked(engine, reconcile_index=reconcile_index)
 
 
-def _init_db_locked(engine: Engine) -> dict[str, int] | None:
+def _init_db_locked(engine: Engine, *, reconcile_index: bool = True) -> dict[str, int] | None:
     Base.metadata.create_all(engine)
     from .migrations import migrate_account_sessions
 
@@ -211,7 +217,7 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
         workspace_ids = list(session.scalars(select(Workspace.id).order_by(Workspace.id)))
     for workspace_id in workspace_ids:
         with workspace_scope(workspace_id), Session(engine) as session:
-            prepare_workspace(session)
+            prepare_workspace(session, reconcile_index=reconcile_index)
             session.commit()
     if get_settings().pipeline.artifact_mode == "independent":
         from .migrations import prepare_independent_mode

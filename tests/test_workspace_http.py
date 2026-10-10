@@ -3,7 +3,7 @@
 import re
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from localplaud.db.models import AccountUser, Folder, PlaudFile, Summary, Tag, Transcript
 from localplaud.db.session import session_scope
@@ -201,3 +201,22 @@ def test_workspace_name_always_matches_the_account(two_workspaces):
         ).json()
         assert saved["workspace_name"] == username
         assert web.get("/api/preferences/workspace").json()["workspace_name"] == username
+
+
+def test_background_index_reconcile_covers_every_workspace(two_workspaces):
+    from localplaud.db.models import KnowledgeDocument, UserNote
+    from localplaud.worker.knowledge_index import reconcile_knowledge_documents
+
+    _, theirs = two_workspaces
+    for workspace_id, file_id in ((1, "mine"), (2, theirs)):
+        with workspace_scope(workspace_id), session_scope() as db:
+            db.add(UserNote(file_id=file_id, title="Note", content_md="Body"))
+            db.add(UserNote(file_id=None, title="Library note", content_md="Body"))
+    assert reconcile_knowledge_documents() >= 4
+    with system_scope(), session_scope() as db:
+        rows = db.execute(
+            select(KnowledgeDocument.workspace_id, func.count()).group_by(
+                KnowledgeDocument.workspace_id
+            )
+        ).all()
+    assert sorted(count for _, count in rows) == [2, 2] and len(rows) == 2

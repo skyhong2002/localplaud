@@ -10,12 +10,13 @@ from .db.models import AccountUser, Workspace
 from .db.tenancy import DEFAULT_WORKSPACE_ID, system_scope, workspace_scope
 
 
-def prepare_workspace(session: Session) -> None:
+def prepare_workspace(session: Session, *, reconcile_index: bool = True) -> None:
     """Seed and reconcile the active workspace's local defaults.
 
     Idempotent: runs at startup for every workspace and once when a workspace
     is created. Built-in note templates are versioned copies per workspace so
-    personal edits and installs never cross accounts.
+    personal edits and installs never cross accounts. ``reconcile_index=False``
+    leaves the (slow, library-wide) note index reconcile to a background job.
     """
     from .automations import ensure_default_note_templates
     from .worker.knowledge_index import sync_knowledge_documents
@@ -23,6 +24,8 @@ def prepare_workspace(session: Session) -> None:
 
     bootstrap_note_templates(session)
     ensure_default_note_templates(session)
+    if not reconcile_index:
+        return
     # Discover current note artifacts without doing any provider work.
     # Embedding remains an explicit mutation/worker action, so a serve-only
     # process or a restart with automatic processing disabled stays idle.

@@ -22,6 +22,7 @@ class DaemonJobs:
         self.stopped = threading.Event()
         self.sync_lock = threading.Lock()
         self.work_lock = threading.Lock()
+        self.reconcile_lock = threading.Lock()
         self.workers = max(1, settings.pipeline.concurrency)
         self.pool = ThreadPoolExecutor(max_workers=self.workers) if self.workers > 1 else None
         self.inflight = set()
@@ -49,6 +50,17 @@ class DaemonJobs:
             coalesce=True,
             next_run_time=datetime.now(UTC),
         )
+        # Startup skips the library-wide note index reconcile so the Web App
+        # comes up quickly; run it now, off the request path, then daily.
+        self.scheduler.add_job(
+            self.reconcile_index,
+            "interval",
+            hours=24,
+            id="index-reconcile",
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(UTC),
+        )
         if self.settings.poller.enabled:
             self.scheduler.add_job(
                 self.sync,
@@ -59,6 +71,14 @@ class DaemonJobs:
                 coalesce=True,
                 next_run_time=datetime.now(UTC),
             )
+
+    def reconcile_index(self):
+        from .knowledge_index import reconcile_knowledge_documents
+
+        def reconcile():
+            return reconcile_knowledge_documents(self.settings)
+
+        return self._run(self.reconcile_lock, reconcile)
 
     def heartbeat(self):
         from ..poller.poll import refresh_daemon_owner
