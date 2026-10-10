@@ -188,3 +188,16 @@ def test_external_rule_ids_are_independent_per_workspace(two_workspaces):
     assert web.put("/api/automations/external-rules", json=body).json()["created"] is True
     login(web, "member")
     assert web.put("/api/automations/external-rules", json=body).json()["created"] is True
+
+
+def test_workspace_name_always_matches_the_account(two_workspaces):
+    web, _ = two_workspaces
+    for username in ("sky", "member"):
+        login(web, username)
+        prefs = web.get("/api/preferences/workspace").json()
+        assert prefs["workspace_name"] == username and prefs["workspace_name_locked"]
+        saved = web.put(
+            "/api/preferences/workspace", json={**prefs, "workspace_name": "Renamed"}
+        ).json()
+        assert saved["workspace_name"] == username
+        assert web.get("/api/preferences/workspace").json()["workspace_name"] == username

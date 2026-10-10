@@ -1874,6 +1874,15 @@ def migrate_workspaces(engine: Engine) -> list[str]:
                 )
             )
             changed.append("workspaces.default")
+        # A workspace owned by an account is always named after that account.
+        connection.execute(
+            text(
+                "UPDATE workspaces SET name = (SELECT username FROM account_users "
+                "WHERE account_users.id = workspaces.owner_user_id) "
+                "WHERE owner_user_id IS NOT NULL AND name != (SELECT username "
+                "FROM account_users WHERE account_users.id = workspaces.owner_user_id)"
+            )
+        )
     return changed
 
 

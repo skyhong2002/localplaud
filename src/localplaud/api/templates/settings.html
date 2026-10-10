@@ -132,7 +132,7 @@
     <strong>{{ t('Workspace preferences') }}</strong>
     <p class="sub" style="margin:4px 0 12px">{{ t('Durable workspace preferences shared by every browser using localplaud.') }}</p>
     <form id="workspace-preferences-form" class="settings-form">
-      <label class="sub settings-field">{{ t('Workspace name') }}<input class="search-input" name="workspace_name" maxlength="80" required value="{{ workspace_preferences.workspace_name }}"></label>
+      <label class="sub settings-field">{{ t('Workspace name') }}<input class="search-input" name="workspace_name" maxlength="80" required value="{{ workspace_preferences.workspace_name }}"{% if workspace_preferences.workspace_name_locked %} readonly aria-describedby="workspace-name-help"{% endif %}>{% if workspace_preferences.workspace_name_locked %}<span id="workspace-name-help" class="sub" style="font-size:11.5px">與帳號名稱相同，無法另外修改。</span>{% endif %}</label>
       <label class="sub settings-field">{{ t('Interface language') }}<select class="search-input select" name="locale">{% for code, label in supported_locales.items() %}<option value="{{ code }}" {% if workspace_preferences.locale==code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <label class="sub settings-field">{{ t('Timezone') }}<input class="search-input" name="timezone" list="timezone-suggestions" maxlength="64" required value="{{ workspace_preferences.timezone }}"></label>
       <datalist id="timezone-suggestions"><option value="Asia/Taipei"><option value="UTC"><option value="Asia/Tokyo"><option value="America/Los_Angeles"><option value="Europe/London"></datalist>

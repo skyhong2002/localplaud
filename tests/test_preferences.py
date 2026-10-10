@@ -40,6 +40,8 @@ def test_workspace_preferences_are_validated_persisted_and_rendered(monkeypatch,
             "hour_cycle": "24",
             "locale": "en",
             "auto_process_new_recordings": True,
+            # Without accounts the workspace has no owner, so its name is editable.
+            "workspace_name_locked": False,
         }
 
         invalid = client.put(

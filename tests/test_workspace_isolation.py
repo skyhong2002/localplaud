@@ -211,7 +211,7 @@ def test_legacy_library_migrates_into_the_owner_workspace(tmp_path):
             (7, 1)
         ]
         assert connection.execute(text("SELECT id, name, owner_user_id FROM workspaces")).all() == [
-            (1, "w80233781", 1)
+            (1, "sky", 1)
         ]
         assert dict(connection.execute(text("SELECT username, role FROM account_users")).all()) == {
             "sky": "owner",

@@ -20,7 +20,7 @@
 {% for user in users %}
 <article class="user-row">
 <div class="user-info"><div class="user-name"><strong>{{ user.username }}</strong><span class="chip status-{{ user.status }}">{{ statuses.get(user.status, user.status) }}</span>{% if user.id == account_user.id %}<span class="you">你</span>{% endif %}</div><p>{{ user.email }}</p>
-<span class="field-help">{% if user.role == 'owner' %}擁有者 · 系統管理 · {% endif %}{% if user.workspace %}工作區「{{ user.workspace.name }}」· {{ user.workspace.recordings }} 筆錄音{% else %}核准後建立工作區{% endif %}</span></div>
+<span class="field-help">{% if user.role == 'owner' %}擁有者 · 系統管理 · {% endif %}{% if user.workspace %}工作區 · {{ user.workspace.recordings }} 筆錄音{% else %}核准後建立工作區{% endif %}</span></div>
 {% if user.role != 'owner' %}
 <form class="user-controls" action="/admin/users/{{ user.id }}" method="post" data-submit-label="儲存中…" data-confirm="變更會登出此帳號的所有裝置。確定儲存？">
 <div><label for="status-{{ user.id }}">狀態</label><select class="input select" id="status-{{ user.id }}" name="status">{% for value, label in statuses.items() %}<option value="{{ value }}" {% if user.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
