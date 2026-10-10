@@ -62,11 +62,6 @@ notification watcher has a separate, metadata-only credential described in
   workspace content.
 - The owner can approve users as **viewer** or **admin** and change their status.
   Admins can manage viewers but cannot grant admin access or change another admin.
-- Owners and admins can also create accounts directly from **帳號管理 → 新增帳號**
-  with a username, email, initial password, and role. Directly created accounts are
-  active immediately; admins can only create viewers. Each creation records a
-  `user_created` audit event. Share the initial password privately and ask the user
-  to change it after signing in.
 - Active viewers can read and export the shared library. They cannot edit, generate,
   submit Ask requests, or access system settings and administrative APIs. New
   endpoints are denied to viewers until explicitly reviewed and allowed.

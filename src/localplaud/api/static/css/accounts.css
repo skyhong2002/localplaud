@@ -59,16 +59,6 @@
 .account-page .session-detail { min-width:0; }
 .account-page .session strong { font-weight:500; }
 .account-page .agent-label { font-size:12px; color:var(--c-text-2); overflow-wrap:anywhere; margin:4px 0; }
-.account-page .create-user { margin-bottom:20px; padding:0; }
-.account-page .create-user summary { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; padding:16px 20px; cursor:pointer; list-style:none; }
-.account-page .create-user summary::-webkit-details-marker { display:none; }
-.account-page .create-user summary::before { content:"+"; font-size:16px; line-height:1; color:var(--c-text-2); }
-.account-page .create-user[open] summary::before { content:"−"; }
-.account-page .create-user summary .field-help { margin:0; }
-.account-page .create-user-title { font-weight:600; }
-.account-page .create-user-form { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; padding:4px 20px 20px; border-top:1px solid var(--c-border); padding-top:20px; }
-.account-page .create-user-form label { display:block; font-size:13px; margin-bottom:6px; font-weight:500; }
-.account-page .create-user-form .alert, .account-page .create-user-actions { grid-column:1/-1; margin:0; }
 .account-page .user-list { padding:0 20px; }
 .account-page .user-row { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:20px 0; }
 .account-page .user-row+.user-row { border-top:1px solid var(--c-border); }
@@ -89,7 +79,6 @@
   .account-page .user-controls { margin-top:16px; display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   .account-page .user-controls button { grid-column:1/-1; }
   .account-page .user-row>.chip { display:inline-flex; margin-top:10px; }
-  .account-page .create-user-form { grid-template-columns:minmax(0,1fr); }
 }
 @media(max-width:600px) {
   .auth-shell .account-header { padding:20px; }
@@ -103,8 +92,6 @@
   .account-page .page-heading>.chip { margin-top:8px; }
   .account-page .panel { padding:16px; }
   .account-page .user-list { padding:0 16px; }
-  .account-page .create-user summary { padding:14px 16px; }
-  .account-page .create-user-form { padding:16px; }
   .account-page .session { gap:12px; }
   :is(.account-page,.auth-shell) .input { font-size:16px; }
   :is(.account-page,.auth-shell) .btn { min-height:42px; }

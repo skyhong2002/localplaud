@@ -3,21 +3,10 @@
 {% block account_content %}
 {% set roles = {'owner':'擁有者', 'admin':'管理員', 'viewer':'唯讀成員'} %}
 {% set statuses = {'pending':'待核准', 'active':'已啟用', 'disabled':'已停用'} %}
-<div class="page-heading"><div><h1 class="page">帳號管理</h1><p class="sub">新增或核准帳號、調整權限，或停用存取。</p></div><span class="chip">{{ users|length }} 個帳號</span></div>
+<div class="page-heading"><div><h1 class="page">帳號管理</h1><p class="sub">核准新帳號、調整權限，或停用存取。</p></div><span class="chip">{{ users|length }} 個帳號</span></div>
 <div class="alert">所有已核准的成員共用這個工作區的錄音與筆記。唯讀成員可瀏覽及匯出；管理員可編輯、生成與管理工作區。</div>
 {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
 {% if notice %}<div class="alert success" role="status">{{ notice }}</div>{% endif %}
-<details class="panel create-user"{% if create_error %} open{% endif %}>
-<summary><span class="create-user-title">新增帳號</span><span class="field-help">直接建立已啟用的帳號，並設定初始密碼。</span></summary>
-<form action="/admin/users" method="post" class="create-user-form" data-submit-label="建立中…">
-{% if create_error %}<div class="alert error" role="alert" id="create-user-error">{{ create_error }}</div>{% endif %}
-<div><label for="new-username">帳號</label><input class="input" id="new-username" name="username" value="{{ draft.username }}" autocomplete="off" autocapitalize="none" spellcheck="false" minlength="3" maxlength="40" pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]{2,39}" required aria-describedby="new-username-help"><p id="new-username-help" class="field-help">3–40 個小寫英數字、底線、點或連字號。</p></div>
-<div><label for="new-email">Email</label><input class="input" id="new-email" name="email" type="email" value="{{ draft.email }}" autocomplete="off" maxlength="254" required><p class="field-help">之後也可用此 Email 連結 Google 登入。</p></div>
-<div><label for="new-password">初始密碼</label><input class="input" id="new-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required aria-describedby="new-password-help"><p id="new-password-help" class="field-help">至少 12 個字元，請私下交給對方並請其登入後變更。</p></div>
-<div><label for="new-role">角色</label><select class="input select" id="new-role" name="role"><option value="viewer" {% if draft.role != 'admin' %}selected{% endif %}>唯讀成員</option>{% if account_user.role == 'owner' %}<option value="admin" {% if draft.role == 'admin' %}selected{% endif %}>管理員</option>{% endif %}</select></div>
-<div class="create-user-actions"><button class="btn" type="submit">建立帳號</button></div>
-</form>
-</details>
 <section class="panel user-list" aria-label="使用者">
 {% for user in users %}
 <article class="user-row">

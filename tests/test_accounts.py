@@ -96,8 +96,8 @@ def test_account_navigation_leaves_workspace_shell(client, monkeypatch, path):
     assert 'id="workspace-sidebar"' in full.text
     assert 'id="app-view"' in full.text
     assert 'id="account-content"' in full.text
-    assert "accounts.css" in full.text
-    assert "someone" in full.text
+    assert 'accounts.css' in full.text
+    assert 'someone' in full.text
 
 
 def test_pending_account_keeps_workspace_metadata_out_of_page(client, monkeypatch):
@@ -116,7 +116,7 @@ def test_pending_account_keeps_workspace_metadata_out_of_page(client, monkeypatc
     assert "等待管理員核准" in response.text
     assert 'id="workspace-sidebar"' not in response.text
     assert 'id="account-content"' not in response.text
-    assert "/static/css/app.css" in response.text
+    assert '/static/css/app.css' in response.text
     assert 'action="/account/password"' in response.text
 
 
@@ -257,53 +257,6 @@ def test_admin_permissions_owner_protection_and_immediate_revocation(client):
     client.cookies.clear()
     client.cookies.set(auth.COOKIE, cookie)
     assert client.get("/account").status_code == 401
-
-
-def test_managers_create_active_accounts_within_their_role(client):
-    create_user("sky", role="owner")
-    create_user("admin", role="admin")
-    viewer = create_user("someone")
-    form = {"username": " New.Member ", "email": "New@Example.com", "password": PASSWORD}
-
-    login(client, "someone")
-    assert client.post("/admin/users", data=form).status_code == 403
-
-    login(client, "admin")
-    denied = client.post("/admin/users", data={**form, "role": "admin"}).json()
-    assert denied["create_error"] and denied["draft"]["username"] == "new.member"
-    assert "password" not in denied["draft"]
-    created = client.post("/admin/users", data=form)
-    assert created.headers["location"].endswith("notice=created")
-    for duplicate in (
-        form,
-        {**form, "username": "other"},
-        {**form, "username": "sky", "email": "x@example.com"},
-    ):
-        assert client.post("/admin/users", data=duplicate).json()["create_error"]
-    for invalid in ({"username": "a"}, {"email": "nope"}, {"password": "short"}):
-        assert client.post("/admin/users", data={**form, **invalid}).json()["create_error"]
-
-    login(client, "sky")
-    assert (
-        "notice"
-        in client.post(
-            "/admin/users",
-            data={
-                "username": "second",
-                "email": "second@example.com",
-                "password": PASSWORD,
-                "role": "admin",
-            },
-        ).headers["location"]
-    )
-    with session_scope() as db:
-        rows = {u.username: u for u in db.scalars(select(AccountUser))}
-        assert (rows["new.member"].role, rows["new.member"].status) == ("viewer", "active")
-        assert rows["new.member"].email == "new@example.com"
-        assert rows["second"].role == "admin"
-        assert db.get(AccountUser, viewer).status == "active"
-    login(client, "new.member")
-    assert client.get("/api/files").status_code == 200
 
 
 def test_sessions_are_private_password_change_and_operator_recovery(client):
@@ -791,51 +744,39 @@ def test_link_publication_serializes_with_concurrent_revocation(client, monkeypa
         assert db.scalar(select(BrowserSession).where(BrowserSession.user_id == user_id)) is None
 
 
-@pytest.mark.parametrize("account_mode", ["true", "false"])
+@pytest.mark.parametrize('account_mode', ['true', 'false'])
 def test_completion_machine_credential_is_narrow_and_revocable(client, monkeypatch, account_mode):
     import hashlib
 
     from localplaud.db.models import FileStatus, PlaudFile
 
-    path = "/api/integrations/completion-status"
-    token = "synthetic-completion-only-token-123456789"
-    monkeypatch.setenv("LOCALPLAUD_API__ACCOUNTS_ENABLED", account_mode)
-    monkeypatch.setenv(
-        "LOCALPLAUD_API__COMPLETION_TOKEN_SHA256", hashlib.sha256(token.encode()).hexdigest()
-    )
+    path = '/api/integrations/completion-status'
+    token = 'synthetic-completion-only-token-123456789'
+    monkeypatch.setenv('LOCALPLAUD_API__ACCOUNTS_ENABLED', account_mode)
+    monkeypatch.setenv('LOCALPLAUD_API__COMPLETION_TOKEN_SHA256', hashlib.sha256(token.encode()).hexdigest())
     get_settings(reload=True)
     with session_scope() as db:
         # No paid/cloud AI artifacts, local transcript or summaries required.
-        db.add(PlaudFile(id="raw", filename="Raw audio", status=FileStatus.downloaded))
-        db.add(
-            PlaudFile(
-                id="done",
-                filename="Cloud name",
-                generated_title="Generated",
-                local_title="User title",
-                status=FileStatus.done,
-                duration_ms=12000,
-            )
-        )
-        db.add(PlaudFile(id="trash", filename="Deleted", status=FileStatus.done, is_trash=True))
-    headers = {"Authorization": f"Bearer {token}"}
+        db.add(PlaudFile(id='raw', filename='Raw audio', status=FileStatus.downloaded))
+        db.add(PlaudFile(id='done', filename='Cloud name', generated_title='Generated',
+                         local_title='User title', status=FileStatus.done, duration_ms=12000))
+        db.add(PlaudFile(id='trash', filename='Deleted', status=FileStatus.done, is_trash=True))
+    headers = {'Authorization': f'Bearer {token}'}
     assert client.get(path).status_code == 401
-    assert client.get(path, headers={"Authorization": "Bearer old-secret"}).status_code == 401
-    assert client.get(path, headers={"X-Auth-Token": token}).status_code == 401
-    assert client.get(path, params={"token": token}).status_code == 401
+    assert client.get(path, headers={'Authorization': 'Bearer old-secret'}).status_code == 401
+    assert client.get(path, headers={'X-Auth-Token': token}).status_code == 401
+    assert client.get(path, params={'token': token}).status_code == 401
     response = client.get(path, headers=headers)
     assert response.status_code == 200
-    assert response.headers["Cache-Control"] == "private, no-store"
-    files = response.json()["files"]
-    assert [f["id"] for f in files] == ["done", "raw"]
-    assert files[0]["filename"] == "User title"
-    assert files[1]["status"] == "downloaded"
-    assert set(files[0]) == {"id", "filename", "status", "duration_ms", "start_time_ms"}
+    assert response.headers['Cache-Control'] == 'private, no-store'
+    files = response.json()['files']
+    assert [f['id'] for f in files] == ['done', 'raw']
+    assert files[0]['filename'] == 'User title'
+    assert files[1]['status'] == 'downloaded'
+    assert set(files[0]) == {'id', 'filename', 'status', 'duration_ms', 'start_time_ms'}
     assert client.post(path, headers=headers).status_code == 405
-    for other in ["/api/files", "/admin/users", "/api/files/raw/usage", "/audio/raw", "/file/raw"]:
+    for other in ['/api/files', '/admin/users', '/api/files/raw/usage', '/audio/raw', '/file/raw']:
         assert client.get(other, headers=headers).status_code == 401
-    monkeypatch.setenv(
-        "LOCALPLAUD_API__COMPLETION_TOKEN_SHA256", hashlib.sha256(b"rotated").hexdigest()
-    )
+    monkeypatch.setenv('LOCALPLAUD_API__COMPLETION_TOKEN_SHA256', hashlib.sha256(b'rotated').hexdigest())
     get_settings(reload=True)
     assert client.get(path, headers=headers).status_code == 401

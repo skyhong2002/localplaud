@@ -150,9 +150,7 @@ def render(request, name, **context):
         )
         return Response(headers={"HX-Redirect": destination})
     user = context.get("account_user")
-    workspace = (
-        name in {"account.html", "account_users.html"} and user and user["status"] == "active"
-    )
+    workspace = name in {"account.html", "account_users.html"} and user and user["status"] == "active"
     if workspace:
         context = {**_base_ctx(request, "settings"), **context, "partial_response": False}
     context["account_workspace"] = bool(workspace)
@@ -528,20 +526,11 @@ def revoke_session(session_id: int, request: Request):
     return RedirectResponse("/account?notice=session", 303)
 
 
-USER_NOTICES = {
-    "updated": "帳號權限已更新。",
-    "created": "帳號已建立，對方可用你設定的初始密碼登入。",
-}
-
-
-def require_manager(request):
+@router.get("/admin/users")
+def users_page(request: Request, error: str | None = None, notice: str | None = None):
     user = current_user(request)
     if user["role"] not in {"owner", "admin"} or user["status"] != "active":
         raise HTTPException(403)
-    return user
-
-
-def render_users(request, user, *, error=None, notice=None, create_error=None, draft=None):
     with session_scope() as db:
         users = [
             user_dict(row)
@@ -552,86 +541,16 @@ def render_users(request, user, *, error=None, notice=None, create_error=None, d
         "account_users.html",
         account_user=user,
         users=users,
-        error=error,
-        notice=notice,
-        create_error=create_error,
-        draft=draft or {"username": "", "email": "", "role": "viewer"},
-    )
-
-
-@router.get("/admin/users")
-def users_page(request: Request, error: str | None = None, notice: str | None = None):
-    user = require_manager(request)
-    return render_users(
-        request,
-        user,
         error="無法變更此帳號的權限。" if error else None,
-        notice=USER_NOTICES.get(notice or ""),
+        notice="帳號權限已更新。" if notice else None,
     )
-
-
-@router.post("/admin/users")
-def create_account_user(
-    request: Request,
-    username: str = Form(),
-    email: str = Form(),
-    password: str = Form(),
-    role: str = Form("viewer"),
-):
-    actor = require_manager(request)
-    username, email = username.strip().lower(), email.strip().lower()
-    draft = {"username": username, "email": email, "role": role}
-    allowed_roles = {"admin", "viewer"} if actor["role"] == "owner" else {"viewer"}
-    error = None
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", username):
-        error = "帳號需為 3–40 個字元，只能使用小寫英數字、底線、點或連字號，並以英數字開頭。"
-    elif len(email) > 254 or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
-        error = "請輸入有效的 Email。"
-    elif not valid_password(password):
-        error = "初始密碼至少需要 12 個字元。"
-    elif role not in allowed_roles:
-        error = "只有擁有者能建立管理員帳號。"
-    if error:
-        return render_users(request, actor, create_error=error, draft=draft)
-    cfg = get_settings().api
-    taken = "此帳號或 Email 已被使用。"
-    try:
-        with session_scope() as db:
-            if (
-                username == cfg.owner_username.strip().lower()
-                or email == cfg.owner_email.strip().lower()
-                or db.scalar(
-                    select(AccountUser.id).where(
-                        or_(AccountUser.username == username, AccountUser.email == email)
-                    )
-                )
-            ):
-                return render_users(request, actor, create_error=taken, draft=draft)
-            user = AccountUser(
-                username=username,
-                email=email,
-                role=role,
-                status="active",
-                password_hash=PASSWORDS.hash(password),
-            )
-            db.add(user)
-            db.flush()
-            db.add(
-                AccountAuditEvent(
-                    actor_id=actor["id"],
-                    user_id=user.id,
-                    action="user_created",
-                    changes={"after": {"role": role, "status": "active"}},
-                )
-            )
-    except IntegrityError:
-        return render_users(request, actor, create_error=taken, draft=draft)
-    return RedirectResponse("/admin/users?notice=created", 303)
 
 
 @router.post("/admin/users/{user_id}")
 def update_user(user_id: int, request: Request, role: str = Form(), status: str = Form()):
-    actor = require_manager(request)
+    actor = current_user(request)
+    if actor["role"] not in {"owner", "admin"} or actor["status"] != "active":
+        raise HTTPException(403)
     with session_scope() as db:
         target = db.get(AccountUser, user_id)
         if (
