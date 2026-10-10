@@ -83,6 +83,7 @@ def test_knowledge_index_migration_is_additive_and_idempotent(tmp_path):
         "created_at",
         "updated_at",
         "indexed_at",
+        "workspace_id",
     }
     document_indexes = {
         index["name"] for index in inspector.get_indexes("knowledge_documents")

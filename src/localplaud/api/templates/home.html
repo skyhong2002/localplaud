@@ -20,7 +20,11 @@
       {{ icon('waveform') }}
       <p class="empty-title">{{ t('No recordings yet') }}</p>
       <p class="empty-body">{{ t('Record with your Plaud device as usual. New uploads appear here and are processed locally. You can also add an audio file.') }}</p>
+      {% if plaud_connected %}
       <div class="empty-actions"><button class="btn" id="home-add-audio" data-open-import="device" type="button">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button><button class="btn sec" id="home-import-plaud" data-open-import="plaud" type="button">{{ icon('cloud', 'sm') }}{{ t('Import from Plaud') }}</button></div>
+      {% else %}
+      <div class="empty-actions"><a class="btn" id="home-connect-plaud" href="/settings#plaud-account">{{ icon('cloud', 'sm') }}連結 Plaud 帳號</a><button class="btn sec" id="home-add-audio" data-open-import="device" type="button">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button></div>
+      {% endif %}
     </div>
     {% endif %}
   </section>

@@ -19,7 +19,7 @@
     <nav aria-label="帳號導覽">
       {% if account_user.status == 'active' %}<a href="/home">工作區</a>{% endif %}
       <a href="/account" {% if request.url.path == '/account' %}aria-current="page"{% endif %}>我的帳號</a>
-      {% if account_user.role in ['owner', 'admin'] and account_user.status == 'active' %}<a href="/admin/users" {% if request.url.path == '/admin/users' %}aria-current="page"{% endif %}>帳號管理</a>{% endif %}
+      {% if account_user.role == 'owner' and account_user.status == 'active' %}<a href="/admin/users" {% if request.url.path == '/admin/users' %}aria-current="page"{% endif %}>帳號管理</a>{% endif %}
       <form action="/logout" method="post"><button class="link-button" type="submit">登出</button></form>
     </nav>
     {% endif %}

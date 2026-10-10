@@ -36,6 +36,7 @@ from ..db.models import (
     UserNote,
 )
 from ..db.session import session_scope
+from ..db.tenancy import scoped_to_file
 from ..embeddings.base import build_embedder
 from ..error_redaction import sanitize_error
 from ..note_history import fingerprint_digest
@@ -1195,6 +1196,7 @@ def process_pending_documents(
     return sum(index_document(document_id, settings) for document_id in ids)
 
 
+@scoped_to_file
 def process_file_documents(
     file_id: str, settings: Settings | None = None, *, limit: int = 20
 ) -> int:

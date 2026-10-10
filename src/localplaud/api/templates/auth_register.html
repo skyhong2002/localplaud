@@ -4,7 +4,7 @@
 <section class="auth-card" aria-labelledby="register-title">
   <div class="eyebrow">加入工作區</div>
   <h1 id="register-title">建立帳號</h1>
-  <p class="sub">建立後可登入查看核准狀態。管理員核准前，你無法存取錄音與筆記。</p>
+  <p class="sub">建立後可登入查看核准狀態。核准後，你會有一個只屬於自己的工作區，可連結自己的 Plaud 帳號。</p>
   {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
   <form method="post" action="/register" class="stack" data-submit-label="建立中…">
     <div><label for="username">帳號名稱</label><input class="input" id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="40" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{2,39}" aria-describedby="username-help" required><p class="field-help" id="username-help">至少 3 個字元，以英文字母或數字開頭，可使用句點、底線或連字號；最多 40 個字元。</p></div>

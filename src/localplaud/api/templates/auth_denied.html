@@ -1,5 +1,5 @@
 {% extends "auth_base.html" %}
 {% block title %}無法存取{% endblock %}
 {% block content %}
-<section class="auth-card"><div class="eyebrow">存取權限</div><h1>此功能需要管理員權限</h1><p class="sub">{{ error or '你目前可以瀏覽與匯出內容。若需要編輯、生成或管理工作區，請聯絡管理員調整權限。' }}</p><a class="btn" href="/home">返回工作區</a><p class="auth-switch"><a href="/account">查看我的帳號</a></p></section>
+<section class="auth-card"><div class="eyebrow">存取權限</div><h1>這是系統管理功能</h1><p class="sub">{{ error or '模型、運算資源與帳號管理由擁有者負責。你的工作區內容與設定不受影響。' }}</p><a class="btn" href="/home">返回工作區</a><p class="auth-switch"><a href="/account">查看我的帳號</a></p></section>
 {% endblock %}

@@ -29,6 +29,7 @@ from ..db.models import (
     StageStatus,
 )
 from ..db.session import session_scope
+from ..db.tenancy import scoped_to_file
 from ..providers.fallback import candidate_snapshots, is_retryable_fallback_error
 from ..providers.service import lock_library_profile_resolution, resolve_recording_profile
 from ..providers.usage import (
@@ -473,6 +474,7 @@ def _embed_reindex_chunks(
     return blobs, model_name, dim, provider, usage
 
 
+@scoped_to_file
 def reindex_file(
     file_id: str,
     settings: Settings | None = None,

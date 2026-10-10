@@ -7,12 +7,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import get_settings
 from ..error_redaction import sanitize_error_value
+from . import tenancy as _tenancy  # noqa: F401 - registers workspace isolation
 from .models import Base
 
 _engine: Engine | None = None
@@ -123,6 +124,9 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
     from .migrations import migrate_account_sessions
 
     migrate_account_sessions(engine)
+    from .migrations import migrate_workspace_columns
+
+    migrate_workspace_columns(engine)
     from ..providers.service import bootstrap_default_profile
     from .migrations import (
         migrate_artifact_lineage_columns,
@@ -193,21 +197,22 @@ def _init_db_locked(engine: Engine) -> dict[str, int] | None:
     migrate_share_link_options_schema(engine)
     migrate_chunk_file_index(engine)
     redact_legacy_error_text(engine)
+    from .migrations import migrate_workspaces
+
+    migrate_workspaces(engine)
     with Session(engine) as session:
         bootstrap_default_profile(session, get_settings())
-        from ..worker.summary_templates import bootstrap_note_templates
-
-        bootstrap_note_templates(session)
-        from ..automations import ensure_default_note_templates
-
-        ensure_default_note_templates(session)
-        # Discover current note artifacts without doing any provider work.
-        # Embedding remains an explicit mutation/worker action, so a serve-only
-        # process or a restart with automatic processing disabled stays idle.
-        from ..worker.knowledge_index import sync_knowledge_documents
-
-        sync_knowledge_documents(session, get_settings())
         session.commit()
+    from ..workspaces import prepare_workspace
+    from .models import Workspace
+    from .tenancy import system_scope, workspace_scope
+
+    with system_scope(), Session(engine) as session:
+        workspace_ids = list(session.scalars(select(Workspace.id).order_by(Workspace.id)))
+    for workspace_id in workspace_ids:
+        with workspace_scope(workspace_id), Session(engine) as session:
+            prepare_workspace(session)
+            session.commit()
     if get_settings().pipeline.artifact_mode == "independent":
         from .migrations import prepare_independent_mode
 

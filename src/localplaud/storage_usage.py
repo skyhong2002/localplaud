@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .db.models import KeyValue, PlaudFile
+from .db.tenancy import workspace_key
 
 RETENTION_KEY = "storage_retention"
 DEFAULT_RETENTION = {"backup_keep_latest": None}
@@ -21,7 +22,7 @@ MAX_BACKUP_KEEP = 100
 
 
 def get_retention_policy(session: Session) -> dict:
-    row = session.get(KeyValue, RETENTION_KEY)
+    row = session.get(KeyValue, workspace_key(RETENTION_KEY))
     stored = row.value if row is not None and isinstance(row.value, dict) else {}
     return DEFAULT_RETENTION | {k: v for k, v in stored.items() if k in DEFAULT_RETENTION}
 
@@ -33,9 +34,9 @@ def save_retention_policy(session: Session, values: dict) -> dict:
         if not 1 <= keep <= MAX_BACKUP_KEEP:
             raise ValueError(f"backup_keep_latest must be between 1 and {MAX_BACKUP_KEEP}")
     policy = DEFAULT_RETENTION | {"backup_keep_latest": keep}
-    row = session.get(KeyValue, RETENTION_KEY)
+    row = session.get(KeyValue, workspace_key(RETENTION_KEY))
     if row is None:
-        session.add(KeyValue(key=RETENTION_KEY, value=policy))
+        session.add(KeyValue(key=workspace_key(RETENTION_KEY), value=policy))
     else:
         row.value = policy
     session.flush()

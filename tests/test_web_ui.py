@@ -1413,6 +1413,9 @@ def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_pat
         "detail": f"no session at {tmp_path / 'plaud-tokens.json'}",
         "provider": "official",
         "login_method": "native-pkce-loopback",
+        "web_connect": True,
+        "pending": False,
+        "connected_at": None,
     }
 
 

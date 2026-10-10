@@ -13,9 +13,9 @@ addressing before wider use.
 
 - **Web UI is loopback-by-default; remote deployments use individual accounts.**
   `api.accounts_enabled` enables Google OIDC and local passwords, pending approval,
-  protected owner/admin/viewer roles and user-bound revocable sessions. See
-  [accounts](../accounts.md) for bootstrap, recovery and the shared-workspace
-  boundary. Account mode rejects legacy shared passwords and API tokens. Opaque
+  a protected owner and member accounts, one private workspace per account
+  ([ADR 0008](0008-workspace-isolation.md)) and user-bound revocable sessions. See
+  [accounts](../accounts.md) for bootstrap, recovery and workspace boundaries. Account mode rejects legacy shared passwords and API tokens. Opaque
   session cookies remain HttpOnly, Secure and SameSite=Lax; only peppered hashes
   are stored. Unsafe browser requests require the trusted same origin. Worker
   authentication remains separate. `/healthz` and explicitly issued public share

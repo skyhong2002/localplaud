@@ -37,6 +37,7 @@ from ..db.models import (
     StageStatus,
 )
 from ..db.session import session_scope
+from ..db.tenancy import workspace_key
 from ..plaud import make_plaud_client
 from ..plaud.common import _assert_safe_fetch_url
 from ..plaud.models import PlaudFileDTO
@@ -170,7 +171,7 @@ def _claim_catalog_sync() -> str | None:
     now = datetime.now(UTC)
     token = uuid4().hex
     with session_scope() as session:
-        current = session.get(KeyValue, _CATALOG_SYNC_LOCK_KEY)
+        current = session.get(KeyValue, workspace_key(_CATALOG_SYNC_LOCK_KEY))
         if current is not None:
             claimed_at_raw = (current.value or {}).get("claimed_at")
             try:
@@ -183,7 +184,7 @@ def _claim_catalog_sync() -> str | None:
                 return None
             session.execute(
                 delete(KeyValue).where(
-                    KeyValue.key == _CATALOG_SYNC_LOCK_KEY,
+                    KeyValue.key == workspace_key(_CATALOG_SYNC_LOCK_KEY),
                     KeyValue.updated_at <= now - _CATALOG_SYNC_LOCK_TTL,
                 ),
                 execution_options={"synchronize_session": False},
@@ -191,7 +192,7 @@ def _claim_catalog_sync() -> str | None:
             session.flush()
         claimed = _insert_key_if_absent(
             session,
-            key=_CATALOG_SYNC_LOCK_KEY,
+            key=workspace_key(_CATALOG_SYNC_LOCK_KEY),
             value={"token": token, "claimed_at": now.isoformat()},
         )
     return token if claimed else None
@@ -199,14 +200,14 @@ def _claim_catalog_sync() -> str | None:
 
 def _release_catalog_sync(token: str) -> None:
     with session_scope() as session:
-        row = session.get(KeyValue, _CATALOG_SYNC_LOCK_KEY)
+        row = session.get(KeyValue, workspace_key(_CATALOG_SYNC_LOCK_KEY))
         if row is not None and (row.value or {}).get("token") == token:
             session.delete(row)
 
 
 def _catalog_baseline_complete() -> bool:
     with session_scope() as session:
-        return session.get(KeyValue, _CATALOG_BASELINE_KEY) is not None
+        return session.get(KeyValue, workspace_key(_CATALOG_BASELINE_KEY)) is not None
 
 
 def _apply_dto(row: PlaudFile, dto: PlaudFileDTO) -> None:
@@ -243,7 +244,7 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
         files = list(client.iter_files(include_trash=settings.poller.include_trash))
         new_count = changed_count = 0
         with session_scope() as session:
-            catalog_initialized = session.get(KeyValue, _CATALOG_BASELINE_KEY) is not None
+            catalog_initialized = session.get(KeyValue, workspace_key(_CATALOG_BASELINE_KEY)) is not None
             if not catalog_initialized:
                 # Upgrade safely from metadata-first deployments: old audio-less
                 # queues and download errors must not become a historical backfill.
@@ -296,10 +297,10 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                         log.info("New file discovered: %s (%s)", dto.id, dto.filename)
                 else:
                     _apply_dto(row, dto)
-            if session.get(KeyValue, _CATALOG_BASELINE_KEY) is None:
+            if session.get(KeyValue, workspace_key(_CATALOG_BASELINE_KEY)) is None:
                 session.add(
                     KeyValue(
-                        key=_CATALOG_BASELINE_KEY,
+                        key=workspace_key(_CATALOG_BASELINE_KEY),
                         value={"completed_at": datetime.now(UTC).isoformat()},
                     )
                 )
@@ -878,11 +879,15 @@ def download_pending(client, settings: Settings) -> int:
     if workers == 1:
         return sum(run_download(item) for item in pending)
 
+    import contextvars
     from concurrent.futures import ThreadPoolExecutor
 
+    # Each download keeps the caller's workspace; pool threads start without it.
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = pool.map(run_download, pending)
-    return sum(results)
+        futures = [
+            pool.submit(contextvars.copy_context().run, run_download, item) for item in pending
+        ]
+    return sum(future.result() for future in futures)
 
 
 def _looks_like_raw_name(name: str) -> bool:
@@ -1105,11 +1110,51 @@ def ingest_cloud_artifacts(client, settings: Settings) -> int:
 
 
 def poll_once(settings: Settings | None = None) -> dict:
-    """One full poll cycle: sync the official listing + download pending
-    (+ mirror Plaud's own transcripts/summaries when
-    explicit migration mode is enabled)."""
+    """One full poll cycle for every workspace with a Plaud connection.
+
+    Inside a workspace scope only that workspace is polled. A failing account
+    never blocks the others; the original workspace's failure still raises so
+    single-account deployments keep their existing error reporting.
+    """
+    from ..db.tenancy import (
+        DEFAULT_WORKSPACE_ID,
+        scope_is_bound,
+        system_scope,
+        workspace_scope,
+    )
+    from ..plaud.connections import connected_workspace_ids
+
     settings = settings or get_settings()
-    reset_inflight()
+    if scope_is_bound():
+        return _poll_workspace(settings)
+    with system_scope():
+        reset_inflight()
+    with session_scope() as session:
+        workspace_ids = connected_workspace_ids(session, settings)
+    totals = dict.fromkeys(("new", "changed", "downloaded", "cloud_artifacts", "automated"), 0)
+    failure: Exception | None = None
+    for workspace_id in workspace_ids:
+        try:
+            with workspace_scope(workspace_id):
+                result = _poll_workspace(settings, recover=False)
+        except Exception as exc:  # noqa: BLE001 - one account must not stall others
+            if workspace_id == DEFAULT_WORKSPACE_ID:
+                failure = exc
+            else:
+                log.warning("Plaud poll failed for workspace %s: %s", workspace_id, exc)
+            continue
+        for key, value in result.items():
+            totals[key] = totals.get(key, 0) + value
+    if failure is not None:
+        raise failure
+    return totals
+
+
+def _poll_workspace(settings: Settings, *, recover: bool = True) -> dict:
+    """Sync the listing, download pending audio (and mirror Plaud's own
+    artifacts when explicit migration mode is enabled) for one workspace."""
+    if recover:
+        reset_inflight()
     baseline_complete = _catalog_baseline_complete()
     if settings.poller.auto_download and baseline_complete:
         reset_download_errors()

@@ -7,7 +7,7 @@
     <a class="account-back" href="/settings">{{ icon('chevron-left', 'sm') }}設定</a>
     <nav class="account-tabs" aria-label="帳號與安全">
       <a href="/account" {% if request.url.path == '/account' %}aria-current="page"{% endif %}>我的帳號</a>
-      {% if account_user.role in ['owner', 'admin'] %}<a href="/admin/users" {% if request.url.path == '/admin/users' %}aria-current="page"{% endif %}>帳號管理</a>{% endif %}
+      {% if account_user.role == 'owner' %}<a href="/admin/users" {% if request.url.path == '/admin/users' %}aria-current="page"{% endif %}>帳號管理</a>{% endif %}
     </nav>
     {{ self.account_content() }}
   </main>

@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 from .config import Settings, get_settings
 from .db.models import FileStatus, ImportRun, PlaudFile, Summary, Transcript
 from .db.session import session_scope
+from .db.tenancy import run_in_current_workspace
 from .plaud import make_plaud_client
 from .poller.poll import (
     AUDIO_RESTORABLE_STATUSES,
@@ -88,7 +89,7 @@ def start_plaud_metadata_import(
         run_id = row.id
         result = import_run_to_dict(row)
     threading.Thread(
-        target=_run_plaud_metadata_import,
+        target=run_in_current_workspace(_run_plaud_metadata_import),
         args=(run_id, settings, refresh_artifacts),
         daemon=True,
         name=f"plaud-metadata-{run_id[:8]}",
@@ -279,7 +280,7 @@ def start_plaud_audio_import(file_id: str, settings: Settings | None = None) -> 
             row.error = None
         raw = dict(row.raw or {})
     threading.Thread(
-        target=_run_audio_import,
+        target=run_in_current_workspace(_run_audio_import),
         args=(file_id, raw, settings, cache_only),
         daemon=True,
         name=f"plaud-audio-{file_id[:8]}",

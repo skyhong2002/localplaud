@@ -21,6 +21,8 @@ from markupsafe import Markup
 from pydantic import BaseModel, Field
 from sqlalchemy import distinct, func, select
 
+from ..db.tenancy import run_in_current_workspace
+
 router = APIRouter(tags=["surfaces"])
 
 _CITE_MARKER = re.compile(r"\[(\d{1,2})\](?![^<]*>)")
@@ -745,7 +747,9 @@ def _ask_event_stream(request: Request, run, render, unavailable):
         finally:
             events.put(None)
 
-    threading.Thread(target=worker, name=f"localplaud-ask-{stream_id}", daemon=True).start()
+    threading.Thread(
+        target=run_in_current_workspace(worker), name=f"localplaud-ask-{stream_id}", daemon=True
+    ).start()
 
     def body():
         finished = False

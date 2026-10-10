@@ -1,8 +1,12 @@
 # Web App accounts
 
 localplaud supports Google OpenID Connect and local username/email + password
-login in one shared workspace. This is independent of Plaud OAuth and provider
-credentials. It does not create separate recording libraries for each user.
+login. Every account owns one private workspace: its own Plaud connection,
+recordings, transcripts, notes, templates, folders and tags, vocabulary, Ask
+history and index, AutoFlow rules, integrations, notifications and preferences.
+No account can see another account's workspace, including the owner. Speech, AI
+provider, remote-worker and backup configuration is shared and managed by the
+owner. See [ADR 0008](adr/0008-workspace-isolation.md) for how isolation is enforced.
 
 ## Enable accounts
 
@@ -58,20 +62,55 @@ notification watcher has a separate, metadata-only credential described in
 
 - Anyone may create a local account or sign in with Google. New accounts are pending
   and can only view their own account, change their password, manage their own
-  sessions and sign out. They cannot list, play, search, export, or ask about
-  workspace content.
-- The owner can approve users as **viewer** or **admin** and change their status.
-  Admins can manage viewers but cannot grant admin access or change another admin.
-- Active viewers can read and export the shared library. They cannot edit, generate,
-  submit Ask requests, or access system settings and administrative APIs. New
-  endpoints are denied to viewers until explicitly reviewed and allowed.
-- Admins have full workspace access. The owner cannot be demoted or disabled through
-  account management. Permission/status changes revoke the affected user's sessions.
+  sessions and sign out. They have no workspace yet.
+- The owner approves (activates), disables, or re-enables accounts from
+  **帳號管理**. Activation creates the account's empty workspace, named after the
+  username, with the owner's locale, timezone and the built-in note templates.
+  Disabling revokes sessions immediately and keeps the workspace intact.
+- The owner can also create an account directly (**帳號管理 → 新增帳號**) with a
+  username, email and initial password. It is active immediately with its own
+  empty workspace; share the password privately and ask the user to change it.
+  Each creation records a `user_created` audit event.
+- Roles are `owner` (system administration plus workspace 1, which holds the
+  library that predates accounts) and `member`. Members have full control of their
+  own workspace. System administration is owner-only: account management,
+  provider connections and models, execution-profile edits, remote workers,
+  backups, storage retention and diagnostics. Members may read the shared
+  execution-profile catalog to choose a profile for their recordings.
+- The owner sees account names, status and each workspace's recording count, never
+  its contents.
 - Local-registration email addresses are not verified by an email service in this
-  release. Administrators must confirm the applicant before approval; the displayed
+  release. The owner must confirm the applicant before approval; the displayed
   address alone does not prove identity. Google email claims are verified.
-- Existing public share links remain deliberately public to their holders. Pending
-  status is not intended to invalidate independently issued public links.
+- Existing public share links remain deliberately public to their holders. A link
+  is served from the workspace that issued it. Pending or disabled status is not
+  intended to invalidate independently issued public links.
+
+## Plaud connection per workspace
+
+Each workspace connects its own Plaud account under **設定 → Plaud 帳號 → 連結 Plaud
+帳號**. The official Open API client only accepts a loopback redirect, so the Web
+flow is: Plaud opens in a new tab, the member authorizes, the tab lands on an
+unreachable `http://localhost:8199/auth/callback?...` address, and the member
+pastes that full address back. localplaud checks the single-use, 15-minute state
+and exchanges the code with its stored PKCE verifier. One Plaud account can back
+only one workspace.
+
+Workspace 1 keeps the configured token cache (`plaud.official.tokens_path`, shared
+with `localplaud auth login`). Other workspaces store tokens in
+`<download_dir>/../plaud-connections/workspace-N.json` with mode `0600`; include
+that directory in host backups and keep it private. The first successful listing of
+a newly connected account is a metadata-only baseline, exactly like a new
+deployment: earlier recordings appear without downloading their audio, and
+recordings uploaded afterwards are downloaded and processed automatically. A
+member can import older audio on demand. Disconnecting stops synchronization and
+keeps every recording already in the workspace. Workspace 1 keeps the host's
+configured transport (Open API or MCP); other workspaces always use the official
+read-only Open API, so they can connect even when the host uses MCP.
+
+Recording ids in workspace 1 are Plaud's own ids, so audio paths, share links and
+citations from before workspaces are unchanged. Other workspaces use `wN-<plaud id>`
+locally; the Plaud client translates ids at its boundary.
 
 Account mode uses opaque revocable sessions with peppered token hashes, HttpOnly /
 Secure / SameSite=Lax cookies, Argon2id password hashes, same-origin checks on unsafe
@@ -109,13 +148,19 @@ available in the Web App without CLI access.
 
 Pause new automatic work using the durable workspace preference and wait for active
 processing to finish before restarting. Use SQLite's online backup API. The schema
-migration adds account tables and nullable session ownership/authentication fields;
-original recordings, artifacts, revisions and pipeline provenance are preserved.
+migration adds account tables and nullable session ownership/authentication fields,
+then the `workspaces` table, a `workspace_id` column (default 1) on every
+workspace-owned table, and per-workspace uniqueness for vocabulary, note templates
+and external AutoFlow rules. Former `admin` and `viewer` accounts become `member`
+accounts with their own new workspace on next sign-in. Original recordings,
+artifacts, revisions and pipeline provenance are preserved in workspace 1.
 Restore the previous automatic-processing preference after the cutover.
 
 Verify local registration/login, Google redirect and callback, pending access denial,
-viewer/admin boundaries, owner protection, permission revocation, local password
-recovery and desktop/mobile account screens. Tests use isolated databases and mocked
+cross-workspace isolation, owner-only administration, owner protection, revocation,
+local password recovery and desktop/mobile account screens. `tests/test_workspace_*`
+covers ORM isolation, every recording route against another workspace's id, and
+per-workspace Plaud connection and polling. Tests use isolated databases and mocked
 Google replies with real signed-token verification. A successful redirect alone does
 not prove a live Google login completed; verify the latter with the account holder.
 

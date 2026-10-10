@@ -17,7 +17,7 @@ from authlib.jose import JsonWebToken
 from authlib.oidc.core import CodeIDToken
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from sqlalchemy import and_, delete, or_, select, text
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 
@@ -31,6 +31,8 @@ from ..db.models import (
     OAuthIdentity,
 )
 from ..db.session import session_scope
+from ..db.tenancy import workspace_scope
+from ..workspaces import ensure_user_workspace
 
 router = APIRouter()
 COOKIE = "localplaud_session"
@@ -46,32 +48,25 @@ PUBLIC = {
     "/favicon.ico",
     "/robots.txt",
 }
-# Explicit GET allowlist: new routes require a deliberate authorization decision.
-VIEWER_PATHS = tuple(
+# System administration shared by every workspace: only the owner may use it.
+# Everything else acts on the signed-in account's own workspace.
+OWNER_PATHS = tuple(
     re.compile(p)
     for p in (
-        r"/",
-        r"/home",
-        r"/search",
-        r"/notes",
-        r"/ui/sidebar-tags",
-        r"/api/files",
-        r"/api/files/picker",
-        r"/api/organization",
-        r"/file/[^/]+",
-        r"/file/[^/]+/transcript-page",
-        r"/audio/[^/]+(?:/waveform)?",
-        r"/file/[^/]+/export\.md",
-        r"/file/[^/]+/export/(?:audio|mind-map\.png|transcript\.(?:txt|srt|vtt|docx|pdf)|notes\.(?:md|txt|docx|pdf))",
-        r"/api/files/[^/]+/note-assets/[^/]+",
-        r"/api/files/[^/]+/outline",
-        r"/api/notes",
-        r"/api/notes/\d+/(?:history|history/\d+|export\.md)",
-        r"/notes/\d+/versions/\d+",
-        r"/file/[^/]+/notes/generated/[^/]+/versions/\d+",
-        r"/api/files/[^/]+/summaries/\d+/history",
+        r"/admin/.*",
+        r"/api/system/.*",
+        r"/api/backups(?:/.*)?",
+        r"/api/storage(?:/.*)?",
+        r"/api/providers/(?!recordings/|folders/|profiles$|resolve$|resolution-preview$).*",
     )
 )
+
+
+def owner_only(path: str, method: str) -> bool:
+    if any(p.fullmatch(path) for p in OWNER_PATHS):
+        return True
+    # Members may read the shared profile catalog to pick one, not edit it.
+    return method not in {"GET", "HEAD"} and path == "/api/providers/profiles"
 
 
 def now():
@@ -237,26 +232,19 @@ async def gate(request, call_next):
             )
             if user.status != "active" and not own:
                 destination = "/account"
-            elif (
-                user.status == "active"
-                and user.role == "viewer"
-                and not own
-                and not (
-                    request.method in {"GET", "HEAD"}
-                    and any(p.fullmatch(path) for p in VIEWER_PATHS)
-                )
-                and not (request.method == "POST" and path == "/api/files/export")
-            ):
+            elif user.role != "owner" and owner_only(path, request.method):
                 if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
                     response = render(
                         request,
                         "auth_denied.html",
                         account_user=user_dict(user),
-                        error="此操作需要管理員權限。",
+                        error="這是系統管理功能，只有擁有者可以使用。",
                     )
                     response.status_code = 403
                     return response
-                return JSONResponse({"detail": "此操作需要管理員權限。"}, status_code=403)
+                return JSONResponse(
+                    {"detail": "這是系統管理功能，只有擁有者可以使用。"}, status_code=403
+                )
         if destination:
             code = 401 if not user else 403
             if request.headers.get("hx-request", "").lower() == "true":
@@ -264,15 +252,46 @@ async def gate(request, call_next):
             if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
                 return RedirectResponse(destination, status_code=303)
             return JSONResponse(
-                {"detail": "請先登入。" if not user else "帳號仍在等待管理員核准。"},
+                {"detail": "請先登入。" if not user else "帳號仍在等待擁有者核准。"},
                 status_code=code,
             )
-    response = await call_next(request)
+    share = re.fullmatch(r"/share/([^/]+)(?:/audio)?", path)
+    if share and request.method in {"GET", "HEAD"}:
+        # A public link is served from the workspace that issued it, whoever opens it.
+        workspace_id = share_link_workspace(share.group(1))
+    else:
+        workspace_id = request_workspace(user)
+    request.state.workspace_id = workspace_id
+    if workspace_id is None:
+        # Signed-out and pending requests may only reach public or own-account
+        # pages; give them a workspace that owns nothing.
+        workspace_id = NO_WORKSPACE
+    with workspace_scope(workspace_id):
+        response = await call_next(request)
     response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Vary"] = ", ".join(filter(None, [response.headers.get("Vary"), "Cookie"]))
     return response
+
+
+NO_WORKSPACE = 0
+
+
+def request_workspace(user) -> int | None:
+    """Workspace the signed-in account works in; created on first approved visit."""
+    if not user or user.status != "active":
+        return None
+    with session_scope() as db:
+        return ensure_user_workspace(db, db.get(AccountUser, user.id))
+
+
+def share_link_workspace(token: str) -> int | None:
+    from ..db.models import ShareLink
+    from ..db.tenancy import system_scope
+
+    with system_scope(), session_scope() as db:
+        return db.scalar(select(ShareLink.workspace_id).where(ShareLink.token == token))
 
 
 def rate_limit(request):
@@ -526,14 +545,43 @@ def revoke_session(session_id: int, request: Request):
     return RedirectResponse("/account?notice=session", 303)
 
 
-@router.get("/admin/users")
-def users_page(request: Request, error: str | None = None, notice: str | None = None):
+USER_NOTICES = {
+    "updated": "帳號狀態已更新。",
+    "created": "帳號已建立，並有自己的空白工作區。請私下把初始密碼交給對方。",
+}
+
+
+def require_owner(request):
     user = current_user(request)
-    if user["role"] not in {"owner", "admin"} or user["status"] != "active":
+    if user["role"] != "owner" or user["status"] != "active":
         raise HTTPException(403)
+    return user
+
+
+def workspace_summaries(db) -> dict[int, dict]:
+    """Per-account workspace size for administration, never its contents."""
+    from ..db.models import PlaudFile, Workspace
+    from ..db.tenancy import system_scope
+
+    with system_scope():
+        counts = dict(
+            db.execute(
+                select(PlaudFile.workspace_id, func.count(PlaudFile.id))
+                .where(PlaudFile.is_trash.is_(False))
+                .group_by(PlaudFile.workspace_id)
+            ).all()
+        )
+        return {
+            row.owner_user_id: {"id": row.id, "name": row.name, "recordings": counts.get(row.id, 0)}
+            for row in db.scalars(select(Workspace).where(Workspace.owner_user_id.is_not(None)))
+        }
+
+
+def render_users(request, user, *, error=None, notice=None, create_error=None, draft=None):
     with session_scope() as db:
+        workspaces = workspace_summaries(db)
         users = [
-            user_dict(row)
+            {**user_dict(row), "workspace": workspaces.get(row.id)}
             for row in db.scalars(select(AccountUser).order_by(AccountUser.created_at))
         ]
     return render(
@@ -541,37 +589,102 @@ def users_page(request: Request, error: str | None = None, notice: str | None = 
         "account_users.html",
         account_user=user,
         users=users,
-        error="無法變更此帳號的權限。" if error else None,
-        notice="帳號權限已更新。" if notice else None,
+        error=error,
+        notice=notice,
+        create_error=create_error,
+        draft=draft or {"username": "", "email": ""},
     )
 
 
+@router.get("/admin/users")
+def users_page(request: Request, error: str | None = None, notice: str | None = None):
+    user = require_owner(request)
+    return render_users(
+        request,
+        user,
+        error="無法變更此帳號。" if error else None,
+        notice=USER_NOTICES.get(notice or ""),
+    )
+
+
+@router.post("/admin/users")
+def create_account_user(
+    request: Request,
+    username: str = Form(),
+    email: str = Form(),
+    password: str = Form(),
+):
+    """Create an active member with a new, empty private workspace."""
+    actor = require_owner(request)
+    username, email = username.strip().lower(), email.strip().lower()
+    draft = {"username": username, "email": email}
+    error = None
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,39}", username):
+        error = "帳號需為 3–40 個字元，只能使用小寫英數字、底線、點或連字號，並以英數字開頭。"
+    elif len(email) > 254 or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        error = "請輸入有效的 Email。"
+    elif not valid_password(password):
+        error = "初始密碼至少需要 12 個字元。"
+    if error:
+        return render_users(request, actor, create_error=error, draft=draft)
+    cfg = get_settings().api
+    taken = "此帳號或 Email 已被使用。"
+    try:
+        with session_scope() as db:
+            if (
+                username == cfg.owner_username.strip().lower()
+                or email == cfg.owner_email.strip().lower()
+                or db.scalar(
+                    select(AccountUser.id).where(
+                        or_(AccountUser.username == username, AccountUser.email == email)
+                    )
+                )
+            ):
+                return render_users(request, actor, create_error=taken, draft=draft)
+            user = AccountUser(
+                username=username,
+                email=email,
+                role="member",
+                status="active",
+                password_hash=PASSWORDS.hash(password),
+            )
+            db.add(user)
+            db.flush()
+            workspace_id = ensure_user_workspace(db, user)
+            db.add(
+                AccountAuditEvent(
+                    actor_id=actor["id"],
+                    user_id=user.id,
+                    action="user_created",
+                    changes={"after": {"status": "active", "workspace_id": workspace_id}},
+                )
+            )
+    except IntegrityError:
+        return render_users(request, actor, create_error=taken, draft=draft)
+    return RedirectResponse("/admin/users?notice=created", 303)
+
+
 @router.post("/admin/users/{user_id}")
-def update_user(user_id: int, request: Request, role: str = Form(), status: str = Form()):
-    actor = current_user(request)
-    if actor["role"] not in {"owner", "admin"} or actor["status"] != "active":
-        raise HTTPException(403)
+def update_user(user_id: int, request: Request, status: str = Form()):
+    actor = require_owner(request)
     with session_scope() as db:
         target = db.get(AccountUser, user_id)
         if (
             not target
             or target.role == "owner"
-            or role not in {"admin", "viewer"}
             or status not in {"pending", "active", "disabled"}
-            or (actor["role"] != "owner" and (target.role != "viewer" or role != "viewer"))
         ):
             return RedirectResponse("/admin/users?error=permission", 303)
-        changes = {
-            "before": {"role": target.role, "status": target.status},
-            "after": {"role": role, "status": status},
-        }
-        target.role, target.status = role, status
+        changes = {"before": {"status": target.status}, "after": {"status": status}}
+        target.status = status
         db.execute(delete(BrowserSession).where(BrowserSession.user_id == target.id))
+        if status == "active":
+            changes["after"]["workspace_id"] = ensure_user_workspace(db, target)
         db.add(
             AccountAuditEvent(
                 actor_id=actor["id"],
                 user_id=target.id,
-                action="permissions_changed",
+                action="status_changed",
                 changes=changes,
             )
         )
@@ -783,7 +896,7 @@ async def google_callback(request: Request, state: str = "", code: str = "", err
                 user = AccountUser(
                     username=username,
                     email=email,
-                    role="owner" if owner else "viewer",
+                    role="owner" if owner else "member",
                     status="active" if owner else "pending",
                     owner_slot="owner" if owner else None,
                 )

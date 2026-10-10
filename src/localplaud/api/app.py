@@ -125,9 +125,11 @@ def _escape_like_literal(value: str) -> str:
 async def _lifespan(app: FastAPI):
     if not getattr(app.state, "database_initialized", False):
         init_db()
+    from ..db.tenancy import system_scope
     from ..imports import recover_interrupted_imports
 
-    recover_interrupted_imports()
+    with system_scope():
+        recover_interrupted_imports()
     with session_scope() as session:
         auto_process = get_workspace_preferences(session)["auto_process_new_recordings"]
     if auto_process and not getattr(app.state, "managed_daemon", False):
@@ -199,7 +201,10 @@ def _is_browser_navigation(request: Request) -> bool:
 
 
 def _login_context(next_path: str, error: bool) -> dict:
-    with session_scope() as session:
+    from ..db.tenancy import DEFAULT_WORKSPACE_ID, workspace_scope
+
+    # Signed-out pages use the server's (original workspace's) locale.
+    with workspace_scope(DEFAULT_WORKSPACE_ID), session_scope() as session:
         preferences = get_workspace_preferences(session)
     return {
         "next": _safe_next(next_path),
@@ -2047,7 +2052,12 @@ def home(request: Request):
                 .limit(4)
             )
         ]
+    from ..plaud.connections import connection_status
+
+    with session_scope() as session:
+        plaud_connected = connection_status(session, get_settings())["ok"]
     ctx = _base_ctx(request, "home") | {
+        "plaud_connected": plaud_connected,
         "recent_files": recent_files,
         "attention_files": attention_files,
         "attention_stages": attention_stages,
@@ -3647,6 +3657,7 @@ def settings_page(request: Request):
     from ..backups import list_workspace_backups
     from ..email_integrations import list_email_integrations
     from ..integrations import list_webhook_integrations
+    from ..plaud.connections import connection_status, tokens_path
     from ..providers.contracts import ProviderStage
     from ..providers.hardware import hardware_recommendations
     from ..providers.service import list_connections, list_models, list_profiles
@@ -3656,19 +3667,9 @@ def settings_page(request: Request):
     from ..system_info import about_info
 
     settings = get_settings()
-    if settings.plaud.provider == "mcp":
-        from ..plaud.mcp import PlaudMcpClient
-
-        plaud_auth = PlaudMcpClient.auth_status(settings.plaud.mcp)
-    else:
-        from ..plaud.oauth import OfficialTokenStore
-
-        plaud_auth = OfficialTokenStore(
-            settings.plaud.official.tokens_path,
-            settings.plaud.official.refresh_url,
-            settings.plaud.official.request_timeout_seconds,
-        ).status()
-        plaud_auth["tokens_path"] = str(settings.plaud.official.tokens_path.expanduser())
+    with session_scope() as session:
+        plaud_auth = connection_status(session, settings)
+    plaud_auth["tokens_path"] = str(tokens_path(settings))
     try:
         workspace_backups = list_workspace_backups()
         backup_error = None
@@ -3735,7 +3736,7 @@ def settings_page(request: Request):
             ],
             "hardware_recommendations": hardware_recommendations(),
             "plaud_auth": plaud_auth,
-            "plaud_provider": settings.plaud.provider,
+            "plaud_provider": plaud_auth["provider"],
             "workspace_backups": workspace_backups,
             "backup_error": backup_error,
             "backup_destinations": backup_destinations,
@@ -3764,26 +3765,55 @@ def settings_page(request: Request):
 
 @app.get("/api/plaud/auth/status")
 def plaud_auth_status():
-    """Non-secret status for setup/health UI."""
+    """Non-secret status of this workspace's Plaud connection."""
+    from ..plaud.connections import connection_status
+
     settings = get_settings()
-    if settings.plaud.provider == "mcp":
-        from ..plaud.mcp import PlaudMcpClient
-
-        status = PlaudMcpClient.auth_status(settings.plaud.mcp)
-        login_method = "plaud-mcp-oauth"
-    else:
-        from ..plaud.oauth import OfficialTokenStore
-
-        status = OfficialTokenStore(
-            settings.plaud.official.tokens_path,
-            settings.plaud.official.refresh_url,
-            settings.plaud.official.request_timeout_seconds,
-        ).status()
-        login_method = "native-pkce-loopback"
+    with session_scope() as session:
+        status = connection_status(session, settings)
     return status | {
-        "provider": settings.plaud.provider,
-        "login_method": login_method,
+        "login_method": "native-pkce-loopback" if status["web_connect"] else "plaud-mcp-oauth",
     }
+
+
+class PlaudConnectFinishBody(BaseModel):
+    redirect_url: str = Field(min_length=1, max_length=4096)
+
+
+@app.post("/api/plaud/connect")
+def plaud_connect_start() -> dict:
+    """Begin connecting this workspace's own Plaud account."""
+    from ..plaud.connections import PlaudConnectionError, start_connection
+
+    try:
+        with session_scope() as session:
+            return {"authorization_url": start_connection(session, get_settings())}
+    except PlaudConnectionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/plaud/connect/complete")
+def plaud_connect_finish(body: PlaudConnectFinishBody) -> dict:
+    from ..plaud.connections import PlaudConnectionError, finish_connection
+
+    try:
+        with session_scope() as session:
+            return finish_connection(session, get_settings(), body.redirect_url)
+    except PlaudConnectionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete("/api/plaud/connection")
+def plaud_disconnect() -> dict:
+    from ..plaud.connections import PlaudConnectionError, connection_status, disconnect
+
+    settings = get_settings()
+    try:
+        with session_scope() as session:
+            disconnect(session, settings)
+            return connection_status(session, settings)
+    except PlaudConnectionError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.get("/notes", response_class=HTMLResponse)

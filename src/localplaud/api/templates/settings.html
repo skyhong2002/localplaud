@@ -8,6 +8,7 @@
 </header>
 {% endblock %}
 {% block body %}
+{% set system_admin = not account_user|default(None) or account_user.role == 'owner' %}
 <div class="content"><div class="pane-inner settings-page" data-surface="settings">
   <header class="sf-settings-head">
     <h1 class="page sf-large-title">{{ t('Settings') }}</h1>
@@ -34,8 +35,8 @@
         <a class="sf-index-row" href="#group-account" data-sf-open-group="account">{{ icon('user') }}<span class="sf-index-label">{{ t('Account') }}</span><span class="sf-index-value">{{ t('connected') if plaud_auth.ok else t('sign-in required') }}</span>{{ icon('chevron-right', 'sm') }}</a>
       </div>
       <div class="sf-index-group">
-        <a class="sf-index-row" href="#group-processing" data-sf-open-group="processing">{{ icon('cpu') }}<span class="sf-index-label">{{ t('Speech & AI providers') }}</span>{{ icon('chevron-right', 'sm') }}</a>
-        <a class="sf-index-row" href="#group-data" data-sf-open-group="data">{{ icon('database') }}<span class="sf-index-label">{{ t('Sync, backup & privacy') }}</span>{{ icon('chevron-right', 'sm') }}</a>
+{% if system_admin %}<a class="sf-index-row" href="#group-processing" data-sf-open-group="processing">{{ icon('cpu') }}<span class="sf-index-label">{{ t('Speech & AI providers') }}</span>{{ icon('chevron-right', 'sm') }}</a>{% endif %}
+{% if system_admin %}<a class="sf-index-row" href="#group-data" data-sf-open-group="data">{{ icon('database') }}<span class="sf-index-label">{{ t('Sync, backup & privacy') }}</span>{{ icon('chevron-right', 'sm') }}</a>{% endif %}
         <a class="sf-index-row" href="#group-integrations" data-sf-open-group="integrations">{{ icon('plug') }}<span class="sf-index-label">{{ t('Integrations & automation') }}</span>{{ icon('chevron-right', 'sm') }}</a>
       </div>
       <div class="sf-index-group">
@@ -52,6 +53,7 @@
       <a href="#workspace-preferences" data-sf-nav-target="workspace-preferences">{{ t('Personalization & locale') }}</a>
       <a href="#vocabulary" data-sf-nav-target="vocabulary">{{ t('Custom vocabulary') }}</a>
       <a href="#note-templates" data-sf-nav-target="note-templates">{{ t('Note templates') }}</a>
+      {% if system_admin %}
       <div class="sf-nav-caption">{{ t('Speech & AI providers') }}</div>
       <a href="#hardware-profiles" data-sf-nav-target="hardware-profiles">{{ t('ASR & diarization') }}</a>
       <a href="#starting-profiles" data-sf-nav-target="starting-profiles">{{ t('Cloud & remote profiles') }}</a>
@@ -65,6 +67,7 @@
       <a href="#private-backup" data-sf-nav-target="private-backup">{{ t('Sync & backup') }}</a>
       <a href="#storage" data-sf-nav-target="storage">{{ t('Storage & retention') }}</a>
       <a href="#privacy" data-sf-nav-target="privacy">{{ t('Privacy') }}</a>
+      {% endif %}
       <div class="sf-nav-caption">{{ t('Integrations & automation') }}</div>
       <a href="#webhook-integrations" data-sf-nav-target="webhook-integrations">{{ t('Webhooks') }}</a>
       <a href="#email-integrations" data-sf-nav-target="email-integrations">{{ t('Email') }}</a>
@@ -86,9 +89,25 @@
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;margin-top:12px">
       <div class="tile"><div class="k">{{ t('Session') }}</div><div style="margin-top:4px">{{ plaud_auth.detail }}</div></div>
       <div class="tile"><div class="k">{{ t('Login method') }}</div><div style="margin-top:4px">{{ t('Official Plaud MCP OAuth') if plaud_provider == 'mcp' else t('Native S256 PKCE · no Node.js') }}</div></div>
-      <div class="tile"><div class="k">{{ t('Token storage') }}</div><div style="margin-top:4px"><code class="settings-path">{% for part in (plaud_auth.tokens_path|string).split('/') %}{% if not loop.first %}/<wbr>{% endif %}{{ part }}{% endfor %}</code></div></div>
+      {% if system_admin %}<div class="tile"><div class="k">{{ t('Token storage') }}</div><div style="margin-top:4px"><code class="settings-path">{% for part in (plaud_auth.tokens_path|string).split('/') %}{% if not loop.first %}/<wbr>{% endif %}{{ part }}{% endfor %}</code></div></div>{% endif %}
     </div>
-    {% if not plaud_auth.ok %}<div class="sub" style="font-size:12px;margin-top:11px">{% if plaud_provider == 'mcp' %}{{ t('Run the official Plaud MCP installer on this machine to sign in.') }} <code>npx -y @plaud-ai/mcp@latest install</code>{% else %}{{ t('On the machine running localplaud, run the following command. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.') }} <code>localplaud auth login</code>{% endif %}</div>{% endif %}
+    {% if plaud_auth.web_connect %}
+    <div class="plaud-connect" data-plaud-connect>
+      <p class="sub" style="font-size:12px;margin:12px 0 0">{% if plaud_auth.ok %}這個工作區只會讀取這個 Plaud 帳號的錄音。要改連其他帳號，請重新連結。{% else %}連結你自己的 Plaud 帳號後，新上傳到 Plaud 的錄音會自動出現在這個工作區。localplaud 只會讀取清單與原始音檔。{% endif %}</p>
+      <div class="plaud-connect-actions"><button class="btn{% if plaud_auth.ok %} sec{% endif %}" type="button" data-plaud-connect-start>{{ '重新連結' if plaud_auth.ok else '連結 Plaud 帳號' }}</button>{% if plaud_auth.ok and not system_admin %}<button class="btn sec btn-danger" type="button" data-plaud-disconnect>中斷連結</button>{% endif %}</div>
+      <form class="plaud-connect-finish" data-plaud-connect-finish {% if not plaud_auth.pending %}hidden{% endif %}>
+        <ol class="plaud-connect-steps">
+          <li>在剛開啟的 Plaud 分頁登入並按「授權」。</li>
+          <li>授權後分頁會跳到 <code>http://localhost:8199/…</code>，顯示「無法連上」是正常的。</li>
+          <li>複製那個分頁網址列的完整網址，貼在下面。</li>
+        </ol>
+        <label for="plaud-redirect-url">授權後的網址</label>
+        <div class="plaud-connect-row"><input class="input" id="plaud-redirect-url" name="redirect_url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="http://localhost:8199/auth/callback?code=…" required><button class="btn" type="submit">完成連結</button></div>
+        <p class="sub plaud-connect-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+    {% endif %}
+    {% if not plaud_auth.ok and system_admin %}<div class="sub" style="font-size:12px;margin-top:11px">{% if plaud_provider == 'mcp' %}{{ t('Run the official Plaud MCP installer on this machine to sign in.') }} <code>npx -y @plaud-ai/mcp@latest install</code>{% else %}{{ t('On the machine running localplaud, run the following command. It opens Plaud in your browser and listens only on the fixed localhost callback for up to two minutes.') }} <code>localplaud auth login</code>{% endif %}</div>{% endif %}
   </div>
   <div class="panel sf-settings-panel" id="access-security">
     <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Access & security') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Truthful authentication boundaries for this deployment.') }}</div></div><span class="st {{ 'done' if about.access.browser_login_configured else 'degraded' }}">{{ t('Web login configured') if about.access.browser_login_configured else t('Web login not configured') }}</span></div>
@@ -98,7 +117,7 @@
       <div class="tile"><div class="k">{{ t('Active sessions') }}</div><div style="margin-top:4px">{{ browser_sessions|length }}</div></div>
     </div>
     <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t(about.access.session_detail) }}. {% if accounts_enabled|default(false) %}帳號登入已啟用；共用密碼與 API token 無法存取此工作區。{% else %}{{ t('Configure login_password and session_secret before remote exposure; keep auth_token for API clients.') }}{% endif %}</p>
-    {% if accounts_enabled|default(false) %}<p style="margin:12px 0"><a class="btn btn-sm" href="/account">我的帳號與登入方式</a> <a class="btn btn-sm" href="/admin/users">管理使用者</a></p>{% endif %}
+    {% if accounts_enabled|default(false) %}<p style="margin:12px 0"><a class="btn btn-sm" href="/account">我的帳號與登入方式</a> {% if system_admin %}<a class="btn btn-sm" href="/admin/users">管理使用者</a>{% endif %}</p>{% endif %}
     {% if about.access.browser_login_configured %}<div style="display:grid;gap:8px;margin-top:13px" id="browser-session-list">
       {% for item in browser_sessions %}<div class="tile settings-session">
         <div class="settings-row-main"><strong>{{ t('This session') if item.current else t('Browser session') }}</strong>{% if item.current %} <span class="chip on">{{ t('current') }}</span>{% endif %}<div class="sub" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ item.user_agent }}">{{ item.user_agent }}</div><div class="sub" style="font-size:10.5px">{{ t('Last active') }}: {{ item.last_seen_at[:16]|replace('T',' · ') }} · {{ t('Expires') }}: {{ item.expires_at[:10] }}</div></div>
@@ -177,24 +196,33 @@
   <section class="sf-settings-group sf-prefs" id="group-preferences" data-sf-group="preferences" data-sf-phone-only aria-labelledby="group-preferences-title">
   <h2 class="sf-settings-group-title" id="group-preferences-title">{{ t('Preferences') }}</h2>
     <h3 class="sf-pref-head">{{ t('Transcript & summary') }}</h3>
+    {% if system_admin %}
     <a class="sf-pref-row" href="#hardware-profiles"><span class="sf-pref-label">{{ t('Transcription language') }}</span><span class="sf-pref-value">{{ t('Auto detect') if speech_prefs.language == 'auto' else speech_prefs.language }}</span>{{ icon('chevron-right', 'sm') }}</a>
     <p class="sf-pref-help">{{ t('Default language for transcription and notes. Set with the speech provider configuration.') }}</p>
+    {% endif %}
     <div class="sf-pref-row">
       <label class="sf-pref-label" for="sf-auto-process">{{ t('Process new recordings automatically') }}</label>
       <span class="sf-switch"><input id="sf-auto-process" type="checkbox" role="switch" data-sf-pref-toggle="auto_process_new_recordings" {% if workspace_preferences.auto_process_new_recordings %}checked{% endif %}><span></span></span>
     </div>
     <p class="sf-pref-help" data-sf-pref-status role="status" aria-live="polite">{{ t('Download, transcribe, label speakers, and generate notes as soon as a recording arrives.') }}</p>
+    {% if system_admin %}
     <a class="sf-pref-row" href="#connections"><span class="sf-pref-label">{{ t('Clean up transcript automatically') }}</span><span class="sf-pref-value">{{ t('On') if speech_prefs.polish else t('Off') }}</span>{{ icon('chevron-right', 'sm') }}</a>
     <p class="sf-pref-help">{{ t('AI correction removes stutters and recognition errors after speaker labeling. The raw transcript is always kept.') }}</p>
+    {% endif %}
+    {% if system_admin %}
     <a class="sf-pref-row" href="#hardware-profiles"><span class="sf-pref-label">{{ t('Speaker labeling') }}</span><span class="sf-pref-value">{{ t('On') if speech_prefs.diarization else t('Off') }}</span>{{ icon('chevron-right', 'sm') }}</a>
+    {% endif %}
     <a class="sf-pref-row" href="#vocabulary"><span class="sf-pref-label">{{ t('Custom vocabulary') }}</span><span class="sf-pref-value">{% if speech_prefs.vocabulary_enabled %}{{ t('On') }} · {{ speech_prefs.vocabulary_enabled }}{% else %}{{ t('Off') }}{% endif %}</span>{{ icon('chevron-right', 'sm') }}</a>
     <h3 class="sf-pref-head">{{ t('Notifications') }}</h3>
     <a class="sf-pref-row" href="/notifications"><span class="sf-pref-label">{{ t('Messages & notifications') }}</span><span class="sf-pref-value">{% if speech_prefs.unread_notifications %}{{ speech_prefs.unread_notifications }} {{ t('unread') }}<span class="sf-dot" aria-hidden="true"></span>{% endif %}</span>{{ icon('chevron-right', 'sm') }}</a>
     <h3 class="sf-pref-head">{{ t('Security') }}</h3>
     <a class="sf-pref-row" href="#access-security"><span class="sf-pref-label">{{ t('Web login') }}</span><span class="sf-pref-value">{{ t('On') if about.access.browser_login_configured else t('Off') }}</span>{{ icon('chevron-right', 'sm') }}</a>
-    <p class="sf-pref-help">{% if accounts_enabled|default(false) %}使用 Google 或本地密碼登入，並由管理員核准工作區權限。{% else %}{{ t('Protect this workspace with a password and revocable browser sessions.') }}{% endif %}</p>
+    <p class="sf-pref-help">{% if accounts_enabled|default(false) %}使用 Google 或本地密碼登入。每個帳號都有自己的私有工作區，由擁有者核准新帳號。{% else %}{{ t('Protect this workspace with a password and revocable browser sessions.') }}{% endif %}</p>
+    {% if system_admin %}
     <a class="sf-pref-row" href="#privacy"><span class="sf-pref-label">{{ t('Privacy & data boundary') }}</span>{{ icon('chevron-right', 'sm') }}</a>
+    {% endif %}
   </section>
+  {% if system_admin %}
   <section class="sf-settings-group" id="group-processing" data-sf-group="processing" aria-labelledby="group-processing-title">
   <h2 class="sf-settings-group-title" id="group-processing-title">{{ t('Speech & AI providers') }}</h2>
   <div class="panel sf-settings-panel" id="hardware-profiles">
@@ -456,6 +484,12 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><a class="btn sec" href="#connections">{{ t('Review provider connections') }}</a><a class="btn sec" href="/api/system/diagnostics.json">{{ t('Download safe diagnostics') }}</a></div>
   </div>
   </section>
+  {% else %}
+  <section class="sf-settings-group" id="group-processing" aria-labelledby="group-processing-title">
+  <h2 class="sf-settings-group-title" id="group-processing-title">{{ t('Speech & AI providers') }}</h2>
+  <div class="panel sf-settings-panel" id="shared-processing"><strong>由擁有者統一設定</strong><p class="sub" style="font-size:12px;margin:4px 0 0">轉錄、說話者辨識、AI 模型、運算資源與備份由這台伺服器的擁有者設定，所有工作區共用。你的錄音與筆記只存在你自己的工作區，其他帳號（包含擁有者）在介面中看不到。</p></div>
+  </section>
+  {% endif %}
   <section class="sf-settings-group" id="group-integrations" data-sf-group="integrations" aria-labelledby="group-integrations-title">
   <h2 class="sf-settings-group-title" id="group-integrations-title">{{ t('Integrations & automation') }}</h2>
   <div class="panel sf-settings-panel" id="webhook-integrations">
@@ -526,7 +560,7 @@
   <div class="panel sf-settings-panel" id="support-about">
     <div class="settings-panel-top" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap"><div><strong>{{ t('Support & about') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Runtime identity and a deliberately redacted support bundle.') }}</div></div><span class="chip">v{{ about.version }}{% if about.build_commit %} · {{ about.build_commit[:12] }}{% endif %}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px;margin-top:12px"><div class="tile"><div class="k">{{ t('Runtime') }}</div><div style="margin-top:4px">Python {{ about.python }}</div></div><div class="tile"><div class="k">{{ t('Host') }}</div><div style="margin-top:4px">{{ about.system }} · {{ about.machine }}</div></div><div class="tile"><div class="k">{{ t('License') }}</div><div style="margin-top:4px">{{ about.license }}</div></div></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px"><a class="btn" href="/api/system/diagnostics.json">{{ t('Download safe diagnostics') }}</a><a class="btn sec" href="/status">{{ t('System health') }}</a><a class="btn sec" href="/api/docs">{{ t('API documentation') }}</a><a class="btn sec" href="{{ about.support.repository }}" target="_blank" rel="noopener">{{ t('GitHub repository') }} ↗</a></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px">{% if system_admin %}<a class="btn" href="/api/system/diagnostics.json">{{ t('Download safe diagnostics') }}</a>{% endif %}<a class="btn sec" href="/status">{{ t('System health') }}</a><a class="btn sec" href="/api/docs">{{ t('API documentation') }}</a><a class="btn sec" href="{{ about.support.repository }}" target="_blank" rel="noopener">{{ t('GitHub repository') }} ↗</a></div>
     <p class="sub" style="font-size:11.5px;margin:10px 0 0">{{ t('Diagnostics contain aggregate counts and non-secret runtime switches only. Recording IDs, titles, content, paths, URLs, addresses, errors, environment variables, and credentials are excluded.') }}</p>
   </div>
   </section>
@@ -535,6 +569,35 @@
 </div></div>
 {% endblock %}
 {% block scripts %}
+<style>
+.plaud-connect-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.plaud-connect-finish{margin-top:14px;padding-top:14px;border-top:1px solid var(--line, var(--c-border))}
+.plaud-connect-finish label{display:block;font-size:13px;font-weight:500;margin-bottom:6px}
+.plaud-connect-steps{margin:0 0 12px;padding-left:20px;font-size:13px;line-height:1.7;color:var(--muted, var(--c-text-2))}
+.plaud-connect-steps code{font-size:12px}
+.plaud-connect-row{display:flex;gap:8px}.plaud-connect-row .input{flex:1;min-width:0}
+.plaud-connect-status{font-size:12px;margin:8px 0 0}.plaud-connect-status.error{color:var(--c-danger, #d33)}
+@media(max-width:600px){.plaud-connect-row{flex-direction:column}}
+</style>
+<script>
+(()=>{const root=document.querySelector('[data-plaud-connect]');if(!root)return;
+const form=root.querySelector('[data-plaud-connect-finish]'),status=form.querySelector('.plaud-connect-status');
+const say=(text,error)=>{status.textContent=text;status.classList.toggle('error',!!error)};
+const detail=async r=>{const body=await r.json().catch(()=>({}));return body.detail||'連線失敗，請重新嘗試。'};
+root.querySelector('[data-plaud-connect-start]')?.addEventListener('click',async event=>{
+  const button=event.currentTarget,tab=window.open('about:blank','_blank');button.disabled=true;
+  try{const r=await fetch('/api/plaud/connect',{method:'POST'});if(!r.ok){tab?.close();say(await detail(r),true);form.hidden=false;return}
+    const {authorization_url:url}=await r.json();if(tab){tab.opener=null;tab.location=url}else{location.assign(url);return}
+    form.hidden=false;say('');form.querySelector('input').focus();
+  }finally{button.disabled=false}});
+form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button');button.disabled=true;say('連結中…');
+  try{const r=await fetch('/api/plaud/connect/complete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({redirect_url:form.redirect_url.value})});
+    if(!r.ok){say(await detail(r),true);return}say('已連結。新的錄音會在下次同步時出現。');setTimeout(()=>location.reload(),900);
+  }finally{button.disabled=false}});
+root.querySelector('[data-plaud-disconnect]')?.addEventListener('click',async()=>{if(!confirm('中斷後不會再同步新的錄音，已匯入的錄音會保留。確定中斷？'))return;
+  const r=await fetch('/api/plaud/connection',{method:'DELETE'});if(r.ok)location.reload();else say(await detail(r),true)});
+})();
+</script>
 <style>
 .settings-page{max-width:1180px!important}.settings-layout{display:grid;grid-template-columns:180px minmax(0,1fr);gap:22px;align-items:start;margin-top:20px}.settings-nav{position:sticky;top:18px;display:flex;flex-direction:column;gap:3px}.settings-nav a{padding:8px 10px;border-radius:8px;color:var(--muted);font-size:13px;font-weight:600}.settings-nav a:hover,.settings-nav a:focus-visible{background:var(--panel2);color:var(--fg);outline:none}.settings-sections{min-width:0}.settings-sections>.panel:first-child{margin-top:0!important}.settings-sections>.panel{scroll-margin-top:18px}
 @media(max-width:820px){.settings-layout{grid-template-columns:1fr;gap:14px}.settings-nav{position:static;flex-direction:row;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}.settings-nav a{white-space:nowrap;background:var(--panel)}.settings-sections>.panel{scroll-margin-top:72px}#workspace-preferences-form{grid-template-columns:1fr!important}.folder-profile-row,#note-template-form>div:first-child{grid-template-columns:minmax(0,1fr)!important}.folder-profile-row>*{min-width:0}.folder-profile-row select{width:100%}}

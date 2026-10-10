@@ -37,6 +37,7 @@ from pydantic import BaseModel
 from ..config import get_settings
 from ..db.models import Outline, PlaudFile, StageName, StageStatus
 from ..db.session import session_scope
+from ..db.tenancy import run_in_current_workspace, scoped_to_file
 
 router = APIRouter()
 
@@ -184,9 +185,12 @@ class RegenerateRequest(BaseModel):
 
 def _start_worker(target, *args, **kwargs) -> None:
     """Run the rebuild off the request thread (tests replace this)."""
-    threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True).start()
+    threading.Thread(
+        target=run_in_current_workspace(target), args=args, kwargs=kwargs, daemon=True
+    ).start()
 
 
+@scoped_to_file
 def _run_rebuild(file_id: str, claim_token: str, method: str | None) -> None:
     from ..worker.pipeline import process_outline_only
 

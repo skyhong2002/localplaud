@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import sys
@@ -269,9 +270,13 @@ def run():
         console.print(f"[red]✗[/] {exc}")
         raise typer.Exit(1) from exc
     try:
-        reset_inflight(force=True, previous_owner=previous_owner)
-        recover_ask_request_claims(previous_owner)
-        recover_provider_dispatch_reservations(previous_owner)
+        from .db.tenancy import system_scope
+
+        # A restart interrupts work in every workspace.
+        with system_scope():
+            reset_inflight(force=True, previous_owner=previous_owner)
+            recover_ask_request_claims(previous_owner)
+            recover_provider_dispatch_reservations(previous_owner)
     except Exception:
         release_daemon_owner(daemon_owner)
         raise
@@ -306,8 +311,38 @@ def run_processing_cycle(settings, *, daemon_owner: str | None = None) -> int:
     return process_automatic_pending(settings, daemon_owner=daemon_owner)
 
 
+_workspace_turn = itertools.count()
+
+
 def process_automatic_pending(settings=None, *, daemon_owner: str | None = None) -> int:
-    """Process the daemon queue only when the durable workspace preference allows it."""
+    """Process each workspace's queue when its durable preference allows it.
+
+    Called without a workspace (the daemon), workspaces take turns starting
+    the batch so one large library cannot starve another. Called inside a
+    workspace scope, only that workspace is processed.
+    """
+    from .db.session import session_scope
+    from .db.tenancy import scope_is_bound, workspace_scope
+    from .workspaces import all_workspace_ids
+
+    settings = settings or get_settings()
+    if scope_is_bound():
+        return _process_workspace_pending(settings, daemon_owner=daemon_owner)
+    with session_scope() as session:
+        workspace_ids = all_workspace_ids(session)
+    if not workspace_ids:
+        return 0
+    start = next(_workspace_turn) % len(workspace_ids)
+    count = 0
+    for workspace_id in workspace_ids[start:] + workspace_ids[:start]:
+        with workspace_scope(workspace_id):
+            count += _process_workspace_pending(settings, daemon_owner=daemon_owner)
+        if count >= settings.pipeline.files_per_cycle:
+            break
+    return count
+
+
+def _process_workspace_pending(settings, *, daemon_owner: str | None = None) -> int:
     from .db.session import session_scope
     from .preferences import get_workspace_preferences
     from .worker.claims import processing_owner
@@ -315,7 +350,6 @@ def process_automatic_pending(settings=None, *, daemon_owner: str | None = None)
     from .worker.pipeline import process_pending
     from .worker.reindex import process_pending_reindexes
 
-    settings = settings or get_settings()
     with session_scope() as session:
         enabled = get_workspace_preferences(session)["auto_process_new_recordings"]
     if not enabled:

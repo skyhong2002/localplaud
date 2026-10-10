@@ -163,6 +163,25 @@ def lock_cost_budget(session: Session, file_id: str | None) -> None:
 def cost_budget_status(
     session: Session, file_id: str | None, snapshot: dict | None
 ) -> dict:
+    """Spend against a profile's cost ceiling.
+
+    A recording's budget covers that recording. The library budget (no
+    recording) is shared: every workspace spends the same provider keys, so it
+    totals library-level spend across all workspaces.
+    """
+    from contextlib import nullcontext
+
+    from ..db.tenancy import system_scope
+
+    # Flush pending rows in their own workspace before reading unscoped.
+    session.flush()
+    with system_scope() if file_id is None else nullcontext(), session.no_autoflush:
+        return _cost_budget_status(session, file_id, snapshot)
+
+
+def _cost_budget_status(
+    session: Session, file_id: str | None, snapshot: dict | None
+) -> dict:
     ceiling = ((snapshot or {}).get("policy") or {}).get("cost_ceiling")
     stage_spent = (
         float(

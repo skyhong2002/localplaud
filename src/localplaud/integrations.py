@@ -22,6 +22,7 @@ from .db.models import (
     WebhookIntegration,
 )
 from .db.session import session_scope
+from .db.tenancy import HOST_PRIVILEGE_ERROR, host_privileges_allowed
 from .error_redaction import sanitize_error
 from .export_formats import recording_data
 
@@ -62,6 +63,8 @@ def save_webhook_integration(session, data: dict, integration_id: int | None = N
     if secret_ref and not _ENV_REF.fullmatch(secret_ref):
         raise ValueError("webhook secret reference must use env:VARIABLE")
     allow_private = bool(data.get("allow_private_network"))
+    if (secret_ref or allow_private) and not host_privileges_allowed():
+        raise ValueError(HOST_PRIVILEGE_ERROR)
     validate_webhook_url(data["url"], allow_private_network=allow_private)
     row = session.get(WebhookIntegration, integration_id) if integration_id else None
     if integration_id and row is None:
@@ -180,6 +183,8 @@ def _secret_value(secret_ref: str | None) -> str | None:
         return None
     if not _ENV_REF.fullmatch(secret_ref):
         raise ValueError("webhook secret reference must use env:VARIABLE")
+    if not host_privileges_allowed():
+        raise ValueError(HOST_PRIVILEGE_ERROR)
     name = secret_ref.removeprefix("env:")
     value = os.environ.get(name)
     if not value:
@@ -232,7 +237,9 @@ def build_webhook_payload(file_id: str, snapshot: dict, idempotency_key: str) ->
 
 def _post_webhook(snapshot: dict, body: bytes, idempotency_key: str) -> tuple[int, str]:
     validate_webhook_url(
-        snapshot["url"], allow_private_network=bool(snapshot.get("allow_private_network"))
+        snapshot["url"],
+        allow_private_network=bool(snapshot.get("allow_private_network"))
+        and host_privileges_allowed(),
     )
     headers = {
         "content-type": "application/json",

@@ -15,6 +15,7 @@ import hashlib
 import html
 import json
 import logging
+import os
 import secrets
 import threading
 import time
@@ -74,8 +75,11 @@ class OfficialTokenStore:
     def _save(self, tokens: dict) -> None:
         self.tokens_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         temporary = self.tokens_path.with_name(f".{self.tokens_path.name}.tmp")
-        temporary.write_text(json.dumps(tokens, indent=2))
-        temporary.chmod(0o600)
+        temporary.unlink(missing_ok=True)
+        # Create private from the start; never briefly umask-readable.
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(json.dumps(tokens, indent=2))
         temporary.replace(self.tokens_path)
         self._tokens = tokens
 

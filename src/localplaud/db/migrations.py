@@ -576,10 +576,22 @@ def migrate_automation_ownership_schema(engine: Engine) -> list[str]:
                 "ON automation_rules (owner_type)"
             )
         )
+        # External rule ids are unique per workspace; replace the index from
+        # before workspaces existed. init_db adds workspace_id first, but this
+        # migration may also run alone against an older table.
+        if "workspace_id" not in columns:
+            connection.execute(
+                text("ALTER TABLE automation_rules ADD COLUMN workspace_id INTEGER NOT NULL DEFAULT 1")
+            )
+        for index in inspect(connection).get_indexes("automation_rules"):
+            if index["name"] == "uq_automation_rule_owner_external" and index[
+                "column_names"
+            ] != ["workspace_id", "owner_key", "external_id"]:
+                connection.execute(text("DROP INDEX uq_automation_rule_owner_external"))
         connection.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_rule_owner_external "
-                "ON automation_rules (owner_key, external_id)"
+                "ON automation_rules (workspace_id, owner_key, external_id)"
             )
         )
     return migrated
@@ -1729,3 +1741,194 @@ def migrate_account_sessions(engine: Engine) -> None:
             if column not in columns:
                 connection.execute(text(f"ALTER TABLE browser_sessions ADD COLUMN {column} {ddl}"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_browser_sessions_user_id ON browser_sessions (user_id)"))
+
+
+def _rebuild_sqlite_table(connection, table, *, select_columns=None) -> None:
+    """Recreate ``table`` from the current model, keeping every shared column.
+
+    Follows SQLite's documented order (new table, copy, drop, rename) so foreign
+    keys in other tables keep pointing at the original name. ``select_columns``
+    maps a column name to the SQL expression that fills it.
+    """
+    from sqlalchemy.schema import CreateTable
+
+    name = table.name
+    existing = {column["name"] for column in inspect(connection).get_columns(name)}
+    shared = [column.name for column in table.columns if column.name in existing]
+    for index in inspect(connection).get_indexes(name):
+        connection.execute(text(f'DROP INDEX IF EXISTS "{index["name"]}"'))
+    # An interrupted earlier attempt may have left its staging table behind.
+    connection.execute(text(f'DROP TABLE IF EXISTS "{name}__rebuild"'))
+    ddl = str(CreateTable(table).compile(dialect=connection.dialect))
+    prefix = f"CREATE TABLE {name} "
+    assert ddl.lstrip().startswith(prefix), ddl
+    connection.execute(text(ddl.lstrip().replace(prefix, f'CREATE TABLE "{name}__rebuild" ', 1)))
+    columns = ", ".join(f'"{column}"' for column in shared)
+    values = ", ".join((select_columns or {}).get(column, f'"{column}"') for column in shared)
+    connection.execute(
+        text(f'INSERT INTO "{name}__rebuild" ({columns}) SELECT {values} FROM "{name}"')
+    )
+    connection.execute(text(f'DROP TABLE "{name}"'))
+    connection.execute(text(f'ALTER TABLE "{name}__rebuild" RENAME TO "{name}"'))
+    for index in table.indexes:
+        index.create(connection, checkfirst=True)
+
+
+def migrate_workspace_columns(engine: Engine) -> list[str]:
+    """Add ``workspace_id`` (default 1) to every workspace-owned table.
+
+    Runs before the other migrations, some of which query through the ORM and
+    therefore need the column the workspace filter adds to every statement.
+    """
+    from .models import _INDEXED_WORKSPACE_TABLES, Base, WorkspaceOwned
+
+    changed: list[str] = []
+    owned = [
+        mapper.local_table
+        for mapper in Base.registry.mappers
+        if issubclass(mapper.class_, WorkspaceOwned)
+    ]
+    with engine.begin() as connection:
+        tables = set(inspect(connection).get_table_names())
+        for table in owned:
+            if table.name not in tables:
+                continue
+            columns = {column["name"] for column in inspect(connection).get_columns(table.name)}
+            if "workspace_id" not in columns:
+                connection.execute(
+                    text(
+                        f'ALTER TABLE "{table.name}" '
+                        "ADD COLUMN workspace_id INTEGER NOT NULL DEFAULT 1"
+                    )
+                )
+                changed.append(f"{table.name}.workspace_id")
+            if table.name in _INDEXED_WORKSPACE_TABLES:
+                connection.execute(
+                    text(
+                        f'CREATE INDEX IF NOT EXISTS "ix_{table.name}_workspace_id" '
+                        f'ON "{table.name}" (workspace_id)'
+                    )
+                )
+    return changed
+
+
+def migrate_workspaces(engine: Engine) -> list[str]:
+    """Move the single shared library into workspace 1, owned by the owner account.
+
+    Ensures ``workspace_id`` columns, makes name-like uniqueness per workspace,
+    and narrows account roles to the owner (system administrator) and members
+    (each with a private workspace). Existing ids, audio paths and share links
+    are unchanged.
+    """
+    from .models import AccountUser, Base, Workspace
+
+    changed = migrate_workspace_columns(engine)
+    with engine.begin() as connection:
+        if engine.dialect.name == "sqlite":
+            for table in (
+                Base.metadata.tables["vocabulary_terms"],
+                Base.metadata.tables["note_templates"],
+                Base.metadata.tables["automation_rules"],
+            ):
+                constraints = inspect(connection).get_unique_constraints(table.name)
+                if any(
+                    "workspace_id" not in constraint["column_names"] for constraint in constraints
+                ):
+                    _rebuild_sqlite_table(connection, table)
+                    changed.append(f"{table.name}.unique")
+            accounts = Base.metadata.tables["account_users"]
+            ddl = connection.execute(
+                text("SELECT sql FROM sqlite_master WHERE type='table' AND name='account_users'")
+            ).scalar_one_or_none()
+            if ddl and "'member'" not in ddl:
+                _rebuild_account_roles(connection, accounts)
+                changed.append("account_users.role")
+        elif engine.dialect.name == "postgresql":
+            changed.extend(_migrate_postgres_workspace_constraints(connection))
+
+        owner_id = connection.execute(
+            select(AccountUser.id).where(AccountUser.owner_slot == "owner")
+        ).scalar_one_or_none()
+        preferences = connection.execute(
+            select(KeyValue.value).where(KeyValue.key == "workspace_preferences")
+        ).scalar_one_or_none()
+        name = ((preferences or {}).get("workspace_name") or "localplaud")[:80]
+        # create_all seeds workspace 1 with a placeholder name on new tables.
+        row = connection.execute(
+            select(Workspace.name, Workspace.owner_user_id).where(Workspace.id == 1)
+        ).first()
+        if row is None:
+            connection.execute(
+                Workspace.__table__.insert().values(id=1, name=name, owner_user_id=owner_id)
+            )
+            changed.append("workspaces.default")
+        elif (row.name == "localplaud" and name != row.name) or (
+            owner_id is not None and row.owner_user_id is None
+        ):
+            connection.execute(
+                Workspace.__table__.update()
+                .where(Workspace.id == 1)
+                .values(
+                    name=name if row.name == "localplaud" else row.name,
+                    owner_user_id=row.owner_user_id or owner_id,
+                )
+            )
+            changed.append("workspaces.default")
+    return changed
+
+
+_PER_WORKSPACE_UNIQUE = {
+    "vocabulary_terms": ("uq_vocabulary_source_language", "source_text, language"),
+    "note_templates": ("uq_note_template_key_version", "key, version"),
+    "automation_rules": ("uq_automation_rule_owner_external", "owner_key, external_id"),
+}
+
+
+def _migrate_postgres_workspace_constraints(connection) -> list[str]:
+    """PostgreSQL can alter constraints in place instead of rebuilding tables."""
+    changed = []
+    inspector = inspect(connection)
+    for table, (name, columns) in _PER_WORKSPACE_UNIQUE.items():
+        current = {
+            constraint["name"]: constraint["column_names"]
+            for constraint in inspector.get_unique_constraints(table)
+        }
+        if current.get(name, [None])[0] == "workspace_id":
+            continue
+        connection.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {name}"))
+        connection.execute(
+            text(f"ALTER TABLE {table} ADD CONSTRAINT {name} UNIQUE (workspace_id, {columns})")
+        )
+        changed.append(f"{table}.unique")
+    checks = {
+        constraint["name"]: constraint["sqltext"]
+        for constraint in inspector.get_check_constraints("account_users")
+    }
+    role_checks = [name for name, sql in checks.items() if "'viewer'" in sql]
+    if role_checks:
+        for name in role_checks:
+            connection.execute(text(f'ALTER TABLE account_users DROP CONSTRAINT "{name}"'))
+        connection.execute(
+            text("UPDATE account_users SET role = 'member' WHERE role <> 'owner'")
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE account_users ADD CONSTRAINT ck_account_users_role "
+                "CHECK (role IN ('owner', 'member'))"
+            )
+        )
+        changed.append("account_users.role")
+    return changed
+
+
+def _rebuild_account_roles(connection, accounts) -> None:
+    """Rebuild ``account_users`` with the owner/member role constraint.
+
+    The former shared-workspace admin and viewer roles both become members:
+    each member now owns a private workspace instead of a role in the owner's.
+    """
+    _rebuild_sqlite_table(
+        connection,
+        accounts,
+        select_columns={"role": "CASE WHEN role = 'owner' THEN 'owner' ELSE 'member' END"},
+    )

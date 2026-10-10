@@ -27,8 +27,9 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    event,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column, relationship
 
 
 def _now() -> datetime:
@@ -39,19 +40,76 @@ class Base(DeclarativeBase):
     pass
 
 
+class Workspace(Base):
+    """One private library. Every account owns exactly one; nothing is shared."""
+
+    __tablename__ = "workspaces"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(80), default="localplaud")
+    owner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("account_users.id", ondelete="SET NULL"), unique=True, default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+@event.listens_for(Workspace.__table__, "after_create")
+def _create_default_workspace(target, connection, **_kw) -> None:
+    # Rows written before any account exists belong to the original workspace.
+    connection.execute(target.insert().values(id=1, name="localplaud"))
+
+
+class WorkspaceOwned:
+    """Rows that belong to exactly one workspace.
+
+    ``db.tenancy`` filters every ORM read and stamps every insert with the
+    active workspace, so request handlers never see another account's rows.
+    The server default only backfills rows that predate workspaces.
+    """
+
+    @declared_attr
+    def workspace_id(cls) -> Mapped[int]:
+        return mapped_column(
+            Integer,
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            index=getattr(cls, "__tablename__", None) in _INDEXED_WORKSPACE_TABLES,
+            server_default="1",
+        )
+
+
+# Library roots queried directly by workspace; large child tables are reached
+# through these, so their extra predicate never needs its own index.
+_INDEXED_WORKSPACE_TABLES = {
+    "plaud_files",
+    "folders",
+    "tags",
+    "vocabulary_terms",
+    "note_templates",
+    "ask_threads",
+    "user_notes",
+    "knowledge_documents",
+    "import_runs",
+    "automation_rules",
+    "notifications",
+    "webhook_integrations",
+    "email_integrations",
+}
+
+
 class AccountUser(Base):
     __tablename__ = "account_users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True)
     email: Mapped[str] = mapped_column(String(254), unique=True)
     password_hash: Mapped[str | None] = mapped_column(Text)
-    role: Mapped[str] = mapped_column(String(16), default="viewer")
+    # ``owner`` administers the system; every ``member`` owns a private workspace.
+    role: Mapped[str] = mapped_column(String(16), default="member")
     status: Mapped[str] = mapped_column(String(16), default="pending")
     # Unique nullable bootstrap slot prevents concurrent first-owner creation.
     owner_slot: Mapped[str | None] = mapped_column(String(16), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     __table_args__ = (
-        CheckConstraint("role IN ('owner', 'admin', 'viewer')"),
+        CheckConstraint("role IN ('owner', 'member')"),
         CheckConstraint("status IN ('pending', 'active', 'disabled')"),
     )
 
@@ -135,7 +193,7 @@ recording_tags = Table(
 )
 
 
-class Folder(Base):
+class Folder(WorkspaceOwned, Base):
     __tablename__ = "folders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -151,7 +209,7 @@ class Folder(Base):
     recordings: Mapped[list[PlaudFile]] = relationship(back_populates="folder")
 
 
-class Tag(Base):
+class Tag(WorkspaceOwned, Base):
     __tablename__ = "tags"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -169,7 +227,7 @@ class Tag(Base):
     )
 
 
-class VocabularyTerm(Base):
+class VocabularyTerm(WorkspaceOwned, Base):
     """A local, user-owned transcript correction rule.
 
     Rules are applied as immutable transcript revisions; raw provider output is
@@ -190,7 +248,9 @@ class VocabularyTerm(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("source_text", "language", name="uq_vocabulary_source_language"),
+        UniqueConstraint(
+            "workspace_id", "source_text", "language", name="uq_vocabulary_source_language"
+        ),
     )
 
 
@@ -218,10 +278,12 @@ class StageStatus(enum.StrEnum):
     skipped = "skipped"
 
 
-class PlaudFile(Base):
+class PlaudFile(WorkspaceOwned, Base):
     __tablename__ = "plaud_files"
 
-    # Plaud's file id is the primary key — stable across syncs.
+    # Stable local id. In the original workspace it is Plaud's own file id;
+    # other workspaces prefix it (see ``db.tenancy.local_file_id``) so two
+    # accounts can never collide. The Plaud client translates at its boundary.
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
 
     # ---- Cloud metadata (from GET /file/simple/web) ----
@@ -410,7 +472,7 @@ class PlaudFile(Base):
         return matches[-1] if matches else None
 
 
-class ShareLink(Base):
+class ShareLink(WorkspaceOwned, Base):
     """Revocable public read-only access to one recording."""
 
     __tablename__ = "share_links"
@@ -430,7 +492,7 @@ class ShareLink(Base):
     file: Mapped[PlaudFile] = relationship(back_populates="share_links")
 
 
-class Transcript(Base):
+class Transcript(WorkspaceOwned, Base):
     __tablename__ = "transcripts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -453,7 +515,7 @@ class Transcript(Base):
     file: Mapped[PlaudFile] = relationship(back_populates="transcripts")
 
 
-class Speaker(Base):
+class Speaker(WorkspaceOwned, Base):
     """A stable per-recording speaker identity with an editable display name.
 
     ``key`` is the diarization label stored inside the transcript segment JSON
@@ -482,7 +544,7 @@ class Speaker(Base):
     __table_args__ = (UniqueConstraint("file_id", "key", name="uq_speaker_file_key"),)
 
 
-class TranscriptRevision(Base):
+class TranscriptRevision(WorkspaceOwned, Base):
     """A non-destructive corrected transcript revision over immutable raw ASR.
 
     Each edit produces the next ``revision`` for the file; the latest revision
@@ -522,7 +584,7 @@ class TranscriptRevision(Base):
     )
 
 
-class Summary(Base):
+class Summary(WorkspaceOwned, Base):
     __tablename__ = "summaries"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -557,7 +619,7 @@ class Summary(Base):
     __table_args__ = (UniqueConstraint("file_id", "template", name="uq_summary_file_template"),)
 
 
-class SummaryRevision(Base):
+class SummaryRevision(WorkspaceOwned, Base):
     """Immutable archived version of a generated note (one Summary output).
 
     Rows are written when a live Summary is displaced — by regeneration or by
@@ -608,7 +670,7 @@ class SummaryRevision(Base):
     )
 
 
-class Outline(Base):
+class Outline(WorkspaceOwned, Base):
     """One immutable generation of a recording's chapter outline.
 
     Every generation inserts the next ``revision``; the highest revision is the
@@ -648,7 +710,7 @@ class Outline(Base):
     __table_args__ = (UniqueConstraint("file_id", "revision", name="uq_outline_file_revision"),)
 
 
-class NoteTemplate(Base):
+class NoteTemplate(WorkspaceOwned, Base):
     """Versioned, locally editable prompt used to generate structured notes."""
 
     __tablename__ = "note_templates"
@@ -675,11 +737,13 @@ class NoteTemplate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     __table_args__ = (
-        UniqueConstraint("key", "version", name="uq_note_template_key_version"),
+        UniqueConstraint(
+            "workspace_id", "key", "version", name="uq_note_template_key_version"
+        ),
     )
 
 
-class AskThread(Base):
+class AskThread(WorkspaceOwned, Base):
     __tablename__ = "ask_threads"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -704,7 +768,7 @@ class AskThread(Base):
     )
 
 
-class AskMessage(Base):
+class AskMessage(WorkspaceOwned, Base):
     __tablename__ = "ask_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -725,7 +789,7 @@ class AskMessage(Base):
     thread: Mapped[AskThread] = relationship(back_populates="messages")
 
 
-class UserNote(Base):
+class UserNote(WorkspaceOwned, Base):
     __tablename__ = "user_notes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -762,7 +826,7 @@ class UserNote(Base):
     )
 
 
-class UserNoteRevision(Base):
+class UserNoteRevision(WorkspaceOwned, Base):
     """Immutable title/body snapshot displaced from an editable UserNote."""
 
     __tablename__ = "user_note_revisions"
@@ -784,7 +848,7 @@ class UserNoteRevision(Base):
     )
 
 
-class KnowledgeDocument(Base):
+class KnowledgeDocument(WorkspaceOwned, Base):
     """Durable indexing state for one current note artifact."""
 
     __tablename__ = "knowledge_documents"
@@ -861,7 +925,7 @@ class KnowledgeDocument(Base):
     )
 
 
-class KnowledgeChunk(Base):
+class KnowledgeChunk(WorkspaceOwned, Base):
     """One embedded text span belonging to a versioned knowledge document."""
 
     __tablename__ = "knowledge_chunks"
@@ -887,7 +951,7 @@ class KnowledgeChunk(Base):
     )
 
 
-class KnowledgeIndexAttempt(Base):
+class KnowledgeIndexAttempt(WorkspaceOwned, Base):
     """Immutable-cost ledger for one note-index claim attempt."""
 
     __tablename__ = "knowledge_index_attempts"
@@ -929,7 +993,7 @@ class KnowledgeIndexAttempt(Base):
     )
 
 
-class ProviderCostReservation(Base):
+class ProviderCostReservation(WorkspaceOwned, Base):
     """Durable in-flight/direct-call provider cost charged to one budget scope."""
 
     __tablename__ = "provider_cost_reservations"
@@ -959,7 +1023,7 @@ class ProviderCostReservation(Base):
     )
 
 
-class ImportRun(Base):
+class ImportRun(WorkspaceOwned, Base):
     """Durable progress for a user-triggered metadata-only import."""
 
     __tablename__ = "import_runs"
@@ -984,7 +1048,7 @@ class ImportRun(Base):
     )
 
 
-class AutomationRule(Base):
+class AutomationRule(WorkspaceOwned, Base):
     """AutoFlow rule with explicit trigger/action JSON and edit ownership."""
 
     __tablename__ = "automation_rules"
@@ -1007,11 +1071,16 @@ class AutomationRule(Base):
         DateTime(timezone=True), default=_now, onupdate=_now
     )
     __table_args__ = (
-        UniqueConstraint("owner_key", "external_id", name="uq_automation_rule_owner_external"),
+        UniqueConstraint(
+            "workspace_id",
+            "owner_key",
+            "external_id",
+            name="uq_automation_rule_owner_external",
+        ),
     )
 
 
-class AutomationRun(Base):
+class AutomationRun(WorkspaceOwned, Base):
     """One idempotent evaluation/application of a rule version to a recording."""
 
     __tablename__ = "automation_runs"
@@ -1037,7 +1106,7 @@ class AutomationRun(Base):
     )
 
 
-class Notification(Base):
+class Notification(WorkspaceOwned, Base):
     """Durable local inbox item produced by an AutoFlow run."""
 
     __tablename__ = "notifications"
@@ -1055,7 +1124,7 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
-class AutomationExport(Base):
+class AutomationExport(WorkspaceOwned, Base):
     """One durable transcript export delivery for an AutoFlow run."""
 
     __tablename__ = "automation_exports"
@@ -1084,7 +1153,7 @@ class AutomationExport(Base):
     )
 
 
-class WebhookIntegration(Base):
+class WebhookIntegration(WorkspaceOwned, Base):
     """Explicitly authorized outbound webhook destination."""
 
     __tablename__ = "webhook_integrations"
@@ -1104,7 +1173,7 @@ class WebhookIntegration(Base):
     )
 
 
-class AutomationWebhookDelivery(Base):
+class AutomationWebhookDelivery(WorkspaceOwned, Base):
     """Durable, independently retryable outbound AutoFlow webhook attempt."""
 
     __tablename__ = "automation_webhook_deliveries"
@@ -1139,7 +1208,7 @@ class AutomationWebhookDelivery(Base):
     )
 
 
-class EmailIntegration(Base):
+class EmailIntegration(WorkspaceOwned, Base):
     """Explicitly authorized SMTP email destination."""
 
     __tablename__ = "email_integrations"
@@ -1165,7 +1234,7 @@ class EmailIntegration(Base):
     )
 
 
-class AutomationEmailDelivery(Base):
+class AutomationEmailDelivery(WorkspaceOwned, Base):
     """Durable, independently retryable AutoFlow SMTP delivery."""
 
     __tablename__ = "automation_email_deliveries"
@@ -1243,7 +1312,7 @@ class BackupSyncDelivery(Base):
     )
 
 
-class Chunk(Base):
+class Chunk(WorkspaceOwned, Base):
     """A retrievable text chunk with its embedding, for Q&A / semantic search."""
 
     __tablename__ = "chunks"
@@ -1275,7 +1344,7 @@ class Chunk(Base):
     file: Mapped[PlaudFile] = relationship(back_populates="chunks")
 
 
-class StageRun(Base):
+class StageRun(WorkspaceOwned, Base):
     """Durable state for one processing stage of one recording."""
 
     __tablename__ = "stage_runs"
@@ -1306,7 +1375,7 @@ class StageRun(Base):
     __table_args__ = (UniqueConstraint("file_id", "stage", name="uq_stage_run_file_stage"),)
 
 
-class StageAttempt(Base):
+class StageAttempt(WorkspaceOwned, Base):
     """Append-only execution and usage ledger for a concrete stage attempt."""
 
     __tablename__ = "stage_attempts"
@@ -1403,7 +1472,7 @@ class ProfileStageSelection(Base):
     __table_args__ = (UniqueConstraint("profile_id", "stage", name="uq_profile_stage"),)
 
 
-class RecordingProfileOverride(Base):
+class RecordingProfileOverride(WorkspaceOwned, Base):
     __tablename__ = "recording_profile_overrides"
     file_id: Mapped[str] = mapped_column(
         ForeignKey("plaud_files.id", ondelete="CASCADE"), primary_key=True
@@ -1416,7 +1485,7 @@ class RecordingProfileOverride(Base):
     )
 
 
-class RecordingRuleProfileAssignment(Base):
+class RecordingRuleProfileAssignment(WorkspaceOwned, Base):
     """Durable AutoFlow profile action, kept below a user's recording override."""
 
     __tablename__ = "recording_rule_profile_assignments"

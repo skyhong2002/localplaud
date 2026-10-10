@@ -775,8 +775,14 @@ never inherits forced-alignment evidence from the displaced transcript.
 ### Individual Web App accounts (2026-10-07)
 
 Account mode adds Google OIDC and local username/email/password login with pending
-approval, owner/admin/viewer permissions, user-bound revocable sessions and account
-management in the Web App. The existing recording library remains one shared
-workspace; this does not implement private per-user libraries. Legacy shared token
+approval, user-bound revocable sessions and account management in the Web App.
+
+### Private workspace per account (2026-10-10)
+
+Each account owns a private workspace with its own Plaud connection, recordings,
+notes, templates, organization, Ask, AutoFlow and preferences; no account sees
+another's, including the owner. Speech/AI providers, remote workers and backups
+remain shared and owner-managed. The pre-existing library is the owner's
+workspace. See [ADR 0008](adr/0008-workspace-isolation.md). Legacy shared token
 and password authentication is rejected in account mode. See [accounts](accounts.md)
 for initial owner bootstrap, operator password recovery and release limits.

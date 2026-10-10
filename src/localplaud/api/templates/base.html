@@ -83,9 +83,9 @@
         <div class="ws-menu-head"><span class="ws-avatar" aria-hidden="true">{{ workspace_preferences.workspace_name | initials }}</span><span class="truncate"><strong class="t-strong">{{ workspace_preferences.workspace_name }}</strong><br><span class="t-meta">{{ t('Self-hosted workspace') }}</span></span></div>
         <div class="menu-sep"></div>
         {% if account_user|default(None) %}
-        <div class="menu-label">{{ account_user.username }} · {{ '唯讀成員' if account_user.role == 'viewer' else '管理員' }}</div>
+        <div class="menu-label">{{ account_user.username }} · {{ '擁有者' if account_user.role == 'owner' else '成員' }}</div>
         <a class="menu-item" role="menuitem" href="/account">{{ icon('user') }}我的帳號</a>
-        {% if account_user.role in ['owner', 'admin'] %}<a class="menu-item" role="menuitem" href="/admin/users">{{ icon('users') }}帳號管理</a>{% endif %}
+        {% if account_user.role == 'owner' %}<a class="menu-item" role="menuitem" href="/admin/users">{{ icon('users') }}帳號管理</a>{% endif %}
         {% endif %}
         <a class="menu-item" role="menuitem" href="/settings">{{ icon('settings') }}{{ t('Settings') }}</a>
         <a class="menu-item" role="menuitem" href="/status">{{ icon('activity') }}{{ t('System status') }}</a>
@@ -179,7 +179,6 @@
       <button class="icon-btn" type="button" data-open-import="device" aria-label="{{ t('Add audio') }}">{{ icon('plus') }}</button>
     </header>
     {% endblock %}
-    {% if account_user|default(None) and account_user.role == 'viewer' and not account_workspace|default(false) %}<div role="status" style="padding:10px 20px;background:var(--c-bg-2);font-size:13px">唯讀模式：可瀏覽及匯出內容；編輯與生成需要管理員權限。 <a href="/account">我的帳號</a></div>{% endif %}
     {% block body %}{% endblock %}
     {% if show_tabbar %}{% include "_tabbar.html" %}{% endif %}
     {% block scripts %}{% endblock %}

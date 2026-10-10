@@ -1,14 +1,12 @@
 {% extends "account_base.html" %}
 {% block title %}我的帳號{% if account_workspace %} · localplaud{% endif %}{% endblock %}
 {% block account_content %}
-{% set roles = {'owner':'擁有者', 'admin':'管理員', 'viewer':'唯讀成員'} %}
+{% set roles = {'owner':'擁有者', 'member':'成員'} %}
 <div class="page-heading"><div><h1 class="page">我的帳號</h1><p class="sub">管理你的登入方式與使用中的裝置。</p></div><span class="chip">{{ roles.get(account_user.role, account_user.role) }}</span></div>
 {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
 {% if notice %}<div class="alert success" role="status">{{ notice }}</div>{% endif %}
 {% if account_user.status == 'pending' %}
-<section class="pending-panel" aria-labelledby="pending-title"><span class="status-dot" aria-hidden="true"></span><div><h2 id="pending-title">等待管理員核准</h2><p>你的帳號已建立。管理員核准後，就能依獲得的權限使用工作區。</p><p class="field-help">目前無法查看錄音、筆記、搜尋結果或使用 Ask。</p><a class="btn sec" href="/account">重新整理狀態</a></div></section>
-{% elif account_user.role == 'viewer' %}
-<div class="alert">你目前是唯讀成員，可瀏覽與匯出工作區內容。編輯、生成與管理功能需要管理員權限。</div>
+<section class="pending-panel" aria-labelledby="pending-title"><span class="status-dot" aria-hidden="true"></span><div><h2 id="pending-title">等待擁有者核准</h2><p>你的帳號已建立。核准後，你會有一個只屬於自己的工作區，可以連結自己的 Plaud 帳號。</p><p class="field-help">目前無法查看錄音、筆記、搜尋結果或使用 Ask。</p><a class="btn sec" href="/account">重新整理狀態</a></div></section>
 {% endif %}
 <div class="account-grid">
 <section class="panel"><h2>登入方式</h2><dl class="identity"><div><dt>帳號名稱</dt><dd>{{ account_user.username }}</dd></div><div><dt>Email</dt><dd>{{ account_user.email }}</dd></div><div><dt>Google</dt><dd>{{ '已連結' if google_linked else '尚未連結' }}</dd></div><div><dt>本地密碼</dt><dd>{{ '已設定' if has_password else '尚未設定' }}</dd></div></dl>

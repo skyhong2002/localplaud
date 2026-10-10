@@ -1,25 +1,34 @@
 {% extends "account_base.html" %}
 {% block title %}帳號管理{% if account_workspace %} · localplaud{% endif %}{% endblock %}
 {% block account_content %}
-{% set roles = {'owner':'擁有者', 'admin':'管理員', 'viewer':'唯讀成員'} %}
 {% set statuses = {'pending':'待核准', 'active':'已啟用', 'disabled':'已停用'} %}
-<div class="page-heading"><div><h1 class="page">帳號管理</h1><p class="sub">核准新帳號、調整權限，或停用存取。</p></div><span class="chip">{{ users|length }} 個帳號</span></div>
-<div class="alert">所有已核准的成員共用這個工作區的錄音與筆記。唯讀成員可瀏覽及匯出；管理員可編輯、生成與管理工作區。</div>
+<div class="page-heading"><div><h1 class="page">帳號管理</h1><p class="sub">新增或核准帳號，或停用存取。</p></div><span class="chip">{{ users|length }} 個帳號</span></div>
+<div class="alert">每個帳號都有自己的私有工作區，可連結自己的 Plaud 帳號，彼此看不到對方的錄音與筆記，擁有者也一樣。模型、轉錄與運算資源由擁有者統一設定，所有工作區共用。</div>
 {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
 {% if notice %}<div class="alert success" role="status">{{ notice }}</div>{% endif %}
+<details class="panel create-user"{% if create_error %} open{% endif %}>
+<summary><span class="create-user-title">新增帳號</span><span class="field-help">建立已啟用的帳號與空白工作區，並設定初始密碼。</span></summary>
+<form action="/admin/users" method="post" class="create-user-form" data-submit-label="建立中…">
+{% if create_error %}<div class="alert error" role="alert">{{ create_error }}</div>{% endif %}
+<div><label for="new-username">帳號</label><input class="input" id="new-username" name="username" value="{{ draft.username }}" autocomplete="off" autocapitalize="none" spellcheck="false" minlength="3" maxlength="40" required aria-describedby="new-username-help"><p id="new-username-help" class="field-help">3–40 個小寫英數字、底線、點或連字號。</p></div>
+<div><label for="new-email">Email</label><input class="input" id="new-email" name="email" type="email" value="{{ draft.email }}" autocomplete="off" maxlength="254" required><p class="field-help">對方之後可用相同 Email 的 Google 帳號登入。</p></div>
+<div><label for="new-password">初始密碼</label><input class="input" id="new-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required aria-describedby="new-password-help"><p id="new-password-help" class="field-help">至少 12 個字元。請私下交給對方，並請對方登入後變更。</p></div>
+<div class="create-user-actions"><button class="btn" type="submit">建立帳號</button></div>
+</form>
+</details>
 <section class="panel user-list" aria-label="使用者">
 {% for user in users %}
 <article class="user-row">
-<div class="user-info"><div class="user-name"><strong>{{ user.username }}</strong><span class="chip status-{{ user.status }}">{{ statuses.get(user.status, user.status) }}</span>{% if user.id == account_user.id %}<span class="you">你</span>{% endif %}</div><p>{{ user.email }}</p>{% if user.role == 'owner' %}<span class="field-help">擁有者 · 此帳號受保護</span>{% endif %}</div>
-{% if user.role != 'owner' and (account_user.role == 'owner' or user.role != 'admin') and user.id != account_user.id %}
-<form class="user-controls" action="/admin/users/{{ user.id }}" method="post" data-submit-label="儲存中…" data-confirm="變更會撤銷此帳號的既有登入；核准後可存取共用工作區。確定儲存？">
-<div><label for="role-{{ user.id }}">角色</label><select class="input select" id="role-{{ user.id }}" name="role"><option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>唯讀成員</option>{% if account_user.role == 'owner' %}<option value="admin" {% if user.role == 'admin' %}selected{% endif %}>管理員</option>{% endif %}</select></div>
+<div class="user-info"><div class="user-name"><strong>{{ user.username }}</strong><span class="chip status-{{ user.status }}">{{ statuses.get(user.status, user.status) }}</span>{% if user.id == account_user.id %}<span class="you">你</span>{% endif %}</div><p>{{ user.email }}</p>
+<span class="field-help">{% if user.role == 'owner' %}擁有者 · 系統管理 · {% endif %}{% if user.workspace %}工作區「{{ user.workspace.name }}」· {{ user.workspace.recordings }} 筆錄音{% else %}核准後建立工作區{% endif %}</span></div>
+{% if user.role != 'owner' %}
+<form class="user-controls" action="/admin/users/{{ user.id }}" method="post" data-submit-label="儲存中…" data-confirm="變更會登出此帳號的所有裝置。確定儲存？">
 <div><label for="status-{{ user.id }}">狀態</label><select class="input select" id="status-{{ user.id }}" name="status">{% for value, label in statuses.items() %}<option value="{{ value }}" {% if user.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
 <button class="btn" type="submit">儲存</button>
 </form>
-{% else %}<span class="chip">{{ roles.get(user.role, user.role) }}</span>{% endif %}
+{% else %}<span class="chip">擁有者</span>{% endif %}
 </article>
-{% else %}<div class="empty-state"><h2>目前沒有其他帳號</h2><p class="sub">新帳號建立後，會出現在這裡等待核准。</p></div>{% endfor %}
+{% endfor %}
 </section>
-<p class="field-help">停用帳號會立即撤銷登入。只有擁有者能授予或變更管理員權限。</p>
+<p class="field-help">停用帳號會立即登出，但保留其工作區資料；重新啟用後即可再次使用。</p>
 {% endblock %}

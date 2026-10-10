@@ -345,7 +345,8 @@ variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
   bounded downloads.
 - The web UI binds to `127.0.0.1` by default. **Before exposing it**, configure
   [Web App accounts](docs/accounts.md) with Google/local password login, a session
-  secret and HTTPS. New accounts wait for administrator approval. Account mode
+  secret and HTTPS. New accounts wait for the owner's approval; each account then
+  has its own private workspace and Plaud connection. Account mode
   rejects legacy shared passwords/API tokens; those are only available with
   accounts disabled. See [ADR 0006](docs/adr/0006-security-posture.md).
 - Settings can create private, checksummed workspace backups from a consistent

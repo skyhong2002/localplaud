@@ -60,7 +60,7 @@ def client(monkeypatch, tmp_path):
     db_session.get_engine().dispose()
 
 
-def create_user(username="someone", role="viewer", status="active", password=True):
+def create_user(username="someone", role="member", status="active", password=True):
     with session_scope() as db:
         user = AccountUser(
             username=username,
@@ -113,7 +113,7 @@ def test_pending_account_keeps_workspace_metadata_out_of_page(client, monkeypatc
     monkeypatch.setattr(web, "_base_ctx", forbidden_workspace_context)
     response = client.get("/account")
     assert response.status_code == 200
-    assert "等待管理員核准" in response.text
+    assert "等待擁有者核准" in response.text
     assert 'id="workspace-sidebar"' not in response.text
     assert 'id="account-content"' not in response.text
     assert '/static/css/app.css' in response.text
@@ -190,78 +190,88 @@ def test_legacy_tokens_and_unbound_sessions_rejected(client):
     assert response.json()["error"]
 
 
-def test_viewer_read_allowlist_and_mutation_denial(client):
+def test_members_use_their_workspace_but_not_system_administration(client):
+    create_user("sky", role="owner")
     create_user()
     login(client)
     assert client.get("/api/files").status_code == 200
+    assert client.get("/api/preferences/workspace").status_code == 200
+    assert client.get("/api/providers/profiles").status_code == 200
+    assert client.get("/status").status_code == 200
     for path in [
-        "/settings",
         "/admin/users",
-        "/api/plaud/auth/status",
-        "/status",
-        "/api/preferences/workspace",
-        "/api/new-secret-route",
+        "/api/system/about",
+        "/api/backups",
+        "/api/storage",
+        "/api/providers/connections",
+        "/api/providers/workers",
     ]:
-        assert client.get(path).status_code == 403
-    for path in ["/ask", "/file/x/ask", "/api/folders", "/api/files/x/refresh-cloud-artifacts"]:
-        assert client.post(path).status_code == 403
-    assert client.get("/file/missing/export.md").status_code == 404
-    assert client.get("/file/missing/export/notes.txt").status_code == 404
-    assert client.get("/api/notes/123/export.md").status_code == 404
-    assert client.get("/api/notes/123/history").status_code == 404
-    assert (
-        client.post(
-            "/api/files/export", json={"file_ids": ["missing"], "transcript_format": "txt"}
-        ).status_code
-        == 404
-    )
+        assert client.get(path).status_code == 403, path
+    for path in ["/admin/users", "/api/providers/profiles", "/api/backups"]:
+        assert client.post(path).status_code == 403, path
+    assert client.post("/api/folders", json={"name": "Mine"}).status_code in {200, 201}
 
 
-def test_admin_permissions_owner_protection_and_immediate_revocation(client):
+def test_owner_manages_status_and_revocation_is_immediate(client):
     owner = create_user("sky", role="owner")
-    admin = create_user("admin", role="admin")
-    viewer = create_user("someone", status="pending")
-    login(client, "admin")
-    assert (
-        client.post(f"/admin/users/{viewer}", data={"role": "viewer", "status": "active"})
-        .headers["location"]
-        .endswith("notice=updated")
-    )
-    assert (
-        "error"
-        in client.post(
-            f"/admin/users/{viewer}", data={"role": "admin", "status": "active"}
-        ).headers["location"]
-    )
-    assert (
-        "error"
-        in client.post(
-            f"/admin/users/{owner}", data={"role": "viewer", "status": "disabled"}
-        ).headers["location"]
-    )
+    member = create_user("member")
+    pending = create_user("someone", status="pending")
+    login(client, "member")
+    assert client.post(f"/admin/users/{pending}", data={"status": "active"}).status_code == 403
     login(client, "someone")
     cookie = client.cookies.get(auth.COOKIE)
     login(client, "sky")
     assert (
-        "notice"
-        in client.post(
-            f"/admin/users/{viewer}", data={"role": "viewer", "status": "disabled"}
-        ).headers["location"]
+        "error"
+        in client.post(f"/admin/users/{owner}", data={"status": "disabled"}).headers["location"]
     )
     assert (
         "notice"
-        in client.post(
-            f"/admin/users/{admin}", data={"role": "viewer", "status": "active"}
-        ).headers["location"]
+        in client.post(f"/admin/users/{pending}", data={"status": "active"}).headers["location"]
+    )
+    users = {row["username"]: row for row in client.get("/admin/users").json()["users"]}
+    assert users["someone"]["workspace"]["recordings"] == 0
+    assert users["sky"]["workspace"]["id"] == 1
+    assert (
+        "notice"
+        in client.post(f"/admin/users/{member}", data={"status": "disabled"}).headers["location"]
     )
     client.cookies.clear()
     client.cookies.set(auth.COOKIE, cookie)
     assert client.get("/account").status_code == 401
 
 
+def test_owner_creates_active_members_with_their_own_workspace(client):
+    from localplaud.db.models import Workspace
+
+    create_user("sky", role="owner")
+    form = {"username": " New.Member ", "email": "New@Example.com", "password": PASSWORD}
+    login(client, "sky")
+    created = client.post("/admin/users", data=form)
+    assert created.headers["location"].endswith("notice=created")
+    for duplicate in (
+        form,
+        {**form, "username": "other"},
+        {**form, "username": "sky", "email": "x@example.com"},
+    ):
+        assert client.post("/admin/users", data=duplicate).json()["create_error"]
+    for invalid in ({"username": "a"}, {"email": "nope"}, {"password": "short"}):
+        rejected = client.post("/admin/users", data={**form, **invalid}).json()
+        assert rejected["create_error"]
+        assert "password" not in rejected["draft"]
+    with session_scope() as db:
+        user = db.scalar(select(AccountUser).where(AccountUser.username == "new.member"))
+        assert (user.role, user.status, user.email) == ("member", "active", "new@example.com")
+        workspace = db.scalar(select(Workspace).where(Workspace.owner_user_id == user.id))
+        assert workspace is not None and workspace.id != 1
+    login(client, "new.member")
+    assert client.get("/api/files").json()["files"] == []
+    assert client.post("/admin/users", data=form).status_code == 403
+
+
 def test_sessions_are_private_password_change_and_operator_recovery(client):
     one = create_user("sky", role="owner")
-    two = create_user("admin", role="admin")
+    two = create_user("admin")
     login(client, "admin")
     session_id = client.get("/account").json()["sessions"][0]["id"]
     client.cookies.clear()
@@ -283,7 +293,7 @@ def test_sessions_are_private_password_change_and_operator_recovery(client):
     login(client, "sky")
     with session_scope() as db:
         assert db.get(AccountUser, one).role == "owner"
-        assert db.get(AccountUser, two).role == "admin"
+        assert db.get(AccountUser, two).role == "member"
 
 
 def test_csrf_and_safe_redirect_and_cache(client):
@@ -637,7 +647,7 @@ def test_unhosted_google_email_cannot_link_local_account(client, monkeypatch):
 def test_link_rechecks_auth_after_awaiting_google(client, monkeypatch, mutation):
     from sqlalchemy import delete
 
-    user_id = create_user(role="admin")
+    user_id = create_user()
     login(client)
     query = parse_qs(urlsplit(client.get("/auth/google?link=1").headers["location"]).query)
 
@@ -655,7 +665,7 @@ def test_link_rechecks_auth_after_awaiting_google(client, monkeypatch, mutation)
                 row.authenticated_at = auth.now() - timedelta(minutes=11)
             else:
                 if mutation == "role_change":
-                    user.role = "viewer"
+                    user.status = "pending"
                 if mutation == "password_reset":
                     user.password_hash = auth.PASSWORDS.hash("replacement-password")
                 db.execute(delete(BrowserSession).where(BrowserSession.user_id == user_id))

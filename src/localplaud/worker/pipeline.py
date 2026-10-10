@@ -44,6 +44,7 @@ from ..db.models import (
 from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
+from ..db.tenancy import scoped_to_file
 from ..llm.base import capture_resolved_models
 from ..note_speakers import SPEAKER_ATTRIBUTION_PROMPT_VERSION, anonymous_summary_content
 from ..providers.fallback import candidate_snapshots, is_retryable_fallback_error
@@ -1300,6 +1301,7 @@ def _retry_delay_seconds(count: int, settings: Settings) -> int | None:
     )
 
 
+@scoped_to_file
 def process_file(
     file_id: str,
     settings: Settings | None = None,
@@ -1353,6 +1355,7 @@ def _maybe_evict_completed_plaud_audio(file_id: str, settings: Settings) -> None
         log.exception("Could not release completed Plaud audio cache for %s", file_id)
 
 
+@scoped_to_file
 def process_derived_artifacts(
     file_id: str,
     settings: Settings | None = None,
@@ -1391,6 +1394,7 @@ def process_derived_artifacts(
         _maybe_evict_completed_plaud_audio(file_id, settings)
 
 
+@scoped_to_file
 def process_mind_map_only(
     file_id: str,
     settings: Settings | None = None,
@@ -2812,6 +2816,7 @@ def claim_outline_rebuild(file_id: str, *, method: str | None = None) -> str:
     return token
 
 
+@scoped_to_file
 def process_outline_only(
     file_id: str,
     settings: Settings | None = None,
@@ -4695,7 +4700,10 @@ def process_pending(
     if workers == 1:
         return sum(_run(job) for job in jobs)
 
+    import contextvars
     from concurrent.futures import ThreadPoolExecutor
 
+    # Each job keeps the caller's workspace; pool threads start without it.
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        return sum(pool.map(_run, jobs))
+        futures = [pool.submit(contextvars.copy_context().run, _run, job) for job in jobs]
+    return sum(future.result() for future in futures)

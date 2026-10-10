@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy.orm import Session
 
 from .db.models import KeyValue
+from .db.tenancy import workspace_key
 from .i18n import SUPPORTED_LOCALES
 
 PREFERENCES_KEY = "workspace_preferences"
@@ -33,7 +34,7 @@ def validate_timezone(value: str) -> str:
 
 
 def get_workspace_preferences(session: Session) -> dict:
-    row = session.get(KeyValue, PREFERENCES_KEY)
+    row = session.get(KeyValue, workspace_key(PREFERENCES_KEY))
     stored = row.value if row and isinstance(row.value, dict) else {}
     preferences = DEFAULT_WORKSPACE_PREFERENCES | {
         key: stored[key] for key in DEFAULT_WORKSPACE_PREFERENCES if key in stored
@@ -48,9 +49,10 @@ def save_workspace_preferences(session: Session, values: dict) -> dict:
     preferences["timezone"] = validate_timezone(str(preferences["timezone"]))
     if preferences["locale"] not in SUPPORTED_LOCALES:
         raise ValueError("Interface language is not supported")
-    row = session.get(KeyValue, PREFERENCES_KEY)
+    key = workspace_key(PREFERENCES_KEY)
+    row = session.get(KeyValue, key)
     if row is None:
-        session.add(KeyValue(key=PREFERENCES_KEY, value=preferences))
+        session.add(KeyValue(key=key, value=preferences))
     else:
         row.value = preferences
     session.flush()

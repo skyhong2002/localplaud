@@ -23,6 +23,7 @@ from .db.models import (
     PlaudFile,
 )
 from .db.session import session_scope
+from .db.tenancy import HOST_PRIVILEGE_ERROR, host_privileges_allowed
 from .error_redaction import sanitize_error
 from .export_formats import recording_data
 
@@ -67,6 +68,8 @@ def _password(password_ref: str | None) -> str | None:
         return None
     if not _ENV_REF.fullmatch(password_ref):
         raise ValueError("SMTP password reference must use env:VARIABLE")
+    if not host_privileges_allowed():
+        raise ValueError(HOST_PRIVILEGE_ERROR)
     name = password_ref.removeprefix("env:")
     value = os.environ.get(name)
     if not value:
@@ -111,6 +114,8 @@ def save_email_integration(session, data: dict, integration_id: int | None = Non
     if security not in {"starttls", "tls", "plain"}:
         raise ValueError("SMTP security must be starttls, tls, or plain")
     allow_insecure = bool(data.get("allow_insecure_private"))
+    if (allow_insecure or data.get("password_ref")) and not host_privileges_allowed():
+        raise ValueError(HOST_PRIVILEGE_ERROR)
     if security == "plain" and not allow_insecure:
         raise ValueError("plain SMTP requires explicit insecure/private allowance")
     port = int(data.get("smtp_port", 587))
@@ -242,7 +247,7 @@ def build_email(file_id: str, snapshot: dict, idempotency_key: str, message_id: 
 
 def _send_email(snapshot: dict, message: EmailMessage) -> None:
     host, port = snapshot["smtp_host"], int(snapshot["smtp_port"])
-    allow_private = bool(snapshot.get("allow_insecure_private"))
+    allow_private = bool(snapshot.get("allow_insecure_private")) and host_privileges_allowed()
     _validate_host(host, port, allow_private=allow_private)
     security = snapshot["security"]
     context = ssl.create_default_context()

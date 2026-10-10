@@ -126,8 +126,10 @@ class DaemonJobs:
 
         from ..db.models import PlaudFile
         from ..db.session import session_scope
+        from ..db.tenancy import system_scope
 
-        with session_scope() as session:
+        # GPU and model capacity is shared, so count claims in every workspace.
+        with system_scope(), session_scope() as session:
             return (
                 session.scalar(
                     select(func.count())
