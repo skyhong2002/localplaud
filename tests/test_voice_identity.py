@@ -17,7 +17,13 @@ from localplaud.voice_identity import (
     references,
     undo_assignment,
 )
-from localplaud.voice_matching import clean_windows, cosine, match_voice, usable_name
+from localplaud.voice_matching import (
+    clean_windows,
+    consistent_vectors,
+    cosine,
+    match_voice,
+    usable_name,
+)
 
 
 @pytest.mark.parametrize(
@@ -86,6 +92,39 @@ def test_similar_names_are_ambiguous_and_negative_is_unknown():
         match_voice([[1.0, 0.0]] * 3, refs() + refs("Bob", [0.99, 0.01]))["status"] == "ambiguous"
     )
     assert match_voice([[0.0, 1.0]] * 3, refs())["status"] == "unknown"
+
+
+def test_one_stray_window_no_longer_fails_a_consistent_voice():
+    voice = [[1.0, 0.1], [1.0, 0.0], [1.0, -0.1], [0.9, 0.1], [1.0, 0.05]]
+    stray = [0.0, 1.0]
+    kept = consistent_vectors([*voice[:3], stray, *voice[3:]])
+    assert kept == voice
+    assert consistent_vectors(voice) == voice
+    assert consistent_vectors(voice[:1]) == []
+
+
+def test_a_mixed_cluster_cannot_pass_on_a_lucky_pair():
+    # Two people split evenly: dropping down to one agreeing pair is not allowed.
+    mixed = [[1.0, 0.0], [1.0, 0.05], [0.0, 1.0], [0.05, 1.0], [-1.0, 0.0], [-1.0, 0.05]]
+    assert consistent_vectors(mixed) == []
+
+
+def test_references_enroll_only_the_agreeing_windows():
+    from types import SimpleNamespace
+
+    sample = SimpleNamespace(
+        id="s" * 64,
+        file_id="f1",
+        speaker_key="speaker_0",
+        source="local",
+        reference_name="Gene",
+        status="ready",
+        vectors=[[1.0, 0.0], [1.0, 0.05], [0.0, 1.0], [1.0, -0.05]],
+    )
+    (ref,) = references([sample])
+    assert ref["vectors"] == [[1.0, 0.0], [1.0, 0.05], [1.0, -0.05]]
+    sample.vectors = [[1.0, 0.0], [0.0, 1.0]]
+    assert references([sample]) == []
 
 
 def test_nonfinite_and_empty_vectors_rejected():

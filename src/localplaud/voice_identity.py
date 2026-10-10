@@ -14,7 +14,15 @@ from sqlalchemy import JSON, DateTime, Integer, String, Text, select, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db.models import Base, Chunk, PlaudFile, Speaker
-from .voice_matching import MODEL, REVISION, VERSION, clean_windows, match_voice, usable_name
+from .voice_matching import (
+    MODEL,
+    REVISION,
+    VERSION,
+    clean_windows,
+    consistent_vectors,
+    match_voice,
+    usable_name,
+)
 
 
 def now():
@@ -247,7 +255,7 @@ def references(samples, *, plaud_enrollment=None, name_aliases=None):
             "source_name": s.reference_name,
             "file_id": s.file_id,
             "speaker_key": s.speaker_key,
-            "vectors": s.vectors,
+            "vectors": consistent_vectors(s.vectors),
             "source": s.source,
             "sample_id": s.id,
             "label_provenance": (
@@ -264,7 +272,7 @@ def references(samples, *, plaud_enrollment=None, name_aliases=None):
         for s in samples
         if s.status == "ready"
         and s.reference_name
-        and len(s.vectors) >= 2
+        and consistent_vectors(s.vectors)
         and (
             s.source != "plaud-reference"
             or plaud_enrollment is None
@@ -288,11 +296,13 @@ def _prepare_note_name_change(session, file_id):
         row.key: row.display_name
         for row in session.scalars(select(Speaker).where(Speaker.file_id == file_id))
     }
-    summary_ids = list(session.scalars(
-        select(Summary.id)
-        .where(Summary.file_id == file_id, Summary.source == "local")
-        .order_by(Summary.id)
-    ))
+    summary_ids = list(
+        session.scalars(
+            select(Summary.id)
+            .where(Summary.file_id == file_id, Summary.source == "local")
+            .order_by(Summary.id)
+        )
+    )
     for summary_id in summary_ids:
         lock_summary_for_mutation(session, summary_id, file_id)
     return previous_names

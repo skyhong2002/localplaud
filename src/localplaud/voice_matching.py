@@ -79,6 +79,39 @@ def cosine(a: list[float], b: list[float]) -> float:
     return max(-1.0, min(1.0, sum(x * y for x, y in zip(a, b, strict=True)) / norm))
 
 
+def consistent_vectors(vectors: list[list[float]], floor=0.5) -> list[list[float]]:
+    """The windows of one speaker that agree with each other, or ``[]``.
+
+    A single mis-assigned window (another person, laughter, a door) used to fail the
+    whole speaker, so a voice heard for twenty minutes never matched. Drop windows
+    unlike the others (median similarity to them below ``floor``), keeping a majority
+    and at least two so a mixed cluster cannot pass on a lucky pair, then require the
+    remainder to agree.
+    """
+    vectors = list(vectors or [])
+    if len(vectors) < 2:
+        return []
+    similarity = {}
+    for i, a in enumerate(vectors):
+        for j in range(i + 1, len(vectors)):
+            similarity[i, j] = similarity[j, i] = cosine(a, vectors[j])
+
+    def median(values):
+        values = sorted(values)
+        return values[len(values) // 2]
+
+    def typical(i):
+        return median(similarity[i, j] for j in keep if j != i)
+
+    keep = list(range(len(vectors)))
+    least = max(2, math.ceil(len(keep) / 2))
+    while len(keep) > least and typical(worst := min(keep, key=typical)) < floor:
+        keep.remove(worst)
+    if median(similarity[i, j] for i in keep for j in keep if i < j) < floor:
+        return []
+    return [vectors[i] for i in keep]
+
+
 def clean_windows(
     segments: list[dict], max_per_speaker=6, min_seconds=3.0, max_seconds=10.0
 ) -> dict:

@@ -25,8 +25,14 @@ The default `strict` policy requires at least two query windows, agreement acros
 at least two thirds of them, references from at least two OTHER recordings, a cosine
 threshold and a margin over other names. Scores are similarities, not accuracy
 percentages; see "Calibrated confidence" for the policy that names more voices.
-Insufficient, ambiguous and unknown voices keep their existing labels. Reference
-windows with poor internal similarity are excluded. Human names, clears, and
+Insufficient, ambiguous and unknown voices keep their existing labels. A window
+that disagrees with the rest of its speaker (median similarity to the others below
+0.5: another person mis-assigned by diarization, laughter, noise) is dropped, keeping
+a majority and at least two; if the remainder still disagrees the sample is
+`insufficient` and never enrolls. Such a voice is still matched (on all of its
+windows), so a clearly known speaker in a messy recording is named or suggested
+instead of left blank. Earlier `insufficient` samples are re-judged from their stored
+vectors without re-embedding. Human names, clears, and
 subsequent edits are protected; inferred names can be corrected in the existing
 speaker rename control. Such corrections become manual references on the next scan.
 
@@ -74,8 +80,12 @@ About four fifths of the anonymous speakers in the library are not enrolled, so 
 column matters more than it looks: with that mix, roughly 12% of names applied at p >= 0.70
 would be wrong, 23% at p >= 0.60 and 36% at p >= 0.50 (better if fewer anonymous speakers
 are strangers). A wrong name in a meeting note is worse than "Speaker 3", so the
-production default is 0.70, the point where more coverage stops paying for itself; lower it
-only knowing that trade. `scripts/maintenance/fit_voice_calibration.py --profile PATH`
+code default is 0.70, the point where more coverage stops paying for itself; lower it
+only knowing that trade. A deployment whose owner prefers a wrong name (one edit away) to
+a blank one for the people they record most may choose 0.50: re-measured on 2026-10-10
+after outlier windows were dropped (520 references, leave-one-out), 0.50 named 83% of
+known speakers at 97.7% precision and wrongly named 9% of strangers, against 73%, 97.9%
+and 3% at 0.70. `scripts/maintenance/fit_voice_calibration.py --profile PATH`
 refits the model and prints this table for the current references (read-only); more
 enrolled recordings per person raise coverage at no cost in precision.
 

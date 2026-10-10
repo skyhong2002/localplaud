@@ -43,6 +43,7 @@ from .voice_matching import (
     POLICIES,
     REVISION,
     VoiceMatcher,
+    consistent_vectors,
     cosine,
     resolve_name_conflicts,
 )
@@ -275,19 +276,8 @@ def scan(profile, worker, report_path, *, limit=None):
                                 continue
                             sample.vectors = by_id[sample.id]
                             # Mixed/poor diarization must not seed global identities.
-                            similarities = [
-                                cosine(a, b)
-                                for i, a in enumerate(sample.vectors)
-                                for b in sample.vectors[i + 1 :]
-                            ]
-                            consistent = (
-                                not similarities
-                                or sorted(similarities)[len(similarities) // 2] >= 0.5
-                            )
                             sample.status = (
-                                "ready"
-                                if len(sample.vectors) >= 2 and consistent
-                                else "insufficient"
+                                "ready" if consistent_vectors(sample.vectors) else "insufficient"
                             )
                             sample.error = None
                             sample.updated_at = datetime.now(UTC)
@@ -320,8 +310,22 @@ def scan(profile, worker, report_path, *, limit=None):
         active = [
             sample for sid in active_ids if (sample := session.get(VoiceSample, sid)) is not None
         ]
+        for sample in active:
+            # Samples judged by the stricter all-windows rule are re-judged from their
+            # stored vectors; nothing is embedded again.
+            if sample.status == "insufficient" and consistent_vectors(sample.vectors):
+                sample.status, sample.updated_at = "ready", datetime.now(UTC)
+                stats["samples_reconsidered_ready"] += 1
         refs = references(active, plaud_enrollment=enrollment, name_aliases=name_aliases)
-        targets = [s for s in active if s.source == "local" and s.status == "ready"]
+        # A voice too inconsistent to enroll is still worth a guess: the matcher takes
+        # the median over its windows, and a wrong automatic name is one edit away.
+        targets = [
+            s
+            for s in active
+            if s.source == "local"
+            and s.status in {"ready", "insufficient"}
+            and len(s.vectors or []) >= 2
+        ]
     stats["library_samples_pending"] = sum(s.status == "pending" for s in active)
     stats["library_samples_failed"] = sum(s.status == "failed" for s in active)
     stats["library_samples_ready"] = sum(s.status == "ready" for s in active)
@@ -339,7 +343,7 @@ def scan(profile, worker, report_path, *, limit=None):
     decided: dict[str, list] = {}
     for sample in targets:
         decision = matcher.match(
-            sample.vectors,
+            consistent_vectors(sample.vectors) or sample.vectors,
             threshold=threshold,
             margin=margin,
             query_file_id=sample.file_id,
