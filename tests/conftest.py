@@ -1,8 +1,24 @@
-"""Global test isolation from operator-only Web login secrets in .env."""
+"""Global test isolation from the operator's deployment files and secrets.
+
+A checkout that is also a deployment has a private ``config.toml`` and ``.env`` in
+the repository root. Tests must see defaults plus what they set themselves, never
+production providers, URLs or credentials — and ``get_settings()`` would otherwise
+export ``.env`` into ``os.environ`` for every later test.
+"""
 
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
+
 import pytest
+
+import localplaud.config as _config
+
+os.environ["LOCALPLAUD_CONFIG"] = str(Path(tempfile.mkdtemp()) / "absent-config.toml")
+_config.Settings.model_config["env_file"] = None
+_config.load_dotenv = lambda *args, **kwargs: False
 
 
 @pytest.fixture(autouse=True)

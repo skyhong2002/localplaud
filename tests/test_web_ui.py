@@ -930,7 +930,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'id="recording-file-list" hx-preserve' in r_assets
     assert 'class="recording-crumb-link" href="/" hx-get="/" hx-target="#app-view"' in r_assets
     assert "link.setAttribute('hx-target','#app-view')" in r_assets
-    assert "(?:api|audio|static|login|logout|oauth)" in r_assets
+    assert "(?:api|audio|static|login|logout|register|oauth|auth|account|admin)" in r_assets
     assert "link.setAttribute('hx-boost','false')" in r_assets
     assert "sessionStorage.setItem(storageKey()" in r_assets
     assert "if(event.target===appView)cleanupController.abort()" in r_assets
