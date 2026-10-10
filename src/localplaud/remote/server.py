@@ -11,6 +11,7 @@ import os
 import tempfile
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -49,6 +50,38 @@ _GPU_LOCK = threading.Lock()
 
 router = APIRouter(prefix="/api/worker/v1", tags=["remote-worker"])
 _bearer = HTTPBearer(auto_error=False)
+
+
+@contextmanager
+def gpu_admission_lock():
+    """Keep host watchdog maintenance mutually exclusive with job admission."""
+    import fcntl
+
+    from sqlalchemy.engine import make_url
+
+    url = make_url(get_settings().store.database_url)
+    if url.get_backend_name() != "sqlite" or url.database in {None, ":memory:"}:
+        yield
+        return
+    path = Path(str(url.database) + ".gpu-maintenance.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise HTTPException(
+                status_code=503, detail="worker GPU maintenance in progress",
+                headers={"Retry-After": "120"},
+            ) from None
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _admit_job():
+    with gpu_admission_lock():
+        yield
 
 
 def _authorize(
@@ -453,7 +486,10 @@ def capabilities():
     )
 
 
-@router.post("/jobs", response_model=JobResponse, dependencies=[Depends(_authorize)])
+@router.post(
+    "/jobs", response_model=JobResponse,
+    dependencies=[Depends(_authorize), Depends(_admit_job)],
+)
 def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
     from ..worker.note_policy import NOTE_PROMPT_VERSION
     from ..worker.title_policy import TITLE_PROMPT_VERSION

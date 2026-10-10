@@ -1,0 +1,9 @@
+[Unit]
+Description=Recover idle localplaud WSL GPU container access
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/localplaud-gpu-watchdog --container localplaud-localplaud-gpu-1 --maintenance-lock %h/localplaud/data/localplaud.db.gpu-maintenance.lock --state %h/.local/state/localplaud/gpu-watchdog.json --apply
+TimeoutStartSec=180
+UMask=0077
+

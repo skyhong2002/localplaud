@@ -73,6 +73,63 @@ vacuum is enabled on newly compacted candidates, but releasing SQLite pages
 alone does not return space from a WSL virtual disk to Windows: that also requires
 filesystem trim and offline VHD compaction. Never unregister WSL or delete its VHD.
 
+## WSL GPU access recovery
+
+For a WSL host where `nvidia-smi` works on the host but the speech container
+reports `GPU access blocked by the operating system`, the optional host-side
+`scripts/maintenance/gpu_watchdog.py` can recover container GPU access. It does
+not reset the Windows GPU, restart WSL/Docker, change models, or edit recordings.
+
+The user systemd timer checks every two minutes. Two consecutive explicit CUDA
+availability failures are required, with a 15-minute cooldown and at most three
+restart attempts in a rolling 24 hours. The host GPU must be visible. Unknown
+probe errors, timeouts, non-running containers, startup grace, and active work
+never authorize a restart. An actual CUDA matrix operation checks healthy idle
+containers. Recovery state is owner-only JSON; journal output contains status
+codes rather than credentials or recording contents.
+
+Worker job admission holds a shared filesystem lock beside its SQLite database.
+The watchdog takes that same lock exclusively and verifies its device/inode
+through the container bind mount. During recovery, new submissions get
+HTTP 503 with `Retry-After: 120`; accepted queued/running jobs and ad-hoc child
+processes prevent restart. This closes the race between the idle check and a new
+submission. Never remove or replace the lock file on a running deployment.
+
+Install the updated worker code first. Let current jobs finish before restarting
+the worker to load the admission guard, then initialize the lock using the
+worker's own configured database:
+
+```bash
+docker exec localplaud-localplaud-gpu-1 /opt/venv/bin/python -c \
+  'from localplaud.remote.server import gpu_admission_lock; lock = gpu_admission_lock(); lock.__enter__(); lock.__exit__(None, None, None)'
+install -m 755 scripts/maintenance/gpu_watchdog.py ~/.local/bin/localplaud-gpu-watchdog
+mkdir -p ~/.config/systemd/user
+install -m 644 scripts/deploy/localplaud-gpu-watchdog.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now localplaud-gpu-watchdog.timer
+systemctl --user start localplaud-gpu-watchdog.service
+journalctl --user -u localplaud-gpu-watchdog.service -n 10 --no-pager
+```
+
+The supplied unit targets `~/localplaud/data/localplaud.db` and container
+`localplaud-localplaud-gpu-1`; adjust these paths for other deployments. The user
+needs Docker access and lingering enabled for unattended operation. Run the
+script without `--apply` for observation only. Disable automatic recovery with
+`systemctl --user disable --now localplaud-gpu-watchdog.timer`.
+
+Recording retries remain owned by the controller's durable pipeline scheduler:
+completed stages/checkpoints are reused, and retry counts are not reset by the
+watchdog. Its normal backoff applies, including the configured slow retry interval
+after the fast budget is exhausted (default 24 hours). A manual Resume can bring
+an already exhausted recording forward. A blocked/hung active job or host GPU
+failure requires separate diagnosis; this watchdog deliberately does not kill it.
+
+Deployment verification (2026-10-08): the WSL speech worker has the user timer
+enabled with lingering. The host and container CUDA compute probes passed, and
+an actual authenticated submission under the maintenance lock returned 503 with
+`Retry-After: 120`. The admission guard and watchdog recovery policies have
+regression tests. No GPU fault was injected into the production worker.
+
 ## Authentication
 
 Set the same high-entropy value on the worker and controller:

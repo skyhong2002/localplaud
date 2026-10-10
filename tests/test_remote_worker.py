@@ -59,6 +59,27 @@ def _request(key="same-job"):
     }
 
 
+def test_maintenance_rejects_submission_without_creating_job(monkeypatch, tmp_path):
+    import fcntl
+
+    from sqlalchemy import func, select
+
+    from localplaud.db.models import RemoteJob
+    from localplaud.db.session import session_scope
+
+    client = _client(monkeypatch, tmp_path)
+    with (tmp_path / "worker.db.gpu-maintenance.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        response = client.post(
+            "/api/worker/v1/jobs", json=_request(),
+            headers={"Authorization": "Bearer worker-secret"},
+        )
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "120"
+    with session_scope() as session:
+        assert session.scalar(select(func.count()).select_from(RemoteJob)) == 0
+
+
 @pytest.mark.parametrize("artifact_download", [False, True])
 def test_worker_reads_do_not_load_uploaded_audio(monkeypatch, tmp_path, artifact_download):
     from sqlalchemy import event
