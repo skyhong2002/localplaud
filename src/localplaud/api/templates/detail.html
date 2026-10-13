@@ -38,7 +38,7 @@
         {% if not f.has_audio and f.origin == 'plaud' and not f.audio_on_demand %}<button id="import-recording-audio" type="button" data-import-audio>{{ icon('cloud') }}{{ t('Import audio') }}</button>{% endif %}
         {% if f.origin == 'plaud' and not f.is_trash %}<button id="refresh-plaud-cloud" data-refresh-plaud-cloud type="button">{{ icon('cloud') }}{{ t('Refresh Plaud cloud artifacts') }}</button>{% endif %}
         {% if f.local_title %}<button id="clear-local-title" type="button">{{ t('Use Plaud title') }}</button>{% endif %}
-        {% if f.transcript %}<button id="menu-find-transcript" type="button">{{ icon('search') }}{{ t('Find in transcript') }} / {{ t('Replace') }}</button>{% endif %}
+        {% if f.transcript %}<button id="menu-find-transcript" type="button">{{ icon('search') }}{{ t('Find & replace') }}</button>{% endif %}
         {% if f.speakers %}<button id="menu-name-speakers" type="button">{{ icon('waveform') }}{{ t('Name speakers') }}</button>{% endif %}
         <button id="menu-edit-recording-metadata" type="button">{{ icon('folder') }}{{ t('Folder and tags') }}</button>
         {% if f.has_audio or f.audio_on_demand %}<button hx-post="/file/{{ f.id }}/reprocess" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Resume failed or missing processing stages?">{{ icon('rotate-cw') }}{{ t('Resume processing') }}</button><button hx-post="/file/{{ f.id }}/reprocess?force=true" hx-target="#reprocess-msg" hx-swap="innerHTML" hx-confirm="Rebuild every local artifact for this recording?">{{ icon('rotate-ccw') }}{{ t('Rebuild all') }}</button>{% endif %}
@@ -87,7 +87,7 @@
       <button id="recording-tab-mindmap" role="tab" aria-controls="recording-panel-mindmap" aria-selected="{{ 'true' if active_tab == 'mindmap' else 'false' }}" tabindex="{{ '0' if active_tab == 'mindmap' else '-1' }}" data-panel="mindmap" class="{% if active_tab == 'mindmap' %}on{% endif %}">{{ t('Mind map') }}</button>
       <button id="recording-tab-ask" role="tab" aria-controls="recording-panel-ask" aria-selected="{{ 'true' if active_tab == 'ask' else 'false' }}" tabindex="{{ '0' if active_tab == 'ask' else '-1' }}" data-panel="ask" class="{% if active_tab == 'ask' %}on{% endif %}">{{ t('Ask') }}</button>
     </div>
-    {% if not f.is_trash %}<details class="note-add-menu ws-tab-add"><summary class="note-tab note-add-tab" aria-label="{{ t('New note') }}" title="{{ t('New note') }}">{{ icon('plus', 'xs') }}</summary><div class="note-add-popover" role="menu"><button type="button" data-open-note-generation role="menuitem">{{ icon('sparkles') }}{{ t('Generate AI note') }}</button><button type="button" data-open-manual-note role="menuitem">{{ icon('note') }}{{ t('Blank note') }}</button></div></details>{% endif %}
+    {% if not f.is_trash and f.has_local_transcript %}<div class="ws-tab-add"><button type="button" class="note-tab note-add-tab" data-open-note-generation aria-label="{{ t('Generate AI note') }}" title="{{ t('Generate AI note') }}">{{ icon('plus', 'xs') }}</button></div>{% endif %}
     </div>
     <div id="reprocess-msg" class="sub" aria-live="polite" style="margin:6px 0; font-size:13px">{% if f.audio_on_demand %}{{ t('Processing is complete. Audio is stored in Plaud and downloads automatically when played, exported, or reprocessed.') }}{% elif not f.has_audio and f.origin == 'plaud' %}{{ t('Metadata and available Plaud artifacts are local. Import audio only when you are ready to process or play this recording.') }}{% endif %}</div>
     {% if f.error and notes %}<details class="recording-recovery" style="margin:8px 0;color:var(--muted);font-size:12px"><summary style="cursor:pointer">{{ t('Processing details') }} · {{ t('Processing paused') }}</summary>{% endif %}
@@ -156,9 +156,11 @@
         {% endif %}
         {% if f.preview_revision %}<span class="chip">{{ t('Revision') }} {{ f.preview_revision }} {{ t('preview') }}</span>{% endif %}
         <div class="transcript-tools">
-          <details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Find in transcript') }}">{{ icon('search') }}</summary><div class="transcript-popover search-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}">{{ icon('x') }}</button>
-            <div style="display:flex;gap:7px;align-items:center"><input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript') }}"><button class="icon-action icon-only" id="find-previous" type="button" aria-label="{{ t('Previous') }}">↑</button><button class="icon-action icon-only" id="find-next" type="button" aria-label="{{ t('Next') }}">↓</button></div><span id="find-count" class="sub" style="font-size:11px">0 {{ t('results') }}</span>
-            {% if f.can_edit %}<div id="replace-row" style="display:grid;gap:7px;margin-top:8px" hidden><input id="transcript-replace" class="search-input" type="text" placeholder="{{ t('Replace with') }}"><label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> {{ t('Match case') }}</label><div><button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">{{ t('Replace all') }}</button> <span id="replace-result" class="sub" style="font-size:12px"></span></div></div><button type="button" id="toggle-replace" class="text-action">{{ t('Replace') }}</button>{% endif %}
+          {% set has_editable_notes = not f.is_trash and ((notes | selectattr('source', 'equalto', 'local') | list) or f.user_notes) %}
+          <details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Find & replace') }}">{{ icon('search') }}</summary><div class="transcript-popover search-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}">{{ icon('x') }}</button>
+            <div style="display:flex;gap:7px;align-items:center"><input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript and notes') }}" aria-label="{{ t('Find in transcript and notes') }}"><button class="icon-action icon-only" id="find-previous" type="button" aria-label="{{ t('Previous') }}">↑</button><button class="icon-action icon-only" id="find-next" type="button" aria-label="{{ t('Next') }}">↓</button></div><span id="find-count" class="sub" style="font-size:11px">0 {{ t('results') }}</span>
+            <div id="find-scopes" class="find-scopes" role="group" aria-label="{{ t('Matches by document') }}" hidden></div>
+            {% if f.can_edit or has_editable_notes %}<div id="replace-row" style="display:grid;gap:7px;margin-top:8px" data-transcript-editable="{{ 'true' if f.can_edit else 'false' }}" hidden><input id="transcript-replace" class="search-input" type="text" placeholder="{{ t('Replace with') }}" aria-label="{{ t('Replace with') }}"><label class="sub" style="font-size:12px"><input id="replace-case" type="checkbox"> {{ t('Match case') }}</label><div><button class="btn sec" id="replace-all" type="button" style="padding:7px 10px">{{ t('Replace all') }}</button> <span id="replace-result" class="sub" role="status" aria-live="polite" style="font-size:12px"></span></div><p class="sub find-replace-hint">{% if f.can_edit %}{{ t('Replaces in the transcript and every editable note. AI notes are saved as editable copies; earlier versions stay in history.') }}{% else %}{{ t('Only notes are replaced while an older or raw transcript is shown.') }}{% endif %}</p></div><button type="button" id="toggle-replace" class="text-action">{{ t('Replace') }}</button>{% endif %}
           </div></details>
           {% if f.revisions %}<details class="transcript-tool"><summary class="icon-action icon-only" aria-label="{{ t('Revision history') }}">{{ icon('history') }}</summary><div class="transcript-popover history-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}">{{ icon('x') }}</button><strong>{{ t('Revision history') }} · {{ f.revisions | length }}</strong>{% for revision in f.revisions %}<div class="revision-row"><div><a href="/file/{{ f.id }}?view=corrected&amp;revision={{ revision.revision }}&amp;tab=transcript&amp;return_to={{ return_to_param }}"><strong>{{ t('Revision') }} {{ revision.revision }}</strong></a>{% if revision.current %} <span class="chip on">{{ t('Current') }}</span>{% endif %}<div class="sub" style="font-size:11px">{% if revision.reason %}{% if revision.reason.kind == 'text_and_speaker' %}{{ t('Edited text and reassigned segment') }}{% elif revision.reason.kind == 'speaker_normalized' %}{{ t('Normalized speaker attribution for segment') }}{% elif revision.reason.kind == 'speaker_merge' %}{{ t('Merged speakers across segments') }}{% else %}{{ t('Reassigned segment') }}{% endif %} {{ revision.reason.segment }}{% if revision.reason.kind == 'speaker_normalized' %}: {{ revision.reason.to or t('No speaker') }}{% else %}: {{ revision.reason.from or t('No speaker') }} → {{ revision.reason.to or t('No speaker') }}{% endif %}{% else %}{{ t(revision.note) }}{% endif %} · {{ revision.created_at }}</div></div>{% if not revision.current %}<form method="post" action="/file/{{ f.id }}/transcript/revisions/{{ revision.revision }}/restore" onsubmit="return confirm({{ t('Restore this revision as a new revision? Current history will be preserved.')|tojson|forceescape }})"><input type="hidden" name="base_revision" value="{{ f.corrected_revision }}"><button class="icon-action" type="submit">{{ t('Restore') }}</button></form>{% endif %}</div>{% endfor %}</div></details>{% endif %}
         </div>
@@ -244,7 +246,7 @@
           <button type="button" class="ws-note-picker-btn" data-note-picker aria-haspopup="menu" aria-expanded="false" aria-controls="ws-note-picker-menu"><span data-note-picker-label>{{ t('Notes') }}</span>{{ icon('chevron-down') }}</button>
           <div class="ws-note-picker-menu" id="ws-note-picker-menu" role="menu" hidden></div>
         </div>{% endif %}
-        {% if not f.is_trash %}<details class="note-add-menu ws-m-add"><summary class="note-add-tab" aria-label="{{ t('New note') }}" title="{{ t('New note') }}">{{ icon('plus', 'xs') }}</summary><div class="note-add-popover" role="menu"><button type="button" data-open-note-generation role="menuitem">{{ icon('sparkles') }}{{ t('Generate AI note') }}</button><button type="button" data-open-manual-note role="menuitem">{{ icon('note') }}{{ t('Blank note') }}</button></div></details>{% endif %}
+        {% if not f.is_trash and f.has_local_transcript %}<div class="ws-m-add"><button type="button" class="note-add-tab" data-open-note-generation aria-label="{{ t('Generate AI note') }}" title="{{ t('Generate AI note') }}">{{ icon('plus', 'xs') }}</button></div>{% endif %}
       </div>
       {% endif %}
       <p class="ws-note-stale" data-speaker-note-warning role="status" {% if not f.speaker_note_unresolved %}hidden{% endif %}>{{ t('Some older notes contain names that could not be linked safely. Review them before relying on speaker attribution.') }}</p>
@@ -324,7 +326,7 @@
           </div></details>
         </div>
       </div>
-      <div class="md note-editable" data-workspace-note-body data-note-editable="{{ note.id }}" data-note-version="{{ note.version }}" aria-label="{{ note.title }}">{{ note.content_md | markdown_blocks }}</div><script type="application/json" data-note-markdown>{{ note.content_md | tojson }}</script>
+      <div class="md note-editable" data-workspace-note-body data-note-editable="{{ note.id }}" data-note-version="{{ note.version }}"{% if note.source_summary_id %} data-source-summary="{{ note.source_summary_id }}"{% endif %} aria-label="{{ note.title }}">{{ note.content_md | markdown_blocks }}</div><script type="application/json" data-note-markdown>{{ note.content_md | tojson }}</script>
       <form data-workspace-note-form="{{ note.id }}" hidden style="display:grid;gap:8px;margin-top:10px">
         <input type="hidden" name="base_version" value="{{ note.version }}">
         <input class="search-input" name="title" value="{{ note.title }}" maxlength="200" required>
@@ -339,12 +341,12 @@
       <div class="empty generate-empty ws-notes-empty">
         {{ icon('note', none, cls='empty-icon') }}
         <strong class="empty-title">{{ t('No notes yet.') }}</strong>
-        <span class="sub empty-sub">{% if f.has_local_transcript %}{{ t('Create your own note or choose a template to generate one from the transcript.') }}{% else %}{{ t('Create a note now. Generated notes become available after a local transcript exists.') }}{% endif %}</span>
+        <span class="sub empty-sub">{% if f.has_local_transcript %}{{ t('Choose a template to generate a note from the transcript.') }}{% else %}{{ t('Notes can be generated after a local transcript exists.') }}{% endif %}</span>
         {% if not f.is_trash %}
         {# One primary entry: the Generate sheet (auto/custom, template, AI
-           profile and privacy). Manual notes and Plaud import are secondary. #}
+           profile and privacy). Plaud import is secondary. #}
         {% if f.has_local_transcript and not notes_generating %}<button class="btn generate-cta ws-generate-primary" type="button" data-open-note-dialog>{{ icon('sparkles') }}{{ t('Generate') }}</button>{% endif %}
-        <div class="ws-empty-secondary"><button class="text-action" type="button" data-open-manual-note>{{ t('New note') }}</button>
+        <div class="ws-empty-secondary">
         {% if f.origin == 'plaud' %}<div class="cloud-import-empty"><p class="sub">{{ t('Already generated notes in Plaud? Import them here with their original content and Plaud source label.') }}</p><button class="text-action" type="button" data-refresh-plaud-cloud>{{ t('Import Plaud notes') }}</button><p class="sub" data-cloud-import-status role="status" aria-live="polite"></p></div>{% endif %}</div>
         {% endif %}
       </div>
@@ -679,18 +681,6 @@
   </section>
 </div>
 {% include "_recording_share.html" %}
-{% if not f.is_trash %}
-<div class="import-backdrop" id="manual-note-backdrop" data-dirty="false" hidden>
-  <section class="import-modal manual-note-modal" role="dialog" aria-modal="true" aria-labelledby="manual-note-title">
-    <div class="import-head"><span id="manual-note-title">{{ t('New note') }}</span><button class="import-close" id="manual-note-close" type="button" aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
-    <form class="import-body manual-note-form" id="manual-note-form">
-      <label>{{ t('Title') }}<input class="search-input" id="manual-note-name" name="title" maxlength="200" autocomplete="off" required placeholder="{{ t('Decision log') }}"></label>
-      <label>{{ t('Note') }}<textarea class="search-input" name="content_md" maxlength="200000" required placeholder="{{ t('Write in Markdown…') }}"></textarea></label>
-      <div class="manual-note-actions"><span class="sub" id="manual-note-status" role="status" aria-live="polite"></span><button class="btn sec" id="manual-note-cancel" type="button">{{ t('Cancel') }}</button><button class="btn" id="manual-note-create" type="submit">{{ t('Create note') }}</button></div>
-    </form>
-  </section>
-</div>
-{% endif %}
 {% if f.user_notes %}{% include '_user_note_history.html' %}{% endif %}
 {% set ask_history_file_id = f.id %}
 {% set ask_history_selected_id = f.selected_ask_thread.thread_id if f.selected_ask_thread else none %}
@@ -716,9 +706,9 @@
   function closeDialog(backdrop,{restoreFocus=true}={}){if(!backdrop)return;backdrop.hidden=true;recordingShell.inert=false;dialogChromeInert.forEach((wasInert,region)=>{region.inert=wasInert;});dialogChromeInert.clear();document.body.classList.remove('dialog-open');if(activeDialog===backdrop)activeDialog=null;if(restoreFocus)dialogOpener?.focus();dialogOpener=null;}
   document.addEventListener('keydown',event=>{if(!activeDialog)return;if(event.key==='Escape'){event.preventDefault();closeDialog(activeDialog);return;}if(event.key!=='Tab')return;const items=dialogFocusables(activeDialog);if(!items.length){event.preventDefault();return;}const first=items[0],last=items.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}},{signal:cleanupController.signal});
   cleanupController.signal.addEventListener('abort',()=>{if(activeDialog)closeDialog(activeDialog,{restoreFocus:false});},{once:true});
-  const workspacePopovers=[...document.querySelectorAll('.transcript-tool,.speaker-pill,.note-add-menu,.recording-more')];
+  const workspacePopovers=[...document.querySelectorAll('.transcript-tool,.speaker-pill,.recording-more')];
   function closeWorkspacePopover(details,{restoreFocus=true}={}){if(!details?.open)return;details.open=false;details.querySelector('form.speaker-editor')?.reset();if(restoreFocus)details.querySelector(':scope>summary')?.focus();}
-  workspacePopovers.forEach(details=>{details.addEventListener('toggle',()=>{if(!details.open)return;workspacePopovers.forEach(other=>{if(other!==details)closeWorkspacePopover(other,{restoreFocus:false});});const panel=details.querySelector('.transcript-popover,.speaker-editor,.note-add-popover');requestAnimationFrame(()=>{(panel?.querySelector('input:not([type="hidden"]),textarea,select,button:not([data-close-popover]),a[href]')||panel?.querySelector('[data-close-popover]'))?.focus();});});details.querySelector('[data-close-popover]')?.addEventListener('click',()=>closeWorkspacePopover(details));});
+  workspacePopovers.forEach(details=>{details.addEventListener('toggle',()=>{if(!details.open)return;workspacePopovers.forEach(other=>{if(other!==details)closeWorkspacePopover(other,{restoreFocus:false});});const panel=details.querySelector('.transcript-popover,.speaker-editor');requestAnimationFrame(()=>{(panel?.querySelector('input:not([type="hidden"]),textarea,select,button:not([data-close-popover]),a[href]')||panel?.querySelector('[data-close-popover]'))?.focus();});});details.querySelector('[data-close-popover]')?.addEventListener('click',()=>closeWorkspacePopover(details));});
   document.addEventListener('pointerdown',event=>{workspacePopovers.forEach(details=>{if(details.open&&!details.contains(event.target))closeWorkspacePopover(details,{restoreFocus:false});});},{signal:cleanupController.signal});
   document.addEventListener('keydown',event=>{if(activeDialog||event.key!=='Escape')return;const open=workspacePopovers.find(details=>details.open);if(open){event.preventDefault();closeWorkspacePopover(open);}},{signal:cleanupController.signal});
   const metadataBackdrop=document.getElementById('metadata-backdrop'),currentTagIds={{ f.tags|map(attribute='id')|list|tojson }};
@@ -745,10 +735,18 @@
   const colorSegments=root=>{const segments=[];if(root?.matches?.('.seg[data-spk]'))segments.push(root);root?.querySelectorAll?.('.seg[data-spk]').forEach(seg=>segments.push(seg));segments.forEach(seg=>{const i=window.spkColor(seg.dataset.spk);seg.style.setProperty('--c',`var(${vars[i]})`);});};
   const findInput=document.getElementById('transcript-find');
   if(findInput){
-    const transcript=document.getElementById('transcript'),transcriptSegments=()=>[...transcript.querySelectorAll('.seg')],count=document.getElementById('find-count');
+    const transcript=document.getElementById('transcript'),transcriptSegments=()=>[...transcript.querySelectorAll('.seg')],count=document.getElementById('find-count'),scopes=document.getElementById('find-scopes');
+    // The same query also runs over every note, so one search covers the recording.
+    const matchCase=()=>Boolean(document.getElementById('replace-case')?.checked),segmentText=segment=>segment.querySelector('.seg-text')?.textContent||'';
+    const occurrences=(text,query)=>{const haystack=matchCase()?text:text.toLocaleLowerCase(),needle=matchCase()?query:query.toLocaleLowerCase();let total=0;for(let index=haystack.indexOf(needle);index>=0;index=haystack.indexOf(needle,index+needle.length))total+=1;return total;};
+    const noteMatches=query=>!query||!window.localplaudNoteSearch?[]:window.localplaudNoteSearch.count(query,matchCase());
+    const renderScopes=()=>{const query=findInput.value.trim(),notes=noteMatches(query);scopes.replaceChildren();scopes.hidden=!query||(!matches.length&&!notes.length);if(scopes.hidden)return;
+      const chip=(label,total,onClick,note)=>{const button=document.createElement('button');button.type='button';button.className='chip find-scope';const name=document.createElement('span');name.textContent=label;const number=document.createElement('b');number.textContent=String(total);button.append(name,number);if(note){const hint=document.createElement('span');hint.className='find-scope-hint';hint.textContent=note;button.append(hint);}button.addEventListener('click',onClick);scopes.append(button);};
+      if(matches.length)chip(tr('Transcript'),matches.reduce((total,segment)=>total+occurrences(segmentText(segment),query),0),()=>focusMatch(1));
+      notes.forEach(item=>chip(item.label,item.count,()=>{closeWorkspacePopover(findInput.closest('details'),{restoreFocus:false});window.localplaudNoteSearch.reveal(item.target,query);},item.editable?'':tr('Read-only')));};
     let matches=[],position=-1,lastQuery='',focusPending=false,drainController=null,drainPromise=null;
     const focusMatch=next=>{if(!matches.length)return;position=(position+next+matches.length)%matches.length;matches.forEach((segment,index)=>segment.style.outline=index===position?'2px solid #FFA64D':'');matches[position].scrollIntoView({behavior:'smooth',block:'center'});count.textContent=`${position+1} / ${matches.length}`;};
-    const updateMatches=()=>{const segments=transcriptSegments(),query=findInput.value.trim().toLocaleLowerCase(),previous=matches[position];segments.forEach(segment=>segment.style.outline='');if(query!==lastQuery){position=-1;lastQuery=query;}matches=query?segments.filter(segment=>segment.querySelector('.txt')?.textContent.toLocaleLowerCase().includes(query)):[];if(previous&&matches.includes(previous))position=matches.indexOf(previous);count.textContent=`${matches.length} ${tr('results')}`;if(position>=0){matches[position].style.outline='2px solid #FFA64D';count.textContent=`${position+1} / ${matches.length}`;}else if(focusPending&&matches.length){focusPending=false;focusMatch(1);}};
+    const updateMatches=()=>{const segments=transcriptSegments(),query=findInput.value.trim(),queryKey=`${matchCase()}:${query}`,previous=matches[position];segments.forEach(segment=>segment.style.outline='');if(queryKey!==lastQuery){position=-1;lastQuery=queryKey;}matches=query?segments.filter(segment=>occurrences(segmentText(segment),query)>0):[];if(previous&&matches.includes(previous))position=matches.indexOf(previous);count.textContent=`${matches.length} ${tr('results')}`;if(position>=0){matches[position].style.outline='2px solid #FFA64D';count.textContent=`${position+1} / ${matches.length}`;}else if(focusPending&&matches.length){focusPending=false;focusMatch(1);}renderScopes();};
     const restoreLazyLoader=loader=>{if(loader?.isConnected&&loader.hasAttribute('hx-get')&&!loader.classList.contains('htmx-request'))window.htmx.process(loader);};
     const drainTranscript=()=>{
       if(drainPromise||!findInput.value.trim())return drainPromise;
@@ -794,7 +792,32 @@
     cleanupController.signal.addEventListener('abort',()=>drainController?.abort(),{once:true});
     findInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();focusMatch(event.shiftKey?-1:1);}});
     document.getElementById('toggle-replace')?.addEventListener('click',()=>{const row=document.getElementById('replace-row');row.hidden=!row.hidden;if(!row.hidden)document.getElementById('transcript-replace').focus();});
-    document.getElementById('replace-all')?.addEventListener('click',async()=>{const output=document.getElementById('replace-result'),button=document.getElementById('replace-all');if(!findInput.value.trim()){output.textContent=tr('Enter text to find');return;}button.disabled=true;output.textContent=tr('Replacing…');const body=new FormData();body.set('find',findInput.value);body.set('replace',document.getElementById('transcript-replace').value);body.set('base_revision',String(window.localplaudWorkspaceState?.revision??'{{ f.transcript.revision if f.transcript else 0 }}'));body.set('case_sensitive',document.getElementById('replace-case').checked?'true':'false');const response=await fetch('/file/{{ f.id }}/transcript/replace',{method:'POST',body}),data=await response.json();if(response.ok&&data.replacements){output.textContent=`${tr('Replaced')} ${data.replacements}. ${tr('Reloading…')}`;location.href='/file/{{ f.id }}?view=corrected';return;}output.textContent=response.ok?tr('No matches'):(data.error||tr('Replace failed'));button.disabled=false;});
+    document.getElementById('replace-case')?.addEventListener('change',()=>updateMatches());
+    document.getElementById('replace-all')?.addEventListener('click',async()=>{
+      const output=document.getElementById('replace-result'),button=document.getElementById('replace-all'),query=findInput.value.trim();
+      if(!query){output.textContent=tr('Enter text to find');return;}
+      const replacement=document.getElementById('transcript-replace').value,caseSensitive=document.getElementById('replace-case').checked;
+      const transcriptEditable=document.getElementById('replace-row').dataset.transcriptEditable==='true';
+      const editing=window.localplaudNoteSearch?.editing()||[];
+      if(editing.length){output.textContent=`${tr('Finish editing the Markdown first')}: ${editing.join(', ')}`;return;}
+      const noteHits=noteMatches(query).filter(item=>item.editable);
+      if(noteHits.length&&!confirm(tr('Replace every match in the transcript and notes? Earlier versions stay in each history.')))return;
+      button.disabled=true;output.textContent=tr('Replacing…');
+      let replaced=0;
+      if(noteHits.length){
+        const result=await window.localplaudNoteSearch.replaceAll(query,replacement,caseSensitive);
+        replaced+=result.replaced;
+        if(result.failed.length){output.textContent=`${tr('Could not save')}: ${result.failed.join(', ')}`;button.disabled=false;return;}
+      }
+      if(transcriptEditable){
+        const body=new FormData();body.set('find',query);body.set('replace',replacement);body.set('base_revision',String(window.localplaudWorkspaceState?.revision??'{{ f.transcript.revision if f.transcript else 0 }}'));body.set('case_sensitive',caseSensitive?'true':'false');
+        const response=await fetch('/file/{{ f.id }}/transcript/replace',{method:'POST',body}),data=await response.json().catch(()=>({}));
+        if(!response.ok){const error=data.error?tr(data.error):tr('Replace failed');output.textContent=replaced?`${tr('Replaced')} ${replaced} · ${error}`:error;button.disabled=false;return;}
+        replaced+=data.replacements||0;
+      }
+      if(replaced){output.textContent=`${tr('Replaced')} ${replaced}. ${tr('Reloading…')}`;location.href='/file/{{ f.id }}?view=corrected&tab=transcript&return_to={{ return_to_param }}';return;}
+      output.textContent=tr('No matches');button.disabled=false;
+    });
   }
   const generateBackdrop=document.getElementById('generate-backdrop');
   if(generateBackdrop){
@@ -892,7 +915,7 @@
     statusTimer=setTimeout(tick,2500);
   })();
   const noteTemplateSelect=document.getElementById('note-template-select');
-  document.querySelectorAll('[data-open-note-generation]').forEach(button=>button.addEventListener('click',()=>{closeWorkspacePopover(button.closest('.note-add-menu'),{restoreFocus:false});document.querySelector('[data-open-note-dialog]')?.click();}));
+  document.querySelectorAll('[data-open-note-generation]').forEach(button=>button.addEventListener('click',()=>{document.querySelector('[data-open-note-dialog]')?.click();}));
   function renderResolvedStages(resolved){const list=document.getElementById('resolved-stage-list');if(!list||!resolved?.stages)return;list.replaceChildren();for(const [stage,choice] of Object.entries(resolved.stages)){const chip=document.createElement('span');chip.className='chip';chip.textContent=`${tr(stage)} · ${choice.connection}:${choice.model}`;list.append(chip);}}
   async function previewTemplateResolution(key){const response=await fetch(`/api/providers/recordings/{{ f.id }}/resolution?template_key=${encodeURIComponent(key)}`),data=await response.json();if(response.ok)renderResolvedStages(data.resolved);}
   async function previewAutoTemplate(){if(noteTemplateSelect?.value!=='auto')return;const out=document.getElementById('note-template-result');out.textContent=tr('Checking recording signals…');const response=await fetch('/api/files/{{ f.id }}/note-template/recommendation'),data=await response.json();if(response.ok){const reason=(data.reasons||[]).join('; ');out.textContent=`${tr('Auto suggests')} ${data.template?.name||data.key} · ${data.confidence} ${tr('confidence')} · ${reason}`;previewTemplateResolution(data.key);}else out.textContent=data.detail||tr('Could not preview Auto selection');}
@@ -925,18 +948,6 @@
   syncWorkspaceLocation();
   askDockMedia.addEventListener('change',()=>{const requested=new URLSearchParams(location.search).get('tab')||'notes';if(askDockMedia.matches)setAskDock(requested==='ask'||storedAskDockOpen(),{remember:false});else{askDockLayout.classList.remove('ask-dock-open');askDockButton.setAttribute('aria-expanded','false');}activatePanel(['transcript','notes','mindmap','ask'].includes(requested)?requested:'notes');},{signal:cleanupController.signal});
   window.addEventListener('popstate',syncWorkspaceLocation,{signal:cleanupController.signal});
-  const manualNoteBackdrop=document.getElementById('manual-note-backdrop'),manualNoteForm=document.getElementById('manual-note-form'),manualNoteStatus=document.getElementById('manual-note-status');
-  const manualNoteModal=manualNoteBackdrop?window.localplaudModal({backdrop:manualNoteBackdrop,background:[recordingShell,...dialogChromeRegions],cleanupSignal:cleanupController.signal,dirtyMessage:tr('Discard this unfinished note?')}):null;
-  if(manualNoteModal){
-    const createButton=document.getElementById('manual-note-create'),closeButton=document.getElementById('manual-note-close'),cancelButton=document.getElementById('manual-note-cancel');
-    const resetManualNote=()=>{manualNoteForm.reset();manualNoteStatus.textContent='';createButton.disabled=false;closeButton.disabled=false;cancelButton.disabled=false;manualNoteModal.setDirty(false);manualNoteModal.setBusy(false);};
-    document.querySelectorAll('[data-open-manual-note]').forEach(button=>button.addEventListener('click',event=>{resetManualNote();manualNoteModal.open(event.currentTarget,document.getElementById('manual-note-name'));}));
-    manualNoteForm.addEventListener('input',()=>manualNoteModal.setDirty(Boolean(manualNoteForm.elements.title.value.trim()||manualNoteForm.elements.content_md.value.trim())));
-    closeButton.addEventListener('click',()=>manualNoteModal.close());
-    cancelButton.addEventListener('click',()=>manualNoteModal.close());
-    manualNoteBackdrop.addEventListener('localplaud:modal-close',resetManualNote);
-    manualNoteForm.addEventListener('submit',async event=>{event.preventDefault();createButton.disabled=true;closeButton.disabled=true;cancelButton.disabled=true;manualNoteModal.setBusy(true);manualNoteStatus.textContent=tr('Creating note…');try{const response=await fetch('/api/files/{{ f.id }}/notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:manualNoteForm.elements.title.value,content_md:manualNoteForm.elements.content_md.value}),signal:cleanupController.signal}),data=await response.json();if(!response.ok)throw new Error(response.status===409?tr('This recording is in Trash.'):data.detail?.[0]?.msg||data.detail||tr('Could not create note'));manualNoteModal.setDirty(false);location.href=`/file/{{ f.id }}?tab=notes&note_id=${data.id}`;}catch(error){if(error.name!=='AbortError'){manualNoteStatus.textContent=error.message||tr('Could not create note');createButton.disabled=false;closeButton.disabled=false;cancelButton.disabled=false;manualNoteModal.setBusy(false);}}});
-  }
   const selectedNoteId={{ f.selected_note_id|tojson }};
   if(selectedNoteId){activatePanel('notes');activateNoteTarget(`saved-${selectedNoteId}`);}
   const requestedNoteTarget=new URLSearchParams(location.search).get('note');

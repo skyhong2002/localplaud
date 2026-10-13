@@ -3844,14 +3844,10 @@ def notes_page(request: Request):
             }
             for row in rows
         ]
-        recording_count = int(
-            session.scalar(select(func.count(PlaudFile.id)).where(PlaudFile.is_trash.is_(False)))
-            or 0
-        )
     return templates.TemplateResponse(
         request=request,
         name="notes.html",
-        context=_base_ctx(request, "notes") | {"notes": notes, "recording_count": recording_count},
+        context=_base_ctx(request, "notes") | {"notes": notes},
     )
 
 

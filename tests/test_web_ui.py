@@ -467,9 +467,11 @@ def test_ready_to_generate_empty_state_offers_method_dialog(monkeypatch, tmp_pat
     empty_block = r.text.split('class="empty generate-empty"', 1)[1].split("</div>", 1)[0]
     for term in ("diarize", "align", "embed", "ASR", "pipeline"):
         assert term not in empty_block
-    # Manual notes stay available without a transcript; generated notes remain disabled.
-    assert "Create a note now. Generated notes become available after a local transcript exists." in r.text
-    assert 'data-open-manual-note' in r.text
+    # Without a transcript there is nothing to generate notes from, and blank
+    # notes are no longer offered.
+    assert "Notes can be generated after a local transcript exists." in r.text
+    assert 'data-open-manual-note' not in r.text
+    assert 'class="note-tab note-add-tab" data-open-note-generation' not in r.text
     assert 'id="generate-notes" disabled' in r.text
 
 
@@ -511,8 +513,8 @@ def test_notes_empty_state_guides_template_generation(monkeypatch, tmp_path):
     r = c.get("/file/r4?tab=notes")
     assert r.status_code == 200
     assert "No notes yet." in r.text
-    assert "Create your own note or choose a template to generate one from the transcript." in r.text
-    assert 'data-open-manual-note' in r.text
+    assert "Choose a template to generate a note from the transcript." in r.text
+    assert 'data-open-manual-note' not in r.text
     # A local transcript already exists, so the pre-generation dialog is gone.
     assert 'id="generate-backdrop"' not in r.text
 
@@ -554,12 +556,11 @@ def test_note_tabs_scan_outputs_and_mark_editable_copies(monkeypatch, tmp_path):
     assert f'title="Editable note · {long_title}"' in r.text
     saved_tab = r.text.split('class="note-tab saved-note-tab', 1)[1].split("</button>", 1)[0]
     assert "#i-pencil" in saved_tab
-    # The "+" affordance offers AI generation first and preserves blank notes.
-    assert "data-open-manual-note" in r.text
-    assert 'aria-label="New note"' in r.text
-    assert "data-open-note-generation" in r.text
-    assert "Generate AI note" in r.text and "Blank note" in r.text
-    assert 'id="manual-note-backdrop"' in r.text
+    # The "+" affordance opens AI note generation directly; blank notes are gone.
+    assert "data-open-manual-note" not in r.text
+    assert "Blank note" not in r.text
+    assert 'data-open-note-generation aria-label="Generate AI note"' in r.text
+    assert 'id="manual-note-backdrop"' not in r.text
     assert 'id="note-profile-select"' in r.text
     assert 'name="profile_id"' in r.text
     # Generated notes are edited in place; the first edit creates the copy.
@@ -594,10 +595,16 @@ def test_workspace_inline_manual_note_edit_uses_optimistic_version_api(
 ):
     c = _client(monkeypatch, tmp_path)
     _seed()
-    created = c.post(
-        "/api/files/r1/notes",
-        json={"title": "Draft", "content_md": "First version"},
-    ).json()
+    from localplaud.db.models import UserNote
+    from localplaud.db.session import session_scope
+
+    # A manual note created before blank-note creation was removed.
+    with session_scope() as s:
+        note = UserNote(file_id="r1", title="Draft", content_md="First version",
+                        source_type="manual", citations=[])
+        s.add(note)
+        s.flush()
+        created = {"id": note.id}
     page = c.get(f"/file/r1?tab=notes&note_id={created['id']}")
     assert f'data-workspace-note-form="{created["id"]}"' in page.text
     assert 'name="base_version" value="1"' in page.text
@@ -613,6 +620,45 @@ def test_workspace_inline_manual_note_edit_uses_optimistic_version_api(
         json={"title": "Draft", "content_md": "Stale", "base_version": 1},
     )
     assert stale.status_code == 409
+
+
+def test_find_and_replace_covers_transcript_and_every_note(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import Summary
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        summary_id = session.query(Summary.id).filter_by(file_id="r1").scalar()
+    copy = c.post(f"/api/files/r1/summaries/{summary_id}/editable-copy").json()
+
+    page = c.get("/file/r1?tab=transcript")
+    assets = with_assets(c, page)
+    popover = page.text.split('class="transcript-popover search-popover"', 1)[1].split("</details>", 1)[0]
+    assert 'placeholder="Find in transcript and notes"' in popover
+    assert 'id="find-scopes"' in popover
+    assert 'data-transcript-editable="true"' in popover
+    assert "Replaces in the transcript and every editable note." in popover
+    # An editable copy is searched and replaced through its own panel only.
+    assert f'data-source-summary="{summary_id}"' in page.text
+    assert copy["source_summary_id"] == summary_id
+    # One action: notes are replaced in place and saved, then the transcript.
+    assert "window.localplaudNoteSearch.replaceAll(query,replacement,caseSensitive)" in page.text
+    assert "fetch('/file/r1/transcript/replace'" in page.text
+    assert "window.localplaudNoteSearch = noteSearch" in assets
+
+    # Viewing the raw transcript behind a correction keeps note replacement.
+    with session_scope() as session:
+        from localplaud.db.models import Transcript, TranscriptRevision
+
+        raw = session.query(Transcript).filter_by(file_id="r1").one()
+        session.add(TranscriptRevision(file_id="r1", base_transcript_id=raw.id, revision=1,
+                                       source=raw.source, segments=raw.segments, text=raw.text,
+                                       has_speakers=raw.has_speakers, note="edited"))
+    raw_view = c.get("/file/r1?tab=transcript&view=raw")
+    popover = raw_view.text.split('class="transcript-popover search-popover"', 1)[1].split("</details>", 1)[0]
+    assert 'data-transcript-editable="false"' in popover
+    assert "Only notes are replaced while an older or raw transcript is shown." in popover
 
 
 def test_workspace_generated_note_edit_reuses_copy_and_opens_inline_editor(
@@ -881,7 +927,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     # Flat Plaud tab row: each note output is its own workspace tab, labelled
     # with its template; the first carries the stable notes-tab id.
     assert 'data-panel="notes" data-note-target="sum-' in r_assets
-    assert 'class="note-add-menu ws-tab-add"' in r_assets
+    assert '<div class="ws-tab-add"><button type="button" class="note-tab note-add-tab" data-open-note-generation' in r_assets
     assert 'id="recording-panel-notes" role="tabpanel"' in r_assets
     assert (
         'id="recording-panel-notes" role="tabpanel" '
@@ -1153,7 +1199,7 @@ def test_detail_workspace_uses_traditional_chinese_locale(monkeypatch, tmp_path)
         "提示詞 transcript-polish/v1",
         "失敗",
         "逐字稿",
-        "在逐字稿中尋找",
+        "在逐字稿與筆記中尋找",
         "分享",
         "時間戳記",
         "訂閱獨立性",

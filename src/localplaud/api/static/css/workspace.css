@@ -68,12 +68,6 @@
 .ask-history-footer { position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 16px;border-top:1px solid var(--border);background:var(--panel); }
 /* No conversations (or a failed load): there is nothing to page through. */
 .ask-history-body:has(.ask-history-list > .empty) .ask-history-footer { display:none; }
-.manual-note-modal { width:min(680px,100%);min-height:0;max-height:min(760px,calc(100dvh - 40px)); }
-.manual-note-form { gap:12px; }
-.manual-note-form label { display:grid;gap:5px;font-size:12px;color:var(--muted); }
-.manual-note-form textarea { width:100%;min-height:220px;resize:vertical;line-height:1.5; }
-.manual-note-actions { display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap; }
-.manual-note-actions [role="status"] { min-width:0;margin-right:auto;overflow-wrap:anywhere; }
 .user-note-history-backdrop { justify-content:flex-end;padding:0; }
 .user-note-history-drawer { width:min(460px,100%);height:100dvh;max-height:none;min-height:0;border-radius:8px 0 0 8px; }
 .user-note-history-body { min-height:0;padding:0; }
@@ -237,12 +231,6 @@
 
 .note-tabs .saved-note-tab :is(.nav-icon, .i),.note-tabs .note-add-tab :is(.nav-icon, .i) { flex:none; }
 
-.note-add-menu { position:relative; }
-.note-add-menu>summary { list-style:none; }
-.note-add-menu>summary::-webkit-details-marker { display:none; }
-.note-add-popover { position:absolute;left:0;top:37px;z-index:25;width:210px;padding:5px;border:1px solid var(--border2);border-radius:7px;background:var(--panel);box-shadow:var(--shadow); }
-.note-add-popover button { width:100%;max-width:none;display:flex;align-items:center;border:0;background:transparent;color:var(--fg);justify-content:flex-start;gap:8px;text-align:left; }
-.note-add-popover button:hover { background:var(--panel2); }
 .notes-toolbar { display:grid;grid-template-columns:minmax(220px,1fr) auto auto;align-items:end;gap:9px;margin:2px 0 15px;padding:12px;border:1px solid var(--border);border-radius:7px;background:#FAFAFA; }
 .notes-template-control { display:grid;grid-template-columns:auto minmax(180px,1fr);align-items:center;gap:9px; }
 .notes-template-control label { font-size:12px;font-weight:650;white-space:nowrap; }
@@ -370,8 +358,6 @@
   .ask-history-backdrop { padding:0; }
   .ask-history-drawer { width:100%;max-height:100dvh;border-radius:0; }
   .user-note-history-drawer { width:100%;max-height:100dvh;border-radius:0; }
-  .manual-note-modal { width:100%;max-height:calc(100dvh - 24px); }
-  .manual-note-form textarea { min-height:180px; }
   .saved-note-head { flex-direction:column;align-items:stretch; }
   .saved-note-actions { width:100%;justify-content:flex-start; }
 

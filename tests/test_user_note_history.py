@@ -41,13 +41,21 @@ def _add_recording(file_id: str = "history") -> None:
 
 
 def _create_note(client, *, title: str = "Version one", content: str = "Original") -> dict:
+    """Seed an existing manual note; blank-note creation is no longer offered."""
+    from localplaud.ask_threads import note_to_dict
+    from localplaud.db.models import UserNote
+    from localplaud.db.session import session_scope
+    from localplaud.worker.knowledge_index import sync_user_note_document
+
     _add_recording()
-    response = client.post(
-        "/api/files/history/notes",
-        json={"title": title, "content_md": content},
-    )
-    assert response.status_code == 201
-    return response.json()
+    with session_scope() as session:
+        note = UserNote(
+            file_id="history", title=title, content_md=content, source_type="manual", citations=[]
+        )
+        session.add(note)
+        session.flush()
+        sync_user_note_document(session, note)
+        return note_to_dict(note)
 
 
 def test_edit_archives_current_noop_does_not_and_stale_write_conflicts(client):

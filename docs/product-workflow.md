@@ -623,9 +623,14 @@ stored as provenance-preserving revisions: per-segment
 inline edits create a corrected canonical transcript on top of the immutable raw
 ASR row, survive re-ASR, re-index in the background without rerunning ASR, and hide
 stale notes/maps until explicit regeneration, with a labelled raw-versus-corrected
-view switch. Plaud-derived edits remain excluded from independent mode. Transcript
-find/replace, historical previews, and non-destructive restore-as-new-revision are
-implemented. Summaries, mind maps, embedding chunks, and stage runs persist their
+view switch. Plaud-derived edits remain excluded from independent mode. Find &
+replace is recording-wide: one query shows per-document match counts for the
+transcript and every note (read-only Plaud notes are labelled), a document chip opens
+that note's own find bar, and Replace all writes one transcript revision plus a new
+version of every editable note. AI notes are replaced through their editable copy,
+so the generated artifact stays immutable, and note replacement edits rendered text
+only, leaving link targets and untouched Markdown blocks byte-for-byte. Historical
+previews and non-destructive restore-as-new-revision are implemented. Summaries, mind maps, embedding chunks, and stage runs persist their
 exact input transcript lineage; notes and processing details expose it in the Web UI.
 Transcript correction now dispatches through the durable stage-scoped profile rather
 than being tied to one provider. Ollama, OpenAI, Anthropic, and the no-tools OpenCode
@@ -658,8 +663,8 @@ inside the same recording workspace. User edits affect only that copy; the origi
 AI artifact and its model/template/transcript lineage remain immutable.
 Note generation accepts a one-shot execution-profile choice recorded as an explicit
 resolution layer in stage provenance without persisting an override; the Notes "+"
-control generates a new AI note (template plus AI) by default with a blank manual
-note as the secondary choice, and note bodies are editable in place — AI notes
+control opens AI note generation (template plus AI) directly — blank manual notes
+are no longer offered — and note bodies are editable in place — AI notes
 promote seamlessly to their editable copy on first edit. Transcript polish rejects
 provider output that would empty non-empty segments, and damaged polished revisions
 can be repaired by restoring the emptied text from raw ASR as a normal immutable
@@ -673,12 +678,10 @@ title and exact Markdown body; history is bounded and lazy-loaded, and restoring
 older version creates a new live version while keeping citations, Ask/source links,
 and generated-copy provenance unchanged. The recording workspace and Saved Notes hub
 share the same keyboard-accessible desktop/mobile history drawer.
-User-authored Markdown notes are independent local data and can be created before
-audio import, transcription, or generation. They are selectable in the recording
-Notes workspace, searchable and exportable through the existing note paths, and never
-claim provider/model provenance or alter transcript, generation, Ask, or processing
-state. The Saved Notes hub can find a recording and create the same note without
-opening its workspace first.
+Creating blank manual notes was removed (2026-10-14). Manual notes created earlier
+remain independent local data: selectable in the recording Notes workspace,
+editable, versioned, searchable, exportable, and deletable, and they never claim
+provider/model provenance or alter transcript, generation, Ask, or processing state.
 The Templates workspace now separates My Space and Explore, with server-side search,
 scenario/category browsing, provenance, descriptions, authorship/popularity signals,
 prompt preview, immutable version editing, and copy-to-workspace. Other major gaps

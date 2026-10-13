@@ -185,8 +185,10 @@
       [...body.childNodes].forEach(node => {
         if (node.nodeType !== Node.ELEMENT_NODE || !BLOCK_TAGS.has(node.tagName)) { loose.push(node); return; }
         flushLoose();
-        const known = sources.get(node);
-        blocks.push({ element: node, md: known && known.html === node.outerHTML ? known.md : blockMarkdown(node) });
+        const known = sources.get(node), html = node.outerHTML;
+        // Snapshot the HTML now: text typed or replaced while this save is in
+        // flight must not be recorded as matching the Markdown being sent.
+        blocks.push({ element: node, html, md: known && known.html === html ? known.md : blockMarkdown(node) });
       });
       flushLoose();
       return blocks.filter(block => block.md.trim());
@@ -248,7 +250,7 @@
           if (response.ok) {
             version = Number(result.version ?? version + 1);
             lastSaved = content;
-            blocks.forEach(block => { if (block.element) sources.set(block.element, { html: block.element.outerHTML, md: block.md }); });
+            blocks.forEach(block => { if (block.element) sources.set(block.element, { html: block.html, md: block.md }); });
             syncChrome();
             setStatus(dirty ? tr('Unsaved changes') : tr('Saved'), dirty ? 'dirty' : 'saved');
             return;
@@ -339,6 +341,8 @@
       changed,
       flush: async () => { if (dirty || saving) await save(); },
       get busy() { return dirty || Boolean(saving); },
+      // A version conflict or an existing edited copy stops saving for good.
+      get blocked() { return conflict; },
     };
     editors.set(body, editor);
     return editor;
@@ -409,10 +413,40 @@
 
   const clearHighlights = () => { highlights?.delete('note-find'); highlights?.delete('note-find-current'); };
 
-  const openFind = panel => {
+  const findRanges = (body, query, caseSensitive) => {
+    const ranges = [], starts = [];
+    if (!query) return { ranges, starts };
+    const { text, locate } = textIndex(body);
+    const haystack = caseSensitive ? text : text.toLocaleLowerCase();
+    const needle = caseSensitive ? query : query.toLocaleLowerCase();
+    for (let index = haystack.indexOf(needle); index >= 0; index = haystack.indexOf(needle, index + needle.length)) {
+      const start = locate(index), end = locate(index + needle.length - 1);
+      const range = document.createRange();
+      range.setStart(start.node, index - start.start);
+      range.setEnd(end.node, index + needle.length - end.start);
+      ranges.push(range);
+      starts.push(index);
+    }
+    return { ranges, starts };
+  };
+  // Edits only text nodes, so links, formatting and untouched blocks keep
+  // their Markdown source when the editor serializes the note.
+  const replaceInBody = (body, ranges, value) => {
+    // Last first, so earlier ranges keep valid offsets.
+    [...ranges].reverse().forEach(range => {
+      range.deleteContents();
+      if (value) range.insertNode(document.createTextNode(value));
+    });
+    body.normalize();
+  };
+
+  const openFind = (panel, query = null) => {
     const body = noteBody(panel);
     if (!body) return;
-    if (active?.panel === panel) { active.input.focus({ preventScroll: true }); active.input.select(); active.bar.scrollIntoView({ block: 'nearest' }); return; }
+    if (active?.panel === panel) {
+      if (query !== null) { active.input.value = query; active.input.dispatchEvent(new Event('input')); }
+      active.input.focus({ preventScroll: true }); active.input.select(); active.bar.scrollIntoView({ block: 'nearest' }); return;
+    }
     closeFind();
     const editor = editors.get(body);
     const bar = document.createElement('div');
@@ -463,21 +497,9 @@
     };
     const refresh = ({ keepPosition = false } = {}) => {
       const query = input.value;
-      const { text, locate } = textIndex(body);
-      state.matches = [];
-      state.starts = [];
-      if (query) {
-        const haystack = caseSensitive() ? text : text.toLocaleLowerCase();
-        const needle = caseSensitive() ? query : query.toLocaleLowerCase();
-        for (let index = haystack.indexOf(needle); index >= 0; index = haystack.indexOf(needle, index + needle.length)) {
-          const start = locate(index), end = locate(index + needle.length - 1);
-          const range = document.createRange();
-          range.setStart(start.node, index - start.start);
-          range.setEnd(end.node, index + needle.length - end.start);
-          state.matches.push(range);
-          state.starts.push(index);
-        }
-      }
+      const found = findRanges(body, query, caseSensitive());
+      state.matches = found.ranges;
+      state.starts = found.starts;
       if (!keepPosition || state.position >= state.matches.length) state.position = state.matches.length ? 0 : -1;
       count.textContent = !query ? '' : state.matches.length ? `${state.position + 1} / ${state.matches.length}` : tr('No results');
       paint();
@@ -497,13 +519,7 @@
       reveal();
     };
     const replaceRanges = ranges => {
-      const value = replacement.value;
-      // Last first, so earlier ranges keep valid offsets.
-      [...ranges].reverse().forEach(range => {
-        range.deleteContents();
-        if (value) range.insertNode(document.createTextNode(value));
-      });
-      body.normalize();
+      replaceInBody(body, ranges, replacement.value);
       editor.changed();
     };
 
@@ -539,8 +555,10 @@
     if (editor) on(body, 'input', () => { if (active === state) refresh({ keepPosition: true }); });
 
     const selected = window.getSelection()?.toString();
-    if (selected && !selected.includes('\n') && body.contains(window.getSelection().anchorNode)) input.value = selected;
+    if (query !== null) input.value = query;
+    else if (selected && !selected.includes('\n') && body.contains(window.getSelection().anchorNode)) input.value = selected;
     refresh();
+    reveal();
     input.focus({ preventScroll: true });
     input.select();
     bar.scrollIntoView({ block: 'nearest' });
@@ -576,6 +594,60 @@
     event.stopImmediatePropagation();
     openFind(panel);
   }, { capture: true });
+  /* ---------- Recording-wide search (used by the workspace Find & replace) ---------- */
+
+  const noteTab = target => document.querySelector(`.tabs [data-note-target="${CSS.escape(target)}"]`);
+  // Every note once: a generated note whose editable copy has its own panel is
+  // searched (and replaced) through that copy; its preserved output is skipped.
+  const searchTargets = () => [...document.querySelectorAll('.note-panel')].flatMap(panel => {
+    const body = noteBody(panel);
+    const target = panel.dataset.notePanel || '';
+    const summaryId = target.startsWith('sum-') ? target.slice(4) : null;
+    if (!body || (summaryId && document.querySelector(`[data-source-summary="${CSS.escape(summaryId)}"]`))) return [];
+    return [{ target, body, editor: editors.get(body) || null, label: noteTab(target)?.querySelector('.note-tab-label')?.textContent.trim() || tr('Note') }];
+  });
+  const markdownFormOpen = item => {
+    const form = item.body.closest('.note-panel')?.querySelector('[data-workspace-note-form]');
+    return Boolean(form && !form.hidden);
+  };
+  const noteSearch = {
+    // Notes whose Markdown source editor is open: replacing the rendered text
+    // underneath would overwrite what is being typed there.
+    editing: () => searchTargets().filter(item => item.editor && markdownFormOpen(item)).map(item => item.label),
+    count: (query, caseSensitive = false) => searchTargets()
+      .map(item => ({ target: item.target, label: item.label, editable: Boolean(item.editor), count: findRanges(item.body, query, caseSensitive).ranges.length }))
+      .filter(item => item.count),
+    // Replaces in every editable note, then waits for each save. Notes that
+    // could not be saved are returned by label and keep their unsaved text.
+    replaceAll: async (query, replacement, caseSensitive = false) => {
+      closeFind();
+      const targets = searchTargets().filter(item => item.editor && !markdownFormOpen(item));
+      // Finish pending saves first so each replacement starts from saved text.
+      for (const item of targets) if (item.editor.busy) await item.editor.flush();
+      const touched = [];
+      let replaced = 0;
+      targets.forEach(item => {
+        const { ranges } = findRanges(item.body, query, caseSensitive);
+        if (!ranges.length) return;
+        replaceInBody(item.body, ranges, replacement);
+        item.editor.changed();
+        replaced += ranges.length;
+        touched.push(item);
+      });
+      // One at a time: each save takes the note write lock.
+      for (const item of touched) await item.editor.flush();
+      const failed = touched.filter(item => item.editor.busy || item.editor.blocked).map(item => item.label);
+      return { replaced, notes: touched.length, failed };
+    },
+    reveal: (target, query) => {
+      noteTab(target)?.click();
+      const panel = document.querySelector(`.note-panel[data-note-panel="${CSS.escape(target)}"]`);
+      if (panel) requestAnimationFrame(() => openFind(panel, query));
+    },
+  };
+  window.localplaudNoteSearch = noteSearch;
+  signal.addEventListener('abort', () => { if (window.localplaudNoteSearch === noteSearch) delete window.localplaudNoteSearch; });
+
   // Switching notes or tabs hides the panel; drop its stale highlights.
   const observer = new MutationObserver(() => { if (active && (active.panel.hidden || active.panel.offsetParent === null)) closeFind(); });
   document.querySelectorAll('.note-panel').forEach(panel => observer.observe(panel, { attributes: true, attributeFilter: ['hidden'] }));

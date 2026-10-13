@@ -1,4 +1,7 @@
-"""Manual-note picker, workspace, and export journey coverage."""
+"""Saved-note workspace, hub, picker, and export journey coverage.
+
+Blank-note creation was removed; existing notes keep their full lifecycle.
+"""
 
 from __future__ import annotations
 
@@ -106,8 +109,8 @@ def test_recording_and_notes_hub_render_manual_lifecycle_contract(client):
     assert f'data-note-panel="saved-{manual_id}" hidden' not in detail.text
     for label in ("Created by you", "Saved from Ask", "Editable generated copy"):
         assert label in detail_assets
-    assert 'id="manual-note-backdrop" data-dirty="false" hidden' in detail_assets
-    assert "Discard this unfinished note?" in detail_assets
+    assert "manual-note-backdrop" not in detail_assets
+    assert "data-open-manual-note" not in detail_assets
     assert "window.localplaudModal" in detail_assets
     assert "data-note-copy" in detail_assets and "data-note-delete" in detail_assets
     assert "textarea[name=\"content_md\"]'" in detail_assets
@@ -134,24 +137,15 @@ def test_recording_and_notes_hub_render_manual_lifecycle_contract(client):
     hub = client.get("/notes")
     hub_assets = with_assets(client, hub)
     assert hub.status_code == 200
-    assert "Write your own notes, edit generated copies" in hub_assets
-    assert 'id="manual-note-recording-search"' in hub_assets
-    assert "Search recordings…" in hub_assets
+    assert "Edited copies of AI notes and answers saved from Ask." in hub_assets
+    assert "manual-note-backdrop" not in hub_assets
+    assert "data-open-manual-note" not in hub_assets
     assert "Library · ask" not in hub.text
     for label in ("Created by you", "Saved from Ask", "Editable generated copy"):
         assert label in hub_assets
     assert "area.value=text" in hub_assets and "document.execCommand('copy')" in hub_assets
     assert "deleteMessages={manual:" in hub_assets
-    assert "clearTimeout(searchTimer)" in hub_assets
-    assert "if(cleanupController.signal.aborted)return" in hub_assets
-    assert "controller===pickerController" in hub_assets
-    assert "pickerController?.abort();pickerController=null;results.replaceChildren()" in hub_assets
-    assert "function renderRecordings(data){selectedFileId=null;create.disabled=true" in hub_assets
-    assert "modal.setBusy(true)" in hub_assets
-    assert "closeButton.disabled=true;cancelButton.disabled=true" in hub_assets
     assert "backdrop.dataset.busy==='true'" in hub_assets
-    assert "manualNoteModal.setBusy(true)" in detail_assets
-    assert "if(error.name!=='AbortError')status.textContent" in detail_assets
     assert f'data-user-note-history="{manual_id}"' in hub_assets
     assert hub.text.count('id="user-note-history-backdrop"') == 1
     assert ".user-note-history-preview { max-width:100%;max-height:280px;overflow:auto" in hub_assets
@@ -160,25 +154,32 @@ def test_recording_and_notes_hub_render_manual_lifecycle_contract(client):
     assert ".user-note-history-footer [role=\"status\"] { min-width:0;flex:1 1 180px;overflow-wrap:anywhere; }" in hub_assets
 
 
-def test_notes_hub_without_recordings_guides_to_add_audio(client):
+def test_empty_notes_hub_explains_where_notes_come_from(client):
     page = client.get("/notes")
     assert page.status_code == 200
-    assert "Add a recording before creating a note." in page.text
-    assert 'data-open-import="device"' in page.text
+    assert "Edit an AI note in a recording, or save an Ask answer, and it appears here." in page.text
+    assert "data-open-manual-note" not in page.text
     assert 'id="manual-note-backdrop"' not in page.text
 
 
-def test_manual_note_create_update_search_and_recording_exports(client):
+def test_existing_manual_note_update_search_and_recording_exports(client):
+    from localplaud.db.models import UserNote
+    from localplaud.db.session import session_scope
+    from localplaud.worker.knowledge_index import sync_user_note_document
+
     _recording("journey", "Planning session", 1_800_000_000_000)
-    created = client.post(
-        "/api/files/journey/notes",
-        json={
-            "title": "Decision log",
-            "content_md": "## Follow-up\n\n| Owner | Action |\n| --- | --- |\n| Sky | Ship beta |",
-        },
-    )
-    assert created.status_code == 201
-    note_id = created.json()["id"]
+    with session_scope() as session:
+        note = UserNote(
+            file_id="journey",
+            title="Decision log",
+            content_md="## Follow-up\n\n| Owner | Action |\n| --- | --- |\n| Sky | Ship beta |",
+            source_type="manual",
+            citations=[],
+        )
+        session.add(note)
+        session.flush()
+        sync_user_note_document(session, note)
+        note_id = note.id
 
     selected = client.get(f"/file/journey?tab=notes&note_id={note_id}")
     assert f'data-note-target="saved-{note_id}" class="note-tab saved-note-tab on"' in selected.text

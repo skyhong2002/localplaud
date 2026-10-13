@@ -7,11 +7,11 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..ask_threads import note_to_dict, save_answer_as_note
-from ..db.models import PlaudFile, Summary, UserNote, UserNoteRevision
+from ..db.models import Summary, UserNote, UserNoteRevision
 from ..db.session import session_scope
 from ..editable_notes import (
     USER_NOTE_CONTENT_MAX_LENGTH,
@@ -76,13 +76,6 @@ class NoteRestoreBody(BaseModel):
     base_version: int = Field(ge=1)
 
 
-def _serialize_manual_note_creation(session: Session) -> None:
-    # Reserve the SQLite writer before checking the trash boundary so a concurrent
-    # mirror update cannot commit between that check and the note insert.
-    if session.get_bind().dialect.name == "sqlite":
-        session.execute(text("BEGIN IMMEDIATE"))
-
-
 def _lock_note_for_write(session: Session, note_id: int) -> UserNote | None:
     """Serialize the version check with the archive and live-row update."""
     from ..worker.knowledge_index import KnowledgeIndexBusyError, lock_user_note_for_mutation
@@ -136,34 +129,6 @@ def save_answer(message_id: int, body: SaveAnswerBody) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except EditableNoteContentError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return result
-
-
-@router.post("/files/{file_id}/notes", status_code=201)
-def create_manual_note(file_id: str, body: NoteBody) -> dict:
-    from ..worker.knowledge_index import sync_user_note_document
-
-    with session_scope() as session:
-        _serialize_manual_note_creation(session)
-        recording = session.get(PlaudFile, file_id)
-        if recording is None:
-            raise HTTPException(status_code=404, detail="recording not found")
-        if recording.is_trash:
-            raise HTTPException(status_code=409, detail="recording is in trash")
-        note = UserNote(
-            file_id=file_id,
-            title=body.title,
-            content_md=body.content_md,
-            source_type="manual",
-            ask_message_id=None,
-            source_summary_id=None,
-            source_summary_snapshot=None,
-            citations=[],
-        )
-        session.add(note)
-        session.flush()
-        sync_user_note_document(session, note)
-        result = note_to_dict(note)
     return result
 
 

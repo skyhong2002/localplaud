@@ -354,8 +354,10 @@ this file's git history (pre-2026-07-31 versions).
   questions, and save-to-note; fail-closed embedding identity with the
   durable note-embedding queue; one shared cost ledger across pipeline,
   indexing, and Ask; transcript corrections as immutable revisions with
-  find/replace, bulk edits, history, and non-destructive restore; manual and
-  editable-copy notes with immutable version history.
+  recording-wide find/replace across the transcript and every editable note,
+  bulk edits, history, and non-destructive restore; editable-copy notes with
+  immutable version history (blank manual-note creation removed 2026-10-14;
+  existing manual notes stay editable).
 - **Web App.** Two screenshot-led Plaud-fidelity passes (2026-07-18 shell:
   single white sidebar, breadcrumb workspace, Ask dock); original brand
   system (`docs/brand.md`, logo/wordmark/favicon, CSS token set, OFL Noto

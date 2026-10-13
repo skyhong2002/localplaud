@@ -1512,12 +1512,14 @@ def test_saved_note_api_queues_invalidates_and_deletes_document(monkeypatch, tmp
     with session_scope() as session:
         _recording(session, "r1", "Weekly Sync")
     client = TestClient(app)
-    created = client.post(
-        "/api/files/r1/notes",
-        json={"title": "Plan", "content_md": "Version one"},
-    )
-    assert created.status_code == 201
-    note_id = created.json()["id"]
+    with session_scope() as session:
+        note = UserNote(
+            file_id="r1", title="Plan", content_md="Version one", source_type="manual", citations=[]
+        )
+        session.add(note)
+        session.flush()
+        service.sync_user_note_document(session, note)
+        note_id = note.id
     with session_scope() as session:
         document = session.scalar(
             select(KnowledgeDocument).where(KnowledgeDocument.user_note_id == note_id)

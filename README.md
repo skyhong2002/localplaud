@@ -82,10 +82,12 @@ exports remain available. Transcript and current notes can be copied directly, a
 the Library can export up to 50 selected recordings as one provenance-aware ZIP with
 a partial-availability manifest. Library and recording Ask surfaces also provide a
 searchable, paginated conversation-history drawer with rename/delete controls;
-deleting a conversation preserves any Saved notes created from its answers. Manual
-Markdown notes can be created from a recording or the Saved Notes hub without a
-transcript or AI provider, and share the same search, edit, copy, export, backup, and
-local-data preservation paths as other user-owned notes. Durable note knowledge
+deleting a conversation preserves any Saved notes created from its answers. Blank
+manual notes are no longer created; notes made that way earlier keep the same search,
+edit, copy, export, backup, and local-data preservation paths as other user-owned
+notes. One recording-wide Find & replace searches the transcript and every note
+together, and Replace all updates the transcript (one revision) and every editable
+note (AI notes through their editable copy) in one action. Durable note knowledge
 documents also let recording and library Ask rank current local generated notes and
 Saved notes alongside corrected transcript chunks. Note citations open the exact
 artifact, and independent retry/fencing keeps an embedding failure from changing the
