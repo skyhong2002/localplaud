@@ -5469,6 +5469,39 @@ def restore_summary_version_route(
     return RedirectResponse(f"/file/{file_id}?tab={safe_tab}{note_param}", status_code=303)
 
 
+@app.delete("/api/files/{file_id}/summaries/{summary_id}", status_code=204)
+def delete_summary_route(file_id: str, summary_id: int) -> Response:
+    """Delete one locally generated note; its content stays in version history.
+
+    Plaud-imported notes are read-only mirrors that a cloud refresh would bring
+    back, and the mind map is regenerated from its own tab, so neither is
+    deletable here.
+    """
+    from ..note_history import delete_generated_note
+    from ..worker.knowledge_index import KnowledgeIndexBusyError, lock_summary_for_mutation
+
+    with session_scope() as session:
+        try:
+            row = lock_summary_for_mutation(session, summary_id, file_id)
+        except KnowledgeIndexBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if row is None or row.file_id != file_id:
+            raise HTTPException(status_code=404, detail="note not found")
+        recording = session.get(PlaudFile, file_id)
+        if recording is not None:
+            session.refresh(recording)
+        if recording is not None and _recording_edit_blocked(recording):
+            raise HTTPException(
+                status_code=409, detail="recording is processing; try again when it finishes"
+            )
+        if row.source != "local":
+            raise HTTPException(status_code=400, detail="Plaud notes are read-only")
+        if row.template == "mind_map":
+            raise HTTPException(status_code=400, detail="the mind map cannot be deleted here")
+        delete_generated_note(session, row)
+    return Response(status_code=204)
+
+
 # Library surfaces (whole-library Ask page, search helpers). Included last so
 # their routes never shadow the established pages above.
 from .surfaces import install as _install_surface_helpers  # noqa: E402

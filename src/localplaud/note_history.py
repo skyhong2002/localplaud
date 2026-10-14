@@ -230,6 +230,24 @@ def retire_legacy_notes(
     return retired
 
 
+def delete_generated_note(session: Session, row: Summary) -> None:
+    """Remove one live generated note at the user's request.
+
+    The caller holds the summary mutation lock. The outgoing content is first
+    preserved as a version of its template chain, so generating that template
+    again brings it back into the note's history. Editable copies keep their
+    text and lose only the link to the removed note; the note's knowledge
+    document and chunks go with the row, so search and Ask stop citing it.
+    """
+    archive_summary(session, row, reason="deleted")
+    # Deployed SQLite libraries may not enforce foreign keys.
+    session.execute(
+        update(UserNote).where(UserNote.source_summary_id == row.id).values(source_summary_id=None)
+    )
+    session.delete(row)
+    session.flush()
+
+
 def restore_summary_version(session: Session, row: Summary, target: SummaryRevision) -> bool:
     """Make ``target`` the live content of ``row``, preserving what it displaces.
 
