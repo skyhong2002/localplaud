@@ -120,8 +120,12 @@ body:has(#persistent-player.ws-player) .toast-region { bottom: calc(var(--ws-pla
 .recording-shell .transcript-toolbar { position: sticky; top: 42px; z-index: 12; padding: 8px 0; margin: 0 0 8px; background: var(--c-bg, var(--panel)); }
 .recording-shell .transcript-toolbar > .chip { margin-right: auto; }
 .recording-shell .transcript-view-notice { border-radius: 999px; padding: 4px 11px; }
-/* Find & replace is a bar under the toolbar rather than a floating popover. */
-.recording-shell .transcript-tool:has(#transcript-find) { position: static; }
+/* Find & replace hangs from the top bar's right edge, over whichever tab is open. */
+.recording-shell .ws-topbar { position: relative; z-index: 40; }
+.recording-shell .ws-find { position: static; }
+.recording-shell .ws-find > summary { list-style: none; }
+.recording-shell .ws-find > summary::-webkit-details-marker { display: none; }
+.ws-topbar .ws-find[open] > summary { background: var(--c-subtle, #EBEBEB); }
 .recording-shell .transcript-popover.search-popover {
   left: 0; right: 0; top: calc(100% + 2px); width: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center;
   padding: 10px 44px 10px 12px; border-radius: var(--radius);
@@ -522,10 +526,10 @@ body.ws-mm-full-open { overflow: hidden; }
 }
 
 /* Desktop: the header search icon owns find & replace; the panel floats at the
-   right of the reading column like Plaud's 325px find panel. */
+   top-right corner of the page like Plaud's 325px find panel. */
 @media (min-width: 821px) {
-  .recording-shell .transcript-tool:has(#transcript-find) > summary { display: none; }
-  .recording-shell .transcript-popover.search-popover { left: auto; right: 0; width: 360px; padding-right: 12px; box-shadow: 0 0 32px rgba(0, 0, 0, .10); border-color: var(--c-border-ui, #E5E7EB); border-radius: 5px; }
+  .recording-shell #open-find-inline { display: none; }
+  .recording-shell .transcript-popover.search-popover { left: auto; right: 12px; top: calc(100% + 4px); width: 360px; padding-right: 12px; box-shadow: 0 0 32px rgba(0, 0, 0, .10); border-color: var(--c-border-ui, #E5E7EB); border-radius: 5px; }
 }
 .ws-template-card .chip { justify-self: start; }
 /* Production reading layout: the notes view carries its own reading title, so

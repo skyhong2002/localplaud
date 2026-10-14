@@ -1077,27 +1077,16 @@
     document.getElementById('open-ask-dock')?.click();
     requestAnimationFrame(() => document.getElementById('ask-q')?.focus());
   });
+  // Find & replace covers the transcript and every note, so it opens from the
+  // top bar over whichever tab is showing instead of switching to the transcript.
   const openFind = () => {
-    document.querySelector('.tabs>button[data-panel="transcript"]:not(.on)')?.click();
     const details = document.getElementById('transcript-find')?.closest('details');
     if (!details) return;
     details.open = true;
-    requestAnimationFrame(() => {
-      document.getElementById('transcript-find')?.focus({ preventScroll: true });
-      // The panel hangs under the transcript toolbar; when that toolbar sits low
-      // in the viewport, scroll just enough to bring the whole panel into view.
-      const panel = details.querySelector('.search-popover');
-      const rect = panel?.getBoundingClientRect();
-      if (!rect || (rect.bottom <= window.innerHeight - 12 && rect.top >= 0)) return;
-      let scroller = details.parentElement;
-      while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
-      const target = !scroller || scroller === document.body ? window : scroller;
-      const delta = rect.top < 0 ? rect.top - 12 : rect.bottom - window.innerHeight + 16;
-      target.scrollBy({ top: delta });
-    });
+    requestAnimationFrame(() => document.getElementById('transcript-find')?.focus({ preventScroll: true }));
   };
   on(document, 'keydown', event => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && transcriptVisible() && document.getElementById('transcript-find')) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && !document.body.classList.contains('dialog-open') && document.getElementById('transcript-find')) {
       event.preventDefault();
       openFind();
     }
@@ -1221,7 +1210,7 @@
     try { await writeClipboard(`${time ? `[${time}] ` : ''}${who ? `${who}: ` : ''}${text}`); toast(tr('Copied')); } catch (_error) { toast(tr('Copy failed'), { error: true }); }
   });
 
-  on(document.getElementById('open-find'), 'click', () => openFind());
+  on(document.getElementById('open-find-inline'), 'click', () => openFind());
 
   // Name speakers dialog: one field per voice with sample clips.
   const namesBackdrop = document.getElementById('name-speakers-backdrop');

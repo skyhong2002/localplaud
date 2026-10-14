@@ -2156,3 +2156,25 @@ def test_library_checkbox_gutter_reveals_on_hover_focus_selection_and_touch():
     touch = css.index("@media (hover: none) { .file-row .row-check, .file-table-head .head-check")
     # The touch override must come after the hidden-by-default row rule to win.
     assert touch > css.index(".file-row .row-check { position: absolute;")
+
+
+def test_find_and_replace_opens_from_the_top_bar_over_the_current_tab(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    _seed()
+    page = c.get("/file/r1?workspace=true").text
+
+    # The panel lives in the top bar, so it opens at the top right on any tab.
+    header = page.split('<header class="detail-topbar ws-topbar">', 1)[1].split("</header>", 1)[0]
+    assert '<details class="transcript-tool ws-find"><summary class="icon-action icon-only" id="open-find"' in header
+    assert 'id="find-popover"' in header and 'id="transcript-find"' in header
+    toolbar = page.split('<div class="transcript-toolbar">', 1)[1].split('<div class="legend"', 1)[0]
+    assert 'id="transcript-find"' not in toolbar
+    assert 'id="open-find-inline"' in toolbar
+
+    # Opening, typing, and Replace all never switch to the transcript on their own.
+    open_find = WORKSPACE_JS.split("const openFind = () => {", 1)[1].split("};", 1)[0]
+    assert 'data-panel="transcript"' not in open_find
+    assert "activatePanel('transcript',true)" not in page
+    assert "focusPending&&matches.length&&transcriptShown()" in page
+    assert "tab=transcript&return_to" not in page.split("getElementById('replace-all')", 1)[1]
+    assert "next.searchParams.set('tab',document.querySelector('.tabs>button.on')?.dataset.panel" in page
