@@ -18,7 +18,7 @@
         <span>{{ ops.ready }} / {{ total }} {{ t('recordings ready') }} · {{ stats.hours }} {{ t('hours') }}</span>
         {% if ops.attention %}<a href="/?state=attention">{{ ops.attention }} {{ t('need attention') }}</a>{% elif ops.processing or ops.queued %}<a href="/?state=generating">{{ ops.processing + ops.queued }} {{ t('generating') }}</a>{% else %}<span>{{ t('All caught up') }}</span>{% endif %}
       </div>
-      <a class="btn btn-lg btn-block explore-hero-button" href="/ask">{{ icon('sparkles', 'sm') }}{{ t('Ask your library') }}</a>
+      {% if ask_enabled|default(false) %}<a class="btn btn-lg btn-block explore-hero-button" href="/ask">{{ icon('sparkles', 'sm') }}{{ t('Ask your library') }}</a>{% endif %}
     </div>
   </section>
   <div class="explore-body">

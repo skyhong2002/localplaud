@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from tests.assets import with_assets
+from tests.workspace import set_ask_enabled
 
 WORKSPACE_JS = (
     Path(__file__).parents[1] / "src/localplaud/api/static/js/workspace.js"
@@ -898,6 +899,7 @@ def test_sidebar_ops_card_all_caught_up(monkeypatch, tmp_path):
 
 def test_detail_page_renders(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
+    set_ask_enabled(c)
     audio = tmp_path / "audio.mp3"
     audio.write_bytes(b"audio")
     _seed(str(audio))
@@ -1272,6 +1274,7 @@ def test_imported_only_recording_disables_local_generation(monkeypatch, tmp_path
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__ARTIFACT_MODE", "migration")
     monkeypatch.setenv("LOCALPLAUD_PIPELINE__PREFER_CLOUD_ARTIFACTS", "true")
     c = _client(monkeypatch, tmp_path)
+    set_ask_enabled(c)
     from localplaud.db.models import FileStatus, PlaudFile, Transcript
     from localplaud.db.session import session_scope
 
@@ -1875,6 +1878,7 @@ def test_home_modules_use_shell_language_and_direct_routes(monkeypatch, tmp_path
 
 def test_search_results_are_title_first_with_quiet_kind_labels(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
+    set_ask_enabled(c)
     _seed()
     from localplaud.db.models import Folder, PlaudFile, UserNote
     from localplaud.db.session import session_scope

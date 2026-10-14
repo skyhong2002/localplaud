@@ -223,7 +223,7 @@
   };
   lp.shortcut('g h', go('/home'), {description: 'Go to Home'});
   lp.shortcut('g f', go('/'), {description: 'Go to All files'});
-  lp.shortcut('g a', go('/ask'), {description: 'Go to Ask'});
+  lp.shortcut('g a', () => { if ('askEnabled' in document.body.dataset) go('/ask')(); }, {description: 'Go to Ask'});
   lp.shortcut('g t', go('/templates'), {description: 'Go to Templates'});
   lp.shortcut('g s', go('/settings'), {description: 'Go to Settings'});
   lp.shortcut('?', () => lp.openDialog('shortcuts-dialog'), {description: 'Show keyboard shortcuts'});

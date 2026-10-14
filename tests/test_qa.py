@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from tests.assets import with_assets
+from tests.workspace import set_ask_enabled
 
 
 def _fresh_db(monkeypatch, tmp_path, name="qa.db"):
@@ -1519,6 +1520,7 @@ def test_file_ask_provider_unavailable_degrades(monkeypatch, tmp_path):
 
 def test_detail_page_has_ask_tab_and_deeplink(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
+    set_ask_enabled(c)
     _seed_file()
     r = c.get("/file/r1")
     r_assets = with_assets(c, r)

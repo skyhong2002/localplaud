@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tests.workspace import set_ask_enabled
+
 
 def _client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
@@ -242,6 +244,7 @@ def _seed_transcript():
 
 def test_search_page_highlights_hits_and_hands_query_to_ask(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+    set_ask_enabled(client)
     _seed_transcript()
     monkeypatch.setattr("localplaud.worker.qa.retrieve", lambda *args, **kwargs: [])
     page = client.get("/search", params={"q": "roadmap"})

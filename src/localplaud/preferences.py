@@ -19,6 +19,8 @@ DEFAULT_WORKSPACE_PREFERENCES = {
     "hour_cycle": "24",
     "locale": "en",
     "auto_process_new_recordings": True,
+    # Ask entry points stay out of the way until the user turns them on.
+    "ask_enabled": False,
 }
 
 

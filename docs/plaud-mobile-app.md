@@ -633,7 +633,8 @@ Every gesture has a visible button equivalent. Honour `prefers-reduced-motion`.
       animation under reduced motion).
     - **Failure state**: an inline error card with the stage, provider, and message, plus
       **Retry** and **Change provider**. The rest of the recording stays usable.
-19. **Pinned Ask input** at the bottom of detail (both tabs):
+19. **Pinned Ask input** at the bottom of detail (both tabs), shown only while
+    **Show Ask** is on in Settings (off by default):
     - A rounded 12px field labelled "Ask about this recording…" with a thin AI-accent
       border (localplaud blue→violet `#007AFF → #8F53ED`, not Plaud's cyan-green) and a
       circular ↑ send button.

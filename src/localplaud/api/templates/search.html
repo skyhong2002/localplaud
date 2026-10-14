@@ -29,7 +29,7 @@
 
 <div id="sf-search-results" class="sf-search-results" data-sf-search-results data-query="{{ q }}" aria-live="polite">
 {% if search_filters.invalid_date_filter %}<div class="range-error" role="alert">{{ t('Enter a valid recorded date in the supported range.') }}</div>{% elif search_filters.invalid_date_range %}<div class="range-error" role="alert">{{ t('Start date must not follow end date.') }}</div>{% endif %}
-{% if q %}
+{% if q and ask_enabled|default(false) %}
 <a class="sf-search-ask" href="/ask?q={{ q|urlencode }}&amp;send=1" data-sf-result>
   <span class="sf-search-ask-icon" aria-hidden="true">{{ icon('sparkles') }}</span>
   <span class="sf-search-ask-text">{{ t('Ask the library') }}: “{{ q }}”<small>{{ t('Get a grounded answer with cited moments') }}</small></span>
@@ -43,7 +43,7 @@
   <span class="sub empty-sub">{{ t('No title, transcript, or note matches within these filters.') }}</span>
   <div class="search-empty-actions">
     <a class="btn sec" href="/">{{ t('All files') }}</a>
-    <a class="btn sec" href="/ask?q={{ q|urlencode }}">{{ t('Ask the library') }}</a>
+    {% if ask_enabled|default(false) %}<a class="btn sec" href="/ask?q={{ q|urlencode }}">{{ t('Ask the library') }}</a>{% endif %}
   </div>
 </div>
 {% elif groups %}
@@ -93,7 +93,7 @@
   <div class="search-empty-actions">
     <a class="btn sec" href="/">{{ t('All files') }}</a>
     <a class="btn sec" href="/notes">{{ t('Saved notes') }}</a>
-    <a class="btn sec" href="/ask">{{ t('Ask the library') }}</a>
+    {% if ask_enabled|default(false) %}<a class="btn sec" href="/ask">{{ t('Ask the library') }}</a>{% endif %}
   </div>
 </div>
 {% endif %}

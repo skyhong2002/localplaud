@@ -539,6 +539,7 @@ body.app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 .home-section + .home-section { margin-top: 60px; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .home-cards { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 24px; }
+.home-cards-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
 .home-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 156px; padding: 16px; border-radius: var(--radius);
   background: var(--c-surface-2); color: var(--c-text-body); text-decoration: none; transition: background-color .2s; }
 a.home-card:hover { background: var(--c-hover); }

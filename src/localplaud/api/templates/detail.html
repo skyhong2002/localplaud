@@ -45,8 +45,8 @@
         {% if f.has_audio or f.audio_on_demand %}<button id="menu-speech-settings" type="button" data-dialog-open="speech-settings-dialog">{{ icon('waveform') }}{{ t('Speech settings') }}{% if f.speech_overrides %} <span class="chip">{{ t('Custom') }}</span>{% endif %}</button>{% endif %}
         <button id="menu-processing-details" type="button">{{ icon('activity') }}{{ t('Processing details') }}</button>
       </div></details>
-      <span class="ws-divider" aria-hidden="true"></span>
-      <button class="icon-action ws-ask-button" id="open-ask-dock" type="button" aria-controls="recording-panel-ask" aria-expanded="false" {% if not f.has_local_transcript %}title="{{ t('A local transcript is required first.') }}"{% endif %}>{{ icon('sparkles') }}<span class="action-label">{{ t('Ask') }}</span></button>
+      {% if ask_enabled %}<span class="ws-divider" aria-hidden="true"></span>
+      <button class="icon-action ws-ask-button" id="open-ask-dock" type="button" aria-controls="recording-panel-ask" aria-expanded="false" {% if not f.has_local_transcript %}title="{{ t('A local transcript is required first.') }}"{% endif %}>{{ icon('sparkles') }}<span class="action-label">{{ t('Ask') }}</span></button>{% endif %}
     </div>
   </header>
   <div class="detail-body">
@@ -85,7 +85,7 @@
       <button id="recording-tab-notes" role="tab" aria-controls="recording-panel-notes" aria-selected="{{ 'true' if active_tab == 'notes' else 'false' }}" tabindex="{{ '0' if active_tab == 'notes' else '-1' }}" data-panel="notes" class="{% if active_tab == 'notes' %}on{% endif %}">{{ t('Notes') }}</button>
       {% endif %}
       <button id="recording-tab-mindmap" role="tab" aria-controls="recording-panel-mindmap" aria-selected="{{ 'true' if active_tab == 'mindmap' else 'false' }}" tabindex="{{ '0' if active_tab == 'mindmap' else '-1' }}" data-panel="mindmap" class="{% if active_tab == 'mindmap' %}on{% endif %}">{{ t('Mind map') }}</button>
-      <button id="recording-tab-ask" role="tab" aria-controls="recording-panel-ask" aria-selected="{{ 'true' if active_tab == 'ask' else 'false' }}" tabindex="{{ '0' if active_tab == 'ask' else '-1' }}" data-panel="ask" class="{% if active_tab == 'ask' %}on{% endif %}">{{ t('Ask') }}</button>
+      {% if ask_enabled %}<button id="recording-tab-ask" role="tab" aria-controls="recording-panel-ask" aria-selected="{{ 'true' if active_tab == 'ask' else 'false' }}" tabindex="{{ '0' if active_tab == 'ask' else '-1' }}" data-panel="ask" class="{% if active_tab == 'ask' %}on{% endif %}">{{ t('Ask') }}</button>{% endif %}
     </div>
     {% if not f.is_trash and f.has_local_transcript %}<div class="ws-tab-add"><button type="button" class="note-tab note-add-tab" data-open-note-generation aria-label="{{ t('Generate AI note') }}" title="{{ t('Generate AI note') }}">{{ icon('plus', 'xs') }}</button></div>{% endif %}
     </div>
@@ -399,6 +399,7 @@
     </div>
 
       </main>
+    {% if ask_enabled %}
     <aside class="tabpanel ask-dock" id="recording-panel-ask" role="tabpanel" aria-labelledby="recording-tab-ask" data-panel="ask" {% if active_tab != 'ask' %}hidden{% endif %}>
       <div class="ask-dock-header"><strong class="ask-dock-title">{{ t('Ask') }}</strong><div class="ask-dock-actions"><button class="icon-action" type="button" data-open-ask-history>{{ icon('history') }}{{ t('History') }}</button><button class="icon-action icon-only ask-dock-close" id="close-ask-dock" type="button" aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div></div>
       <form class="ask" data-ask-request data-ask-status="file-ask-status" hx-post="/file/{{ f.id }}/ask" hx-target="#file-answer" hx-sync="#file-answer:drop" hx-swap="innerHTML"
@@ -426,6 +427,7 @@
       {% if f.ask_threads %}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 10px"><span class="sub" style="font-size:11px">{{ t('Recent threads') }}</span>{% for thread in f.ask_threads %}<a class="chip {% if f.selected_ask_thread and f.selected_ask_thread.thread_id == thread.id %}on{% endif %}" href="/file/{{ f.id }}?tab=ask&amp;ask_thread={{ thread.id }}&amp;return_to={{ return_to_param }}">{{ thread.title | truncate(34) }}</a>{% endfor %}</div>{% endif %}
       <div id="file-answer" role="region" aria-label="{{ t('Answer') }}">{% if f.selected_ask_thread %}{% set thread=f.selected_ask_thread %}{% set file_id=f.id %}{% set target='file-answer' %}{% include '_ask_thread.html' %}{% endif %}</div>
     </aside>
+    {% endif %}
     </div>
     <div class="ws-advanced-wrap">
     <details class="recording-advanced" id="recording-advanced">
@@ -502,7 +504,7 @@
 
     </div>
   </div>
-    <button class="ws-ask-pin" type="button" data-open-ask-sheet {% if not f.has_local_transcript %}hidden{% endif %}>{{ icon('sparkles') }}<span>{{ t('Ask about this recording…') }}</span></button>
+    {% if ask_enabled %}<button class="ws-ask-pin" type="button" data-open-ask-sheet {% if not f.has_local_transcript %}hidden{% endif %}>{{ icon('sparkles') }}<span>{{ t('Ask about this recording…') }}</span></button>{% endif %}
     {% if f.has_audio or f.audio_on_demand %}
     <section id="persistent-player" class="recording-player ws-player" aria-label="{{ t('Audio player') }}">
       <audio id="player" preload="metadata" src="/audio/{{ f.id }}"></audio>
@@ -682,10 +684,12 @@
 </div>
 {% include "_recording_share.html" %}
 {% if f.user_notes %}{% include '_user_note_history.html' %}{% endif %}
+{% if ask_enabled %}
 {% set ask_history_file_id = f.id %}
 {% set ask_history_selected_id = f.selected_ask_thread.thread_id if f.selected_ask_thread else none %}
 {% set ask_history_open_url = '/file/' ~ f.id ~ '?tab=ask&return_to=' ~ return_to_param %}
 {% include '_ask_history.html' %}
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -928,15 +932,15 @@
   const panels = document.querySelectorAll('.tabpanel');
   const askDock=document.getElementById('recording-panel-ask'),askDockLayout=document.querySelector('.recording-workspace-layout'),askDockButton=document.getElementById('open-ask-dock'),askDockMedia=window.matchMedia('(min-width:1200px)'),askDockStorageKey='localplaud:recording-ask-dock';
   const storedAskDockOpen=()=>{try{return localStorage.getItem(askDockStorageKey)==='open';}catch(_error){return false;}};
-  const setAskDock=(open,{remember=true,focus=false}={})=>{if(!askDockMedia.matches)return false;askDockLayout.classList.toggle('ask-dock-open',open);askDock.hidden=!open;askDockButton.setAttribute('aria-expanded',String(open));if(remember){try{localStorage.setItem(askDockStorageKey,open?'open':'closed');}catch(_error){}}if(open&&focus)requestAnimationFrame(()=>document.getElementById('ask-q')?.focus());return open;};
+  const setAskDock=(open,{remember=true,focus=false}={})=>{if(!askDock||!askDockMedia.matches)return false;askDockLayout.classList.toggle('ask-dock-open',open);askDock.hidden=!open;askDockButton.setAttribute('aria-expanded',String(open));if(remember){try{localStorage.setItem(askDockStorageKey,open?'open':'closed');}catch(_error){}}if(open&&focus)requestAnimationFrame(()=>document.getElementById('ask-q')?.focus());return open;};
   const workspacePathForTab=(raw,name)=>{const url=new URL(raw,location.origin);url.searchParams.set('tab',name);url.searchParams.delete('note');url.searchParams.delete('note_id');return `${url.pathname}${url.search}${url.hash}`;};
   const pushWorkspaceUrl=(url,state)=>{const next=`${url.pathname}${url.search}${url.hash}`,current=`${location.pathname}${location.search}${location.hash}`;if(next!==current)history.pushState(state,'',url);};
   const syncFilelistTab=name=>document.querySelectorAll('#recording-file-list [data-recording-id]').forEach(link=>{for(const attribute of ['href','hx-get']){const raw=link.getAttribute(attribute);if(raw)link.setAttribute(attribute,workspacePathForTab(raw,name));}});
   const activePanelName=()=>document.querySelector('.tabs>button.on')?.dataset.panel||'transcript';
-  const activatePanel=(requested,push=false)=>{const previous=activePanelName();if(requested==='ask'&&previous!=='ask')askDockLayout.dataset.previousPanel=previous;const dockRequest=requested==='ask'&&askDockMedia.matches,name=dockRequest?'transcript':requested,button=(name==='notes'&&document.querySelector('.tabs>button[data-note-target].on'))||document.querySelector(`.tabs>button[data-panel="${name}"]`);if(!button)return;recordingShell.dataset.activePanel=name;if(dockRequest)setAskDock(true);document.querySelectorAll('.tabs>button').forEach(item=>{const active=item===button;item.classList.toggle('on',active);item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;});panels.forEach(panel=>{if(panel===askDock&&askDockMedia.matches)panel.hidden=!askDockLayout.classList.contains('ask-dock-open');else panel.hidden=panel.dataset.panel!==name;});syncFilelistTab(name);if(push){const url=new URL(location.href);url.searchParams.set('tab',requested);if(requested!=='notes'){url.searchParams.delete('note');url.searchParams.delete('note_id');}pushWorkspaceUrl(url,{localplaudTab:requested});}};
+  const activatePanel=(requested,push=false)=>{if(requested==='ask'&&!askDock)requested='notes';const previous=activePanelName();if(requested==='ask'&&previous!=='ask')askDockLayout.dataset.previousPanel=previous;const dockRequest=requested==='ask'&&askDockMedia.matches,name=dockRequest?'transcript':requested,button=(name==='notes'&&document.querySelector('.tabs>button[data-note-target].on'))||document.querySelector(`.tabs>button[data-panel="${name}"]`);if(!button)return;recordingShell.dataset.activePanel=name;if(dockRequest)setAskDock(true);document.querySelectorAll('.tabs>button').forEach(item=>{const active=item===button;item.classList.toggle('on',active);item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;});panels.forEach(panel=>{if(panel===askDock&&askDockMedia.matches)panel.hidden=!askDockLayout.classList.contains('ask-dock-open');else panel.hidden=panel.dataset.panel!==name;});syncFilelistTab(name);if(push){const url=new URL(location.href);url.searchParams.set('tab',requested);if(requested!=='notes'){url.searchParams.delete('note');url.searchParams.delete('note_id');}pushWorkspaceUrl(url,{localplaudTab:requested});}};
   document.querySelectorAll('.tabs>button').forEach(button=>button.onclick=()=>{if(!button.dataset.noteTarget)activatePanel(button.dataset.panel,true);});
-  askDockButton.addEventListener('click',()=>{if(askDockMedia.matches){setAskDock(true,{focus:true});syncFilelistTab(activePanelName());}else activatePanel('ask',true);});
-  document.getElementById('close-ask-dock').addEventListener('click',()=>{if(!askDockMedia.matches){const back=askDockLayout.dataset.previousPanel||'notes';activatePanel(back,true);document.querySelector(`.tabs>button[data-panel="${back}"]`)?.focus();return;}setAskDock(false);const url=new URL(location.href);if(url.searchParams.get('tab')==='ask'){url.searchParams.delete('tab');history.replaceState({localplaudTab:'transcript'},'',url);}syncFilelistTab(document.querySelector('.tabs>button.on')?.dataset.panel||'transcript');askDockButton.focus();});
+  askDockButton?.addEventListener('click',()=>{if(askDockMedia.matches){setAskDock(true,{focus:true});syncFilelistTab(activePanelName());}else activatePanel('ask',true);});
+  document.getElementById('close-ask-dock')?.addEventListener('click',()=>{if(!askDockMedia.matches){const back=askDockLayout.dataset.previousPanel||'notes';activatePanel(back,true);document.querySelector(`.tabs>button[data-panel="${back}"]`)?.focus();return;}setAskDock(false);const url=new URL(location.href);if(url.searchParams.get('tab')==='ask'){url.searchParams.delete('tab');history.replaceState({localplaudTab:'transcript'},'',url);}syncFilelistTab(document.querySelector('.tabs>button.on')?.dataset.panel||'transcript');askDockButton.focus();});
   document.addEventListener('htmx:configRequest',event=>{if(event.detail.elt?.closest?.('#recording-file-list [data-recording-id]'))event.detail.path=workspacePathForTab(event.detail.path,activePanelName());},{signal:cleanupController.signal});
   document.querySelector('details:has([data-imported-transcript-loader])')?.addEventListener('toggle',event=>{if(event.currentTarget.open){const loader=event.currentTarget.querySelector('[data-imported-transcript-loader]');if(loader)window.htmx.trigger(loader,'load-imported');}});
   const defaultNoteTarget=document.querySelector('[data-note-target].on')?.dataset.noteTarget||document.querySelector('[data-note-target]')?.dataset.noteTarget||null;
@@ -946,7 +950,7 @@
   const syncWorkspaceLocation=()=>{const params=new URLSearchParams(location.search),requested=params.get('tab')||'notes',panel=['transcript','notes','mindmap','ask'].includes(requested)?requested:'notes';activatePanel(panel);if(panel==='notes')activateNoteTarget(noteTargetFromLocation()||defaultNoteTarget);};
   if(askDockMedia.matches&&new URLSearchParams(location.search).get('tab')!=='ask')setAskDock(storedAskDockOpen(),{remember:false});
   syncWorkspaceLocation();
-  askDockMedia.addEventListener('change',()=>{const requested=new URLSearchParams(location.search).get('tab')||'notes';if(askDockMedia.matches)setAskDock(requested==='ask'||storedAskDockOpen(),{remember:false});else{askDockLayout.classList.remove('ask-dock-open');askDockButton.setAttribute('aria-expanded','false');}activatePanel(['transcript','notes','mindmap','ask'].includes(requested)?requested:'notes');},{signal:cleanupController.signal});
+  askDockMedia.addEventListener('change',()=>{const requested=new URLSearchParams(location.search).get('tab')||'notes';if(askDockMedia.matches)setAskDock(requested==='ask'||storedAskDockOpen(),{remember:false});else{askDockLayout.classList.remove('ask-dock-open');askDockButton?.setAttribute('aria-expanded','false');}activatePanel(['transcript','notes','mindmap','ask'].includes(requested)?requested:'notes');},{signal:cleanupController.signal});
   window.addEventListener('popstate',syncWorkspaceLocation,{signal:cleanupController.signal});
   const selectedNoteId={{ f.selected_note_id|tojson }};
   if(selectedNoteId){activatePanel('notes');activateNoteTarget(`saved-${selectedNoteId}`);}

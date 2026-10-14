@@ -920,8 +920,11 @@
         body.setAttribute('aria-busy', 'true');
         try {
           const data = await requestJson(`/api/search?limit=8&q=${encodeURIComponent(value)}`, { signal: controller.signal }, 'Search failed');
-          body.replaceChildren(caption(tr('Ask localplaud')));
-          body.append(row({ href: `/ask?q=${encodeURIComponent(value)}&send=1`, icon: 'sparkles', title: `${tr('Search all sources for')} “${value}” ${tr('with Ask')}`, query: '' }));
+          body.replaceChildren();
+          if ('askEnabled' in document.body.dataset) {
+            body.append(caption(tr('Ask localplaud')));
+            body.append(row({ href: `/ask?q=${encodeURIComponent(value)}&send=1`, icon: 'sparkles', title: `${tr('Search all sources for')} “${value}” ${tr('with Ask')}`, query: '' }));
+          }
           body.append(caption(tr('Best matches')));
           if (!data.results.length) {
             const empty = document.createElement('div'); empty.className = 'sf-palette-empty'; empty.textContent = `${tr('No matches for')} “${value}”`; body.append(empty);
@@ -1364,6 +1367,8 @@
           body: JSON.stringify({ ...current, [toggle.dataset.sfPrefToggle]: desired }),
         }, 'Could not save preferences');
         toast(tr('Preferences saved'));
+        // Shell-level preferences change navigation, so redraw the page.
+        if ('sfPrefReload' in toggle.dataset) location.reload();
       } catch (error) {
         toggle.checked = !desired;
         if (out) out.textContent = error.message;

@@ -68,7 +68,7 @@
   <script src="/static/js/app.js?v={{ asset_version }}"></script>
   {% block page_head %}{% endblock %}
 </head>
-<body class="app{% if show_tabbar %} has-tabbar{% endif %}"{% if account_user|default(None) %} hx-history="false"{% endif %}>
+<body class="app{% if show_tabbar %} has-tabbar{% endif %}"{% if ask_enabled|default(false) %} data-ask-enabled{% endif %}{% if account_user|default(None) %} hx-history="false"{% endif %}>
   {% include "_icons.html" %}
   <a class="skip-link" href="#app-view">{{ t('Skip to content') }}</a>
   <aside class="sidebar" id="workspace-sidebar">
@@ -114,7 +114,7 @@
       <nav aria-label="{{ t('Personal') }}"><ul class="nav-list">
         <li><a class="nav-item {% if active=='search' %}on{% endif %}" href="/search" data-shortcut-hint="Ctrl K">{{ icon('search') }}<span class="nav-label">{{ t('Search') }}</span></a></li>
         <li><a class="nav-item {% if active=='home' %}on{% endif %}" href="/home">{{ icon('home') }}<span class="nav-label">{{ t('Home') }}</span></a></li>
-        <li><a class="nav-item {% if active=='ask' %}on{% endif %}" href="/ask">{{ icon('sparkles') }}<span class="nav-label">{{ t('Ask') }}</span></a></li>
+        {% if ask_enabled|default(false) %}<li><a class="nav-item {% if active=='ask' %}on{% endif %}" href="/ask">{{ icon('sparkles') }}<span class="nav-label">{{ t('Ask') }}</span></a></li>{% endif %}
         <li><a class="nav-item {% if active=='templates' %}on{% endif %}" href="/templates">{{ icon('template') }}<span class="nav-label">{{ t('Templates') }}</span></a></li>
         <li><a class="nav-item {% if active=='discover' %}on{% endif %}" href="/discover">{{ icon('grid') }}<span class="nav-label">{{ t('Discover') }}</span></a></li>
       </ul></nav>
@@ -231,7 +231,7 @@
       <div><dt><kbd>[</kbd></dt><dd>{{ t('Collapse or expand the sidebar') }}</dd></div>
       <div><dt><kbd>g</kbd> <kbd>h</kbd></dt><dd>{{ t('Go to Home') }}</dd></div>
       <div><dt><kbd>g</kbd> <kbd>f</kbd></dt><dd>{{ t('Go to All files') }}</dd></div>
-      <div><dt><kbd>g</kbd> <kbd>a</kbd></dt><dd>{{ t('Go to Ask') }}</dd></div>
+      {% if ask_enabled|default(false) %}<div><dt><kbd>g</kbd> <kbd>a</kbd></dt><dd>{{ t('Go to Ask') }}</dd></div>{% endif %}
       <div><dt><kbd>g</kbd> <kbd>t</kbd></dt><dd>{{ t('Go to Templates') }}</dd></div>
       <div><dt><kbd>g</kbd> <kbd>s</kbd></dt><dd>{{ t('Go to Settings') }}</dd></div>
       <div><dt><kbd>?</kbd></dt><dd>{{ t('Show keyboard shortcuts') }}</dd></div>

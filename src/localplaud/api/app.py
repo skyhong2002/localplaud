@@ -744,6 +744,7 @@ def _base_ctx(request: Request, active: str) -> dict:
             "tags": sidebar_tags,
         },
         "workspace_preferences": workspace_preferences,
+        "ask_enabled": workspace_preferences["ask_enabled"],
         "supported_locales": SUPPORTED_LOCALES,
         "t": translator(workspace_preferences["locale"]),
         "translations": catalog(workspace_preferences["locale"]),
@@ -1229,6 +1230,7 @@ class WorkspacePreferencesBody(BaseModel):
     hour_cycle: Literal["12", "24"] = "24"
     locale: Literal["en", "zh-Hant-TW"] = "en"
     auto_process_new_recordings: bool = True
+    ask_enabled: bool = False
 
     @field_validator("workspace_name")
     @classmethod
@@ -3570,6 +3572,8 @@ def file_detail(
         "playback_second": playback_second,
         "segment_edit_error": segment_edit_error,
     }
+    if active_tab == "ask" and not ctx["ask_enabled"]:
+        ctx["active_tab"] = "notes"
     return templates.TemplateResponse(request=request, name="detail.html", context=ctx)
 
 

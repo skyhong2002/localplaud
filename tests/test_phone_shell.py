@@ -64,7 +64,7 @@ def test_phone_rows_explore_and_add_sheet_render(monkeypatch, tmp_path):
     assert 'class="row-sep" aria-hidden="true"' in row
     # Phone top bar: processing status (opens the drawer), AI search, avatar -> Settings.
     assert 'class="m-topbar m-root-topbar"' in files.text
-    assert 'aria-label="Search and Ask"' in files.text and '<use href="#i-search-ai">' in files.text
+    assert 'aria-label="Search"' in files.text and '<use href="#i-search-ai">' in files.text
     assert 'class="m-status-level m-status-attention"' in files.text
     # Unlabelled 3-slot tab bar: Files, "+" bottom sheet, Explore.
     assert 'class="m-plus" type="button" data-dialog-open="add-sheet"' in files.text

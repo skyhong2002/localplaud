@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine, inspect, select, text
 
 from tests.assets import with_assets
+from tests.workspace import set_ask_enabled
 
 
 def _client(monkeypatch, tmp_path):
@@ -190,6 +191,7 @@ def test_editable_note_source_migration_is_idempotent(tmp_path):
 
 def test_ask_history_api_and_accessible_drawer_contract(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+    set_ask_enabled(client)
     _seed()
     from localplaud.db.models import AskMessage, AskThread, UserNote
     from localplaud.db.session import session_scope
@@ -282,6 +284,7 @@ def test_ask_history_api_and_accessible_drawer_contract(monkeypatch, tmp_path):
 
 def test_single_recording_followup_persists_history_and_sources(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
+    set_ask_enabled(client)
     _seed()
     histories = []
 

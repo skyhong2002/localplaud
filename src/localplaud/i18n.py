@@ -247,6 +247,8 @@ _ZH_HANT_TW = {
     "Workspace preferences": "工作區偏好設定",
     "Durable workspace preferences shared by every browser using localplaud.": "套用至所有使用 localplaud 瀏覽器的工作區偏好設定。",
     "Process new recordings automatically": "自動處理新錄音",
+    "Show Ask": "顯示詢問功能",
+    "Adds Ask to the sidebar, Search, and every recording. Turning it off keeps your past conversations.": "在側邊欄、搜尋和每份錄音中加入詢問功能。關閉後，過去的對話仍會保留。",
     "Automatic processing": "自動處理",
     "paused": "已暫停",
     "Interface language": "介面語言",

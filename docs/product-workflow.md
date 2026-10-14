@@ -341,6 +341,13 @@ tabs above the player, a polished/raw transcript notice chip, airy speaker
 paragraphs, and Ask as a closable right dock on wide viewports with the Ask tab
 retained on narrow ones.
 
+Ask entry points are off by default to keep the workspace compact: the sidebar item,
+Home card, Search and command-palette handoff, `g a` shortcut, and the recording's
+Ask button, tab, dock, and phone pinned input appear only after the workspace turns on
+**Show Ask** (`ask_enabled`) in Settings → Workspace preferences, or the phone
+Preferences switch. Turning it off hides those entry points only; Ask history, notes
+saved from Ask, and the `/ask` page remain intact and reachable.
+
 A recording can be shared with people outside the workspace: one active revocable
 public link per recording serves an unauthenticated, noindex, read-only page with
 the title, a Range-capable token-scoped audio stream, the canonical local transcript

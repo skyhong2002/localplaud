@@ -9,6 +9,6 @@
     <span class="m-status-level m-status-{{ level }}" aria-hidden="true"></span>{{ icon('drive', 'lg') }}{{ icon('chevron-down', 'sm') }}
   </button>
   <span class="m-title"></span>
-  <a class="icon-btn" href="/search" aria-label="{{ t('Search and Ask') }}">{{ icon('search-ai', 'lg') }}</a>
+  <a class="icon-btn" href="/search" aria-label="{{ t('Search and Ask') if ask_enabled|default(false) else t('Search') }}">{{ icon('search-ai', 'lg') }}</a>
   <a class="icon-btn" href="/settings" aria-label="{{ t('Settings') }}"><span class="m-avatar" aria-hidden="true">{{ workspace_preferences.workspace_name | initials }}</span></a>
 </header>

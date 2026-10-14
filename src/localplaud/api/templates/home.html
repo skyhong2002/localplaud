@@ -31,7 +31,7 @@
 
   <section class="home-section" aria-labelledby="home-glance-title">
     <div class="section-head"><h2 class="page-title" id="home-glance-title">{{ t('At a glance') }}</h2><a class="view-all" href="/status">{{ t('System status') }}{{ icon('chevron-right') }}</a></div>
-    <div class="home-cards">
+    <div class="home-cards{% if not ask_enabled|default(false) %} home-cards-2{% endif %}">
       <a class="home-card" href="/?state=generating" data-home-card="generating">
         <span class="home-card-icon">{{ icon('loader', cls='i-spin' if stats.processing else '') }}</span>
         <span class="home-card-title">{{ t('Generating') }}</span>
@@ -46,12 +46,14 @@
         <span class="home-card-foot">{{ t('Open a recording to retry the failed stage. Everything else stays usable.') }}</span>
         {% else %}<span class="home-card-body">{{ t('All recordings processed cleanly.') }}</span>{% endif %}
       </a>
+      {% if ask_enabled|default(false) %}
       <a class="home-card home-card-ask" href="/ask" data-home-card="ask">
         <span class="home-card-icon">{{ icon('sparkles') }}</span>
         <span class="home-card-title">{{ t('Ask your library') }}</span>
         <span class="home-card-body">{{ t('Answers grounded in your corrected transcripts, with playable citations.') }}</span>
         <span class="home-card-foot"><span class="chip">{{ t('What decisions were made recently?') }}</span></span>
       </a>
+      {% endif %}
     </div>
     <p class="home-meta t-meta">
       <span>{{ icon('cloud', 'xs') }} {{ t('Plaud mirror') }}: {% if import_run %}{{ import_run.processed }} / {{ import_run.total }} · {{ t(import_run.status) }}{% if import_run.failed %} · {{ import_run.failed }} {{ t('failed') }}{% endif %}{% else %}{{ t('No Plaud import has run yet.') }}{% endif %}</span>
