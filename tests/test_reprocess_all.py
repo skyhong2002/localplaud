@@ -150,3 +150,21 @@ def test_unknown_mode_rejected(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError):
         queue_library_reprocess(mode="nope")
+
+
+def test_include_trash_false_skips_trashed_recordings(monkeypatch, tmp_path):
+    _init_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.worker.pipeline import queue_library_reprocess
+
+    with session_scope() as session:
+        session.add(PlaudFile(id="live", filename="l", status=FileStatus.partial, audio_path="/x/l.opus"))
+        session.add(PlaudFile(id="binned", filename="t", status=FileStatus.partial,
+                              audio_path="/x/t.opus", is_trash=True))
+
+    result = queue_library_reprocess(mode="resume", statuses=["error", "partial"], include_trash=False)
+    assert result["queued"] == 1
+    assert result["queued_ids"] == ["live"]
+    with session_scope() as session:
+        assert session.get(PlaudFile, "binned").pipeline_next_retry_at is None

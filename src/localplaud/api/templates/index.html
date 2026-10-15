@@ -186,6 +186,13 @@
   </ul>
   {% endif %}
 
+  {# Recordings stop here once automatic retries run out; offer one obvious way
+     to resume them all. Only on the bare state view, so the count is exact. #}
+  {% set retry_statuses = ['error', 'partial'] if lib.state == 'attention' else ([lib.state] if lib.state in attention_states else []) %}
+  {% if retry_statuses and files and lib.view == 'all' and filter_count == 1 %}
+  <div class="library-banner attention-retry" id="attention-retry">{{ icon('alert') }}<span class="attention-retry-copy"><strong>{{ pagination.total }} {{ t('recordings did not finish processing') }}</strong> {{ t('Reprocessing reruns only the failed or unfinished steps; finished speech recognition is not redone.') }}<span class="attention-retry-status" id="attention-retry-status" role="status" aria-live="polite"></span></span><button class="btn btn-sm" type="button" id="attention-retry-button" data-statuses="{{ retry_statuses | join(',') }}">{{ icon('refresh', 'sm') }}{{ t('Reprocess all') }}</button></div>
+  {% endif %}
+
   {% if lib.view == 'trash' %}
   <div class="library-banner trash">{{ icon('info') }}<span><strong>{{ t("Trash mirrors Plaud's cloud trash.") }}</strong> {{ t('This is a read-only recovery view — localplaud never deletes your cloud data. Restore a recording in the Plaud app to bring it back.') }}</span></div>
   {% endif %}
@@ -761,6 +768,31 @@
     } catch (error) {
       show(error.message, true);
       apply.disabled = false;
+    }
+  });
+
+  const retryAll = document.getElementById('attention-retry-button');
+  const retryStatus = document.getElementById('attention-retry-status');
+  retryAll?.addEventListener('click', async () => {
+    retryAll.disabled = true;
+    retryStatus.classList.remove('err');
+    retryStatus.textContent = tr('Queuing…');
+    try {
+      const response = await fetch('/api/files/reprocess-all', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({mode:'resume', statuses:retryAll.dataset.statuses.split(','), include_trash:false})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || tr('Could not queue recordings'));
+      const notes = [`${data.queued} ${tr('recordings queued')}`];
+      if (data.processing) notes.push(`${data.processing} ${tr('already processing')}`);
+      if (data.no_audio) notes.push(`${data.no_audio} ${tr('have no local audio')}`);
+      retryStatus.textContent = `${notes.join(' · ')} — ${tr('They leave this list as each one finishes.')}`;
+      retryAll.lastChild.textContent = tr('Queued for processing');
+    } catch (error) {
+      retryStatus.classList.add('err');
+      retryStatus.textContent = error.message;
+      retryAll.disabled = false;
     }
   });
 

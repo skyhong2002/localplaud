@@ -733,3 +733,23 @@ def test_home_generating_tile_matches_destination_with_trashed_pending_row(monke
     # are excluded from both.
     assert destination_rows == 1
     assert tile_count == destination_rows
+
+
+def test_attention_view_offers_reprocess_all(monkeypatch, tmp_path):
+    c = _client(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as s:
+        s.add(PlaudFile(id="p1", filename="p1", status=FileStatus.partial, duration_ms=1000, start_time_ms=0))
+        s.add(PlaudFile(id="e1", filename="e1", status=FileStatus.error, duration_ms=1000, start_time_ms=0))
+        s.add(PlaudFile(id="d1", filename="d1", status=FileStatus.done, duration_ms=1000, start_time_ms=0))
+
+    attention = c.get("/?state=attention").text
+    assert 'id="attention-retry-button" data-statuses="error,partial"' in attention
+    assert "<strong>2 recordings did not finish processing</strong>" in attention
+    assert 'data-statuses="partial"' in c.get("/?state=partial").text
+    # Not offered where it would act on rows the user is not looking at.
+    assert 'id="attention-retry-button"' not in c.get("/").text
+    assert 'id="attention-retry-button"' not in c.get("/?state=done").text
+    assert 'id="attention-retry-button"' not in c.get("/?state=attention&q=p1").text

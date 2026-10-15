@@ -533,6 +533,13 @@ body.app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
   background: var(--c-surface-2); color: var(--c-text-body); font-size: 13px; }
 .library-banner .i { width: 18px; height: 18px; color: var(--c-text-2); margin-top: 1px; }
 .library-banner strong { color: var(--c-text); font-weight: 500; }
+.library-banner.attention-retry { align-items: center; }
+.library-banner.attention-retry > .i { color: var(--c-warn); margin-top: 0; }
+.attention-retry-copy { flex: 1; min-width: 0; }
+.attention-retry-status { display: block; margin-top: 4px; color: var(--c-text-2); }
+.attention-retry-status:empty { display: none; }
+.attention-retry-status.err { color: var(--c-danger); }
+.attention-retry .btn { flex: none; }
 .active-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 16px 0 0 40px; }
 .active-filters .chip { color: var(--c-text); background: var(--c-surface-2); border-color: transparent; }
 .active-filters .chip .i { width: 12px; height: 12px; }
@@ -971,6 +978,8 @@ body.progressive-failed .progressive-error { display: flex; }
   .skeleton-player { grid-template-columns: 38px 1fr; } .skeleton-time { display: none; }
   /* rows become two-line app rows */
   .library-head, .active-filters, .library-banner, .pagination { padding-left: 0; margin-left: 0; }
+  .library-banner.attention-retry { flex-wrap: wrap; }
+  .attention-retry .btn { margin-left: 28px; }
   .library-head { padding-right: 0; }
   .file-table-head { display: none; }
   .file-list { margin-top: 4px; border-top: 1px solid var(--c-border); }

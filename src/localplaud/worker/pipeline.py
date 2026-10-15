@@ -1179,6 +1179,7 @@ def queue_library_reprocess(
     statuses: list[str] | None = None,
     limit: int | None = None,
     dry_run: bool = False,
+    include_trash: bool = True,
 ) -> dict:
     """Queue every eligible recording so the background worker loop drains them.
 
@@ -1190,6 +1191,7 @@ def queue_library_reprocess(
 
     Recordings without local audio, or currently processing, are skipped. Newest
     first; ``limit`` caps how many are queued. ``dry_run`` changes nothing.
+    ``include_trash=False`` limits the batch to what the library shows.
     """
     import secrets
 
@@ -1203,6 +1205,8 @@ def queue_library_reprocess(
         query = select(PlaudFile).order_by(PlaudFile.created_at.desc())
         if statuses:
             query = query.where(PlaudFile.status.in_([FileStatus(s) for s in statuses]))
+        if not include_trash:
+            query = query.where(PlaudFile.is_trash.is_(False))
         for row in session.scalars(query):
             if limit is not None and result["queued"] >= limit:
                 break

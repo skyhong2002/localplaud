@@ -1414,6 +1414,7 @@ class ReprocessAllBody(BaseModel):
     statuses: list[str] | None = None
     limit: int | None = Field(default=None, ge=1)
     dry_run: bool = False
+    include_trash: bool = True
 
 
 class BulkExportBody(BaseModel):
@@ -1809,7 +1810,11 @@ def reprocess_all_files(body: ReprocessAllBody) -> dict:
 
     try:
         return queue_library_reprocess(
-            mode=body.mode, statuses=body.statuses, limit=body.limit, dry_run=body.dry_run
+            mode=body.mode,
+            statuses=body.statuses,
+            limit=body.limit,
+            dry_run=body.dry_run,
+            include_trash=body.include_trash,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
