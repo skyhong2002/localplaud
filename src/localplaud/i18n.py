@@ -1196,7 +1196,6 @@ _ZH_HANT_TW = {
     "Could not organize recordings": "無法整理錄音",
     "recordings queued": "筆錄音已排入佇列",
     "recordings updated": "筆錄音已更新",
-    "attention": "需要處理",
     "recordings did not finish processing": "筆錄音未完成處理",
     "Reprocessing reruns only the failed or unfinished steps; finished speech recognition is not redone.": "重新處理只會重跑失敗或未完成的步驟，已完成的語音辨識不會重做。",
     "Reprocess all": "全部重新處理",

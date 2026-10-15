@@ -753,3 +753,4 @@ def test_attention_view_offers_reprocess_all(monkeypatch, tmp_path):
     assert 'id="attention-retry-button"' not in c.get("/").text
     assert 'id="attention-retry-button"' not in c.get("/?state=done").text
     assert 'id="attention-retry-button"' not in c.get("/?state=attention&q=p1").text
+    assert "State: Needs attention" in attention

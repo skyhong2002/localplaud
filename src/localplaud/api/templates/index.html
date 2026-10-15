@@ -176,7 +176,7 @@
   {% if filter_count and files %}
   <ul class="active-filters" aria-label="{{ t('Active filters') }}">
     {% if q %}<li><a class="chip" href="{{ liburl() | replace('&amp;q=' ~ (q | urlencode), '') }}">{{ t('Search') }}: {{ q }} {{ icon('x', 'xs') }}</a></li>{% endif %}
-    {% if lib.state %}<li><a class="chip" href="{{ liburl(state='') }}">{{ t('State') }}: {{ t(lib.state) }} {{ icon('x', 'xs') }}</a></li>{% endif %}
+    {% if lib.state %}<li><a class="chip" href="{{ liburl(state='') }}">{{ t('State') }}: {{ t('Needs attention') if lib.state == 'attention' else t(lib.state) }} {{ icon('x', 'xs') }}</a></li>{% endif %}
     {% if active_scene %}<li><a class="chip" href="{{ liburl(scene='') }}">{{ t('Source') }}: {{ t(active_scene.label) }} {{ icon('x', 'xs') }}</a></li>{% endif %}
     {% if active_folder %}<li><a class="chip" href="{{ liburl(folder='') }}">{{ t('Folder') }}: {{ active_folder.name }} {{ icon('x', 'xs') }}</a></li>{% endif %}
     {% if active_tag %}<li><a class="chip" href="{{ liburl(tag='') }}">{{ t('Tag') }}: {{ active_tag.name }} {{ icon('x', 'xs') }}</a></li>{% endif %}
@@ -207,7 +207,7 @@
       {% if lib.view == 'uncategorized' and not filter_count %}<p class="empty-body">{{ t('Every recording is in a folder or tagged.') }}</p>{% endif %}
       <ul class="active-filter-list" aria-label="{{ t('Active filters') }}">
         {% if q %}<li>{{ t('Search') }}: {{ q }}</li>{% endif %}
-        {% if lib.state %}<li>{{ t('State') }}: {{ t(lib.state) }}</li>{% endif %}
+        {% if lib.state %}<li>{{ t('State') }}: {{ t('Needs attention') if lib.state == 'attention' else t(lib.state) }}</li>{% endif %}
         {% if active_scene %}<li>{{ t('Source') }}: {{ t(active_scene.label) }}</li>{% endif %}
         {% if active_folder %}<li>{{ t('Folder') }}: {{ active_folder.name }}</li>{% endif %}
         {% if active_tag %}<li>{{ t('Tag') }}: {{ active_tag.name }}</li>{% endif %}
