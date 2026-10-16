@@ -120,6 +120,9 @@ service supervisor, using the deployment's normal config and PATH. The profile i
 reread each cycle; `enabled: false` pauses future cycles. A process lock prevents
 duplicate watchers. Start with `apply_names: false` and optionally `--limit 25`
 for a bounded enrollment smoke test, inspect `receipt.json`, then enable application.
+Watch mode runs each full scan in a short-lived child process so scan memory is
+released before idling. The parent retains the lock and retry schedule; child logs
+stream to the supervisor as before. One-shot invocations scan in-process.
 With `--watch --limit 25`, each cycle extracts up to 25 additional recordings and
 applies matches before continuing in the next cycle; cached samples are skipped,
 so this eventually covers the whole library and continues with newly arriving files.

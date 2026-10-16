@@ -16,6 +16,7 @@ import os
 import select as io_select
 import shlex
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -468,13 +469,20 @@ def main():
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--child-pass", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.child_pass and args.watch:
+        parser.error("--child-pass cannot be combined with --watch")
     os.umask(0o077)
     folder = args.profile.resolve().parent
     folder.mkdir(parents=True, exist_ok=True)
-    with open(folder / "voice-service.lock", "w") as lock:
+    lock_context = (
+        contextlib.nullcontext() if args.child_pass else open(folder / "voice-service.lock", "w")
+    )
+    with lock_context as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if lock is not None:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise SystemExit("voice service already running") from None
         create_schema(get_engine())
@@ -497,9 +505,26 @@ def main():
             ):
                 time.sleep(max(30, profile.get("poll_seconds", 300)))
                 continue
-            worker = VoiceWorker(profile, folder / "runtime.log")
             try:
-                receipt = scan(profile, worker, folder / "receipt.json", limit=args.limit)
+                if args.watch:
+                    command = [
+                        sys.executable,
+                        "-m",
+                        "localplaud.voice_service",
+                        "--profile",
+                        str(args.profile),
+                    ]
+                    if args.limit is not None:
+                        command.extend(["--limit", str(args.limit)])
+                    command.append("--child-pass")
+                    subprocess.run(command, check=True)
+                    receipt = json.loads((folder / "receipt.json").read_text())
+                else:
+                    worker = VoiceWorker(profile, folder / "runtime.log")
+                    try:
+                        receipt = scan(profile, worker, folder / "receipt.json", limit=args.limit)
+                    finally:
+                        worker.close()
                 # A capped pass may have left extraction work behind; run again.
                 if not args.limit or receipt["counts"].get("recordings_extracted", 0) < args.limit:
                     last_fingerprint, last_scan = fingerprint, time.monotonic()
@@ -507,8 +532,6 @@ def main():
                 print(json.dumps({"event": "scan_failed", "error": type(exc).__name__}), flush=True)
                 if not args.watch:
                     raise
-            finally:
-                worker.close()
             if not args.watch:
                 break
             time.sleep(max(30, profile.get("poll_seconds", 300)))
