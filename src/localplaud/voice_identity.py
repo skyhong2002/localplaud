@@ -320,10 +320,7 @@ def apply_match(session, sample, decision, *, threshold=0.75, margin=0.12):
         return "removed"
     if processing_claim_active(row):
         return "busy"
-    # Refuse stale results following a diarization or segment ownership edit.
-    active = inventory(session, row)
-    if sample.id not in {s.id for s in active}:
-        return "stale"
+    # Outcomes that write nothing are settled before the costly staleness check below.
     speaker = session.scalar(
         select(Speaker).where(Speaker.file_id == row.id, Speaker.key == sample.speaker_key)
     )
@@ -338,9 +335,6 @@ def apply_match(session, sample, decision, *, threshold=0.75, margin=0.12):
             if prior and prior.status == "applied" and speaker.display_name == prior.applied_name
             else "manual"
         )
-    previous_names = (
-        _prepare_note_name_change(session, row.id) if decision["status"] == "matched" else None
-    )
     evidence = {
         **decision,
         "sample_id": sample.id,
@@ -351,6 +345,20 @@ def apply_match(session, sample, decision, *, threshold=0.75, margin=0.12):
         "margin": margin,
         "reference_policy": "explicit-manual-or-opt-in-plaud; no-inferred-enrollment",
     }
+    if (
+        decision["status"] != "matched"
+        and prior is not None
+        and prior.status == decision["status"]
+        and prior.evidence == json.loads(json.dumps(evidence))
+    ):
+        return decision["status"]
+    # Refuse stale results following a diarization or segment ownership edit.
+    active = inventory(session, row)
+    if sample.id not in {s.id for s in active}:
+        return "stale"
+    previous_names = (
+        _prepare_note_name_change(session, row.id) if decision["status"] == "matched" else None
+    )
     if prior is None:
         prior = VoiceAssignment(
             speaker_id=speaker.id,

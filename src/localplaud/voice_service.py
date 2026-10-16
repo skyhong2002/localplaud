@@ -421,6 +421,29 @@ def scan(profile, worker, report_path, *, limit=None):
     return receipt
 
 
+def library_fingerprint(profile):
+    """Cheap summary of everything a scan reads; voice tables are excluded because
+    only this service writes them, so its own writes settle after one more pass."""
+    from sqlalchemy import func
+
+    from .db.models import TranscriptRevision
+
+    with session_scope() as session:
+        rows = [
+            session.execute(
+                select(
+                    func.count(), func.max(PlaudFile.updated_at), func.sum(PlaudFile.is_trash)
+                )
+            ).one(),
+            session.execute(select(func.count(), func.max(Transcript.id))).one(),
+            session.execute(select(func.count(), func.max(TranscriptRevision.id))).one(),
+            session.execute(select(func.count(), func.max(Speaker.updated_at))).one(),
+        ]
+    return json.dumps(
+        [[str(value) for value in row] for row in rows] + [profile], sort_keys=True, default=str
+    )
+
+
 def validate_profile_thresholds(profile):
     """Refuse a profile whose matching limits could name people recklessly."""
     if (
@@ -455,6 +478,7 @@ def main():
         except BlockingIOError:
             raise SystemExit("voice service already running") from None
         create_schema(get_engine())
+        last_fingerprint, last_scan = None, 0.0
         while True:
             profile = json.loads(args.profile.read_text())
             if not profile.get("enabled", False):
@@ -463,9 +487,22 @@ def main():
                 time.sleep(30)
                 continue
             validate_profile_thresholds(profile)
+            # A full pass re-reads every transcript; skip it while nothing it reads has
+            # changed. Time-based retries and in-place edits wait for the periodic pass.
+            fingerprint = library_fingerprint(profile)
+            if (
+                args.watch
+                and fingerprint == last_fingerprint
+                and time.monotonic() - last_scan < profile.get("full_scan_seconds", 3600)
+            ):
+                time.sleep(max(30, profile.get("poll_seconds", 300)))
+                continue
             worker = VoiceWorker(profile, folder / "runtime.log")
             try:
-                scan(profile, worker, folder / "receipt.json", limit=args.limit)
+                receipt = scan(profile, worker, folder / "receipt.json", limit=args.limit)
+                # A capped pass may have left extraction work behind; run again.
+                if not args.limit or receipt["counts"].get("recordings_extracted", 0) < args.limit:
+                    last_fingerprint, last_scan = fingerprint, time.monotonic()
             except Exception as exc:
                 print(json.dumps({"event": "scan_failed", "error": type(exc).__name__}), flush=True)
                 if not args.watch:
