@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import wave
 from contextlib import contextmanager
+from io import BytesIO
 
 import httpx
 import respx
@@ -536,9 +538,13 @@ def test_local_audio_upload_and_metadata_only_ui(monkeypatch, tmp_path):
     client = TestClient(app)
     page = client.get("/")
     assert "Add audio" in page.text and "Import from Plaud" in page.text
+    recording = BytesIO()
+    with wave.open(recording, "wb") as fixture:
+        fixture.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+        fixture.writeframes(b"\x00\x00" * 800)
     response = client.post(
         "/api/imports/local/audio",
-        files={"file": ("interview.mp3", b"not-a-real-mp3", "audio/mpeg")},
+        files={"file": ("interview.wav", recording.getvalue(), "audio/wav")},
     )
     assert response.status_code == 201
     with session_scope() as session:
@@ -551,7 +557,7 @@ def test_local_audio_upload_and_metadata_only_ui(monkeypatch, tmp_path):
     # Feature-phone AMR recordings are accepted (ffmpeg decodes them natively).
     amr = client.post(
         "/api/imports/local/audio",
-        files={"file": ("memo.amr", b"#!AMR\n\x00", "audio/amr")},
+        files={"file": ("memo.amr", b"#!AMR\n" + (b"\x04" + b"\x00" * 12) * 50, "audio/amr")},
     )
     assert amr.status_code == 201
     with session_scope() as session:
