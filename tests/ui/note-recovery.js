@@ -7,6 +7,7 @@
   const original = '## Synthetic planning\n\nOriginal generated text.';
   const savedContent = '## Someone else’s saved copy\n\nKeep this exact content.\n';
   let calls = [], toasts = [], sourceOpens = 0, confirmCalls = 0, errors = [];
+  let confirmDiscard = false, navigationRequests = [];
   let saveReply, copyReply, compareReply, speechReply, queueReply;
   const check = (condition, message) => { if (!condition) throw new Error(message); };
   const response = (status, body) => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status });
@@ -26,7 +27,7 @@
   });
   window.addEventListener('error', event => errors.push(event.message));
   window.addEventListener('unhandledrejection', event => errors.push(String(event.reason)));
-  window.confirm = () => { confirmCalls += 1; return false; };
+  window.confirm = () => { confirmCalls += 1; return confirmDiscard; };
   window.localplaudT = message => message;
   window.lp = { toast: (message, options) => toasts.push({ message, ...options }), closeDialog: dialog => dialog.close() };
   // A generated 0.1-second silent WAV, never user media.
@@ -49,10 +50,52 @@
     throw new Error(`Fixture blocked unexpected request: ${method} ${url}`);
   };
 
+  // Run the vendored HTMX request/swap lifecycle, with manually ordered replies.
+  // No XHR can reach even the static server: only this synthetic route is valid.
+  window.XMLHttpRequest = class extends EventTarget {
+    constructor() { super(); this.upload = new EventTarget(); }
+    open(method, url) {
+      check(method === 'GET' && new URL(url, location.href).pathname === '/fixture/navigation', `Fixture blocked XHR: ${method} ${url}`);
+      this.responseURL = new URL(url, location.href).href;
+    }
+    overrideMimeType() {}
+    setRequestHeader() {}
+    getAllResponseHeaders() { return ''; }
+    getResponseHeader() { return null; }
+    send() { navigationRequests.push(this); }
+    abort() { this.onabort?.(); }
+    respond() {
+      this.status = 200;
+      this.response = this.responseText = '<p data-navigation-arrived>Another synthetic page</p>';
+      this.onload();
+    }
+  };
+  const navigate = (target = root) => {
+    const source = document.createElement('button');
+    source.hidden = true;
+    document.querySelector('.fixture-controls').append(source);
+    return window.htmx.ajax('GET', '/fixture/navigation', { source, target, swap: 'innerHTML' })
+      .finally(() => source.remove());
+  };
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    return { promise, resolve };
+  };
+  const conflictReply = generated => generated
+    ? response(201, { id: 42, version: 7, content_md: savedContent })
+    : response(409, { detail: { code: 'note_changed', current_version: 8 } });
+  const holdSave = generated => {
+    const pending = deferred();
+    if (generated) copyReply = () => pending.promise; else saveReply = () => pending.promise;
+    return pending;
+  };
+
   async function reset({ generated = false } = {}) {
     window.localplaudNoteEditorTeardown?.();
     window.localplaudWorkspaceTeardown?.();
     calls = []; toasts = []; sourceOpens = 0; confirmCalls = 0; errors = [];
+    confirmDiscard = false; navigationRequests = [];
     saveReply = () => response(409, { detail: { code: 'note_changed', current_version: 8 } });
     copyReply = () => response(201, { id: 42, version: 7, title: 'Existing copy', content_md: savedContent });
     compareReply = () => response(200, { notes: [{ id: 42, version: 8, content_md: savedContent }] });
@@ -144,6 +187,80 @@
   const cases = [
     ['409 retains exact latest draft and fences all writes/navigation', () => conflict()],
     ['ExistingCopy retains exact latest draft without a PUT', () => conflict({ generated: true })],
+    ...[false, true].flatMap(generated => {
+      const kind = generated ? 'editable-copy' : 'PUT';
+      return [
+        [`Pending ${kind} navigation requires explicit discard before sending`, async () => {
+          await reset({ generated });
+          const pending = holdSave(generated);
+          const exact = type('Keep the pending draft'); save(); await waitFor(() => calls.length);
+          const navigation = navigate();
+          check(confirmCalls === 1 && navigationRequests.length === 0, 'Navigation escaped while save was pending');
+          await navigation;
+          pending.resolve(conflictReply(generated)); await waitFor(conflicted);
+          check(draftArea().value === exact, 'Pending navigation lost recovery');
+        }],
+        [`${kind} conflict before an earlier navigation reply keeps recovery mounted`, async () => {
+          await reset({ generated });
+          const navigation = navigate();
+          check(navigationRequests.length === 1 && confirmCalls === 0, 'Clean navigation did not start');
+          const pending = holdSave(generated);
+          type('First pending text'); save(); await waitFor(() => calls.length);
+          const exact = type('Late typing 最後 🙂');
+          pending.resolve(conflictReply(generated)); await waitFor(conflicted);
+          const retainedBody = body();
+          navigationRequests[0].respond(); await navigation;
+          check(confirmCalls === 1 && body() === retainedBody && draftArea()?.value === exact, 'Late navigation swap removed conflict recovery');
+          check(!root.querySelector('[data-navigation-arrived]'), 'Navigation response replaced the draft');
+          check(generated ? writes().length === 0 : writes().length === 1, 'Unexpected overwrite after conflict');
+        }],
+        [`Navigation reply before pending ${kind} resolution keeps the draft`, async () => {
+          await reset({ generated });
+          const navigation = navigate(), pending = holdSave(generated);
+          const exact = type('Still saving when navigation returns'); save(); await waitFor(() => calls.length);
+          navigationRequests[0].respond(); await navigation;
+          check(confirmCalls === 1 && body(), 'Swap discarded an unresolved save');
+          pending.resolve(conflictReply(generated)); await waitFor(conflicted);
+          check(draftArea().value === exact, 'Recovery lost after pending-swap cancellation');
+        }],
+        [`Explicit discard during pending ${kind} permits only that navigation`, async () => {
+          await reset({ generated });
+          const pending = holdSave(generated);
+          type('Explicitly discarded draft'); save(); await waitFor(() => calls.length);
+          confirmDiscard = true;
+          const navigation = navigate();
+          check(navigationRequests.length === 1 && confirmCalls === 1, 'Explicit discard prevented navigation');
+          pending.resolve(conflictReply(generated)); await waitFor(conflicted);
+          confirmDiscard = false;
+          const fragment = navigate(results);
+          // An unrelated fragment request cannot consume/inherit discard approval.
+          check(navigationRequests.length === 2 && confirmCalls === 1, 'Unrelated fragment prompted discard');
+          navigationRequests[1].respond(); await fragment;
+          await navigate();
+          check(navigationRequests.length === 2 && confirmCalls === 2, 'Discard approval leaked to another request');
+          navigationRequests[0].respond(); await navigation;
+          check(root.querySelector('[data-navigation-arrived]') && confirmCalls === 2, 'Approved request prompted twice or failed to navigate');
+        }],
+      ];
+    }),
+    ['Successful pending save permits an earlier navigation response without a prompt', async () => {
+      await reset();
+      const navigation = navigate(), pending = holdSave(false);
+      type('Saved before navigation returns'); save(); await waitFor(() => calls.length);
+      pending.resolve(response(200, { version: 4 }));
+      await waitFor(() => root.querySelector('[data-note-save-state]').dataset.state === 'saved');
+      navigationRequests[0].respond(); await navigation;
+      check(root.querySelector('[data-navigation-arrived]') && confirmCalls === 0, 'Successful save broke ordinary navigation');
+    }],
+    ['Explicit discard at a late conflict swap remains possible', async () => {
+      await reset();
+      const navigation = navigate(), pending = holdSave(false);
+      type('Recover or discard'); save(); await waitFor(() => calls.length);
+      pending.resolve(conflictReply(false)); await waitFor(conflicted);
+      confirmDiscard = true;
+      navigationRequests[0].respond(); await navigation;
+      check(root.querySelector('[data-navigation-arrived]') && confirmCalls === 1, 'Late conflict cannot be explicitly discarded');
+    }],
     ['Earlier revision restored to generated text still cannot be overwritten', async () => {
       await reset({ generated: true });
       copyReply = () => response(201, { id: 42, version: 4, content_md: original });

@@ -5,6 +5,9 @@ entries are merged by ``localplaud.i18n_ext``.
 """
 
 ZH_HANT_TW = {
+    "Speech settings saved. Could not confirm the rebuild. Check processing status before trying again.": "語音設定已儲存，但無法確認重建是否已開始。請先查看處理狀態，再決定是否重試。",
+    "Speech settings saved. Rebuild was not started. Check processing status before trying again.": "語音設定已儲存，但尚未開始重建。請先查看處理狀態，再決定是否重試。",
+    "Speech settings saved. Could not start the rebuild. Check processing status before trying again.": "語音設定已儲存，但無法開始重建。請先查看處理狀態，再決定是否重試。",
     "Some older notes contain names that could not be linked safely. Review them before relying on speaker attribution.": "部分舊筆記的姓名無法安全對應，請先核對內容再採用其中的語者歸屬。",
     "Speaker {number}": "語者 {number}",
     "Names update this recording’s transcript and existing generated notes immediately. No note regeneration is needed. Your edited notes are preserved.": "姓名會立即更新此錄音的逐字稿與現有生成筆記，不需重新生成筆記；你編輯過的筆記會保留。",

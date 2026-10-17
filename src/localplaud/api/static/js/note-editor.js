@@ -460,12 +460,25 @@
 
   document.querySelectorAll('[data-note-editable], [data-summary-editable]').forEach(createEditor);
 
-  // HTMX navigation does not fire beforeunload. Keep conflict recovery visible
-  // unless the user explicitly accepts losing the draft held on this page.
-  on(document, 'htmx:beforeRequest', event => {
-    if (event.detail?.target?.id !== 'app-view' || ![...editors.values()].some(editor => editor.blocked)) return;
-    if (!confirm(tr('Leave this page and discard the unsaved draft? Copy or download it first.'))) event.preventDefault();
-  });
+  // HTMX navigation does not fire beforeunload. A pending save can still fail,
+  // and navigation started on a clean page can return after editing/conflict.
+  // Check both boundaries; explicit discard belongs only to that request.
+  const discardedRequests = new WeakSet();
+  const guardNavigation = event => {
+    const { target, xhr } = event.detail || {};
+    if (!appView || !(target === appView || target?.contains(appView))) return;
+    if (event.type === 'htmx:beforeSwap' && event.detail.shouldSwap === false) return;
+    if (xhr && discardedRequests.has(xhr)) return;
+    if (![...editors.values()].some(editor => editor.busy || editor.blocked)) return;
+    if (confirm(tr('Leave this page and discard the unsaved draft? Copy or download it first.'))) {
+      if (xhr) discardedRequests.add(xhr);
+    } else {
+      event.preventDefault();
+      if (event.type === 'htmx:beforeSwap') event.detail.shouldSwap = false;
+    }
+  };
+  on(document, 'htmx:beforeRequest', guardNavigation, { capture: true });
+  on(document, 'htmx:beforeSwap', guardNavigation, { capture: true });
 
   // Markdown source editing reads the form, so finish any in-place save first.
   on(document, 'click', async event => {
