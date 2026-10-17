@@ -146,7 +146,9 @@
 
   // A generated note is never changed in place: its first edit creates (once)
   // the recording's editable copy of it, and every save goes to that copy.
-  class ExistingCopy extends Error {}
+  class ExistingCopy extends Error {
+    constructor(note) { super(String(note.id)); this.note = note; }
+  }
   const createEditor = body => {
     let id = body.dataset.noteEditable || null;
     const summaryId = body.dataset.summaryEditable;
@@ -154,13 +156,13 @@
     const form = panel.querySelector('[data-workspace-note-form]');
     const status = panel.querySelector('[data-note-save-state]');
     const sources = new WeakMap();
-    const originalHTML = body.innerHTML;
     let version = Number(body.dataset.noteVersion || 0);
     let title = form?.elements.title.value || '';
     // The exact stored source: a <textarea> would drop a leading newline and
     // shift every block's line range.
     let lastSaved = JSON.parse(panel.querySelector('script[data-note-markdown]')?.textContent || 'null') ?? form.elements.content_md.value;
     let timer = 0, saving = null, dirty = false, conflict = false, failed = false;
+    signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
 
     const lines = lastSaved.split('\n');
     const covered = new Set();
@@ -207,12 +209,128 @@
       status.textContent = text;
       status.dataset.state = state;
     };
+    const preserveConflict = (existing = null) => {
+      conflict = true;
+      dirty = true;
+      clearTimeout(timer);
+      // Read the live DOM, including keystrokes entered while the request was
+      // in flight. Never replace it with the older submitted/saved snapshot.
+      const draft = contentOf(serialize());
+      body.contentEditable = 'false';
+      body.setAttribute('aria-readonly', 'true');
+      closeFind();
+      setStatus(tr(existing ? 'This note already has an edited copy. Your draft is still here.' : 'This note changed elsewhere. Your draft is still here.'), 'error');
+
+      const recovery = document.createElement('section');
+      recovery.className = 'note-draft-recovery';
+      recovery.dataset.noteDraftRecovery = '';
+      recovery.setAttribute('aria-label', tr('Recover unsaved draft'));
+      const explanation = document.createElement('p');
+      explanation.textContent = tr('Saving is paused. Copy or download your draft before leaving this page, then compare it with the saved note.');
+      const columns = document.createElement('div');
+      columns.className = 'note-draft-columns';
+      const field = (label, value, attribute) => {
+        const wrapper = document.createElement('label');
+        const caption = document.createElement('span');
+        caption.textContent = tr(label);
+        const area = document.createElement('textarea');
+        area.className = 'search-input';
+        area.readOnly = true;
+        area.rows = 8;
+        area.value = value;
+        area.setAttribute(attribute, '');
+        wrapper.append(caption, area);
+        columns.append(wrapper);
+        return { wrapper, caption, area };
+      };
+      const local = field('Your unsaved draft (Markdown)', draft, 'data-note-draft');
+      const saved = field('Saved note (Markdown)', '', 'data-note-saved');
+      saved.wrapper.hidden = true;
+      const actions = document.createElement('div');
+      actions.className = 'note-draft-actions';
+      const action = label => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn sec';
+        button.textContent = tr(label);
+        actions.append(button);
+        return button;
+      };
+      const copy = action('Copy draft');
+      const download = action('Download draft');
+      const compare = action('Compare with saved note');
+      const latestId = String(existing?.id || id);
+      const link = document.createElement('a');
+      link.className = 'btn sec';
+      link.href = `/file/${encodeURIComponent(fileId)}?tab=notes&note_id=${encodeURIComponent(latestId)}`;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = tr('Open saved note in a new tab');
+      actions.append(link);
+      const feedback = document.createElement('p');
+      feedback.setAttribute('role', 'status');
+      feedback.setAttribute('aria-live', 'polite');
+      recovery.append(explanation, columns, actions, feedback);
+      // Put recovery before long notes so it is reachable without scrolling
+      // through the entire retained draft.
+      body.before(recovery);
+
+      on(copy, 'click', async () => {
+        try {
+          try { await navigator.clipboard.writeText(draft); }
+          catch (_error) {
+            local.area.focus();
+            local.area.select();
+            if (!document.execCommand('copy')) throw new Error('clipboard unavailable');
+          }
+          feedback.textContent = tr('Draft copied. Keep it until you have recovered your changes.');
+        } catch (_error) {
+          local.area.focus();
+          local.area.select();
+          feedback.textContent = tr('Copy failed. Select and copy the draft below, or download it.');
+        }
+      });
+      on(download, 'click', () => {
+        const url = URL.createObjectURL(new Blob([draft], { type: 'text/markdown;charset=utf-8' }));
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'unsaved-note-draft.md';
+        recovery.append(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        feedback.textContent = tr('Keep the downloaded draft until you have recovered your changes.');
+      });
+      on(compare, 'click', async () => {
+        compare.disabled = true;
+        columns.setAttribute('aria-busy', 'true');
+        feedback.textContent = tr('Loading saved note…');
+        try {
+          // The current API has no single-note GET. Scope the read to this
+          // recording; comparison never adopts its version or sends a write.
+          const response = await fetch(`/api/notes?file_id=${encodeURIComponent(fileId)}`, { credentials: 'same-origin', cache: 'no-store', signal });
+          const result = await response.json();
+          const note = result.notes?.find(item => String(item.id) === latestId);
+          if (!response.ok || typeof note?.content_md !== 'string') throw new Error('saved note unavailable');
+          if (signal.aborted) return;
+          saved.caption.textContent = `${tr('Saved note (Markdown)')} · v${note.version}`;
+          saved.area.value = note.content_md;
+          saved.wrapper.hidden = false;
+          feedback.textContent = tr('Compare both versions, then recover your changes in the saved note. Your draft stays on this page.');
+        } catch (error) {
+          if (error.name !== 'AbortError') feedback.textContent = tr('Could not load the saved note. Your draft is still here. Try comparing again or open the saved note in a new tab.');
+        } finally {
+          compare.disabled = false;
+          columns.removeAttribute('aria-busy');
+        }
+      });
+    };
     const adoptCopy = async () => {
       const response = await fetch(`/api/files/${encodeURIComponent(fileId)}/summaries/${summaryId}/editable-copy`, { method: 'POST', credentials: 'same-origin' });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof result.detail === 'string' ? tr(result.detail) : tr('Could not save'));
       // An existing copy may hold earlier edits; never overwrite it with this text.
-      if (result.content_md !== lastSaved) throw new ExistingCopy(String(result.id));
+      if (result.content_md !== lastSaved || Number(result.version) !== 1) throw new ExistingCopy(result);
       id = String(result.id);
       version = result.version;
       title = result.title;
@@ -256,22 +374,13 @@
             return;
           }
           if (response.status === 409) {
-            conflict = true;
-            body.contentEditable = 'false';
-            setStatus(tr('This note changed elsewhere. Reload to see the latest version.'), 'error');
+            preserveConflict();
             return;
           }
           throw new Error(typeof result.detail === 'string' ? result.detail : tr('Could not save'));
         } catch (error) {
           if (error instanceof ExistingCopy) {
-            conflict = true;
-            body.innerHTML = originalHTML;
-            body.contentEditable = 'false';
-            setStatus(tr('This note already has an edited copy.'), 'error');
-            const link = document.createElement('a');
-            link.href = `/file/${encodeURIComponent(fileId)}?tab=notes&note_id=${encodeURIComponent(error.message)}`;
-            link.textContent = tr('Open it');
-            status?.append(' ', link);
+            preserveConflict(error.note);
             return;
           }
           dirty = true;
@@ -324,6 +433,7 @@
     on(window, 'beforeunload', event => {
       if (!dirty && !saving) return;
       event.preventDefault();
+      event.returnValue = '';
       save();
     });
     on(window, 'pagehide', () => {
@@ -350,16 +460,23 @@
 
   document.querySelectorAll('[data-note-editable], [data-summary-editable]').forEach(createEditor);
 
+  // HTMX navigation does not fire beforeunload. Keep conflict recovery visible
+  // unless the user explicitly accepts losing the draft held on this page.
+  on(document, 'htmx:beforeRequest', event => {
+    if (event.detail?.target?.id !== 'app-view' || ![...editors.values()].some(editor => editor.blocked)) return;
+    if (!confirm(tr('Leave this page and discard the unsaved draft? Copy or download it first.'))) event.preventDefault();
+  });
+
   // Markdown source editing reads the form, so finish any in-place save first.
   on(document, 'click', async event => {
     const button = event.target.closest('[data-note-edit]');
     const editor = button && editors.get(panelOf(button)?.querySelector('[data-note-editable]'));
-    if (!editor?.busy) return;
+    if (!editor || (!editor.busy && !editor.blocked)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     await editor.flush();
     // A failing save keeps its error visible instead of opening stale source.
-    if (!editor.busy) button.click();
+    if (!editor.busy && !editor.blocked) button.click();
   }, { capture: true });
 
   const focusId = new URLSearchParams(location.search).get('focus_note');
@@ -460,7 +577,7 @@
         <button class="icon-action icon-only" type="button" data-find-step="1">↓</button>
         <button class="icon-action icon-only" type="button" data-find-close>✕</button>
       </div>
-      ${editor ? `<div class="note-find-row">
+      ${editor && !editor.blocked ? `<div class="note-find-row">
         <input class="search-input" type="text" data-find-replacement>
         <button class="btn sec" type="button" data-find-replace-one></button>
         <button class="btn sec" type="button" data-find-replace-all></button>
@@ -519,6 +636,7 @@
       reveal();
     };
     const replaceRanges = ranges => {
+      if (editor?.blocked) return;
       replaceInBody(body, ranges, replacement.value);
       editor.changed();
     };
@@ -615,7 +733,7 @@
     // underneath would overwrite what is being typed there.
     editing: () => searchTargets().filter(item => item.editor && markdownFormOpen(item)).map(item => item.label),
     count: (query, caseSensitive = false) => searchTargets()
-      .map(item => ({ target: item.target, label: item.label, editable: Boolean(item.editor), count: findRanges(item.body, query, caseSensitive).ranges.length }))
+      .map(item => ({ target: item.target, label: item.label, editable: Boolean(item.editor && !item.editor.blocked), count: findRanges(item.body, query, caseSensitive).ranges.length }))
       .filter(item => item.count),
     // Replaces in every editable note, then waits for each save. Notes that
     // could not be saved are returned by label and keep their unsaved text.
@@ -629,6 +747,7 @@
       targets.forEach(item => {
         const { ranges } = findRanges(item.body, query, caseSensitive);
         if (!ranges.length) return;
+        if (item.editor.blocked) { touched.push(item); return; }
         replaceInBody(item.body, ranges, replacement);
         item.editor.changed();
         replaced += ranges.length;

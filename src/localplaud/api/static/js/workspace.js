@@ -1276,17 +1276,33 @@
         const response = await fetch(`/api/files/${encodeURIComponent(speechForm.dataset.fileId)}/speech-settings`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : tr('Could not save'));
-        if (rebuild) {
-          const queued = await fetch(`/file/${encodeURIComponent(speechForm.dataset.fileId)}/reprocess?force=true`, { method: 'POST', signal });
-          const message = document.getElementById('reprocess-msg');
-          if (message) message.innerHTML = await queued.text();
-        }
-        status.textContent = '';
         const menuItem = document.getElementById('menu-speech-settings');
         const custom = Object.values(body).some(value => value !== null && value !== undefined);
         let chip = menuItem?.querySelector('.chip');
         if (menuItem && custom && !chip) { chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = tr('Custom'); menuItem.append(' ', chip); }
         if (!custom) chip?.remove();
+        if (rebuild) {
+          let queued, result;
+          try {
+            queued = await fetch(`/file/${encodeURIComponent(speechForm.dataset.fileId)}/reprocess?force=true`, { method: 'POST', signal });
+            result = await queued.text();
+          } catch (error) {
+            if (error.name === 'AbortError') throw error;
+            throw new Error(tr('Speech settings saved. Could not confirm the rebuild. Check processing status before trying again.'));
+          }
+          const message = document.getElementById('reprocess-msg');
+          if (!queued.ok) {
+            // A proxy/worker failure can return an HTML error page. Keep it
+            // out of the dialog and never report a rejected POST as success.
+            const error = tr(queued.status === 409
+              ? 'Speech settings saved. Rebuild was not started. Check processing status before trying again.'
+              : 'Speech settings saved. Could not start the rebuild. Check processing status before trying again.');
+            if (message) message.textContent = error;
+            throw new Error(error);
+          }
+          if (message) message.innerHTML = result;
+        }
+        status.textContent = '';
         delete speechDialog.dataset.busy;
         if (window.lp?.closeDialog) window.lp.closeDialog(speechDialog); else speechDialog.close();
         toast(rebuild ? tr('Speech settings saved. Rebuilding this recording.') : tr('Speech settings saved. They apply on the next rebuild.'));

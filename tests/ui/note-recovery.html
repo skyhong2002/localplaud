@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synthetic note recovery regression</title>
+<link rel="stylesheet" href="../../src/localplaud/api/static/css/app.css">
+<link rel="stylesheet" href="../../src/localplaud/api/static/css/workspace.css">
+<link rel="stylesheet" href="../../src/localplaud/api/static/css/recording.css">
+<style>
+  body { padding: 16px; }
+  main { max-width: 900px; margin: auto; }
+  #app-view { display: block; }
+  .fixture-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+  .fixture-results { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .fixture-workspace { padding: 16px; border: 1px solid var(--border); }
+  .note-panel, audio { max-width: 100%; min-width: 0; }
+  .note-editable { overflow-wrap: anywhere; }
+  dialog { max-width: min(600px, calc(100% - 24px)); }
+  #speech-settings-form { display: grid; gap: 12px; }
+</style>
+<main>
+  <h1>Synthetic note recovery regression</h1>
+  <p>Account-free browser fixture. All API requests are intercepted in this page. No model, scraper, worker, or account calls.</p>
+  <audio controls aria-label="Synthetic silent audio"></audio>
+  <div class="fixture-controls">
+    <button class="btn" id="run-tests">Run regressions</button>
+    <button class="btn sec" id="show-conflict">Show conflict recovery</button>
+    <button class="btn sec" id="show-speech">Show rebuild failure</button>
+  </div>
+  <pre class="fixture-results" id="results" role="status" aria-live="polite">Ready.</pre>
+  <div id="app-view"></div>
+</main>
+<script src="note-recovery.js"></script>
+</html>
