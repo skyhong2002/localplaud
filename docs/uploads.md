@@ -17,8 +17,8 @@ the uploaded file.
 
 ## App integration hook
 
-The endpoint's file check runs after multipart parsing. Install the ASGI middleware
-to enforce a body bound **before** the multipart parser spools bytes:
+The endpoint's file check runs after multipart parsing. The application registers
+this ASGI middleware to enforce a body bound **before** the parser spools bytes:
 
 ```python
 from localplaud.api.upload_limits import UploadBodyLimitMiddleware
@@ -29,8 +29,9 @@ app.add_middleware(UploadBodyLimitMiddleware)
 Integration belongs in `api/app.py`, immediately after constructing the FastAPI app
 and before registering its existing authentication middleware. Starlette runs the
 last-added middleware first, so authentication then stays outside the limiter. This
-scoped implementation supplies the hook without editing `app.py`; the main app is
-not protected by the streaming bound until that registration is integrated.
+registration is present in `api/app.py`. Integration regressions verify an
+unauthorized request receives 401 and an authorized oversized request receives 413
+without consuming or spooling its body.
 
 The default request-body bound is 2 GiB + 64 KiB of multipart envelope overhead;
 the endpoint still independently enforces the exact 2 GiB file limit. The limiter
