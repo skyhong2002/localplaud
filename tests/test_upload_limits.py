@@ -168,6 +168,70 @@ def test_receive_cancellation_closes_rolled_multipart_spools_and_propagates(
     assert spools and all(spool._rolled and spool.closed for spool in spools)
 
 
+@pytest.mark.parametrize("operation", ["write", "seek"])
+@pytest.mark.parametrize("cancel_task", [False, True])
+@pytest.mark.parametrize("with_limiter", [False, True])
+def test_parser_io_cancellation_closes_all_rolled_spools_and_preserves_cancellation(
+    monkeypatch, operation, cancel_task, with_limiter
+):
+    import starlette.formparsers as parser
+    from starlette.datastructures import UploadFile as ParserUploadFile
+
+    spools = []
+    sent = []
+    raised = []
+    cancellation = asyncio.CancelledError(f"cancel during multipart {operation}")
+    actual_operation = getattr(ParserUploadFile, operation)
+
+    def tracked_spool(*args, **kwargs):
+        kwargs["max_size"] = 1
+        spool = tempfile.SpooledTemporaryFile(*args, **kwargs)
+        spools.append(spool)
+        return spool
+
+    async def cancel_during_io(upload, *args):
+        await actual_operation(upload, *args)
+        if upload.filename != "partial.wav":
+            return
+        assert upload.file._rolled and not upload.file.closed
+        try:
+            if cancel_task:
+                asyncio.current_task().cancel(str(cancellation))
+                await asyncio.sleep(0)
+            else:
+                raise cancellation
+        except asyncio.CancelledError as exc:
+            raised.append(exc)
+            raise
+
+    monkeypatch.setattr(parser, "SpooledTemporaryFile", tracked_spool)
+    monkeypatch.setattr(ParserUploadFile, operation, cancel_during_io)
+    monkeypatch.setattr(imports, "file_dir", lambda _id: pytest.fail("cancelled upload ran"))
+    app = FastAPI()
+    app.include_router(imports.router)
+    if with_limiter:
+        app.add_middleware(UploadBodyLimitMiddleware, max_body_bytes=4096)
+
+    async def record_send(scope, receive, send):
+        async def tracked_send(message):
+            sent.append(message)
+            await send(message)
+
+        await app(scope, receive, tracked_send)
+
+    # One completed file and one failing file must both close. Use separate
+    # receive chunks so the first file has finished its write AND seek already.
+    completed = b'--fixture\r\nContent-Disposition: form-data; name="extra"; filename="complete.wav"\r\n\r\ncompleted\r\n--fixture\r\n'
+    failing = b'Content-Disposition: form-data; name="file"; filename="partial.wav"\r\n\r\nfixture\r\n--fixture--\r\n'
+    with pytest.raises(asyncio.CancelledError, match=str(cancellation)) as exc:
+        _request(record_send, [completed, failing])
+    assert raised == [exc.value]
+    if not cancel_task:
+        assert exc.value is cancellation
+    assert sent == []
+    assert len(spools) == 2 and all(spool._rolled and spool.closed for spool in spools)
+
+
 def test_mounted_upload_route_is_bounded():
     child = FastAPI()
     child.include_router(imports.router)

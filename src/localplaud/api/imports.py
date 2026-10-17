@@ -23,9 +23,10 @@ from ..imports import (
     start_plaud_metadata_import,
 )
 from ..store.files import file_dir
-from .upload_limits import MAX_UPLOAD_BYTES
+from .upload_limits import MAX_UPLOAD_BYTES, UploadCleanupRoute
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
+_upload_router = APIRouter(route_class=UploadCleanupRoute)
 _ALLOWED_EXTENSIONS = {
     "mp3",
     "mp4",
@@ -74,7 +75,7 @@ def import_plaud_audio_status(file_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/local/audio", status_code=201)
+@_upload_router.post("/local/audio", status_code=201)
 def import_local_audio(file: Annotated[UploadFile, File()]) -> dict:
     original_name = Path(file.filename or "audio").name
     extension = Path(original_name).suffix.lower().lstrip(".")
@@ -135,6 +136,9 @@ def import_local_audio(file: Annotated[UploadFile, File()]) -> dict:
         "status": "downloaded",
         "media_probe": probe.status,
     }
+
+
+router.include_router(_upload_router)
 
 
 @dataclass(frozen=True)

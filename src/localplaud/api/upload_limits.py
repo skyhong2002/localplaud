@@ -8,14 +8,74 @@ checks file bytes; this bound includes a small allowance for the multipart envel
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 
-from starlette.formparsers import MultiPartException
-from starlette.responses import JSONResponse
+from fastapi.routing import APIRoute
+from starlette.datastructures import FormData
+from starlette.exceptions import HTTPException
+from starlette.formparsers import MultiPartException, MultiPartParser, parse_options_header
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 MULTIPART_OVERHEAD_BYTES = 64 * 1024
 UPLOAD_PATH = "/api/imports/local/audio"
+
+
+class _UploadMultiPartParser(MultiPartParser):
+    async def parse(self) -> FormData:
+        try:
+            return await super().parse()
+        except BaseException:
+            # Starlette's error list includes completed and in-progress files,
+            # but its handler omits cancellation during UploadFile.write/seek.
+            # Close synchronously: another await could itself be cancelled.
+            for file in self._files_to_close_on_error:
+                with suppress(Exception):
+                    file.close()
+            raise
+
+
+class _UploadRequest(Request):
+    async def _get_form(
+        self,
+        *,
+        max_files: int | float = 1000,
+        max_fields: int | float = 1000,
+        max_part_size: int = 1024 * 1024,
+    ) -> FormData:
+        if (
+            self._form is None
+            and parse_options_header(self.headers.get("content-type"))[0] == b"multipart/form-data"
+        ):
+            parser = _UploadMultiPartParser(
+                self.headers,
+                self.stream(),
+                max_files=max_files,
+                max_fields=max_fields,
+                max_part_size=max_part_size,
+            )
+            try:
+                self._form = await parser.parse()
+            except MultiPartException as exc:
+                # Keep Request._get_form's normal parser-error response behavior.
+                raise HTTPException(status_code=400, detail=exc.message) from exc
+        return await super()._get_form(
+            max_files=max_files, max_fields=max_fields, max_part_size=max_part_size
+        )
+
+
+class UploadCleanupRoute(APIRoute):
+    """Install cancellation-safe multipart parsing only on the upload endpoint."""
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def upload_handler(request: Request) -> Response:
+            return await handler(_UploadRequest(request.scope, request.receive))
+
+        return upload_handler
 
 
 class _UploadBodyTooLarge(MultiPartException):

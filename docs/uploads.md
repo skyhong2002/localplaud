@@ -44,6 +44,16 @@ bound; a parser-compatible exception closes those temporary files before returni
 cleanup. Cancellation is re-raised unchanged at the limiter boundary after the
 parser closes partial files; no HTTP error response is sent for it. Remaining
 request data is not drained.
+
+The upload endpoint also uses a route-scoped multipart parser that closes every
+completed and partial spool on any `BaseException`, including cancellation while
+awaiting `UploadFile.write()` or `seek()`. Cleanup closes the underlying files
+synchronously and re-raises the original exception without sending an HTTP error
+for cancellation. This cleanup works independently of limiter registration and
+does not replace Starlette's parser globally. It relies on Starlette's parser error
+file list and request form cache; the upload regressions cover those integration
+points and must pass when upgrading Starlette or FastAPI.
+
 The HTTP server may already have buffered a receive message; its transport buffering
 and connection timeouts remain server concerns.
 
