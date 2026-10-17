@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import tempfile
+import threading
 from contextlib import contextmanager
 from io import BytesIO
 from types import SimpleNamespace
@@ -230,6 +232,160 @@ def test_parser_io_cancellation_closes_all_rolled_spools_and_preserves_cancellat
         assert exc.value is cancellation
     assert sent == []
     assert len(spools) == 2 and all(spool._rolled and spool.closed for spool in spools)
+
+
+@pytest.mark.parametrize("operation", ["rollover", "write", "seek", "seek_error"])
+@pytest.mark.parametrize("cancellation", ["direct", "repeated", "scope"])
+@pytest.mark.parametrize("with_limiter", [False, True])
+def test_inflight_threaded_upload_io_drains_before_close(
+    monkeypatch, operation, cancellation, with_limiter
+):
+    import anyio
+    import starlette.formparsers as parser
+
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    spools, physical_files, descriptors, sent, raised = [], [], [], [], []
+    actual_spool, actual_tmpfile = tempfile.SpooledTemporaryFile, tempfile.TemporaryFile
+    event_loop_thread = threading.get_ident()
+
+    def pause_worker():
+        assert threading.get_ident() != event_loop_thread
+        entered.set()
+        if not release.wait(5):
+            raise AssertionError("fixture did not release the I/O worker")
+
+    def tracked_tmpfile(*args, **kwargs):
+        file = actual_tmpfile(*args, **kwargs)
+        physical_files.append(file)
+        descriptors.append(file.fileno())
+        if operation == "rollover":
+            # Pause after creating the disk file, before rollover installs it.
+            pause_worker()
+        return file
+
+    def tracked_spool(*args, **kwargs):
+        spool = actual_spool(*args, **kwargs)
+        spools.append(spool)
+        actual_io = spool.seek if operation.startswith("seek") else spool.write
+
+        def tracked_io(*args):
+            try:
+                if operation.startswith("seek") or (operation == "write" and spool._rolled):
+                    pause_worker()
+                if operation == "seek_error":
+                    raise OSError("worker failure must not replace cancellation")
+                return actual_io(*args)
+            finally:
+                if entered.is_set():
+                    finished.set()
+
+        if operation.startswith("seek"):
+            spool.seek = tracked_io
+        else:
+            spool.write = tracked_io
+        return spool
+
+    monkeypatch.setattr(parser, "SpooledTemporaryFile", tracked_spool)
+    monkeypatch.setattr(tempfile, "TemporaryFile", tracked_tmpfile)
+    monkeypatch.setattr(imports, "file_dir", lambda _id: pytest.fail("cancelled upload ran"))
+    app = FastAPI()
+    app.include_router(imports.router)
+    if with_limiter:
+        app.add_middleware(UploadBodyLimitMiddleware, max_body_bytes=2 * 1024 * 1024)
+
+    async def exercise():
+        beginning = (
+            b'--fixture\r\nContent-Disposition: form-data; name="file"; filename="memo.wav"\r\n\r\n'
+            + b"x" * (1024 * 1024 + 1)
+        )
+        ending = b"y\r\n--fixture--\r\n"
+        chunks = [beginning, ending] if operation == "write" else [beginning + ending]
+        receives = []
+        scopes = []
+
+        async def receive():
+            receives.append(True)
+            assert chunks
+            return {"type": "http.request", "body": chunks.pop(0), "more_body": bool(chunks)}
+
+        async def send(message):
+            sent.append(message)
+
+        async def request():
+            with anyio.CancelScope() as scope:
+                scopes.append(scope)
+                try:
+                    await app(
+                        {
+                            "type": "http",
+                            "asgi": {"version": "3.0"},
+                            "http_version": "1.1",
+                            "method": "POST",
+                            "path": UPLOAD_PATH,
+                            "raw_path": UPLOAD_PATH.encode(),
+                            "query_string": b"",
+                            "root_path": "",
+                            "scheme": "http",
+                            "server": ("fixture", 80),
+                            "client": ("fixture", 1),
+                            "headers": [(b"content-type", b"multipart/form-data; boundary=fixture")],
+                        },
+                        receive,
+                        send,
+                    )
+                except asyncio.CancelledError as exc:
+                    raised.append(exc)
+                    raise
+
+        task = asyncio.create_task(request())
+        try:
+            async with asyncio.timeout(3):
+                while not entered.is_set():
+                    await asyncio.sleep(0.001)
+            if cancellation == "scope":
+                scopes[0].cancel()
+            else:
+                task.cancel("original in-flight cancellation")
+            # Let the request enter cancellation cleanup while the worker is
+            # paused. Release independently BEFORE awaiting request completion:
+            # a correct implementation must wait for this worker to finish.
+            for _ in range(3):
+                await asyncio.sleep(0)
+            if cancellation == "repeated":
+                for _ in range(3):
+                    task.cancel("later cancellation must not replace the original")
+                    await asyncio.sleep(0)
+            pending_before_release = not task.done()
+            open_before_release = all(not spool.closed for spool in spools)
+            release.set()
+            if cancellation == "scope":
+                await asyncio.wait_for(task, 3)
+            else:
+                with pytest.raises(asyncio.CancelledError) as error:
+                    await asyncio.wait_for(task, 3)
+                assert str(error.value) == "original in-flight cancellation"
+                assert raised == [error.value]
+            async with asyncio.timeout(3):
+                while not finished.is_set():
+                    await asyncio.sleep(0.001)
+            assert len(raised) == 1 and not sent
+            assert receives == [True] * (2 if operation == "write" else 1)
+            assert len(spools) == 1 and spools[0]._max_size == 1024 * 1024
+            assert all(spool._rolled and spool.closed for spool in spools)
+            assert len(physical_files) == 1 and all(file.closed for file in physical_files)
+            for descriptor in descriptors:
+                with pytest.raises(OSError):
+                    os.fstat(descriptor)
+            assert pending_before_release and open_before_release
+        finally:
+            release.set()
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 3)
+            for file in physical_files:
+                file.close()
+            for spool in spools:
+                spool.close()
+
+    asyncio.run(exercise())
 
 
 def test_mounted_upload_route_is_bounded():

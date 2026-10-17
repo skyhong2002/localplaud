@@ -8,10 +8,13 @@ checks file bytes; this bound includes a small allowance for the multipart envel
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from contextlib import suppress
+from typing import Any
 
+from anyio import CancelScope
 from fastapi.routing import APIRoute
-from starlette.datastructures import FormData
+from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException
 from starlette.formparsers import MultiPartException, MultiPartParser, parse_options_header
 from starlette.requests import Request
@@ -23,13 +26,64 @@ MULTIPART_OVERHEAD_BYTES = 64 * 1024
 UPLOAD_PATH = "/api/imports/local/audio"
 
 
+class _UploadFile(UploadFile):
+    async def _run_io(self, operation: Coroutine[Any, Any, None]) -> None:
+        async def run() -> BaseException | None:
+            try:
+                await operation
+            except BaseException as exc:
+                # Return cancellation as a value: asyncio.shield otherwise
+                # replaces a cancelled child's original CancelledError.
+                return exc
+            return None
+
+        # Own the I/O independently of request cancellation. In particular, a
+        # worker rolling the spool to disk must finish before parser cleanup
+        # closes it, or it could install a new disk file AFTER that close.
+        task = asyncio.create_task(run())
+        try:
+            error = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # AnyIO scope shielding prevents level cancellation from spinning;
+            # asyncio.shield plus retrying also handles repeated Task.cancel().
+            with CancelScope(shield=True):
+                while not task.done():
+                    with suppress(asyncio.CancelledError):
+                        await asyncio.shield(task)
+            # The worker's error must not replace the request's cancellation.
+            # run() captures it, so completion cannot leave an unobserved error.
+            raise
+        if error is not None:
+            raise error
+
+    async def write(self, data: bytes) -> None:
+        await self._run_io(super().write(data))
+
+    async def seek(self, offset: int) -> None:
+        await self._run_io(super().seek(offset))
+
+
 class _UploadMultiPartParser(MultiPartParser):
+    def on_headers_finished(self) -> None:
+        super().on_headers_finished()
+        upload = self._current_part.file
+        if upload is not None:
+            # Keep Starlette's header validation, spool construction, and error
+            # file tracking, changing only this route's UploadFile lifecycle.
+            self._current_part.file = _UploadFile(
+                file=upload.file,
+                size=upload.size,
+                filename=upload.filename,
+                headers=upload.headers,
+            )
+
     async def parse(self) -> FormData:
         try:
             return await super().parse()
         except BaseException:
             # Starlette's error list includes completed and in-progress files,
             # but its handler omits cancellation during UploadFile.write/seek.
+            # UploadFile.write/seek have drained their worker before unwinding.
             # Close synchronously: another await could itself be cancelled.
             for file in self._files_to_close_on_error:
                 with suppress(Exception):

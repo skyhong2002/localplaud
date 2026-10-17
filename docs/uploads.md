@@ -48,11 +48,20 @@ request data is not drained.
 The upload endpoint also uses a route-scoped multipart parser that closes every
 completed and partial spool on any `BaseException`, including cancellation while
 awaiting `UploadFile.write()` or `seek()`. Cleanup closes the underlying files
-synchronously and re-raises the original exception without sending an HTTP error
-for cancellation. This cleanup works independently of limiter registration and
-does not replace Starlette's parser globally. It relies on Starlette's parser error
-file list and request form cache; the upload regressions cover those integration
-points and must pass when upgrading Starlette or FastAPI.
+synchronously after any in-flight write/seek finishes, then re-raises the original
+exception without sending an HTTP error for cancellation. A route-local
+`UploadFile` subclass owns each write/seek in an independent task, shields it from
+request cancellation, and drains it even under repeated direct `Task.cancel()`
+calls. This prevents a spool rollover worker from installing a new disk file after
+cleanup has closed the old in-memory file. An already-started filesystem operation
+cannot be stopped safely: cancellation waits for it to finish, with no fixed upper
+bound if the filesystem stalls. Later cancellation or an I/O error during that wait
+does not replace the original cancellation.
+
+This cleanup works independently of limiter registration and does not replace
+Starlette's parser globally. It relies on Starlette's current-part file, parser
+error file list, and request form cache; the upload regressions cover those
+integration points and must pass when upgrading Starlette or FastAPI.
 
 The HTTP server may already have buffered a receive message; its transport buffering
 and connection timeouts remain server concerns.
