@@ -255,6 +255,7 @@ def run():
         reset_inflight,
     )
     from .providers.usage import recover_provider_dispatch_reservations
+    from .service_signals import ServiceSignals
     from .worker.daemon import DaemonJobs
 
     # Under launchd the log files otherwise fill with thousands of
@@ -262,44 +263,63 @@ def run():
     if not sys.stderr.isatty():
         os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
-    settings = get_settings()
-    # Serve as soon as the schema is ready; the daemon reconciles the note
-    # index in the background (see DaemonJobs.install).
-    init_db(reconcile_index=False)
-    try:
-        daemon_owner, previous_owner = register_daemon_owner()
-    except RuntimeError as exc:
-        console.print(f"[red]✗[/] {exc}")
-        raise typer.Exit(1) from exc
-    try:
-        from .db.tenancy import system_scope
+    jobs = None
 
-        # A restart interrupts work in every workspace.
-        with system_scope():
-            reset_inflight(force=True, previous_owner=previous_owner)
-            recover_ask_request_claims(previous_owner)
-            recover_provider_dispatch_reservations(previous_owner)
-    except Exception:
-        release_daemon_owner(daemon_owner)
-        raise
+    def stop_dispatch():
+        if jobs is not None:
+            jobs.stopped.set()
 
-    scheduler = BackgroundScheduler()
-    jobs = DaemonJobs(settings, daemon_owner, scheduler)
-    jobs.install()
-    try:
-        scheduler.start()
-        console.print("[green]✓[/] poller + worker ready; starting web UI…")
-        _serve(settings, database_initialized=True, managed_daemon=True)
-    finally:
-        jobs.stopped.set()
+    # Keep these handlers installed through owner release, including Uvicorn's
+    # signal replay and repeated supervisor signals while workers are draining.
+    with ServiceSignals(stop_dispatch) as stop:
+        settings = get_settings()
+        # The daemon reconciles the note index off the request path.
+        init_db(reconcile_index=False)
+        if stop.requested:
+            return
         try:
-            if scheduler.running:
-                scheduler.shutdown(wait=True)
+            daemon_owner, previous_owner = register_daemon_owner()
+        except RuntimeError as exc:
+            console.print(f"[red]✗[/] {exc}")
+            raise typer.Exit(1) from exc
+        scheduler = None
+        try:
+            from .db.tenancy import system_scope
+
+            with system_scope():
+                reset_inflight(force=True, previous_owner=previous_owner)
+                recover_ask_request_claims(previous_owner)
+                recover_provider_dispatch_reservations(previous_owner)
+            if stop.requested:
+                return
+            scheduler = BackgroundScheduler()
+            jobs = DaemonJobs(settings, daemon_owner, scheduler)
+            jobs.install()
+            if stop.requested:
+                return
+            scheduler.start()
+            console.print("[green]✓[/] poller + worker ready; starting web UI…")
+            if not stop.requested:
+                _serve(
+                    settings,
+                    database_initialized=True,
+                    managed_daemon=True,
+                    service_stop=stop,
+                )
         finally:
+            # Mark the scope first: a first signal during normal cleanup must
+            # not reenter jobs.stopped.set() while its lock is held here.
+            stop.request_stop()
+            stop_dispatch()
             try:
-                jobs.shutdown()
+                if scheduler is not None and scheduler.running:
+                    scheduler.shutdown(wait=True)
             finally:
-                release_daemon_owner(daemon_owner)
+                try:
+                    if jobs is not None:
+                        jobs.shutdown()
+                finally:
+                    release_daemon_owner(daemon_owner)
 
 
 def run_processing_cycle(settings, *, daemon_owner: str | None = None) -> int:
@@ -752,7 +772,13 @@ def serve():
     _serve(get_settings())
 
 
-def _serve(settings, *, database_initialized: bool = False, managed_daemon: bool = False):
+def _serve(
+    settings,
+    *,
+    database_initialized: bool = False,
+    managed_daemon: bool = False,
+    service_stop=None,
+):
     import logging
 
     import uvicorn
@@ -773,12 +799,29 @@ def _serve(settings, *, database_initialized: bool = False, managed_daemon: bool
         web_app.state.database_initialized = database_initialized
         web_app.state.managed_daemon = managed_daemon
         target = web_app
-    uvicorn.run(
-        target,
-        host=settings.api.host,
-        port=settings.api.port,
-        log_level="info",
-    )
+    options = dict(host=settings.api.host, port=settings.api.port, log_level="info")
+    if service_stop is None:
+        uvicorn.run(target, **options)
+    else:
+        from contextlib import contextmanager
+
+        class ManagedServer(uvicorn.Server):
+            @contextmanager
+            def capture_signals(self):
+                with super().capture_signals():
+                    # A signal during app/config preparation belongs to the
+                    # outer scope. Transfer it after Uvicorn installs handlers,
+                    # closing the gap before its first signal capture.
+                    if service_stop.requested:
+                        self.should_exit = True
+                    yield
+
+            def handle_exit(self, sig, frame):
+                # Stop new daemon dispatch at first capture, before HTTP drains.
+                service_stop.request_stop()
+                super().handle_exit(sig, frame)
+
+        ManagedServer(uvicorn.Config(target, **options)).run()
 
 
 @app.command("benchmark-speech")

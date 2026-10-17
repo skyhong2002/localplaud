@@ -123,6 +123,15 @@ for a bounded enrollment smoke test, inspect `receipt.json`, then enable applica
 Watch mode runs each full scan in a short-lived child process so scan memory is
 released before idling. The parent retains the lock and retry schedule; child logs
 stream to the supervisor as before. One-shot invocations scan in-process.
+On SIGTERM/SIGINT, the watcher stops admitting passes and wakes promptly from its
+30–300 second idle wait. An already admitted child finishes naturally while the
+parent retains its lock. Each child has a separate session so signals sent to the
+watcher's process group do not interrupt that pass. Repeated TERM does not bypass
+the wait. The watcher restores previous handlers after exit; one-shot and internal
+`--child-pass` invocations retain their existing signal semantics. A signal sent
+directly to the child still uses those semantics. Configure supervisor grace for
+the full active pass: a five-second launchd `ExitTimeOut` cannot guarantee this
+drain, and SIGKILL cannot run cleanup (see [deployment](deploy.md#graceful-service-shutdown)).
 With `--watch --limit 25`, each cycle extracts up to 25 additional recordings and
 applies matches before continuing in the next cycle; cached samples are skipped,
 so this eventually covers the whole library and continues with newly arriving files.

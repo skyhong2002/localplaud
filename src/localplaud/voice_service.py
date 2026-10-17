@@ -30,6 +30,7 @@ from sqlalchemy import exists, select
 from .config import get_settings
 from .db.models import PlaudFile, Speaker, Transcript
 from .db.session import get_engine, session_scope
+from .service_signals import ServiceSignals
 from .voice_identity import (
     VoiceSample,
     apply_match,
@@ -479,62 +480,69 @@ def main():
     lock_context = (
         contextlib.nullcontext() if args.child_pass else open(folder / "voice-service.lock", "w")
     )
-    with lock_context as lock:
-        try:
-            if lock is not None:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise SystemExit("voice service already running") from None
-        create_schema(get_engine())
-        last_fingerprint, last_scan = None, 0.0
-        while True:
-            profile = json.loads(args.profile.read_text())
-            if not profile.get("enabled", False):
-                if not args.watch:
-                    return
-                time.sleep(30)
-                continue
-            validate_profile_thresholds(profile)
-            # A full pass re-reads every transcript; skip it while nothing it reads has
-            # changed. Time-based retries and in-place edits wait for the periodic pass.
-            fingerprint = library_fingerprint(profile)
-            if (
-                args.watch
-                and fingerprint == last_fingerprint
-                and time.monotonic() - last_scan < profile.get("full_scan_seconds", 3600)
-            ):
-                time.sleep(max(30, profile.get("poll_seconds", 300)))
-                continue
+    stop = ServiceSignals()
+    # One-shot and internal child passes retain their existing signal semantics.
+    with stop if args.watch else contextlib.nullcontext():
+        with lock_context as lock:
             try:
-                if args.watch:
-                    command = [
-                        sys.executable,
-                        "-m",
-                        "localplaud.voice_service",
-                        "--profile",
-                        str(args.profile),
-                    ]
-                    if args.limit is not None:
-                        command.extend(["--limit", str(args.limit)])
-                    command.append("--child-pass")
-                    subprocess.run(command, check=True)
-                    receipt = json.loads((folder / "receipt.json").read_text())
-                else:
-                    worker = VoiceWorker(profile, folder / "runtime.log")
-                    try:
-                        receipt = scan(profile, worker, folder / "receipt.json", limit=args.limit)
-                    finally:
-                        worker.close()
-                # A capped pass may have left extraction work behind; run again.
-                if not args.limit or receipt["counts"].get("recordings_extracted", 0) < args.limit:
-                    last_fingerprint, last_scan = fingerprint, time.monotonic()
-            except Exception as exc:
-                print(json.dumps({"event": "scan_failed", "error": type(exc).__name__}), flush=True)
+                if lock is not None:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise SystemExit("voice service already running") from None
+            create_schema(get_engine())
+            last_fingerprint, last_scan = None, 0.0
+            while not stop.requested:
+                profile = json.loads(args.profile.read_text())
+                if not profile.get("enabled", False):
+                    if not args.watch:
+                        return
+                    stop.wait(30)
+                    continue
+                validate_profile_thresholds(profile)
+                # A full pass re-reads every transcript; skip it while nothing it reads has
+                # changed. Time-based retries and in-place edits wait for the periodic pass.
+                fingerprint = library_fingerprint(profile)
+                if (
+                    args.watch
+                    and fingerprint == last_fingerprint
+                    and time.monotonic() - last_scan < profile.get("full_scan_seconds", 3600)
+                ):
+                    stop.wait(max(30, profile.get("poll_seconds", 300)))
+                    continue
+                try:
+                    if args.watch:
+                        command = [
+                            sys.executable,
+                            "-m",
+                            "localplaud.voice_service",
+                            "--profile",
+                            str(args.profile),
+                        ]
+                        if args.limit is not None:
+                            command.extend(["--limit", str(args.limit)])
+                        command.append("--child-pass")
+                        if stop.requested:
+                            break
+                        # Terminal/group signals belong to the watcher. Let its
+                        # admitted pass finish without forwarding TERM/INT to it.
+                        subprocess.run(command, check=True, start_new_session=True)
+                        receipt = json.loads((folder / "receipt.json").read_text())
+                    else:
+                        worker = VoiceWorker(profile, folder / "runtime.log")
+                        try:
+                            receipt = scan(profile, worker, folder / "receipt.json", limit=args.limit)
+                        finally:
+                            worker.close()
+                    # A capped pass may have left extraction work behind; run again.
+                    if not args.limit or receipt["counts"].get("recordings_extracted", 0) < args.limit:
+                        last_fingerprint, last_scan = fingerprint, time.monotonic()
+                except Exception as exc:
+                    print(json.dumps({"event": "scan_failed", "error": type(exc).__name__}), flush=True)
+                    if not args.watch:
+                        raise
                 if not args.watch:
-                    raise
-            if not args.watch:
-                break
-            time.sleep(max(30, profile.get("poll_seconds", 300)))
+                    break
+                stop.wait(max(30, profile.get("poll_seconds", 300)))
 
 
 if __name__ == "__main__":

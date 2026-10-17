@@ -8,7 +8,8 @@ trap 'rm -rf "$test_root"' EXIT HUP INT TERM
 cd "$repo"
 if [ "$#" -eq 0 ]; then
     set -- -q tests/test_runtime_startup_guard.py tests/test_subprocesses.py \
-        tests/test_runtime_admission.py tests/test_daemon_cycle.py
+        tests/test_runtime_admission.py tests/test_daemon_cycle.py \
+        tests/test_service_signals.py tests/test_voice_service.py
 fi
 # Drop inherited deployment settings/credentials; never load a production .env.
 env -i PATH="$PATH" \

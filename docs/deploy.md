@@ -54,6 +54,43 @@ Provider quotas and model limits still apply; parallelism improves library
 throughput, not necessarily one recording's latency. Existing processing leases
 prevent duplicate recording work, and completed stage artifacts remain reusable.
 
+## Graceful service shutdown
+
+`localplaud run` handles SIGTERM and SIGINT cooperatively. At Uvicorn's first
+signal capture it stops new daemon dispatch, lets HTTP shutdown finish, then runs
+the CLI cleanup: stop jobs, shut down the scheduler with `wait=True`, drain admitted
+workers, and release daemon ownership once. The scoped handlers remain active
+through cleanup, including repeated SIGTERM and Uvicorn's restored-handler signal
+replay (verified with installed Uvicorn 0.51.0). Requests received during app/config
+preparation are retained when Uvicorn takes over. Prior handlers are restored when
+the command returns; imports and calls from other threads install no handlers.
+Standalone `serve` keeps Uvicorn's normal signal behavior.
+
+This drain has no new hard deadline and does not cancel upstream provider billing
+or terminate active recordings. Configure the supervisor's stop grace period to
+accommodate the longest admitted work before rolling out/restarting the service.
+The observed launchd `ExitTimeOut` of **5 seconds is still too short** for work
+that takes longer to drain; this code change does not update the loaded service
+configuration or deploy it. Supervisor grace configuration remains a rollout
+requirement. SIGKILL, including a supervisor's escalation after its timeout, is
+ungraceful: Python cannot run finally blocks, drain children, or release ownership.
+
+Run the synthetic regression suite with the deployment virtualenv interpreter:
+
+```bash
+LOCALPLAUD_TEST_PYTHON=/path/to/deployment/.venv/bin/python sh tests/run_runtime_offline.sh
+```
+
+The runner strips inherited deployment settings and sets explicit
+`PYTHONPATH=tests/runtime_guard:src:<checkout>` for parent and child Python startup.
+It blocks real network/model access and disables `.env` loading. Signal fixtures
+stub registration, scheduler, jobs and database operations before use; they execute
+installed Uvicorn capture/replay with a synthetic HTTP loop and synthetic workers,
+without sockets, application lifespan, providers or real recordings. They prove
+cleanup waits beyond five seconds, repeated TERM remains cooperative, and ownership
+is released once. These checks do not qualify real model/provider latency or a
+supervisor's loaded configuration.
+
 ## Before you start (per host)
 
 1. **DNS**: point your domain's A/AAAA record at the machine's public IP.

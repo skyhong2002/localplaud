@@ -29,7 +29,9 @@ def watch(monkeypatch, profile, *options, cycles=2):
         service.sys, "argv", ["voice_service", "--profile", str(profile), "--watch", *options]
     )
     sleeps = Mock(side_effect=[None] * (cycles - 1) + [KeyboardInterrupt])
-    monkeypatch.setattr(service.time, "sleep", sleeps)
+    stop = service.ServiceSignals()
+    monkeypatch.setattr(stop, "wait", sleeps)
+    monkeypatch.setattr(service, "ServiceSignals", lambda: stop)
     with pytest.raises(KeyboardInterrupt):
         service.main()
     assert sleeps.call_args_list == [((300,),)] * cycles
@@ -37,7 +39,8 @@ def watch(monkeypatch, profile, *options, cycles=2):
 
 @pytest.mark.parametrize("limit", [None, 3])
 def test_watch_due_child_receipt_caches_fingerprint(main_env, monkeypatch, limit):
-    def run(command, *, check):
+    def run(command, *, check, start_new_session):
+        assert start_new_session is True
         assert check is True
         # The parent retains its lock throughout the child pass.
         with open(main_env.parent / "voice-service.lock") as lock:
@@ -59,6 +62,7 @@ def test_watch_due_child_receipt_caches_fingerprint(main_env, monkeypatch, limit
             "--child-pass",
         ],
         check=True,
+        start_new_session=True,
     )
     assert service.library_fingerprint.call_count == 2
     service.VoiceWorker.assert_not_called()
