@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import logging
 import shutil
-import subprocess
 import wave
 from pathlib import Path
+
+from ..subprocesses import ProcessDeadlineExceeded, run_process
 
 log = logging.getLogger(__name__)
 
@@ -154,10 +155,16 @@ def slice_region(src, start_s: float, end_s: float, dst) -> Path:
     if shutil.which("ffmpeg") is None:
         raise VadUnavailable("ffmpeg not found on PATH — required to slice VAD speech regions")
     dst = Path(dst)
+    if Path(src).resolve() == dst.resolve():
+        raise VadError("source and destination must differ")
     dst.parent.mkdir(parents=True, exist_ok=True)
     duration = max(0.0, end_s - start_s)
     cmd = [
         "ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-y",
         "-ss",
         f"{start_s:.3f}",
@@ -173,8 +180,16 @@ def slice_region(src, start_s: float, end_s: float, dst) -> Path:
         "pcm_s16le",
         str(dst),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = run_process(cmd, timeout=120)
+    except ProcessDeadlineExceeded as exc:
+        dst.unlink(missing_ok=True)
+        raise VadError(f"ffmpeg region slicing timed out: {exc}") from exc
+    except BaseException:
+        dst.unlink(missing_ok=True)
+        raise
     if proc.returncode != 0:
+        dst.unlink(missing_ok=True)
         raise VadError(f"ffmpeg failed slicing region ({proc.returncode}): {proc.stderr[-500:]}")
     return dst
 

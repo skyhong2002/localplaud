@@ -411,11 +411,10 @@ def test_failed_speech_process_keeps_private_runtime_log(monkeypatch, tmp_path):
 
     from localplaud.asr import qwen_provider
 
-    def fake_run(args, *, stdout, stderr, timeout, check):
-        stdout.write("Traceback\nRuntimeError: real cause 你好\n")
-        return subprocess.CompletedProcess(args, 1)
+    def fake_run(args, *, timeout, output_limit):
+        return subprocess.CompletedProcess(args, 1, "", "Traceback\nRuntimeError: real cause 你好\n")
 
-    monkeypatch.setattr(qwen_provider.subprocess, "run", fake_run)
+    monkeypatch.setattr(qwen_provider, "run_process", fake_run)
     monkeypatch.setattr(qwen_provider, "FAILURE_LOG_DIR", tmp_path / "failures")
     monkeypatch.setattr(qwen_provider, "FAILURE_LOG_KEEP", 2)
     for _ in range(3):
@@ -429,6 +428,25 @@ def test_failed_speech_process_keeps_private_runtime_log(monkeypatch, tmp_path):
     assert "RuntimeError: real cause 你好" in logs[-1].read_text()
     assert oct(os.stat(logs[-1]).st_mode & 0o777) == "0o600"
     assert oct(os.stat(tmp_path / "failures").st_mode & 0o777) == "0o700"
+
+
+def test_speech_deadline_keeps_bounded_private_log_and_sanitized_stage_error(monkeypatch, tmp_path):
+    from localplaud.asr import qwen_provider
+    from localplaud.subprocesses import ProcessDeadlineExceeded
+
+    def timeout(args, *, timeout, output_limit):
+        assert timeout == 10
+        assert output_limit == qwen_provider._FAILURE_LOG_TAIL_BYTES // 2
+        raise ProcessDeadlineExceeded(timeout, b"", b"synthetic private diagnostic")
+
+    monkeypatch.setattr(qwen_provider, "run_process", timeout)
+    monkeypatch.setattr(qwen_provider, "FAILURE_LOG_DIR", tmp_path / "failures")
+    with pytest.raises(AsrError, match="timed out") as failure:
+        qwen_provider.run_speech_process("qwen", Path("synthetic.wav"), {}, "", 10)
+    assert "synthetic private diagnostic" not in str(failure.value)
+    logs = list((tmp_path / "failures").glob("*.log"))
+    assert len(logs) == 1
+    assert logs[0].read_text() == "synthetic private diagnostic"
 
 
 @pytest.mark.parametrize(
@@ -452,14 +470,14 @@ def test_speech_process_failure_is_classified_as_resource_or_deterministic(
     from localplaud.asr import qwen_provider
     from localplaud.asr.base import AsrResourceError
 
-    def fake_run(args, *, stdout, stderr, timeout, check):
+    def fake_run(args, *, timeout, output_limit):
         if payload is not None:
             from pathlib import Path
 
             Path(args[-1]).write_text(payload)
         return subprocess.CompletedProcess(args, returncode)
 
-    monkeypatch.setattr(qwen_provider.subprocess, "run", fake_run)
+    monkeypatch.setattr(qwen_provider, "run_process", fake_run)
     monkeypatch.setattr(qwen_provider, "FAILURE_LOG_DIR", tmp_path / "failures")
     with pytest.raises(AsrError) as excinfo:
         qwen_provider.run_speech_process("nemotron", Path("raw.wav"), {}, "", 10)

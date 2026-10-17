@@ -109,6 +109,7 @@ class PipelineConfig(BaseModel):
     """Which local processing stages to run after a file is downloaded."""
 
     convert: bool = True  # opus -> 16kHz mono wav for ASR
+    convert_timeout_seconds: int = Field(default=900, ge=1, le=86_400)
     transcribe: bool = True
     align: bool = True  # validate durable word timestamps before diarization
     diarize: bool = True
@@ -222,6 +223,7 @@ class WhisperCppConfig(BaseModel):
     binary: str = "whisper-cli"  # from whisper.cpp; uses Metal on Apple Silicon
     model_path: Path = Path("./models/ggml-large-v3-turbo.bin")
     extra_args: list[str] = Field(default_factory=list)
+    timeout_seconds: int = Field(default=14400, ge=1, le=86_400)
 
 
 class MlxWhisperConfig(BaseModel):

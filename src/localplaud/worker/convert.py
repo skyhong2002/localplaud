@@ -7,14 +7,20 @@ import math
 import os
 import shutil
 import struct
-import subprocess
 import tempfile
 from pathlib import Path
+
+from ..config import get_settings
+from ..subprocesses import ProcessDeadlineExceeded, run_process
 
 log = logging.getLogger(__name__)
 
 
 class ConversionError(RuntimeError):
+    pass
+
+
+class ConversionTimeout(ConversionError):
     pass
 
 
@@ -29,12 +35,15 @@ def ffmpeg_available() -> bool:
 
 
 def _decode(src: Path, dst: Path, sample_rate: int, *, strict: bool = False) -> None:
-    cmd = ["ffmpeg", "-y"]
+    cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
     if strict:
         cmd.append("-xerror")
     cmd.extend(["-i", str(src), "-ac", "1", "-ar", str(sample_rate), "-c:a", "pcm_s16le", str(dst)])
     log.debug("Running: %s", " ".join(cmd))
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = run_process(cmd, timeout=get_settings().pipeline.convert_timeout_seconds)
+    except ProcessDeadlineExceeded as exc:
+        raise ConversionTimeout(f"ffmpeg conversion timed out: {exc}") from exc
     if proc.returncode != 0:
         raise ConversionError(f"ffmpeg failed ({proc.returncode}): {proc.stderr[-800:]}")
 
@@ -132,6 +141,8 @@ def to_wav(
     try:
         try:
             _decode(src, output, sample_rate)
+        except ConversionTimeout:
+            raise
         except ConversionError as ffmpeg_error:
             if src.suffix.lower() != ".opus" or not src.is_file():
                 raise

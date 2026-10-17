@@ -4419,6 +4419,7 @@ def reprocess(file_id: str, force: bool = False):
     from ..worker.claims import processing_claim, processing_owner
     from ..worker.pipeline import (
         PipelineAlreadyRunning,
+        PipelineCapacityBusy,
         _assert_processing_claim_in_session,
         claim_processing_work,
         process_file,
@@ -4445,6 +4446,10 @@ def reprocess(file_id: str, force: bool = False):
     try:
         with processing_owner(current_daemon_owner()):
             claim_token = claim_processing_work(file_id, require_audio=True)
+    except PipelineCapacityBusy as exc:
+        return HTMLResponse(
+            f'<span style="color:var(--warn)">{escape(str(exc))}</span>', status_code=409
+        )
     except (PipelineAlreadyRunning, FileNotFoundError):
         return HTMLResponse(
             '<span style="color:var(--warn)">already processing</span>', status_code=409
@@ -4486,6 +4491,7 @@ def generate_recording_notes(
     from ..worker.claims import processing_claim, processing_owner
     from ..worker.pipeline import (
         PipelineAlreadyRunning,
+        PipelineCapacityBusy,
         _assert_processing_claim_in_session,
         claim_processing_work,
         process_derived_artifacts,
@@ -4505,6 +4511,8 @@ def generate_recording_notes(
     try:
         with processing_owner(current_daemon_owner()):
             claim_token = claim_processing_work(file_id, require_audio=False)
+    except PipelineCapacityBusy as exc:
+        return HTMLResponse(str(exc), status_code=409)
     except PipelineAlreadyRunning:
         return HTMLResponse("already processing", status_code=409)
     try:

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..subprocesses import ProcessDeadlineExceeded, run_process
 from .base import AsrError, AsrResourceError, Segment, Transcript, Word
 from .registry import register
 
@@ -31,8 +31,10 @@ def _keep_failure_log(kind: str, runtime_log: Path) -> Path | None:
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%f")
         target = directory / f"{stamp}-{kind}-{os.getpid()}.log"
         fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(runtime_log.read_bytes()[-_FAILURE_LOG_TAIL_BYTES:])
+        with os.fdopen(fd, "wb") as handle, runtime_log.open("rb") as source:
+            source.seek(0, os.SEEK_END)
+            source.seek(max(0, source.tell() - _FAILURE_LOG_TAIL_BYTES))
+            handle.write(source.read(_FAILURE_LOG_TAIL_BYTES))
         for stale in sorted(directory.glob("*.log"))[:-FAILURE_LOG_KEEP]:
             stale.unlink(missing_ok=True)
         return target
@@ -50,8 +52,8 @@ def run_speech_process(kind: str, audio: Path, config: dict, python: str, timeou
         request.write_text(json.dumps({"audio": str(audio), "config": config}))
         # Runtime logs can include decoded text; keep them private, outside errors.
         runtime_log = root / "runtime.log"
-        with runtime_log.open("w+") as log:
-            result = subprocess.run(
+        try:
+            result = run_process(
                 [
                     python or sys.executable,
                     "-m",
@@ -60,12 +62,18 @@ def run_speech_process(kind: str, audio: Path, config: dict, python: str, timeou
                     str(request),
                     str(output),
                 ],
-                stdout=log,
-                stderr=log,
                 timeout=timeout,
-                check=False,
+                output_limit=_FAILURE_LOG_TAIL_BYTES // 2,
             )
+        except ProcessDeadlineExceeded as exc:
+            runtime_log.write_text(exc.stdout + exc.stderr)
+            saved = _keep_failure_log(kind, runtime_log)
+            message = f"{kind} GPU process timed out: {exc}"
+            if saved is not None:
+                message += f"; runtime log kept on the speech worker as {saved.name}"
+            raise AsrError(message) from exc
         if result.returncode:
+            runtime_log.write_text((result.stdout or "") + (result.stderr or ""))
             error = json.loads(output.read_text()).get("error") if output.exists() else None
             message = error or f"{kind} GPU process failed (exit {result.returncode})"
             saved = _keep_failure_log(kind, runtime_log)

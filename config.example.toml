@@ -69,7 +69,8 @@ mind_map = true                  # nested Markdown outline rendered as a tree in
 outline = false                 # opt in to automatic timestamped chapters
 outline_method = "llm"           # mind-map profile text model; or explicit "time_slices" (no model)
 index = true                     # build embeddings for Q&A / search
-concurrency = 1                  # recording slots; text overlaps, speech stages serialize
+concurrency = 1                  # shared recording slots, including manual Web/CLI work
+convert_timeout_seconds = 900    # per ffmpeg conversion attempt; kill the process group on expiry
 files_per_cycle = 1              # serial/CLI batch; parallel daemon selects one file per slot
 auto_process_untranscribed_only = false # true skips existing local transcripts and background backfills; manual resume remains available
 untranscribed_only_retry_hours = 72     # with the above, recordings transcribed this recently keep automatic retries (0 = off)
@@ -136,6 +137,7 @@ fallback = []                    # opt in explicitly; avoid surprise paid proces
   [asr.whispercpp]               # local, uses Metal on Apple Silicon
   binary = "whisper-cli"
   model_path = "./models/ggml-large-v3-turbo.bin"
+  timeout_seconds = 14400        # whole whisper-cli invocation, including descendants
 
   [asr.mlx_whisper]              # local, Apple Silicon (MLX / Metal)
   model = "mlx-community/whisper-large-v3-turbo"

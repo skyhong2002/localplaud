@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
+from ..subprocesses import ProcessDeadlineExceeded, run_process
 from .base import AsrError, AsrUnavailable, Segment, Transcript
 from .registry import register
 
@@ -51,11 +51,14 @@ class WhisperCppProvider:
             ]
             if language != "auto":
                 cmd += ["-l", language]
-            log.info("Running whisper.cpp: %s", " ".join(cmd))
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            log.info("Running whisper.cpp")
+            try:
+                result = run_process(cmd, timeout=self.cfg.timeout_seconds)
+            except ProcessDeadlineExceeded as exc:
+                raise AsrError(f"whisper.cpp timed out: {exc}") from exc
             if result.returncode != 0:
                 raise AsrError(
-                    f"whisper.cpp exited with {result.returncode}: {result.stderr.strip()}"
+                    f"whisper.cpp exited with {result.returncode}"
                 )
 
             json_path = out_base.with_suffix(".json")

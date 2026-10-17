@@ -27,7 +27,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 
 from ..asr.base import Segment, Transcript, Word
 from ..config import Settings, get_settings
@@ -201,6 +201,35 @@ class PipelineAlreadyRunning(RuntimeError):
     pass
 
 
+class PipelineCapacityBusy(PipelineAlreadyRunning):
+    """No shared recording slot is available; no claim or artifacts changed."""
+
+
+def _admit_processing(session, file_id: str, now: datetime) -> None:
+    """Serialize count-and-claim across processes and all workspaces.
+
+    Use the same library-first lock order as profile resolution. SQLite's
+    no-op DML acquires its write lock before any reads; PostgreSQL's exclusive
+    library advisory lock fences concurrent admissions. Only a Core aggregate is
+    read across workspace boundaries; no foreign ORM objects enter this session.
+    The host setting is authoritative, even for a daemon slot's Settings copy
+    whose concurrency is deliberately reduced to one.
+    """
+    lock_cost_budget(session, None)
+    # Raw table columns avoid the workspace ORM loader criteria without loading
+    # any other workspace's recording into the identity map.
+    files = PlaudFile.__table__
+    active = session.scalar(
+        select(func.count()).select_from(files).where(
+            files.c.processing_token.is_not(None),
+            files.c.processing_lease_until > now,
+            files.c.id != file_id,
+        )
+    ) or 0
+    if active >= max(1, get_settings().pipeline.concurrency):
+        raise PipelineCapacityBusy("processing capacity is full; retry when a recording finishes")
+
+
 def processing_claim_active(row: PlaudFile, *, now: datetime | None = None) -> bool:
     if not row.processing_token or row.processing_lease_until is None:
         return False
@@ -228,7 +257,7 @@ def _claim_processing(
     token = new_processing_token()
     now = datetime.now(UTC)
     with session_scope() as session:
-        lock_library_profile_resolution(session)
+        _admit_processing(session, file_id, now)
         row = session.get(PlaudFile, file_id)
         if row is None:
             raise ValueError(f"unknown file {file_id}")

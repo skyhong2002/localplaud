@@ -442,6 +442,26 @@ default daily) rather than stopping. Newly downloaded recordings remain ahead of
 retries in each bounded daemon batch; the recording UI shows the next retry, and an
 explicit Resume bypasses the delay and resets the consecutive-failure budget.
 
+Runtime admission (2026-10-18): recording processing claims share the host's
+`pipeline.concurrency` limit across workspaces, daemon slots, CLI work, and manual
+Reprocess/Generate notes. Admission is atomic in the database. A manual request
+when full returns HTTP 409 with a retry message before changing stage artifacts;
+it is not accepted into a waiting queue. Accepted requests retain their existing
+force/profile options and stage scope. Daemon-owner recovery and expired-lease
+recovery release abandoned slots; standalone claims retain the existing 24-hour
+lease. Rejected requests must be retried by the user.
+Admission persists the claim, not a durable request payload: a crash before stage
+setup may require resubmitting the original force/profile choice.
+
+Local ffmpeg conversion, VAD region slicing, whisper.cpp, and disposable speech
+runtimes terminate their process groups on deadline or loss of the recording
+lease. Conversion defaults to 900 seconds per decode attempt
+(`pipeline.convert_timeout_seconds`), region slicing to 120 seconds, and
+whisper.cpp to 14,400 seconds (`asr.whispercpp.timeout_seconds`). Disposable GPU
+speech keeps its configured stage timeout. Captured diagnostics are bounded;
+speech-runtime failure tails stay in private, rotated local logs. In-process
+model calls do not acquire subprocess deadlines from this change.
+
 The pipeline must reach a usable result without a person. The only expected manual
 step is renaming speakers, which propagates into existing notes and the index
 without regeneration. Derived stages therefore end in a published artifact, not a
