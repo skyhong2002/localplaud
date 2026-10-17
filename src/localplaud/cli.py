@@ -819,7 +819,11 @@ def _serve(
             def handle_exit(self, sig, frame):
                 # Stop new daemon dispatch at first capture, before HTTP drains.
                 service_stop.request_stop()
-                super().handle_exit(sig, frame)
+                # Managed cleanup stays cooperative on every TERM/INT, even
+                # after a transferred startup stop. Uvicorn's second-INT policy
+                # skips task/lifespan drain; retain its restore/replay instead.
+                self._captured_signals.append(sig)
+                self.should_exit = True
 
         ManagedServer(uvicorn.Config(target, **options)).run()
 

@@ -60,7 +60,7 @@ prevent duplicate recording work, and completed stage artifacts remain reusable.
 signal capture it stops new daemon dispatch, lets HTTP shutdown finish, then runs
 the CLI cleanup: stop jobs, shut down the scheduler with `wait=True`, drain admitted
 workers, and release daemon ownership once. The scoped handlers remain active
-through cleanup, including repeated SIGTERM and Uvicorn's restored-handler signal
+through cleanup, including repeated SIGTERM/SIGINT and Uvicorn's restored-handler signal
 replay (verified with installed Uvicorn 0.51.0). Requests received during app/config
 preparation are retained when Uvicorn takes over. Prior handlers are restored when
 the command returns; imports and calls from other threads install no handlers.
@@ -85,11 +85,13 @@ The runner strips inherited deployment settings and sets explicit
 `PYTHONPATH=tests/runtime_guard:src:<checkout>` for parent and child Python startup.
 It blocks real network/model access and disables `.env` loading. Signal fixtures
 stub registration, scheduler, jobs and database operations before use; they execute
-installed Uvicorn capture/replay with a synthetic HTTP loop and synthetic workers,
-without sockets, application lifespan, providers or real recordings. They prove
-cleanup waits beyond five seconds, repeated TERM remains cooperative, and ownership
-is released once. These checks do not qualify real model/provider latency or a
-supervisor's loaded configuration.
+installed Uvicorn capture/replay with a synthetic HTTP loop and synthetic workers.
+A separate socket-free coroutine driver exercises installed Uvicorn shutdown,
+task waiting and lifespan cleanup with a synthetic ASGI app. It covers all first
+and repeated TERM/INT pairs, including transferred startup stops, and verifies
+captured-signal replay and handler restoration. These checks prove cleanup waits
+beyond five seconds and ownership is released once; they do not qualify real
+application cleanup, model/provider latency or a supervisor's loaded configuration.
 
 ## Before you start (per host)
 

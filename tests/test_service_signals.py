@@ -254,3 +254,116 @@ def test_standalone_serve_preserves_uvicorn_command_path(monkeypatch):
         log_level="info",
     )
     assert {sig: signal.getsignal(sig) for sig in before} == before
+
+
+@pytest.mark.parametrize("transferred_stop", [False, True])
+@pytest.mark.parametrize("first", [signal.SIGTERM, signal.SIGINT])
+@pytest.mark.parametrize("second", [signal.SIGTERM, signal.SIGINT])
+def test_managed_repeated_signals_drain_installed_uvicorn_tasks_and_lifespan(
+    monkeypatch, transferred_stop, first, second
+):
+    """Drive real shutdown/task/lifespan coroutines with a socket-free scheduler."""
+    import asyncio
+    import types
+
+    import uvicorn
+    from uvicorn.lifespan.on import LifespanOn
+
+    from localplaud import cli
+    from localplaud.config import Settings
+
+    class Tick:
+        def __init__(self, name):
+            self.name = name
+
+        def __await__(self):
+            yield self.name
+
+    async def sleep(_):
+        await Tick("sleep")
+
+    async def wait_for(coroutine, timeout):
+        return await coroutine
+
+    async def event_wait(event):
+        while not event.is_set():
+            await Tick("lifespan-wait")
+        return True
+
+    rows = []
+
+    async def asgi(scope, receive, send):
+        assert scope["type"] == "lifespan"
+        assert await receive() == {"type": "lifespan.startup"}
+        await send({"type": "lifespan.startup.complete"})
+        await Tick("lifespan-idle")
+        assert await receive() == {"type": "lifespan.shutdown"}
+        rows.append("cleanup-started")
+        await Tick("lifespan-cleanup")
+        rows.append("cleanup-finished")
+        await send({"type": "lifespan.shutdown.complete"})
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    monkeypatch.setattr(asyncio, "wait_for", wait_for)
+    monkeypatch.setattr(asyncio.Event, "wait", event_wait)
+    monkeypatch.setitem(sys.modules, "localplaud.api.app", types.SimpleNamespace(
+        app=types.SimpleNamespace(state=types.SimpleNamespace())
+    ))
+
+    def run(server):
+        server.servers = []
+        server.lifespan = LifespanOn(types.SimpleNamespace(
+            loaded=True, loaded_app=asgi, asgi_version="3.0", lifespan="on"
+        ))
+        lifespan = server.lifespan.main()
+        shutdown = server.shutdown()
+        server.lifespan.receive_queue.put_nowait({"type": "lifespan.startup"})
+        server.server_state.tasks.add(object())
+        try:
+            assert lifespan.send(None) == "lifespan-idle"
+            with server.capture_signals():
+                if not transferred_stop:
+                    signal.raise_signal(first)
+                assert server.should_exit and stop.requested
+                assert shutdown.send(None) == "sleep"
+                signal.raise_signal(second)
+                # Installed _wait_tasks_to_complete must still wait for the task.
+                assert shutdown.send(None) == "sleep"
+                assert server.server_state.tasks and not server.force_exit
+                assert rows == []
+                server.server_state.tasks.clear()
+                assert shutdown.send(None) == "lifespan-wait"
+                assert lifespan.send(None) == "lifespan-cleanup"
+                signal.raise_signal(second)
+                assert shutdown.send(None) == "lifespan-wait"
+                assert rows == ["cleanup-started"] and not server.force_exit
+                with pytest.raises(StopIteration):
+                    lifespan.send(None)
+                with pytest.raises(StopIteration):
+                    shutdown.send(None)
+                assert rows == ["cleanup-started", "cleanup-finished"]
+                assert not server.lifespan.error_occurred
+                assert server._captured_signals == captured
+            assert replayed == list(reversed(captured))
+        finally:
+            shutdown.close()
+            lifespan.close()
+
+    class ObservedSignals(ServiceSignals):
+        def request_stop(self, signum=None, frame=None):
+            if signum is not None:
+                replayed.append(signum)
+            super().request_stop(signum, frame)
+
+    replayed = []
+    stop_calls = []
+    captured = ([] if transferred_stop else [first]) + [second, second]
+    before = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+    monkeypatch.setattr(uvicorn.Server, "run", run)
+    with ObservedSignals(lambda: stop_calls.append("stop")) as stop:
+        if transferred_stop:
+            signal.raise_signal(first)
+            replayed.clear()
+        cli._serve(Settings(_env_file=None), managed_daemon=True, service_stop=stop)
+        assert stop_calls == ["stop"]
+    assert {sig: signal.getsignal(sig) for sig in before} == before
