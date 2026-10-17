@@ -101,6 +101,7 @@ from .share_links import router as share_links_router
 from .storage import router as storage_router
 from .system import router as system_router
 from .ui import register as register_ui_helpers
+from .upload_limits import UploadBodyLimitMiddleware
 from .vocabulary import router as vocabulary_router
 
 _HERE = Path(__file__).parent
@@ -140,6 +141,9 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
+# Register before _auth_gate below: the last middleware added runs first, so
+# unauthorized requests are rejected before the upload body is consumed.
+app.add_middleware(UploadBodyLimitMiddleware)
 app.include_router(completion_router)
 app.include_router(accounts_router)
 app.include_router(providers_router)
