@@ -202,11 +202,13 @@ def test_route_handoff_preserves_force_profile_and_speech_scope(runtime, monkeyp
                 assert run.detail["derived_only"] is True
 
 
-def test_lost_recording_lease_cancels_running_process_and_preserves_new_owner(runtime, tmp_path):
+@pytest.mark.parametrize("ignore_term", [False, True])
+def test_lost_recording_lease_cancels_nested_vad_and_preserves_new_owner(runtime, tmp_path, ignore_term):
     from localplaud.subprocesses import run_process
+    from tests.runtime_process_fixtures import assert_stopped, nested_vad_process
 
     token = pipeline.claim_processing_work("one", require_audio=False)
-    ready = tmp_path / "ready"
+    ready = tmp_path / "descendant.pid"
 
     def displace():
         import time
@@ -218,14 +220,13 @@ def test_lost_recording_lease_cancels_running_process_and_preserves_new_owner(ru
         with session_scope() as session:
             session.get(PlaudFile, "one").processing_token = "replacement"
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        displaced = pool.submit(displace)
-        with processing_claim("one", token), pytest.raises(pipeline.PipelineAlreadyRunning):
-            run_process([
-                sys.executable, "-c",
-                f"from pathlib import Path; import time; Path({str(ready)!r}).touch(); time.sleep(60)",
-            ], timeout=5)
-        displaced.result(timeout=1)
+    with nested_vad_process(tmp_path, ignore_term=ignore_term) as (command, paths):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            displaced = pool.submit(displace)
+            with processing_claim("one", token), pytest.raises(pipeline.PipelineAlreadyRunning):
+                run_process(command, timeout=5)
+            displaced.result(timeout=1)
+        assert_stopped(paths)
     pipeline.release_processing_claim("one", token)
     with session_scope() as session:
         assert session.get(PlaudFile, "one").processing_token == "replacement"

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from localplaud.subprocesses import ProcessDeadlineExceeded, run_process
+from tests.runtime_process_fixtures import assert_stopped, nested_vad_process
 
 
 def test_output_is_drained_without_unbounded_capture():
@@ -85,6 +86,46 @@ def test_deadline_retains_bounded_diagnostics_without_rendering_them():
         )
     assert len(failure.value.stderr) == 100
     assert "private fixture" not in str(failure.value)
+
+
+@pytest.mark.parametrize("ignore_term", [False, True])
+def test_outer_deadline_kills_nested_vad_and_pipe_holding_descendants(tmp_path, ignore_term):
+    with nested_vad_process(tmp_path, ignore_term=ignore_term) as (command, paths):
+        started = time.monotonic()
+        with pytest.raises(ProcessDeadlineExceeded):
+            run_process(command, timeout=2, output_limit=1024)
+        assert time.monotonic() - started < 5
+        assert_stopped(paths)
+
+
+def test_nested_timeout_cannot_signal_enclosing_runtime_or_host_group(tmp_path):
+    with nested_vad_process(tmp_path, inner_timeout=2, catch_timeout=True) as (command, paths):
+        result = run_process(command, timeout=8)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "inner timeout handled\nruntime survived\n"
+        assert_stopped(paths)
+
+
+def test_cancellation_does_not_resignal_reaped_group_or_mask_deadline(monkeypatch):
+    import os
+    import signal
+
+    killpg = os.killpg
+    killed = set()
+
+    def signal_once(group, sig):
+        assert group != os.getpgrp()
+        if sig == signal.SIGKILL:
+            if group in killed:
+                # macOS can report EPERM once only zombies remain in a group.
+                raise PermissionError("synthetic zombies-only process group")
+            killed.add(group)
+        killpg(group, sig)
+
+    monkeypatch.setattr(os, "killpg", signal_once)
+    with pytest.raises(ProcessDeadlineExceeded):
+        run_process([sys.executable, "-c", "import time; time.sleep(60)"], timeout=0.5)
+    assert len(killed) == 1
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])

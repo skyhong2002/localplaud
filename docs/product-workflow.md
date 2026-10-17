@@ -449,7 +449,8 @@ when full returns HTTP 409 with a retry message before changing stage artifacts;
 it is not accepted into a waiting queue. Accepted requests retain their existing
 force/profile options and stage scope. Daemon-owner recovery and expired-lease
 recovery release abandoned slots; standalone claims retain the existing 24-hour
-lease. Rejected requests must be retried by the user.
+lease. A crashed standalone claimant can occupy shared capacity until that lease
+expires. Rejected requests must be retried by the user.
 Admission persists the claim, not a durable request payload: a crash before stage
 setup may require resubmitting the original force/profile choice.
 
@@ -459,8 +460,22 @@ lease. Conversion defaults to 900 seconds per decode attempt
 (`pipeline.convert_timeout_seconds`), region slicing to 120 seconds, and
 whisper.cpp to 14,400 seconds (`asr.whispercpp.timeout_seconds`). Disposable GPU
 speech keeps its configured stage timeout. Captured diagnostics are bounded;
-speech-runtime failure tails stay in private, rotated local logs. In-process
-model calls do not acquire subprocess deadlines from this change.
+speech-runtime failure tails stay in private, rotated local logs. Nested runners
+(including Qwen's VAD ffmpeg) inherit the outer invocation's owned session/group;
+only the outer controller signals that group. Inner timeout cleanup signals and
+reaps its direct child without signaling its runtime or siblings. Descendants of
+an inner child remain bounded by the outer invocation's lifetime and are removed
+when it finishes, times out, or loses its lease. Commands that create their own
+sessions/groups are outside this ownership contract. In-process model calls do
+not acquire subprocess deadlines from this change.
+
+Synthetic runtime checks run with `sh tests/run_runtime_offline.sh` (set
+`LOCALPLAUD_TEST_PYTHON` to a dependency-installed interpreter if needed). The
+launcher clears inherited deployment settings and credentials and installs an
+interpreter-startup guard inherited by Python children: Internet sockets/DNS,
+real model imports, and deployment `.env` loading are disabled. It defaults to
+the bounded subprocess, admission, daemon, and guard tests; explicit pytest
+arguments select other checks.
 
 The pipeline must reach a usable result without a person. The only expected manual
 step is renaming speakers, which propagates into existing notes and the index
