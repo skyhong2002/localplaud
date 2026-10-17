@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import zipfile
@@ -183,7 +184,7 @@ def test_ancestor_symlink_swap_cannot_escape_media_root(monkeypatch, tmp_path):
     assert list(backups.backup_root().iterdir()) == []
 
 
-@pytest.mark.parametrize("corruption", ["media", "database", "traversal", "reference"])
+@pytest.mark.parametrize("corruption", ["media", "database", "traversal", "reference", "source_paths"])
 def test_restore_rejects_corrupt_or_unsafe_members_and_cleans_up(monkeypatch, tmp_path, corruption):
     _workspace(monkeypatch, tmp_path)
     result = backups.create_workspace_backup(include_media=True)
@@ -199,8 +200,10 @@ def test_restore_rejects_corrupt_or_unsafe_members_and_cleans_up(monkeypatch, tm
         entry = manifest["media"]["entries"][0]
         contents["media/../../escaped"] = contents.pop(entry["archive_path"])
         entry["archive_path"] = "media/../../escaped"
-    else:
+    elif corruption == "reference":
         manifest["media"]["references"] = []
+    else:
+        del manifest["media"]["source_paths"]
     contents["manifest.json"] = json.dumps(manifest).encode()
     with zipfile.ZipFile(bad, "w") as archive:
         for name, data in contents.items():
@@ -225,6 +228,126 @@ def test_restore_requires_trusted_digest_and_new_destination(monkeypatch, tmp_pa
     with pytest.raises(FileExistsError):
         backups.restore_workspace_backup(source, destination, expected_sha256=result["sha256"])
     assert marker.read_text() == "keep"
+
+
+def test_restore_rejects_swapped_recording_media_mappings(monkeypatch, tmp_path):
+    database, media, _original = _workspace(monkeypatch, tmp_path)
+    other = media / "other" / "audio.opus"
+    other.parent.mkdir()
+    other.write_bytes(b"other recording fixture")
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute("INSERT INTO plaud_files VALUES ('other', ?, NULL)", (str(other),))
+        connection.commit()
+    result = backups.create_workspace_backup(include_media=True)
+    source = backups.workspace_backup_path(result["name"])
+    with zipfile.ZipFile(source) as archive:
+        contents = {name: archive.read(name) for name in archive.namelist()}
+    manifest = json.loads(contents["manifest.json"])
+    first, second = manifest["media"]["references"]
+    first["archive_path"], second["archive_path"] = second["archive_path"], first["archive_path"]
+    contents["manifest.json"] = json.dumps(manifest).encode()
+    bad = tmp_path / "swapped.zip"
+    with zipfile.ZipFile(bad, "w") as archive:
+        for name, data in contents.items():
+            archive.writestr(name, data)
+    destination = tmp_path / "refused-swapped"
+    with pytest.raises(ValueError, match="media references mismatch"):
+        backups.restore_workspace_backup(bad, destination, expected_sha256=backups.file_sha256(bad))
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("source_path", ["audio/kept/audio.opus", "~/audio/kept/audio.opus"])
+def test_restore_maps_relative_and_home_paths_without_live_source_context(
+    monkeypatch, tmp_path, source_path
+):
+    database, _media, original = _workspace(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute("UPDATE plaud_files SET audio_path=?", (source_path,))
+        connection.commit()
+    result = backups.create_workspace_backup(include_media=True)
+    source = backups.workspace_backup_path(result["name"])
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("HOME", str(elsewhere))
+    monkeypatch.setattr(backups, "get_settings", lambda: pytest.fail("restore loaded settings"))
+    monkeypatch.setattr(Path, "home", lambda: pytest.fail("restore consulted live home"))
+    restored = backups.restore_workspace_backup(
+        source, tmp_path / "isolated", expected_sha256=result["sha256"]
+    )
+    with closing(sqlite3.connect(restored["database"])) as connection:
+        path = Path(connection.execute("SELECT audio_path FROM plaud_files").fetchone()[0])
+    assert path == tmp_path / "isolated/media/kept/audio.opus"
+    assert path.read_bytes() == original.read_bytes()
+
+
+@pytest.mark.parametrize("change", ["replace", "inplace"])
+def test_restore_never_accepts_another_valid_zip_after_trusted_hash(monkeypatch, tmp_path, change):
+    _database, _media, original = _workspace(monkeypatch, tmp_path)
+    first = backups.create_workspace_backup(include_media=True)
+    source = backups.workspace_backup_path(first["name"])
+    original.write_bytes(b"different recording fixture")
+    second = backups.create_workspace_backup(include_media=True)
+    replacement = backups.workspace_backup_path(second["name"])
+    stream_sha256 = backups._stream_sha256
+    hashed_fd = None
+
+    def hash_then_change(handle):
+        nonlocal hashed_fd
+        digest = stream_sha256(handle)
+        if hashed_fd is None:
+            hashed_fd = handle.fileno()
+            if change == "replace":
+                os.replace(replacement, source)
+            else:
+                with source.open("r+b") as output:
+                    output.write(replacement.read_bytes())
+                    output.truncate()
+        else:
+            assert handle.fileno() == hashed_fd
+        return digest
+
+    monkeypatch.setattr(backups, "_stream_sha256", hash_then_change)
+    destination = tmp_path / "refused-race"
+    with pytest.raises(ValueError, match="archive changed during restore"):
+        backups.restore_workspace_backup(source, destination, expected_sha256=first["sha256"])
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("restore_bytes", [False, True])
+def test_restore_rejects_same_size_inplace_writes_even_with_restored_mtime(
+    monkeypatch, tmp_path, restore_bytes
+):
+    _workspace(monkeypatch, tmp_path)
+    result = backups.create_workspace_backup(include_media=True)
+    source = backups.workspace_backup_path(result["name"])
+    with zipfile.ZipFile(source, "a") as archive:
+        archive.comment = b"A"
+    trusted = backups.file_sha256(source)
+    before = source.stat()
+    read_manifest = backups._read_manifest
+
+    def read_then_modify(handle):
+        manifest = read_manifest(handle)
+        # ZIP comments are outside member checksums. Both variants are valid ZIPs.
+        with source.open("r+b") as output:
+            output.seek(-1, os.SEEK_END)
+            output.write(b"B")
+            output.flush()
+            if restore_bytes:
+                output.seek(-1, os.SEEK_END)
+                output.write(b"A")
+        os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+        assert source.stat().st_size == before.st_size
+        return manifest
+
+    monkeypatch.setattr(backups, "_read_manifest", read_then_modify)
+    destination = tmp_path / "refused-inplace"
+    with pytest.raises(ValueError, match="archive changed during restore"):
+        backups.restore_workspace_backup(source, destination, expected_sha256=trusted)
+    assert not destination.exists()
 
 
 def test_unreferenced_uploads_and_staging_files_are_excluded_and_archives_are_private(

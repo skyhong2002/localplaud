@@ -63,32 +63,62 @@ def _package_version() -> str:
         return "development"
 
 
-def file_sha256(path: Path) -> str:
+def _stream_sha256(handle) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
+    handle.seek(0)
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        digest.update(chunk)
     return digest.hexdigest()
 
 
-def _media_files(root: Path, snapshot: Path) -> tuple[list[Path], list[dict]]:
+def file_sha256(path: Path) -> str:
+    with path.open("rb") as handle:
+        return _stream_sha256(handle)
+
+
+def _relative_media_path(value: str, context: dict) -> Path:
+    """Map snapshot paths lexically; never follow source symlinks during restore."""
+    if value.startswith("~"):
+        prefix = value.partition("/")[0]
+        value = context["homes"][prefix] + value[len(prefix) :]
+    path = Path(value)
+    if not path.is_absolute():
+        path = Path(context["directory"]) / path
+    try:
+        return Path(os.path.normpath(path)).relative_to(context["root"])
+    except ValueError:
+        raise ValueError(
+            "snapshot references media outside the configured media directory"
+        ) from None
+
+
+def _media_path_context(root: Path, rows: list) -> dict:
+    prefixes = {
+        value.partition("/")[0]
+        for row in rows
+        for value in row[1:]
+        if value and value.startswith("~")
+    }
+    return {
+        "root": str(root),
+        "directory": str(Path.cwd()),
+        "homes": {prefix: str(Path(prefix).expanduser()) for prefix in prefixes},
+    }
+
+
+def _media_files(root: Path, snapshot: Path) -> tuple[list[Path], list[dict], dict]:
     """Inventory only recordings present in the database snapshot, never new uploads."""
     with closing(sqlite3.connect(snapshot)) as connection:
         rows = connection.execute("SELECT id, audio_path, wav_path FROM plaud_files").fetchall()
     files: set[Path] = set()
     references = []
+    context = _media_path_context(root, rows)
     for file_id, audio, wav in rows:
         for column, value in (("audio_path", audio), ("wav_path", wav)):
             if not value:
                 continue
             # Do not resolve symlinks here: opening below must reject them.
-            path = Path(os.path.abspath(Path(value).expanduser()))
-            try:
-                relative = path.relative_to(root)
-            except ValueError:
-                raise ValueError(
-                    "snapshot references media outside the configured media directory"
-                ) from None
+            relative = _relative_media_path(value, context)
             files.add(relative)
             references.append(
                 {
@@ -109,7 +139,7 @@ def _media_files(root: Path, snapshot: Path) -> tuple[list[Path], list[dict]]:
                     path = Path(parent) / name
                     if not name.startswith(".") and not path.is_symlink() and path.is_file():
                         files.add(path.relative_to(root))
-    return sorted(files), references
+    return sorted(files), references, context
 
 
 def _open_media(root: Path, relative: Path):
@@ -192,8 +222,8 @@ def create_workspace_backup(*, include_media: bool = False) -> dict:
                         closing(sqlite3.connect(snapshot)) as target,
                     ):
                         source.backup(target)
-                    media_files, references = (
-                        _media_files(media_root, snapshot) if include_media else ([], [])
+                    media_files, references, path_context = (
+                        _media_files(media_root, snapshot) if include_media else ([], [], {})
                     )
                     handles = []
                     for path in media_files:
@@ -234,6 +264,7 @@ def create_workspace_backup(*, include_media: bool = False) -> dict:
                         manifest["media"].update(
                             entries=entries,
                             references=references,
+                            source_paths=path_context,
                             bytes=sum(entry["bytes"] for entry in entries),
                         )
                     archive.writestr(
@@ -262,7 +293,7 @@ def create_workspace_backup(*, include_media: bool = False) -> dict:
         _BACKUP_LOCK.release()
 
 
-def _read_manifest(path: Path) -> dict:
+def _read_manifest(path) -> dict:
     with zipfile.ZipFile(path) as archive:
         value = json.loads(archive.read("manifest.json"))
     if not isinstance(value, dict) or value.get("schema") != "localplaud-workspace-backup/v1":
@@ -278,15 +309,29 @@ def restore_workspace_backup(
     This offline helper deliberately requires a trusted, separately recorded
     archive digest. It does not replace an active installation or start workers.
     """
-    if (
-        not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
-        or file_sha256(archive_path) != expected_sha256
-    ):
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
         raise ValueError("backup archive checksum mismatch")
-    manifest = _read_manifest(archive_path)
+    # Keep the same open file for verification, manifest, and extraction. Reopening
+    # a pathname after hashing would allow a different, valid ZIP to replace it.
+    with archive_path.open("rb") as handle:
+        before = os.fstat(handle.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("backup archive must be a regular file")
+        if _stream_sha256(handle) != expected_sha256:
+            raise ValueError("backup archive checksum mismatch")
+        return _restore_verified_archive(handle, destination, expected_sha256, before)
+
+
+def _restore_verified_archive(handle, destination: Path, expected_sha256: str, before) -> dict:
+    manifest = _read_manifest(handle)
     media = manifest["media"]
-    if not media.get("included") or "entries" not in media or "references" not in media:
-        raise ValueError("isolated restore requires a full backup with per-file checksums")
+    if (
+        not media.get("included")
+        or "entries" not in media
+        or "references" not in media
+        or "source_paths" not in media
+    ):
+        raise ValueError("isolated restore requires a full backup with checksums and source paths")
     entries = [manifest["database"], *media["entries"]]
     paths = [entry["archive_path"] for entry in entries]
     if paths[0] != "database/localplaud.db" or len(paths) != len(set(paths)):
@@ -309,7 +354,7 @@ def restore_workspace_backup(
     # mkdir's exclusive behavior protects both existing data and symlink targets.
     destination.mkdir(mode=0o700)
     try:
-        with zipfile.ZipFile(archive_path) as archive:
+        with zipfile.ZipFile(handle) as archive:
             names = archive.namelist()
             if len(names) != len(set(names)) or set(names) != {*paths, "manifest.json"}:
                 raise ValueError("backup inventory does not match archive members")
@@ -333,13 +378,16 @@ def restore_workspace_backup(
                 raise ValueError("backup database failed integrity check")
             rows = connection.execute("SELECT id, audio_path, wav_path FROM plaud_files").fetchall()
             expected = {
-                (row[0], column)
+                (
+                    row[0],
+                    column,
+                ): f"media/{_relative_media_path(value, media['source_paths']).as_posix()}"
                 for row in rows
                 for column, value in zip(("audio_path", "wav_path"), row[1:], strict=True)
                 if value
             }
             references = media["references"]
-            actual = {(ref["file_id"], ref["column"]) for ref in references}
+            actual = {(ref["file_id"], ref["column"]): ref["archive_path"] for ref in references}
             if expected != actual or len(actual) != len(references):
                 raise ValueError("backup database media references mismatch")
             for ref in references:
@@ -355,6 +403,17 @@ def restore_workspace_backup(
         manifest_path = destination / "manifest.json"
         manifest_path.touch(mode=0o600, exist_ok=False)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        # A pinned descriptor defeats replacement, but not writes to that inode.
+        # Rehash after all reads and compare metadata across the entire operation,
+        # including ctime so restoring mtime cannot conceal an in-place write.
+        checksum = _stream_sha256(handle)
+        after = os.fstat(handle.fileno())
+        if checksum != expected_sha256 or (
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ValueError("backup archive changed during restore")
         return {"database": str(database), "media_root": str(destination / "media")}
     except BaseException:
         shutil.rmtree(destination)

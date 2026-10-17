@@ -7,6 +7,8 @@ checks file bytes; this bound includes a small allowance for the multipart envel
 
 from __future__ import annotations
 
+import asyncio
+
 from starlette.formparsers import MultiPartException
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -68,10 +70,19 @@ class UploadBodyLimitMiddleware:
         exceeded = False
         rejected = False
         disconnected = False
+        cancellation = None
 
         async def bounded_receive() -> Message:
-            nonlocal received, exceeded, disconnected
-            message = await receive()
+            nonlocal received, exceeded, disconnected, cancellation
+            try:
+                message = await receive()
+            except asyncio.CancelledError as exc:
+                # Starlette only closes partial parser files on MultiPartException
+                # (or OSError). Let that synchronous cleanup run before restoring
+                # the original cancellation at the middleware boundary.
+                cancellation = exc
+                disconnected = True
+                raise _UploadDisconnected("upload cancelled") from exc
             if message["type"] == "http.disconnect":
                 disconnected = True
                 raise _UploadDisconnected("upload disconnected")
@@ -103,3 +114,6 @@ class UploadBodyLimitMiddleware:
                 await rejection(scope, receive, send)
         except _UploadDisconnected:
             return
+        finally:
+            if cancellation is not None:
+                raise cancellation

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import socket
 import sqlite3
 import zipfile
 from io import BytesIO
@@ -101,6 +102,15 @@ def test_database_and_media_backups_are_consistent_private_and_downloadable(
 
 
 def test_authorized_backup_sync_is_durable_idempotent_and_revocable(monkeypatch, tmp_path):
+    # URL validation resolves before the mocked transport. Keep even that step
+    # synthetic so the test never consults a resolver or depends on networking.
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 9988))
+        ],
+    )
     client, _database, _media = _client(monkeypatch, tmp_path)
     monkeypatch.setenv("BACKUP_SYNC_TOKEN", "remote-backup-secret")
     with client:

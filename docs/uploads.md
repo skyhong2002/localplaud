@@ -39,9 +39,17 @@ An excessive declared Content-Length is rejected without receiving a body. Missi
 or understated lengths are bounded on every ASGI receive message, before the
 crossing message reaches the parser. Earlier messages may have spooled within the
 bound; a parser-compatible exception closes those temporary files before returning
-413. Client disconnects use that same cleanup. Remaining request data is not drained.
+413. Client disconnects and cancellation raised by ASGI receive use that same
+cleanup. Cancellation is re-raised unchanged at the limiter boundary after the
+parser closes partial files; no HTTP error response is sent for it. Remaining
+request data is not drained.
 The HTTP server may already have buffered a receive message; its transport buffering
 and connection timeouts remain server concerns.
+
+With an outer Starlette `BaseHTTPMiddleware`, the framework can turn cancellation
+of its inner task into `RuntimeError("No response returned.")`. The limiter still
+closes partial parser files and re-raises the original cancellation at its own
+boundary; it does not change the outer middleware's cancellation policy.
 
 Isolated regression commands (use the worktree interpreter/environment):
 

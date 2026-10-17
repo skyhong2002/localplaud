@@ -17,7 +17,11 @@ Every ZIP contains:
 
 Full backups add `media.entries` (archive path, byte count, SHA-256 per file) and
 `media.references` (recording ID, database path column, archive path) to the v1
-manifest. Counts and bytes describe the files actually archived. A short SQLite
+manifest. `media.source_paths` records the source media root, working directory,
+and any home-prefix expansions used by the snapshot's paths. Restore derives each
+recording/column's expected archive member from its database path and that context;
+swapping references between existing audio files is rejected. Counts and bytes
+describe the files actually archived. A short SQLite
 write barrier covers the online snapshot, inventory, and opening of media file
 descriptors. Existing upload publication and eviction serialize through database
 writes, so they cannot change those references during capture. The barrier is
@@ -26,6 +30,11 @@ later atomic replacement or eviction; a missing reference, unsafe symlink, or
 detected in-place change aborts the backup without publishing a partial archive.
 This does not coordinate arbitrary filesystem writers that bypass the application's
 database publication protocol.
+
+Media paths must use the configured root's canonical spelling. In particular,
+`/var/…` database paths with a `/private/var/…` resolved media root on macOS are
+currently rejected. This check intentionally does not resolve referenced paths:
+symlinks in media path components remain forbidden.
 
 Capture uses one open descriptor per media file. A library larger than the process's
 descriptor allowance fails safely; increase the service's descriptor allowance
@@ -98,6 +107,12 @@ restored = restore_workspace_backup(
 print(restored)  # database and media_root paths for the isolated copy
 ```
 
+The helper pins one archive file descriptor for hashing, manifest reads, and
+extraction. It rechecks the complete digest and file size, mtime, and ctime before
+returning success; replacement or in-place modification cannot substitute another
+archive after the trusted digest check. This adds a second full archive read.
+Any detected change removes the isolated restore.
+
 The helper verifies the archive digest, inventory, member sizes and checksums,
 database integrity, and complete media-reference mapping. It rejects unsafe member
 paths and existing destinations, removes a failed restore, and rewrites the restored
@@ -105,7 +120,8 @@ paths and existing destinations, removes a failed restore, and rewrites the rest
 live settings or starts workers. The restored database differs from the archived
 database checksum after this intentional path rewrite. Do not start automatic
 processing or external integrations against a drill copy. Older v1 archives without
-per-file checksums and database-only archives require the manual procedure below.
+per-file checksums or source path context, and database-only archives, require the
+manual procedure below.
 
 ### Offline replacement
 

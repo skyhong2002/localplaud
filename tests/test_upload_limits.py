@@ -28,6 +28,10 @@ def _request(app, chunks, *, path=UPLOAD_PATH, content_length=None):
             if not pending:
                 return {"type": "http.disconnect"}
             chunk = pending.pop(0)
+            if isinstance(chunk, BaseException):
+                raise chunk
+            if callable(chunk):
+                await chunk()
             if chunk is None:
                 return {"type": "http.disconnect"}
             consumed.append(chunk)
@@ -120,6 +124,48 @@ def test_disconnect_closes_partial_multipart_spools(monkeypatch):
     messages, consumed = _request(app, [beginning, None])
     assert messages == [] and consumed == [beginning]
     assert spools and all(spool.closed for spool in spools)
+
+
+@pytest.mark.parametrize("cancel_task", [False, True])
+def test_receive_cancellation_closes_rolled_multipart_spools_and_propagates(
+    monkeypatch, cancel_task
+):
+    import starlette.formparsers as parser
+
+    spools = []
+    sent = []
+
+    def tracked_spool(*args, **kwargs):
+        kwargs["max_size"] = 1
+        spool = tempfile.SpooledTemporaryFile(*args, **kwargs)
+        spools.append(spool)
+        return spool
+
+    monkeypatch.setattr(parser, "SpooledTemporaryFile", tracked_spool)
+    monkeypatch.setattr(imports, "file_dir", lambda _id: pytest.fail("cancelled upload ran"))
+    app = FastAPI()
+    app.include_router(imports.router)
+    app.add_middleware(UploadBodyLimitMiddleware, max_body_bytes=4096)
+
+    async def record_send(scope, receive, send):
+        async def tracked_send(message):
+            sent.append(message)
+            await send(message)
+
+        await app(scope, receive, tracked_send)
+
+    async def cancel_current_task():
+        asyncio.current_task().cancel("synthetic receive cancellation")
+        await asyncio.sleep(0)
+
+    cancellation = asyncio.CancelledError("synthetic receive cancellation")
+    beginning = b'--fixture\r\nContent-Disposition: form-data; name="file"; filename="partial.wav"\r\n\r\nfixture'
+    with pytest.raises(asyncio.CancelledError, match="synthetic receive cancellation") as exc:
+        _request(record_send, [beginning, cancel_current_task if cancel_task else cancellation])
+    if not cancel_task:
+        assert exc.value is cancellation
+    assert sent == []
+    assert spools and all(spool._rolled and spool.closed for spool in spools)
 
 
 def test_mounted_upload_route_is_bounded():
