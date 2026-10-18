@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .maintenance import tracked_thread
+
 import hashlib
 import math
 import threading
@@ -88,7 +90,7 @@ def start_plaud_metadata_import(
         session.flush()
         run_id = row.id
         result = import_run_to_dict(row)
-    threading.Thread(
+    tracked_thread(
         target=run_in_current_workspace(_run_plaud_metadata_import),
         args=(run_id, settings, refresh_artifacts),
         daemon=True,
@@ -279,7 +281,7 @@ def start_plaud_audio_import(file_id: str, settings: Settings | None = None) -> 
             row.status = FileStatus.downloading
             row.error = None
         raw = dict(row.raw or {})
-    threading.Thread(
+    tracked_thread(
         target=run_in_current_workspace(_run_audio_import),
         args=(file_id, raw, settings, cache_only),
         daemon=True,

@@ -31,6 +31,7 @@ from .config import get_settings
 from .db.models import PlaudFile, Speaker, Transcript
 from .db.session import get_engine, session_scope
 from .service_signals import ServiceSignals
+from .maintenance import MaintenancePaused, get_gate
 from .voice_identity import (
     VoiceSample,
     apply_match,
@@ -490,59 +491,69 @@ def main():
             except BlockingIOError:
                 raise SystemExit("voice service already running") from None
             create_schema(get_engine())
+            maintenance = get_gate()
+            if args.watch:
+                maintenance.start_reporting("voice")
+                maintenance.serving = True
             last_fingerprint, last_scan = None, 0.0
             while not stop.requested:
-                profile = json.loads(args.profile.read_text())
-                if not profile.get("enabled", False):
-                    if not args.watch:
-                        return
-                    stop.wait(30)
-                    continue
-                validate_profile_thresholds(profile)
-                # A full pass re-reads every transcript; skip it while nothing it reads has
-                # changed. Time-based retries and in-place edits wait for the periodic pass.
-                fingerprint = library_fingerprint(profile)
-                if (
-                    args.watch
-                    and fingerprint == last_fingerprint
-                    and time.monotonic() - last_scan < profile.get("full_scan_seconds", 3600)
-                ):
-                    stop.wait(max(30, profile.get("poll_seconds", 300)))
-                    continue
                 try:
-                    if args.watch:
-                        command = [
-                            sys.executable,
-                            "-m",
-                            "localplaud.voice_service",
-                            "--profile",
-                            str(args.profile),
-                        ]
-                        if args.limit is not None:
-                            command.extend(["--limit", str(args.limit)])
-                        command.append("--child-pass")
-                        if stop.requested:
-                            break
-                        # Terminal/group signals belong to the watcher. Let its
-                        # admitted pass finish without forwarding TERM/INT to it.
-                        subprocess.run(command, check=True, start_new_session=True)
-                        receipt = json.loads((folder / "receipt.json").read_text())
-                    else:
-                        worker = VoiceWorker(profile, folder / "runtime.log")
+                    with maintenance.activity() if args.watch else contextlib.nullcontext():
+                        profile = json.loads(args.profile.read_text())
+                        if not profile.get("enabled", False):
+                            if not args.watch:
+                                return
+                            maintenance.wait(stop, 30)
+                            continue
+                        validate_profile_thresholds(profile)
+                        # A full pass re-reads every transcript; skip it while nothing it reads has
+                        # changed. Time-based retries and in-place edits wait for the periodic pass.
+                        fingerprint = library_fingerprint(profile)
+                        if (
+                            args.watch
+                            and fingerprint == last_fingerprint
+                            and time.monotonic() - last_scan < profile.get("full_scan_seconds", 3600)
+                        ):
+                            maintenance.wait(stop, max(30, profile.get("poll_seconds", 300)))
+                            continue
                         try:
-                            receipt = scan(profile, worker, folder / "receipt.json", limit=args.limit)
-                        finally:
-                            worker.close()
-                    # A capped pass may have left extraction work behind; run again.
-                    if not args.limit or receipt["counts"].get("recordings_extracted", 0) < args.limit:
-                        last_fingerprint, last_scan = fingerprint, time.monotonic()
-                except Exception as exc:
-                    print(json.dumps({"event": "scan_failed", "error": type(exc).__name__}), flush=True)
-                    if not args.watch:
-                        raise
-                if not args.watch:
-                    break
-                stop.wait(max(30, profile.get("poll_seconds", 300)))
+                            if args.watch:
+                                command = [
+                                    sys.executable,
+                                    "-m",
+                                    "localplaud.voice_service",
+                                    "--profile",
+                                    str(args.profile),
+                                ]
+                                if args.limit is not None:
+                                    command.extend(["--limit", str(args.limit)])
+                                command.append("--child-pass")
+                                if stop.requested:
+                                    break
+                                # Terminal/group signals belong to the watcher. Let its
+                                # admitted pass finish without forwarding TERM/INT to it.
+                                subprocess.run(command, check=True, start_new_session=True)
+                                receipt = json.loads((folder / "receipt.json").read_text())
+                            else:
+                                worker = VoiceWorker(profile, folder / "runtime.log")
+                                try:
+                                    receipt = scan(profile, worker, folder / "receipt.json", limit=args.limit)
+                                finally:
+                                    worker.close()
+                            # A capped pass may have left extraction work behind; run again.
+                            if not args.limit or receipt["counts"].get("recordings_extracted", 0) < args.limit:
+                                last_fingerprint, last_scan = fingerprint, time.monotonic()
+                        except Exception as exc:
+                            print(json.dumps({"event": "scan_failed", "error": type(exc).__name__}), flush=True)
+                            if not args.watch:
+                                raise
+                        if not args.watch:
+                            break
+                        maintenance.wait(stop, max(30, profile.get("poll_seconds", 300)))
+                except MaintenancePaused:
+                    stop.wait(0.25)
+            if args.watch:
+                maintenance.close()
 
 
 if __name__ == "__main__":

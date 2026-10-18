@@ -454,6 +454,17 @@ expires. Rejected requests must be retried by the user.
 Admission persists the claim, not a durable request payload: a crash before stage
 setup may require resubmitting the original force/profile choice.
 
+Operator maintenance (opt-in): a private durable local request pauses new managed
+HTTP/daemon/voice queue items while admitted requests, detached workers and recording
+stages finish. Fresh PID/birth/request-bound aggregate receipts cover the main
+process and voice watcher; unmanaged CLI/backfill work and other hosts require
+separate drain evidence. Health stays available and authenticated remote-job
+poll/download/cancel can finish during pause. Explicit resume survives restarts and
+naturally redispatches only maintenance-deferred remote work, including when
+automatic processing is disabled. The gate does not add a durable manual request
+payload queue or exactly-once provider billing. See [maintenance](maintenance.md)
+for scope, failure semantics, and the separate first-deployment preconditions.
+
 Local ffmpeg conversion, VAD region slicing, whisper.cpp, and disposable speech
 runtimes terminate their process groups on deadline or loss of the recording
 lease. Conversion defaults to 900 seconds per decode attempt

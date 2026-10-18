@@ -18,6 +18,7 @@ class ServiceSignals:
     def __init__(self, on_stop=None):
         self.on_stop = on_stop
         self.requested = False
+        self.wake_condition = None
         self._previous = {}
 
     def request_stop(self, signum=None, frame=None):
@@ -33,6 +34,8 @@ class ServiceSignals:
         # the main thread's wait might hold when the signal interrupts it.
         deadline = time.monotonic() + timeout
         while not self.requested:
+            if self.wake_condition is not None and self.wake_condition():
+                return False
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return False

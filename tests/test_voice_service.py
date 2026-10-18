@@ -11,6 +11,10 @@ from localplaud import voice_service as service
 
 @pytest.fixture
 def main_env(tmp_path, monkeypatch):
+    from localplaud.maintenance import Gate
+    gate = Gate(tmp_path / ".maintenance")
+    monkeypatch.setattr(service, "get_gate", lambda: gate)
+    monkeypatch.setattr(gate, "start_reporting", lambda role: None)
     profile = tmp_path / "profile.json"
     profile.write_text(json.dumps({"enabled": True}))
     monkeypatch.setattr(service, "get_engine", Mock())

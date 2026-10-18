@@ -257,6 +257,7 @@ def run():
     from .providers.usage import recover_provider_dispatch_reservations
     from .service_signals import ServiceSignals
     from .worker.daemon import DaemonJobs
+    from .maintenance import get_gate
 
     # Under launchd the log files otherwise fill with thousands of
     # carriage-returned "Loading weights" progress bars per model load.
@@ -294,6 +295,8 @@ def run():
                 return
             scheduler = BackgroundScheduler()
             jobs = DaemonJobs(settings, daemon_owner, scheduler)
+            maintenance = get_gate()
+            maintenance.start_reporting("main")
             jobs.install()
             if stop.requested:
                 return
@@ -319,7 +322,9 @@ def run():
                     if jobs is not None:
                         jobs.shutdown()
                 finally:
+                    get_gate().wait_for_idle()
                     release_daemon_owner(daemon_owner)
+                    get_gate().close()
 
 
 def run_processing_cycle(settings, *, daemon_owner: str | None = None) -> int:

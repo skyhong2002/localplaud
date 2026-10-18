@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from .claims import processing_owner
+from ..maintenance import MaintenancePaused, get_gate
 
 log = logging.getLogger(__name__)
 
@@ -93,8 +94,10 @@ class DaemonJobs:
         try:
             if self.stopped.is_set():
                 return None
-            with processing_owner(self.owner):
+            with get_gate().activity(), processing_owner(self.owner):
                 return operation()
+        except MaintenancePaused:
+            return None
         except Exception:
             log.exception(
                 "Automatic %s failed; the next scheduled attempt remains enabled",
@@ -128,7 +131,8 @@ class DaemonJobs:
 
         if self.pool is None:
             return self._run(self.work_lock, process)
-        if self.stopped.is_set() or not self.work_lock.acquire(blocking=False):
+        if (self.stopped.is_set() or get_gate().request() is not None
+                or not self.work_lock.acquire(blocking=False)):
             return None
         try:
             self.inflight = {future for future in self.inflight if not future.done()}
@@ -170,8 +174,10 @@ class DaemonJobs:
         try:
             # Each slot selects one recording afresh. A long-running sibling
             # never prevents a free slot from taking a newly uploaded recording.
-            with processing_owner(self.owner):
+            with get_gate().activity(), processing_owner(self.owner):
                 process_automatic_pending(self.job_settings, daemon_owner=self.owner)
+        except MaintenancePaused:
+            return None
         except Exception:
             log.exception("Automatic processing slot failed; later dispatch remains enabled")
 

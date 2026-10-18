@@ -309,6 +309,10 @@ model's Hugging Face terms and set `LOCALPLAUD_DIARIZE__HF_TOKEN`;
 
 See [ADR 0003](docs/adr/0003-pluggable-asr.md) for the target quality contract.
 
+For planned service restarts, operators can explicitly pause new work and wait
+for admitted work to finish with the [maintenance procedure](docs/maintenance.md).
+Normal Web use requires no maintenance CLI.
+
 ## Deploying to your own machines
 
 localplaud ships a single Docker Compose file with **profiles** so one repo runs

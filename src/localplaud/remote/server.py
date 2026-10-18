@@ -327,6 +327,45 @@ def release_job_inputs(row: RemoteJob) -> None:
 
 
 def execute_job(job_id: str) -> None:
+    from ..maintenance import get_gate
+
+    if get_gate().request() is not None:
+        _defer_for_maintenance(job_id)
+        return False
+    # Waiters have not started a stage. Recheck admission after the GPU lock:
+    # maintenance leaves their durable input intact for explicit later resume.
+    with _GPU_LOCK:
+        result = get_gate().queued(_execute_admitted_job, job_id)
+        if result is False:
+            _defer_for_maintenance(job_id)
+        return result
+
+
+def _defer_for_maintenance(job_id):
+    with session_scope() as session:
+        row = session.get(RemoteJob, job_id)
+        if row is not None and row.status in {JobStatus.queued, JobStatus.running}:
+            row.options = dict(row.options or {}) | {"_maintenance_deferred": True}
+
+
+class DeferredScanUnavailable(RuntimeError):
+    """No execution began: only the initial deferred-job lookup failed."""
+
+
+def resume_deferred_jobs():
+    try:
+        with session_scope() as session:
+            ids = list(session.scalars(select(RemoteJob.id).where(
+                RemoteJob.status.in_([JobStatus.queued, JobStatus.running]),
+                RemoteJob.options["_maintenance_deferred"].as_boolean().is_(True),
+            )))
+    except Exception:
+        raise DeferredScanUnavailable("Deferred job lookup unavailable") from None
+    for job_id in ids:
+        execute_job(job_id)
+
+
+def _execute_admitted_job(job_id: str) -> None:
     with session_scope() as session:
         row = session.get(RemoteJob, job_id)
         if row is None or row.status not in {JobStatus.queued, JobStatus.running}:
@@ -341,10 +380,7 @@ def execute_job(job_id: str) -> None:
         row.attempts += 1
         request = JobSubmitRequest.model_validate(row.input_manifest)
     try:
-        # One GPU stage at a time on this host (see _GPU_LOCK). A second job
-        # waits here while showing "running"; the controller keeps polling.
-        with _GPU_LOCK:
-            artifacts = _execute(request)
+        artifacts = _execute(request)
         with session_scope() as session:
             row = session.get(RemoteJob, job_id)
             if row.cancel_requested:
@@ -551,6 +587,8 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
             existing.started_at = None
             existing.completed_at = None
             existing.input_manifest = request.model_dump(mode="json")
+            existing.options = {key: value for key, value in request.options.items()
+                                if key != "_maintenance_deferred"}
             response = _response(existing)
             job_id = existing.id
             background.add_task(execute_job, job_id)
@@ -561,7 +599,8 @@ def submit_job(request: JobSubmitRequest, background: BackgroundTasks):
             stage=request.stage,
             model=request.model,
             input_manifest=request.model_dump(mode="json"),
-            options=request.options,
+            options={key: value for key, value in request.options.items()
+                     if key != "_maintenance_deferred"},
         )
         session.add(row)
         try:

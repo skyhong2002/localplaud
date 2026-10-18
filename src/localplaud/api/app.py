@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..maintenance import tracked_thread, tracked_submit
+
 import hashlib
 import hmac
 import json
@@ -124,6 +126,8 @@ def _escape_like_literal(value: str) -> str:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    from ..maintenance import get_gate
+    maintenance = get_gate()
     if not getattr(app.state, "database_initialized", False):
         init_db()
     from ..db.tenancy import system_scope
@@ -133,11 +137,20 @@ async def _lifespan(app: FastAPI):
         recover_interrupted_imports()
     with session_scope() as session:
         auto_process = get_workspace_preferences(session)["auto_process_new_recordings"]
-    if auto_process and not getattr(app.state, "managed_daemon", False):
-        import threading
-
-        threading.Thread(target=resume_pending_jobs, daemon=True).start()
-    yield
+    if (auto_process and not getattr(app.state, "managed_daemon", False)
+            and maintenance.request() is None):
+        tracked_thread(target=resume_pending_jobs, daemon=True).start()
+    owns_reporter = maintenance.reporter is None
+    if owns_reporter:
+        maintenance.start_reporting("main")
+    maintenance.serving = True
+    try:
+        yield
+    finally:
+        maintenance.serving = False
+        if owns_reporter:
+            maintenance.wait_for_idle()
+            maintenance.close()
 
 
 app = FastAPI(title="localplaud", docs_url="/api/docs", lifespan=_lifespan)
@@ -2449,7 +2462,7 @@ def audio_waveform(file_id: str, buckets: int = 180):
     with _waveform_jobs_lock:
         future = _waveform_jobs.get(job_key)
         if future is None:
-            future = _waveform_executor.submit(waveform_peaks, path, buckets=buckets)
+            future = tracked_submit(_waveform_executor, waveform_peaks, path, buckets=buckets)
             _waveform_jobs[job_key] = future
     if not future.done():
         return JSONResponse(
@@ -2637,15 +2650,13 @@ def _start_transcript_reindex(
     expected_speaker_names: dict[str, str],
 ) -> bool:
     """Start the eager reindex while preserving the durable queue on failure."""
-    import threading
-
     from ..worker.reindex import reindex_file
 
     settings = get_settings()
     if not settings.pipeline.index:
         return False
     try:
-        threading.Thread(
+        tracked_thread(
             target=reindex_file,
             args=(file_id, settings),
             kwargs={
@@ -4416,8 +4427,6 @@ def export_original_audio(file_id: str):
 @app.post("/file/{file_id}/reprocess", response_class=HTMLResponse)
 def reprocess(file_id: str, force: bool = False):
     """Kick off a pipeline re-run for one recording in the background."""
-    import threading
-
     from ..imports import ensure_plaud_audio
     from ..poller.poll import current_daemon_owner
     from ..worker.claims import processing_claim, processing_owner
@@ -4462,7 +4471,7 @@ def reprocess(file_id: str, force: bool = False):
         with processing_claim(file_id, claim_token), session_scope() as session:
             r = _assert_processing_claim_in_session(session, file_id)
             reset_pipeline_retry(r)
-        worker = threading.Thread(
+        worker = tracked_thread(
             target=process_file,
             args=(file_id,),
             kwargs={"force": force, "claim_token": claim_token},
@@ -4489,8 +4498,6 @@ def generate_recording_notes(
     profile_id: int | None = Form(None),
 ):
     """Regenerate notes, mind map, and index without rerunning completed speech stages."""
-    import threading
-
     from ..poller.poll import current_daemon_owner
     from ..worker.claims import processing_claim, processing_owner
     from ..worker.pipeline import (
@@ -4549,7 +4556,7 @@ def generate_recording_notes(
                 error=previous_error,
             )
             return HTMLResponse("a local transcript is required first", status_code=409)
-        worker = threading.Thread(
+        worker = tracked_thread(
             target=process_derived_artifacts,
             args=(file_id,),
             kwargs={"claim_token": claim_token, "profile_id": profile_id},
@@ -4610,8 +4617,6 @@ def rebuild_recording_mind_map(file_id: str):
     stale flag clears only when the rebuild succeeds — a failure leaves the
     stage failed with its error and a scheduled retry at this same scope.
     """
-    import threading
-
     from ..poller.poll import current_daemon_owner
     from ..worker.claims import processing_claim, processing_owner
     from ..worker.pipeline import (
@@ -4686,7 +4691,7 @@ def rebuild_recording_mind_map(file_id: str):
         return HTMLResponse(eligibility_error, status_code=409)
 
     try:
-        worker = threading.Thread(
+        worker = tracked_thread(
             target=process_mind_map_only,
             args=(file_id,),
             kwargs={"claim_token": claim_token},
@@ -5529,3 +5534,8 @@ app.include_router(surfaces_router)
 # Template-library items are now built in surfaces.py; the shared helper stays
 # importable here for other pages (e.g. Home) that render template cards.
 _NOTE_TEMPLATE_ITEM = note_template_item
+
+
+# Outermost, including auth, multipart and streaming/background-response lifetime.
+from ..maintenance import MaintenanceMiddleware  # noqa: E402
+app.add_middleware(MaintenanceMiddleware)

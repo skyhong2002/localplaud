@@ -1237,7 +1237,9 @@ def process_pending_documents(
                 .limit(max(1, min(limit, 100)))
             )
         )
-    return sum(index_document(document_id, settings) for document_id in ids)
+    from ..maintenance import get_gate
+
+    return sum(get_gate().queued(index_document, document_id, settings) for document_id in ids)
 
 
 @scoped_to_file

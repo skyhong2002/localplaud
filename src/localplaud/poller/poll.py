@@ -873,8 +873,10 @@ def download_pending(client, settings: Settings) -> int:
     claim_owner = current_processing_owner()
 
     def run_download(item: tuple[str, dict]) -> bool:
+        from ..maintenance import get_gate
+
         with processing_owner(claim_owner):
-            return _download_one(client, item[0], item[1], settings)
+            return get_gate().queued(_download_one, client, item[0], item[1], settings)
 
     if workers == 1:
         return sum(run_download(item) for item in pending)

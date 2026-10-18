@@ -630,4 +630,6 @@ def process_pending_reindexes(
             queued.append(run.file_id)
             if len(queued) >= max(1, min(limit, 100)):
                 break
-    return sum(reindex_file(file_id, settings) for file_id in queued)
+    from ..maintenance import get_gate
+
+    return sum(get_gate().queued(reindex_file, file_id, settings) for file_id in queued)

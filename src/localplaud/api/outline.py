@@ -26,7 +26,8 @@ pending, running, or has failed, so the UI never loses a usable outline.
 
 from __future__ import annotations
 
-import threading
+from ..maintenance import tracked_thread
+
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -185,7 +186,7 @@ class RegenerateRequest(BaseModel):
 
 def _start_worker(target, *args, **kwargs) -> None:
     """Run the rebuild off the request thread (tests replace this)."""
-    threading.Thread(
+    tracked_thread(
         target=run_in_current_workspace(target), args=args, kwargs=kwargs, daemon=True
     ).start()
 

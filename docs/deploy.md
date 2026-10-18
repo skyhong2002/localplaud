@@ -66,14 +66,21 @@ preparation are retained when Uvicorn takes over. Prior handlers are restored wh
 the command returns; imports and calls from other threads install no handlers.
 Standalone `serve` keeps Uvicorn's normal signal behavior.
 
-This drain has no new hard deadline and does not cancel upstream provider billing
-or terminate active recordings. Configure the supervisor's stop grace period to
-accommodate the longest admitted work before rolling out/restarting the service.
-The observed launchd `ExitTimeOut` of **5 seconds is still too short** for work
-that takes longer to drain; this code change does not update the loaded service
-configuration or deploy it. Supervisor grace configuration remains a rollout
-requirement. SIGKILL, including a supervisor's escalation after its timeout, is
-ungraceful: Python cannot run finally blocks, drain children, or release ownership.
+This drain has no hard deadline and does not cancel upstream provider billing
+or terminate active recordings. Use the explicit local [maintenance gate](maintenance.md)
+to pause admission and observe both processes quiescent **before** sending a planned
+supervisor stop. Receipt scope excludes unmanaged CLI/backfill processes and other
+worker hosts. Keep the durable request present through deployment and restart, then
+explicitly resume. Maintenance does not add a durable queue for rejected manual
+requests or persist a force/profile payload before normal stage setup.
+
+Verify the loaded supervisor configuration, not just the file. The audited Mac
+on 2026-10-18 had `ExitTimeOut=300` in both plist files but a loaded timeout of
+60 seconds. Stopping an active service could still kill long work. SIGKILL cannot
+run finally blocks, drain children, or release ownership. An old interpreter
+without this gate needs a separate first-rollout drain and respawn interlock; the
+maintenance document lists those preconditions and explains why zero database
+claims alone is insufficient.
 
 Run the synthetic regression suite with the deployment virtualenv interpreter:
 

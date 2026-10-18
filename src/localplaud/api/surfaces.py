@@ -7,6 +7,8 @@ included from ``app.py`` without a circular import.
 
 from __future__ import annotations
 
+from ..maintenance import tracked_thread, tracked_submit
+
 import json
 import re
 import secrets
@@ -222,7 +224,7 @@ def ask_readiness() -> dict:
 
     with session_scope() as session:
         stats = _index_stats(session)
-    future = _readiness_pool.submit(_llm_health)
+    future = tracked_submit(_readiness_pool, _llm_health)
     try:
         llm = future.result(timeout=_READINESS_TIMEOUT_SECONDS)
     except FutureTimeout:
@@ -747,7 +749,7 @@ def _ask_event_stream(request: Request, run, render, unavailable):
         finally:
             events.put(None)
 
-    threading.Thread(
+    tracked_thread(
         target=run_in_current_workspace(worker), name=f"localplaud-ask-{stream_id}", daemon=True
     ).start()
 

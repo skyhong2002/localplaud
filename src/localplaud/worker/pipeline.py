@@ -4703,7 +4703,9 @@ def process_pending(
     workers = max(1, settings.pipeline.concurrency)
     claim_owner = current_processing_owner()
 
-    def _run(job: tuple[str, str]) -> bool:
+    from ..maintenance import get_gate
+
+    def _execute_pending(job: tuple[str, str]) -> bool:
         with processing_owner(claim_owner):
             fid, scope = job
             try:
@@ -4729,6 +4731,9 @@ def process_pending(
                 return True
             except Exception:  # noqa: BLE001
                 return False  # error already recorded on the row
+
+    def _run(job):
+        return get_gate().queued(_execute_pending, job)
 
     if workers == 1:
         return sum(_run(job) for job in jobs)
