@@ -268,6 +268,9 @@ def test_name_speakers_dialog_lists_talk_time_and_clips(monkeypatch, tmp_path):
     assert "Total duration 0:03" in row  # 1.0 s + 2.5 s
     assert 'data-seek="4.0"' in row and "see you" in row
     assert 'id="menu-name-speakers"' in page
+    # Most talkative voice first; ties keep diarization order.
+    order = [part.split('"', 1)[0] for part in dialog.split('data-speaker-row="')[1:]]
+    assert order == ["SPEAKER_01", "SPEAKER_00", "SPEAKER_02"]
 
 
 def test_workspace_strings_are_translated(monkeypatch, tmp_path):

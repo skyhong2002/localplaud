@@ -627,7 +627,7 @@
   <div class="sheet-grabber" aria-hidden="true"></div>
   <div class="dialog-head"><h2 class="dialog-title" id="name-speakers-title">{{ t('Name speakers') }}</h2><button class="icon-btn" id="name-speakers-close" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
     <form class="dialog-body ws-name-speakers-body" id="name-speakers-form">
-      {% for sp in f.speakers %}
+      {% for sp in f.speakers | sort(attribute='seconds', reverse=true) %}
       <div class="ws-name-row" data-speaker-row="{{ sp.key }}">
         <div class="ws-name-head"><span class="swatch" data-spk="{{ sp.key }}"></span><input class="search-input" name="{{ sp.key }}" value="{{ sp.name or '' }}" placeholder="{{ sp.name or anonymous_label(sp.display_label or sp.key) }}" maxlength="128" autocomplete="off" aria-label="{{ t('Display name for') }} {{ sp.name or anonymous_label(sp.display_label or sp.key) }}"><span class="sub">{{ t('Total duration') }} {{ ((sp.seconds or 0) * 1000) | dur }}</span></div>
         {% if sp.automatic and sp.name %}<div class="ws-name-automatic sub" data-automatic-for="{{ sp.key }}">{{ t('Named automatically from the voice') }}{% if sp.automatic.probability is not none %} · {{ t('{percent}% likely').replace('{percent}', (sp.automatic.probability * 100) | round | int | string) }}{% endif %} · {{ t('Edit the name to correct it') }}</div>{% endif %}
