@@ -2383,6 +2383,14 @@ def _serialize_transcript_mutation(session, file_id: str) -> None:
     _guard_ask_evidence_mutation(session, file_id)
 
 
+_DERIVED_REGENERATION_STAGES = (
+    StageName.summarize,
+    StageName.mind_map,
+    StageName.outline,
+    StageName.index,
+)
+
+
 def _mark_derived_stale(session, file_id: str, stages: tuple[StageName, ...]) -> None:
     """Preserve derived rows but make stale artifacts ineligible for reuse/UI."""
     if StageName.summarize in stages:
@@ -2411,7 +2419,7 @@ def _queue_transcript_reindex(session, file_id: str) -> None:
     _mark_derived_stale(
         session,
         file_id,
-        (StageName.summarize, StageName.mind_map, StageName.index),
+        (StageName.summarize, StageName.mind_map, StageName.outline, StageName.index),
     )
     run = session.scalar(
         select(StageRun).where(
@@ -4221,10 +4229,10 @@ def generate_recording_notes(
                 _mark_derived_stale(
                     session,
                     file_id,
-                    (StageName.summarize, StageName.mind_map, StageName.index),
+                    _DERIVED_REGENERATION_STAGES,
                 )
                 for run in recording.stage_runs:
-                    if run.stage in {StageName.summarize, StageName.mind_map, StageName.index}:
+                    if run.stage in _DERIVED_REGENERATION_STAGES:
                         detail = dict(run.detail or {}) | {
                             "reason": "user requested regeneration",
                             "derived_only": True,

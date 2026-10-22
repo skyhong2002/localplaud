@@ -32,3 +32,33 @@ def force_journal_mode():
         return str(mode).lower()
 
     return apply
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "real_outline: run the real LLM outline generator (no autouse stub)"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_outline_llm(request, monkeypatch):
+    """Keep unrelated pipeline tests off a real LLM for the outline stage.
+
+    The stub is clearly labelled (provider ``test-outline-stub``) and still
+    exercises the durable outline stage, persistence and provenance. Tests
+    marked ``real_outline`` drive the real generator with their own fakes.
+    """
+    if request.node.get_closest_marker("real_outline"):
+        return
+    from localplaud.worker import outline
+
+    def fake(transcript, settings, *, duration_ms=None):
+        result = outline.time_slice_outline(transcript, duration_ms=duration_ms)
+        return result | {
+            "method": "llm",
+            "provider": "test-outline-stub",
+            "model": "stub",
+            "prompt_version": outline.PROMPT_VERSION,
+        }
+
+    monkeypatch.setattr(outline, "generate_outline", fake)

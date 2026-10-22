@@ -65,6 +65,7 @@ from ..store.speakers import (
     sync_speakers,
 )
 from . import align, convert, index, mindmap, polish, summarize, summary_templates, transcribe
+from . import outline as outline_stage
 from .claims import (
     current_processing_claim,
     current_processing_owner,
@@ -514,6 +515,12 @@ def _validate_remote_returned_model(payload: dict, snapshot: dict, stage: str) -
     return returned_model
 
 
+# Durable stages that run on another stage's resolved profile selection. The
+# outline uses the text LLM explicitly selected for mind maps, so provider,
+# privacy, pricing and fallback rules are the same as that selection's.
+_PROFILE_STAGE_FOR = {StageName.index: "embed", StageName.outline: "mind_map"}
+
+
 def _set_stage_in_session(
     session,
     file_id: str,
@@ -547,7 +554,7 @@ def _set_stage_in_session(
     reused = bool((detail or {}).get("reused"))
     if snapshot is not None and not (reused and run.resolved_profile_snapshot is not None):
         run.resolved_profile_snapshot = snapshot
-    profile_stage = "embed" if stage == StageName.index else stage.value
+    profile_stage = _PROFILE_STAGE_FOR.get(stage, stage.value)
     if begin_attempt:
         run.attempts = (run.attempts or 0) + 1
         run.started_at = now
@@ -838,11 +845,20 @@ def _audio_seconds(row: PlaudFile, transcript: Transcript | None = None) -> floa
     return float(row.duration_ms or 0) / 1000
 
 
-def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
+def _cost_guard(
+    file_id: str,
+    stage: str,
+    snapshot: dict,
+    usage: dict,
+    *,
+    durable_stage: StageName | None = None,
+) -> dict:
     with session_scope() as session:
         selection = (snapshot.get("stages") or {}).get(stage) or {}
         if selection.get("execution_target") in {"cloud", "remote_worker"}:
-            durable_stage = StageName.index if stage == "embed" else StageName(stage)
+            durable_stage = durable_stage or (
+                StageName.index if stage == "embed" else StageName(stage)
+            )
             attempt = session.scalar(
                 select(StageAttempt)
                 .where(
@@ -855,7 +871,11 @@ def _cost_guard(file_id: str, stage: str, snapshot: dict, usage: dict) -> dict:
             if attempt is None:
                 raise RuntimeError(f"{stage} dispatch has no active stage attempt")
             file_scope = hashlib.sha256(file_id.encode()).hexdigest()[:16]
-            reservation_id = f"stage:{file_scope}:{stage}:{attempt.attempt}"
+            # Stages borrowing another selection keep their own reservation ids.
+            reservation_scope = (
+                durable_stage.value if durable_stage == StageName.outline else stage
+            )
+            reservation_id = f"stage:{file_scope}:{reservation_scope}:{attempt.attempt}"
             projected, pricing = reserve_provider_cost(
                 session,
                 reservation_id=reservation_id,
@@ -1053,7 +1073,7 @@ def queue_library_reprocess(
     if mode not in {"resume", "force", "derived_only"}:
         raise ValueError(f"unknown reprocess mode: {mode}")
     now = datetime.now(UTC)
-    derived = (StageName.summarize, StageName.mind_map, StageName.index)
+    derived = (StageName.summarize, StageName.mind_map, StageName.outline, StageName.index)
     result = {"mode": mode, "queued": 0, "skipped": 0, "processing": 0, "no_audio": 0}
     queued_ids: list[str] = []
     with session_scope() as session:
@@ -2365,6 +2385,250 @@ def _mind_map_operation(
     return run_mind_map
 
 
+_LINEAGE_KEYS = ("input_transcript_id", "input_transcript_revision", "input_transcript_source")
+
+
+def outline_is_current(outline_row, lineage: dict | None) -> bool:
+    """Whether a stored outline was built from exactly this canonical transcript."""
+    return bool(
+        outline_row is not None
+        and lineage is not None
+        and all(getattr(outline_row, key) == lineage.get(key) for key in _LINEAGE_KEYS)
+    )
+
+
+def _has_current_outline(file_id: str, lineage: dict | None, method: str) -> bool:
+    """Reuse the live outline only for the same transcript, method and prompt."""
+    expected_version = (
+        outline_stage.PROMPT_VERSION if method == "llm" else outline_stage.TIME_SLICES_VERSION
+    )
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        run = next((item for item in row.stage_runs if item.stage == StageName.outline), None)
+        if run is not None and (run.detail or {}).get("stale"):
+            return False
+        live = row.outlines[-1] if row.outlines else None
+        return bool(
+            live is not None
+            and live.source == "local"
+            and live.method == method
+            and live.prompt_version == expected_version
+            and outline_is_current(live, lineage)
+        )
+
+
+def _persist_outline(
+    file_id: str, result: dict, lineage: dict | None, settings: Settings
+) -> int:
+    """Insert the next outline revision; earlier revisions stay as history."""
+    from ..db.models import Outline
+
+    with session_scope() as session:
+        row = _assert_processing_claim_in_session(session, file_id)
+        current = None
+        raw = _select_raw_transcript(row, settings)
+        if raw is not None:
+            revision = row.corrected_transcript_for_source(raw.source)
+            current = {
+                "input_transcript_id": raw.id,
+                "input_transcript_revision": revision.revision if revision else 0,
+                "input_transcript_source": raw.source,
+            }
+        if lineage is None or current != {key: lineage.get(key) for key in _LINEAGE_KEYS}:
+            raise RuntimeError(
+                "transcript changed while the outline was generated; retry from the current version"
+            )
+        next_revision = max((item.revision for item in row.outlines), default=0) + 1
+        session.add(
+            Outline(
+                file_id=file_id,
+                revision=next_revision,
+                chapters=list(result["chapters"]),
+                method=result["method"],
+                source="local",
+                provider=result.get("provider"),
+                model=result.get("model"),
+                prompt_version=result.get("prompt_version"),
+                language=result.get("language"),
+                resolved_profile_snapshot=_PROFILE_SNAPSHOT.get(),
+                detail=dict(result.get("detail") or {}),
+                **{key: lineage.get(key) for key in _LINEAGE_KEYS},
+            )
+        )
+        return next_revision
+
+
+def _outline_operation(
+    file_id: str,
+    settings: Settings,
+    transcript: Transcript,
+    transcript_lineage: dict | None,
+    method: str,
+):
+    """Build the fallback-stage operation that generates and persists an outline.
+
+    ``llm`` runs on the text-LLM selection resolved for the mind-map stage (and
+    that selection's explicit fallbacks); ``time_slices`` is deterministic and
+    is only used when explicitly configured or requested.
+    """
+    if method not in {"llm", "time_slices"}:
+        raise ValueError(f"unknown outline method: {method}")
+
+    def run_outline(candidate):
+        with session_scope() as session:
+            duration_ms = session.get(PlaudFile, file_id).duration_ms
+        cost_budget = None
+        if method == "time_slices":
+            result = outline_stage.time_slice_outline(transcript, duration_ms=duration_ms)
+        else:
+            if _remote_selection(candidate, "mind_map"):
+                raise ValueError(
+                    "outline generation is not available on remote workers; select a "
+                    "local or cloud text model for the mind-map stage, or choose the "
+                    "time-sliced outline"
+                )
+            candidate_settings = _settings_for_stage(settings, candidate, "mind_map")
+            projected_usage = _llm_projected_usage(
+                transcript, candidate_settings, stage="mind_map"
+            )
+            cost_budget = _cost_guard(
+                file_id,
+                "mind_map",
+                candidate,
+                projected_usage,
+                durable_stage=StageName.outline,
+            )
+            result = outline_stage.generate_outline(
+                transcript, candidate_settings, duration_ms=duration_ms
+            )
+        revision = _persist_outline(file_id, result, transcript_lineage, settings)
+        detail = dict(result.get("detail") or {})
+        return {
+            "value": result,
+            "provider": result.get("provider"),
+            "model": result.get("model"),
+            "artifact_source": "local",
+            "detail": detail
+            | {
+                "method": result["method"],
+                "prompt_version": result.get("prompt_version"),
+                "outline_revision": revision,
+                "transcript": transcript_lineage,
+                "cost_budget": cost_budget,
+            },
+            "usage": {
+                "input_chars": len(transcript.text) if method == "llm" else 0,
+                "output_chars": sum(len(item["title"]) for item in result["chapters"]),
+                "requests": detail.get("map_calls", 0) + detail.get("reduce_calls", 0),
+            },
+        }
+
+    return run_outline
+
+
+def claim_outline_rebuild(file_id: str) -> str:
+    """Synchronously reserve a recording for an outline-only rebuild.
+
+    The recording's rollup status is left untouched while the outline runs;
+    progress is visible on the outline stage run itself.
+    """
+    return _claim_processing(file_id, require_audio=False, mark_processing=False)
+
+
+def process_outline_only(
+    file_id: str,
+    settings: Settings | None = None,
+    *,
+    claim_token: str | None = None,
+    method: str | None = None,
+) -> None:
+    """Regenerate only the outline from the current canonical local transcript.
+
+    ASR, transcript revisions, notes, mind map and index are never touched.
+    The previous outline stays as an earlier revision. A failure is recorded on
+    the outline stage run only; it never downgrades usable notes.
+    """
+    settings = settings or get_settings()
+    method = method or settings.pipeline.outline_method
+    token = claim_token or claim_outline_rebuild(file_id)
+    try:
+        with processing_claim(file_id, token):
+            _assert_processing_claim(file_id, token)
+            error: Exception | None = None
+            stage_started = False
+            try:
+                with session_scope() as session:
+                    row = _assert_processing_claim_in_session(session, file_id)
+                    template_key = row.note_template_key or settings.pipeline.summary_template
+                    snapshot = resolve_recording_profile(
+                        session,
+                        file_id,
+                        template_key=(
+                            settings.pipeline.summary_template
+                            if template_key == "auto"
+                            else template_key
+                        ),
+                    ).to_dict()
+                canonical = _load_transcript(file_id, settings)
+                if canonical is None or canonical[1] != "local":
+                    raise ValueError("a local transcript is required before an outline")
+                transcript = canonical[0]
+                if not transcript.text.strip():
+                    raise ValueError("the transcript has no recognizable speech to outline")
+                lineage = _transcript_lineage(file_id, settings)
+                profile_token = _PROFILE_SNAPSHOT.set(snapshot)
+                try:
+                    stage_started = True
+                    _run_fallback_stage(
+                        file_id,
+                        "mind_map",
+                        StageName.outline,
+                        snapshot,
+                        _outline_operation(file_id, settings, transcript, lineage, method),
+                    )
+                finally:
+                    _PROFILE_SNAPSHOT.reset(profile_token)
+            except PipelineAlreadyRunning:
+                raise
+            except Exception as exc:  # noqa: BLE001 - recorded on the outline stage
+                log.exception("Outline rebuild failed for %s", file_id)
+                error = exc
+                if not stage_started:
+                    _set_stage(file_id, StageName.outline, StageStatus.failed, error=str(exc))
+            _finish_outline_cycle(file_id, error)
+            if error is not None:
+                raise error
+    finally:
+        _release_processing(file_id, token)
+
+
+def _finish_outline_cycle(file_id: str, error: Exception | None) -> None:
+    """Let a successful outline rebuild clear a rollup that only it was holding."""
+    with session_scope() as session:
+        row = _assert_processing_claim_in_session(session, file_id)
+        if error is not None or row.status != FileStatus.partial:
+            return
+        leftover = [
+            run
+            for run in row.stage_runs
+            if run.stage != StageName.outline
+            and (
+                (run.detail or {}).get("stale")
+                or run.status
+                in {
+                    StageStatus.pending,
+                    StageStatus.running,
+                    StageStatus.failed,
+                    StageStatus.degraded,
+                }
+            )
+        ]
+        if not leftover:
+            row.status = FileStatus.done
+            row.error = None
+            reset_pipeline_retry(row)
+
+
 def _skip_empty_derivatives(file_id: str) -> None:
     """Keep historical artifacts, but never publish guesses from empty text."""
     from ..vocabulary import _mark_derived_stale
@@ -2379,7 +2643,12 @@ def _skip_empty_derivatives(file_id: str) -> None:
         row.generated_title_provider = None
         row.generated_title_model = None
         row.generated_title_at = None
-        for stage in (StageName.summarize, StageName.mind_map, StageName.index):
+        for stage in (
+            StageName.summarize,
+            StageName.mind_map,
+            StageName.outline,
+            StageName.index,
+        ):
             _set_stage_in_session(
                 session,
                 file_id,
@@ -2417,6 +2686,7 @@ def _run_derived_stages(
             for stage, enabled in (
                 (StageName.summarize, pcfg.summarize),
                 (StageName.mind_map, pcfg.mind_map),
+                (StageName.outline, pcfg.outline),
                 (StageName.index, pcfg.index),
             ):
                 if enabled:
@@ -2695,6 +2965,41 @@ def _run_derived_stages(
                 "disabled" if not pcfg.mind_map else "no transcript",
             )
 
+        if pcfg.outline and transcript is not None:
+            if force or not _has_current_outline(
+                file_id, transcript_lineage, pcfg.outline_method
+            ):
+                try:
+                    _run_fallback_stage(
+                        file_id,
+                        "mind_map",
+                        StageName.outline,
+                        derived_snapshot,
+                        _outline_operation(
+                            file_id,
+                            settings,
+                            transcript,
+                            transcript_lineage,
+                            pcfg.outline_method,
+                        ),
+                    )
+                except Exception as exc:  # noqa: BLE001 - transcript/notes stay usable
+                    log.exception("Outline generation failed for %s", file_id)
+                    partial_errors.append(f"outline: {exc}")
+            else:
+                _finish_stage(
+                    file_id,
+                    StageName.outline,
+                    artifact_source="local",
+                    detail={"reused": True},
+                )
+        else:
+            _skip_stage(
+                file_id,
+                StageName.outline,
+                "disabled" if not pcfg.outline else "no transcript",
+            )
+
         if pcfg.index and transcript is not None:
             stable_index_input = _load_transcript(
                 file_id,
@@ -2807,6 +3112,7 @@ def _finish_processing_cycle(
                         StageName.correct,
                         StageName.summarize,
                         StageName.mind_map,
+                        StageName.outline,
                         StageName.index,
                     } and run.status in {
                         StageStatus.failed,
@@ -3775,7 +4081,13 @@ def _pending_scope(row: PlaudFile, settings: Settings, now: datetime) -> str | N
         # transcript exists the remaining stages are allowed to finish.
         return None
 
-    derived_stages = {StageName.correct, StageName.summarize, StageName.mind_map, StageName.index}
+    derived_stages = {
+        StageName.correct,
+        StageName.summarize,
+        StageName.mind_map,
+        StageName.outline,
+        StageName.index,
+    }
     derived_only = any(
         run.stage in derived_stages
         and bool((run.detail or {}).get("derived_only"))

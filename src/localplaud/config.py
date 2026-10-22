@@ -115,6 +115,12 @@ class PipelineConfig(BaseModel):
     polish: bool = True  # AI correction after speakers, before notes/index
     summarize: bool = True
     mind_map: bool = True  # nested Markdown outline rendered as a tree
+    # Timestamped chapter outline ("Outline") from the canonical transcript.
+    outline: bool = True
+    # ``llm`` uses the text LLM selected for the mind-map stage. ``time_slices``
+    # is an explicit, clearly labelled deterministic alternative (fixed windows
+    # titled by their first salient sentence); it is never a silent fallback.
+    outline_method: Literal["llm", "time_slices"] = "llm"
     index: bool = True  # embeddings for Q&A / semantic search
     # Recordings at or above this length are treated as accidental (the Plaud
     # recorder stops at its 5-hour cap) and are left as metadata-only instead of

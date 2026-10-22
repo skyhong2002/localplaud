@@ -147,6 +147,8 @@ class StageName(enum.StrEnum):
     correct = "correct"
     summarize = "summarize"
     mind_map = "mind_map"
+    # Timestamped chapter titles ("Outline") derived from the canonical transcript.
+    outline = "outline"
     index = "index"
 
 
@@ -284,7 +286,10 @@ class PlaudFile(Base):
     knowledge_documents: Mapped[list[KnowledgeDocument]] = relationship(
         back_populates="file", cascade="all, delete-orphan", order_by="KnowledgeDocument.id"
     )
-    folder: Mapped[Folder | None] = relationship(back_populates="recordings")
+    outlines: Mapped[list[Outline]] = relationship(
+        back_populates="file", cascade="all, delete-orphan", order_by="Outline.revision"
+    )
+    folder:Mapped[Folder | None] = relationship(back_populates="recordings")
     tags: Mapped[list[Tag]] = relationship(
         secondary=recording_tags, back_populates="recordings", order_by="Tag.id"
     )
@@ -539,6 +544,48 @@ class SummaryRevision(Base):
             "revision",
             name="uq_summary_revision_file_template_revision",
         ),
+    )
+
+
+class Outline(Base):
+    """One immutable generation of a recording's chapter outline.
+
+    Every generation inserts the next ``revision``; the highest revision is the
+    live outline and earlier rows remain as history. ``chapters`` is an ordered,
+    contiguous list of ``{"start_ms", "end_ms", "title"}`` covering the whole
+    canonical transcript. ``method`` distinguishes an LLM outline (``llm``) from
+    the explicitly selected deterministic alternative (``time_slices``) so a
+    time-sliced outline is never presented as an AI result.
+    """
+
+    __tablename__ = "outlines"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(
+        ForeignKey("plaud_files.id", ondelete="CASCADE"), index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    chapters: Mapped[list] = mapped_column(JSON, default=list)
+    method: Mapped[str] = mapped_column(String(32), default="llm")
+    source: Mapped[str] = mapped_column(String(16), default="local")
+    provider: Mapped[str | None] = mapped_column(String(64), default=None)
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    prompt_version: Mapped[str | None] = mapped_column(String(64), default=None)
+    language: Mapped[str | None] = mapped_column(String(16), default=None)
+    input_transcript_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    input_transcript_revision: Mapped[int | None] = mapped_column(Integer, default=None)
+    input_transcript_source: Mapped[str | None] = mapped_column(String(16), default=None)
+    resolved_profile_snapshot: Mapped[dict | None] = mapped_column(JSON, default=None)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Local-only thumbs up/down; never sent anywhere.
+    feedback: Mapped[str | None] = mapped_column(String(8), default=None)
+    feedback_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    file: Mapped[PlaudFile] = relationship(back_populates="outlines")
+
+    __table_args__ = (
+        UniqueConstraint("file_id", "revision", name="uq_outline_file_revision"),
     )
 
 

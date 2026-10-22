@@ -118,6 +118,7 @@ def test_remote_title_retry_preserves_notes_even_when_it_fails(recording, monkey
 
     recording.pipeline.mind_map = False
     recording.pipeline.index = False
+    recording.pipeline.outline = False
     snapshot = {"stages": {"summarize": {"execution_target": "remote_worker"}}}
     calls = []
 
