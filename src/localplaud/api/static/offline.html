@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F8F8F8">
+  <title>Offline — localplaud</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: #F8F8F8; color: #3D3D3D;
+      font: 16px/1.55 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "Noto Sans CJK TC", sans-serif; text-align: center; }
+    @media (prefers-color-scheme: dark) { body { background: #161616; color: #D6D6D6; } h1 { color: #F5F5F5; } }
+    main { max-width: 420px; display: grid; gap: 12px; justify-items: center; }
+    img { width: 56px; height: 56px; }
+    h1 { margin: 8px 0 0; color: #000; font-size: 32px; font-weight: 300; }
+    p { margin: 0; color: #6F6F6F; }
+    button { margin-top: 12px; min-height: 44px; padding: 0 20px; border: 0; border-radius: 5px; background: #111; color: #fff; font: inherit; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/static/logo.svg" alt="">
+    <h1>You're offline</h1>
+    <p>localplaud runs on your own server. Pages you opened recently are still available; reconnect to see new recordings and make changes.</p>
+    <p lang="zh-Hant-TW">目前離線。最近開啟過的頁面仍可瀏覽；恢復連線後即可查看新錄音並進行變更。</p>
+    <button type="button" onclick="location.reload()">Try again · 重試</button>
+  </main>
+</body>
+</html>

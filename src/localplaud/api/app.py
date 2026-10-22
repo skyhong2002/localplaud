@@ -251,6 +251,19 @@ def robots() -> Response:
     return Response("User-agent: *\nDisallow: /\n", media_type="text/plain")
 
 
+@app.get("/sw.js", include_in_schema=False)
+def service_worker() -> Response:
+    """App-shell service worker; served from the root so its scope covers the app."""
+    worker = _static / "sw.js"
+    if not worker.exists():
+        return Response(status_code=404)
+    return FileResponse(
+        worker,
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
     """Serve the app icon for browsers that request /favicon.ico by convention.

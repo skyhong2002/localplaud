@@ -579,6 +579,18 @@
     });
   });
 
+  /* ------------------------------------------------------- service worker */
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(() => {}); });
+    // Signing out removes cached pages (they can contain transcripts).
+    document.addEventListener('submit', event => {
+      if (event.target.matches?.('form[action="/logout"]')) {
+        navigator.serviceWorker.controller?.postMessage('lp:clear-caches');
+        if (window.caches) caches.keys().then(keys => keys.forEach(key => caches.delete(key)));
+      }
+    }, true);
+  }
+
   /* ------------------------------------------ view transitions, offline */
   try {
     if (window.htmx && document.startViewTransition && !reduceMotion()) window.htmx.config.globalViewTransitions = true;
