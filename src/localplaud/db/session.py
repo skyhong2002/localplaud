@@ -120,6 +120,9 @@ def init_db() -> dict[str, int] | None:
 
 def _init_db_locked(engine: Engine) -> dict[str, int] | None:
     Base.metadata.create_all(engine)
+    from .migrations import migrate_account_sessions
+
+    migrate_account_sessions(engine)
     from ..providers.service import bootstrap_default_profile
     from .migrations import (
         migrate_artifact_lineage_columns,

@@ -208,10 +208,13 @@ docker compose --profile cpu up -d --build
 
 If the UI is reachable from anything but localhost:
 
-- Serve it through HTTPS and set both `LOCALPLAUD_API__LOGIN_PASSWORD` and a long,
-  random `LOCALPLAUD_API__SESSION_SECRET` to enable the built-in `/login` page.
-- Set `LOCALPLAUD_API__AUTH_TOKEN` separately when non-browser API clients need
-  Bearer or `X-Auth-Token` access.
+- Serve it through HTTPS and enable [Web App accounts](accounts.md), setting a
+  long random `LOCALPLAUD_API__SESSION_SECRET`, the public URL and Google client
+  credentials for initial owner bootstrap. New accounts remain pending until approved.
+- Account mode rejects all legacy shared passwords/API tokens. With accounts
+  disabled, the old `LOCALPLAUD_API__LOGIN_PASSWORD` and
+  `LOCALPLAUD_API__AUTH_TOKEN` settings remain available for legacy deployments.
+  Worker authentication and Plaud/provider credentials stay separate.
 - The reverse proxy normally only terminates HTTPS; upstream authentication can
   still be used when a deployment deliberately delegates identity to it.
 

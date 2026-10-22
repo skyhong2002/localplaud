@@ -725,7 +725,8 @@ def _serve(settings, *, database_initialized: bool = False, managed_daemon: bool
         """Keep uptime-monitor /healthz probes out of the access log."""
 
         def filter(self, record: logging.LogRecord) -> bool:
-            return "/healthz" not in record.getMessage()
+            message = record.getMessage()
+            return "/healthz" not in message and "/auth/google/callback" not in message
 
     logging.getLogger("uvicorn.access").addFilter(_DropHealthzAccessLogs())
 
@@ -812,6 +813,38 @@ def benchmark_speech_command(
         console.print(table)
     if report["aggregate"]["failed"]:
         raise typer.Exit(1)
+
+
+@app.command("recover-owner-password")
+def recover_owner_password_command():
+    """Set an existing owner's local password from a private interactive prompt."""
+    from .api.accounts import recover_owner_password
+    from .db.session import init_db
+
+    init_db()
+    password = typer.prompt("New owner password (12–256 characters)", hide_input=True, confirmation_prompt=True)
+    try:
+        recover_owner_password(password)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    typer.echo("Owner password updated; all previous sessions revoked.")
+
+
+@app.command("recover-account-password")
+def recover_account_password_command(username: str = typer.Argument(...)):
+    """Recover an existing account from a trusted local operator terminal."""
+    from .api.accounts import recover_account_password
+    from .db.session import init_db
+
+    init_db()
+    password = typer.prompt("New password (12–256 characters)", hide_input=True, confirmation_prompt=True)
+    try:
+        recover_account_password(password, username=username)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    typer.echo("Password updated; all previous sessions revoked.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,18 @@
+{% extends "auth_base.html" %}
+{% block title %}建立帳號{% endblock %}
+{% block content %}
+<section class="auth-card" aria-labelledby="register-title">
+  <div class="eyebrow">加入工作區</div>
+  <h1 id="register-title">建立帳號</h1>
+  <p class="sub">建立後可登入查看核准狀態。管理員核准前，你無法存取錄音與筆記。</p>
+  {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+  <form method="post" action="/register" class="stack" data-submit-label="建立中…">
+    <div><label for="username">帳號名稱</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="40" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{2,39}" aria-describedby="username-help" required><p class="field-help" id="username-help">至少 3 個字元，以英文字母或數字開頭，可使用句點、底線或連字號；最多 40 個字元。</p></div>
+    <div><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" autocapitalize="none" maxlength="254" required></div>
+    <div><label for="password">密碼</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" aria-describedby="password-help" required><p class="field-help" id="password-help">至少 12 個字元，建議使用密碼管理器產生。</p></div>
+    <div><label for="password_confirm">再次輸入密碼</label><input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></div>
+    <button class="button primary" type="submit">建立帳號</button>
+  </form>
+  <p class="auth-switch">已經有帳號？ <a href="/login">返回登入</a></p>
+</section>
+{% endblock %}

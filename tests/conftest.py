@@ -7,6 +7,10 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _isolate_web_login_environment(monkeypatch):
+    monkeypatch.setenv("LOCALPLAUD_API__AUTH_TOKEN", "")
+    monkeypatch.setenv("LOCALPLAUD_API__ACCOUNTS_ENABLED", "false")
+    monkeypatch.setenv("LOCALPLAUD_API__GOOGLE_CLIENT_SECRET", "")
+    monkeypatch.setenv("LOCALPLAUD_API__GOOGLE_CLIENT_ID", "")
     monkeypatch.setenv("LOCALPLAUD_API__LOGIN_PASSWORD", "")
     monkeypatch.setenv("LOCALPLAUD_API__SESSION_SECRET", "")
 

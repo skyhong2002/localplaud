@@ -770,3 +770,13 @@ When Resume reuses an already forced-aligned raw transcript and the new profile
 only validates its unchanged word timestamps, the stage retains the original
 aligner provenance and records the new validation separately. A fresh ASR run
 never inherits forced-alignment evidence from the displaced transcript.
+
+
+### Individual Web App accounts (2026-10-07)
+
+Account mode adds Google OIDC and local username/email/password login with pending
+approval, owner/admin/viewer permissions, user-bound revocable sessions and account
+management in the Web App. The existing recording library remains one shared
+workspace; this does not implement private per-user libraries. Legacy shared token
+and password authentication is rejected in account mode. See [accounts](accounts.md)
+for initial owner bootstrap, operator password recovery and release limits.

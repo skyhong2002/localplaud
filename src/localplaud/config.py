@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 # --------------------------------------------------------------------------- #
@@ -497,6 +497,19 @@ class OpenAIBudgetConfig(BaseModel):
 
 
 class ApiConfig(BaseModel):
+    accounts_enabled: bool = False
+    owner_email: str = ""
+    owner_username: str = "sky"
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str | None = None
+
+    @model_validator(mode="after")
+    def validate_accounts(self):
+        if self.accounts_enabled and not self.session_secret:
+            raise ValueError("api.session_secret is required when accounts are enabled")
+        return self
+
     # Loopback by default so an accidental `localplaud run` isn't exposed to the
     # LAN. In Docker this is overridden to 0.0.0.0 (the container sits behind
     # Caddy and its port isn't published).
