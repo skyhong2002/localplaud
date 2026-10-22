@@ -217,6 +217,14 @@ timestamps, and failures; optional-stage errors retain usable transcript/notes a
 can resume from existing artifacts. Ollama embeddings have model-aware health checks
 and modern batch API support. MLX large-v3-turbo is smoke-tested on SkyLabMac, and
 the code targets pyannote Community-1, but VAD/alignment plus authenticated
-real-audio diarization verification remain. Other major gaps include editable
-artifacts, long-form summarization, mind maps, single-file Ask, richer
-organization/export, automation, and UI polish.
+real-audio diarization verification remain. Speaker identities are now persisted
+per recording with stable diarization keys and user-editable display names
+(renamed from the Web detail page, preserved across re-ASR, applied in transcript
+view and export), and transcript corrections are stored as revisions: per-segment
+inline edits create a corrected canonical transcript on top of the immutable raw
+ASR row, feed summaries/indexing/export, survive re-ASR, and re-index in the
+background without rerunning ASR, with a labelled raw-versus-corrected view
+switch. Transcript find/replace, a revision history browser, and automatic name
+propagation into already-generated notes remain. Other major gaps include
+editable notes/templates, mind maps, single-file Ask, richer organization/export,
+automation, and UI polish.

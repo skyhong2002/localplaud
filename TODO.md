@@ -71,7 +71,11 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   assignment, model provenance, and actionable health checks. SkyLabMac still needs
   the optional dependency plus acceptance of the gated model terms and a Hugging
   Face token before real-audio verification. VAD and word-level alignment remain.
-- Persist stable speaker IDs separately from editable display names.
+- ✅ Persist stable speaker IDs separately from editable display names: `speakers`
+  rows mirror the diarization keys per recording, renames are upserted from the
+  Web detail page (legend inline forms), survive re-ASR/re-diarization, and flow
+  into the transcript view and Markdown export. Remaining: propagate names into
+  newly generated summaries/Ask answers automatically.
 - Add a custom vocabulary/correction layer for names, specialist terms, Taiwan
   Mandarin, and Mandarin/English code-switching.
 - Establish a benchmark set from consented user-owned recordings: WER/CER, diarization
@@ -85,8 +89,15 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   transcript size, chunks, and map/reduce call counts.
 - Make templates editable data; support auto selection, per-file custom generation,
   multiple note tabs, provenance, and safe regeneration.
-- Re-index the corrected canonical transcript. Add single-file Ask and whole-library
-  Ask with playable timestamp citations and save-to-note.
+- ✅ Transcript corrections as revisions: inline per-segment editing on the Web
+  detail page creates immutable `transcript_revisions` on top of the untouched raw
+  ASR row; the latest revision is the canonical transcript for summaries, indexing,
+  and export, edits survive re-ASR, and each edit invalidates and rebuilds the
+  embedding index in the background without rerunning ASR (summary regeneration
+  stays explicit). Remaining: transcript find/replace, multi-segment/bulk edits,
+  and a revision history browser.
+- Add single-file Ask and whole-library Ask with playable timestamp citations and
+  save-to-note.
 
 ### P1 — Plaud-like Web App workflow
 
@@ -98,9 +109,10 @@ optional enrichment (`plaud.apse1_enrichment`, needs a pasted session) for
   Templates, Discover/Automation, and Settings with responsive persistence.
 - Add sortable library columns (name, duration, creation date), visible processing
   state, attention indicators, bulk selection, and safe recovery from trash.
-- Add an explicit raw-ASR versus corrected-canonical transcript switch, synchronized
-  timestamps/speaker labels, transcript-local search and find/replace, and preserve
-  edits independently from the raw artifact.
+- ✅ (partial) Explicit raw-ASR versus corrected-canonical transcript switch with
+  synchronized timestamps/speaker labels is live, and edits are preserved
+  independently from the raw artifact. Remaining: transcript-local search and
+  find/replace.
 - Add file Ask suggested questions and reusable local skills (action items, task
   table, insights), plus grounded follow-ups and save-to-note.
 - Build template My Space and Explore surfaces with search, categories/scenarios,
