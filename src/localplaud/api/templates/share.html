@@ -57,6 +57,8 @@
     .scrubber::-moz-range-thumb{width:9px;height:9px;border:0;border-radius:50%;background:var(--ink)}
     .speed-btn{flex:none;min-width:34px;font-size:12px;font-weight:650;color:var(--ink);text-align:center;padding:5px 6px;border-radius:6px}
     .speed-btn:hover{background:var(--soft-2)}
+    .download-btn{flex:none;width:30px;height:30px;display:grid;place-items:center;border-radius:6px;color:var(--ink)}
+    .download-btn:hover{background:var(--soft-2)}
 
     .transcript-badge-row{margin:10px 0 0}
     .segments{padding:18px 0 8px}
@@ -161,6 +163,7 @@
             </button>
             <input class="scrubber" id="scrubber" type="range" min="0" max="1000" value="0" aria-label="{{ t('Seek') }}">
             <button class="speed-btn" id="speed-toggle" type="button" aria-label="{{ t('Playback speed') }}">1x</button>
+            <a class="download-btn" href="{{ audio_url }}?download=1" download aria-label="{{ t('Download audio') }}" title="{{ t('Download audio') }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg></a>
           </div>
           <audio id="shared-audio" preload="metadata" src="{{ audio_url }}"></audio>
         </div>

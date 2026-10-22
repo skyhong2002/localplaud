@@ -215,6 +215,14 @@ def test_public_audio_supports_ranges_and_dies_on_revoke(clients):
     assert ranged.headers["Content-Range"] == "bytes 10-19/100"
     assert ranged.headers["X-Robots-Tag"] == "noindex, nofollow"
 
+    # Whoever can play the shared audio can also download it as a named file.
+    assert f'href="{path}/audio?download=1"' in public.get(path).text
+    saved = public.get(f"{path}/audio?download=1")
+    assert saved.status_code == 200 and saved.content == audio
+    assert saved.headers["Content-Disposition"].startswith("attachment;")
+    assert ".mp3" in saved.headers["Content-Disposition"]
+    assert "attachment" not in public.get(f"{path}/audio").headers.get("Content-Disposition", "")
+
     assert authenticated.delete("/api/files/recording/share-link").status_code == 200
     assert authenticated.delete("/api/files/recording/share-link").status_code == 200
     assert public.get(f"{path}/audio").status_code == 404
@@ -370,8 +378,9 @@ def test_share_options_control_public_content(clients):
     assert "Local weekly sync" in page.text
     assert "corrected canonical line" not in page.text
     assert "Local generated note" not in page.text
-    assert "<audio" not in page.text
+    assert "<audio" not in page.text and "download=1" not in page.text
     assert public.get(f"{path}/audio").status_code == 404
+    assert public.get(f"{path}/audio?download=1").status_code == 404
 
     restored = authenticated.post(
         "/api/files/recording/share-link",

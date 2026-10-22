@@ -976,6 +976,7 @@ _ZH_HANT_TW = {
     "Retry": "重試",
     "Upload": "上傳",
     "Download": "下載",
+    "Download audio": "下載音檔",
     "Test": "測試",
     "Revoke": "撤銷",
     "Recommended for this host": "此主機的建議設定",

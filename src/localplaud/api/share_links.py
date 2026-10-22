@@ -267,7 +267,7 @@ def public_share(request: Request, token: str):
 
 
 @router.get("/share/{token}/audio")
-def public_share_audio(token: str):
+def public_share_audio(token: str, download: bool = False):
     from ..imports import ensure_plaud_audio
 
     with session_scope() as session:
@@ -275,10 +275,15 @@ def public_share_audio(token: str):
         if not _options(link).audio:
             raise _not_found()
         file_id = link.file_id
+        title = link.file.display_title if link.file is not None else None
     try:
         path = ensure_plaud_audio(file_id)
     except Exception as exc:  # noqa: BLE001 - public links do not expose provider details
         raise _not_found() from exc
     if not path.is_file():
         raise _not_found()
-    return audio_file_response(path)
+    if not download:
+        return audio_file_response(path)
+    # Anyone who can play the audio can save it, so offer it as a named download.
+    stem = "".join(" " if ch in '\\/:*?"<>|' or ord(ch) < 32 else ch for ch in title or "")
+    return audio_file_response(path, filename=f"{stem.strip() or 'recording'}{path.suffix}")
