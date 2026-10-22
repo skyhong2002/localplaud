@@ -114,3 +114,79 @@ def test_lower_layer_cannot_weaken_system_privacy_boundary():
     }}, policy={"no_egress": False, "allowed_providers": ["openai"]})
     with pytest.raises(ProfileResolutionError, match="not allowed"):
         resolve_profile("transcribe", system_default=system, recording_override=override)
+
+
+def test_explicit_legacy_sync_updates_only_system_default(monkeypatch, tmp_path):
+    import localplaud.db.session as db_session
+    from localplaud.config import Settings, get_settings
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.providers.bootstrap import sync_system_default_profile
+
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'profiles.db'}")
+    monkeypatch.setattr(db_session, "_engine", None)
+    monkeypatch.setattr(db_session, "_Session", None)
+    get_settings(reload=True)
+    init_db()
+    with session_scope() as session:
+        default = session.query(ExecutionProfile).filter_by(is_system_default=True).one()
+        user = ExecutionProfile(
+            name="my-profile",
+            stages={"transcribe": {"provider": "faster-whisper", "model": "mine"}},
+            policy={"no_egress": True},
+        )
+        session.add(user)
+        session.flush()
+        user_id = user.id
+        default.stages = {
+            **default.stages,
+            "transcribe": {"provider": "mlx-whisper", "model": "mlx-model"},
+        }
+        before = resolve_profile(StageName.transcribe, system_default=default)
+        assert before["route"]["provider"] == "mlx-whisper"
+        assert before["route"]["model"] == "mlx-model"
+
+    changed = Settings(asr={
+        "provider": "openai",
+        "openai": {"model": "gpt-4o-transcribe"},
+    })
+    with session_scope() as session:
+        synced = sync_system_default_profile(session, changed)
+        resolved = resolve_profile(StageName.transcribe, system_default=synced)
+        assert resolved["route"]["provider"] == "openai"
+        assert resolved["route"]["model"] == "gpt-4o-transcribe"
+        user = session.get(ExecutionProfile, user_id)
+        assert user.stages == {
+            "transcribe": {"provider": "faster-whisper", "model": "mine"}
+        }
+        assert user.policy == {"no_egress": True}
+
+
+def test_synced_openai_default_materializes_common_api_key(monkeypatch, tmp_path):
+    import localplaud.db.session as db_session
+    from localplaud.config import Settings, get_settings
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.providers.bootstrap import sync_system_default_profile
+    from localplaud.providers.materialize import materialize_snapshot
+    from localplaud.providers.routing import settings_for_route
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "common-openai-key")
+    monkeypatch.delenv("LOCALPLAUD_OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("LOCALPLAUD_STORE__DATABASE_URL", f"sqlite:///{tmp_path / 'openai.db'}")
+    monkeypatch.setattr(db_session, "_engine", None)
+    monkeypatch.setattr(db_session, "_Session", None)
+    get_settings(reload=True)
+    init_db()
+    settings = Settings(asr={
+        "provider": "openai",
+        "openai": {"model": "gpt-4o-mini-transcribe"},
+    })
+    with session_scope() as session:
+        profile = sync_system_default_profile(session, settings)
+        snapshot = materialize_snapshot(
+            session, resolve_profile(StageName.transcribe, system_default=profile)
+        )
+        assert snapshot["route"]["connection"] == "openai"
+        assert snapshot["route"]["secret_ref"] == "env:OPENAI_API_KEY"
+    routed = settings_for_route(settings, StageName.transcribe, snapshot)
+    assert routed.asr.openai.api_key == "common-openai-key"

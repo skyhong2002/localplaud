@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from .base import EmbeddingUnavailable
+from ..providers.failures import RetryableProviderError, is_retryable_sdk_failure, sdk_failure_label
+from .base import EmbeddingError, EmbeddingUnavailable
 
 if TYPE_CHECKING:
     from ..config import OpenAIEmbeddingsConfig
@@ -38,7 +39,7 @@ class OpenAIEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not self.cfg.api_key:
-            raise EmbeddingUnavailable("OpenAI embeddings: no API key configured")
+            raise EmbeddingError("OpenAI embeddings: no API key configured")
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -49,11 +50,19 @@ class OpenAIEmbedder:
         if self.cfg.max_input_chars is not None and any(
             len(text) > self.cfg.max_input_chars for text in texts
         ):
-            raise EmbeddingUnavailable(
+            raise EmbeddingError(
                 "OpenAI embeddings input exceeds configured max_input_chars"
             )
         client = OpenAI(api_key=self.cfg.api_key, base_url=self.cfg.base_url or None,
                         default_headers=self.cfg.headers or None,
                         timeout=self.cfg.timeout_seconds)
-        resp = client.embeddings.create(model=self.cfg.model, input=texts)
+        try:
+            resp = client.embeddings.create(model=self.cfg.model, input=texts)
+        except Exception as exc:  # SDK boundary; classify before fallback
+            label = sdk_failure_label(exc)
+            if is_retryable_sdk_failure(exc):
+                raise RetryableProviderError(
+                    f"OpenAI embeddings transient failure: {label}"
+                ) from exc
+            raise EmbeddingError(f"OpenAI embeddings request failed: {label}") from exc
         return [d.embedding for d in resp.data]

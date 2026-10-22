@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ..providers.failures import ProviderUnavailableError
+
 if TYPE_CHECKING:
     from ..config import LlmConfig
 
@@ -21,9 +23,9 @@ class LLMError(RuntimeError):
     """Raised when a provider fails to produce a completion."""
 
 
-class LLMUnavailable(LLMError):
+class LLMUnavailable(LLMError, ProviderUnavailableError):
     """Raised when a provider can't run in this environment (missing
-    dependency, API key, or unreachable server)."""
+    dependency, model, or reachable runtime)."""
 
 
 @runtime_checkable
@@ -76,4 +78,4 @@ def build_llm(cfg: LlmConfig) -> LLMProvider:
         from .remote_worker import RemoteWorkerLLM
 
         return RemoteWorkerLLM(cfg.remote_worker)
-    raise LLMUnavailable(f"unknown LLM provider: {cfg.provider!r}")
+    raise ValueError(f"unknown LLM provider: {cfg.provider!r}")

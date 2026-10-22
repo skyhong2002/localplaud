@@ -285,8 +285,9 @@ The recordings library now supports sortable
 name/duration/recorded columns, processing-state and capture-source filters, per-row
 processing state with error/partial attention indicators, and a read-only trash
 mirror view; folders/tags, uncategorized organization, and bulk operations remain.
-MLX large-v3-turbo is smoke-tested on SkyLabMac, and
-the code targets pyannote Community-1. Optional VAD groundwork now exists behind a
+MLX large-v3-turbo is smoke-tested on SkyLabMac. Pyannote Community-1 model access
+and real-audio execution are also verified: a 192-second recording completed with
+two stable speakers plus word/segment assignments. Optional VAD groundwork exists behind a
 default-off `asr.vad.enabled` flag (silero-vad on the mlx path with global-timestamp
 region offsetting; faster-whisper's native bundled VAD filter), and degrades honestly
 to whole-file transcription with a visible health note when the optional `vad` extra
@@ -295,8 +296,7 @@ being enabled by default. Alignment is now a durable stage: the default validate
 Whisper word timestamps and visibly degrades when they are absent; optional WhisperX
 forced alignment supports exact/base-language model overrides with WhisperX's own
 language-aware default, but still needs a Mandarin/code-switch real-recording
-evaluation. Authenticated real-audio
-diarization verification also remains. Single-file
+evaluation. Single-file
 Ask now answers grounded only in one recording and renders each citation as a
 playable timestamp that seeks the player, and whole-library Ask citations deep-link
 to the cited moment (`/file/{id}?t=`). Long transcripts are summarized with full
@@ -323,7 +323,7 @@ a shared capability catalog, durable connection/model/profile schema, determinis
 resolver, immutable attempt snapshots, privacy/quality/timeout/cost checks applied
 equally to primary and fallback routes, headless APIs,
 hardware recommendations, and remote-worker protocol v1. Remaining P0 evidence is
-external acceptance: real Taiwan Mandarin/code-switch benchmarks, authenticated
-pyannote, Apple/NVIDIA/CPU host matrix runs, and self-owned plus rentable remote GPU
-validation. P1 still needs the complete profile Settings editor and broader
+external acceptance: real Taiwan Mandarin/code-switch benchmarks, full clean-recording
+Apple/NVIDIA/CPU host matrix runs, official OpenAI cloud, and self-owned plus rentable
+remote GPU validation. P1 still needs the complete profile Settings editor and broader
 organization/export/UI polish; automation remains P2.

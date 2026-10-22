@@ -1,6 +1,20 @@
 """Summary template registry: lookup, fallback, and prompt rendering."""
 
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
+
 from localplaud.worker.summary_templates import TEMPLATES, get_template, render_prompt
+
+
+@pytest.fixture(autouse=True)
+def _isolate_registry_from_runtime_database(monkeypatch):
+    """These are pure built-in registry tests, not production-DB tests."""
+    import localplaud.db.session as db_session
+
+    def unavailable():
+        raise SQLAlchemyError("database intentionally unavailable in registry unit test")
+
+    monkeypatch.setattr(db_session, "session_scope", unavailable)
 
 
 def test_registry_templates_are_complete():

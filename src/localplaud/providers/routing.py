@@ -38,7 +38,17 @@ def _apply_model_options(target, route: dict[str, Any]) -> None:
 
 def _resolve_secret_ref(secret_ref: str) -> str | None:
     if secret_ref.startswith("env:"):
-        return os.getenv(secret_ref.removeprefix("env:"))
+        name = secret_ref.removeprefix("env:")
+        value = os.getenv(name)
+        if value is not None:
+            return value
+        # BaseSettings reads .env without exporting it into os.environ. Durable
+        # provider connections must use the same secret source or a launchd
+        # service can appear configured while failing at dispatch time.
+        from dotenv import dotenv_values
+
+        dotenv_value = dotenv_values(".env").get(name)
+        return str(dotenv_value) if dotenv_value is not None else None
     if secret_ref.startswith("keychain:"):
         service = secret_ref.removeprefix("keychain:")
         if not service:

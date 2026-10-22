@@ -13,6 +13,7 @@ import logging
 from ..asr.base import Transcript
 from ..asr.remote_worker_provider import _parse_transcript
 from ..config import DiarizeConfig
+from ..providers.failures import ProviderUnavailableError, allows_provider_fallback
 from ..providers.remote_inference import run_remote_audio_json
 from .align import _payload
 
@@ -24,6 +25,10 @@ class DiarizationError(RuntimeError):
 
 
 class DiarizationUnavailable(DiarizationError):
+    pass
+
+
+class DiarizationProviderUnavailable(DiarizationUnavailable, ProviderUnavailableError):
     pass
 
 
@@ -48,7 +53,7 @@ def _load_pipeline(cfg: DiarizeConfig):
     try:
         from pyannote.audio import Pipeline
     except Exception as exc:  # noqa: BLE001
-        raise DiarizationUnavailable(f"pyannote.audio not installed: {exc}") from exc
+        raise DiarizationProviderUnavailable(f"pyannote.audio not installed: {exc}") from exc
     if not cfg.hf_token:
         raise DiarizationUnavailable(
             "diarize.hf_token not set (needed to download the pyannote pipeline)"
@@ -58,7 +63,7 @@ def _load_pipeline(cfg: DiarizeConfig):
             cfg.model,
             token=cfg.hf_token,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # authentication/config/model errors are not fallback eligible
         raise DiarizationUnavailable(f"could not load pyannote pipeline: {exc}") from exc
 
 
@@ -79,7 +84,9 @@ def diarize(wav_path, transcript: Transcript, cfg: DiarizeConfig, remote_input=N
             )
             result = _parse_transcript(data, cfg.model)
         except Exception as exc:
-            raise DiarizationUnavailable(f"remote diarization failed: {exc}") from exc
+            if not allows_provider_fallback(exc):
+                raise
+            raise DiarizationProviderUnavailable(f"remote diarization failed: {exc}") from exc
         if not result.has_speakers:
             raise DiarizationUnavailable("remote diarization returned no speaker labels")
         return result

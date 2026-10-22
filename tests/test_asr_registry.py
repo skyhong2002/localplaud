@@ -8,6 +8,7 @@ import pytest
 from localplaud.asr import registry
 from localplaud.asr.base import AsrUnavailable, Segment, Transcript
 from localplaud.config import AsrConfig
+from localplaud.providers.failures import RetryableProviderError
 
 AUDIO = Path("/nonexistent/audio.opus")  # dummies never touch the file
 
@@ -47,7 +48,7 @@ def dummy_providers(canned):
             return False
 
         def transcribe(self, audio_path, language="auto") -> Transcript:
-            raise AssertionError("must never be called: available() is False")
+            raise AsrUnavailable("provider runtime is unavailable")
 
     registry.register("dummy")(lambda cfg: Dummy())
     registry.register("brokenprimary")(lambda cfg: BrokenPrimary())
@@ -90,6 +91,45 @@ def test_fallback_when_primary_unavailable(dummy_providers, canned):
     assert result is canned
 
 
+@pytest.mark.parametrize("failure", [
+    ValueError("invalid input"),
+    AssertionError("programming bug"),
+    PermissionError("authentication failed"),
+    RuntimeError("non-retryable provider failure"),
+])
+def test_non_retryable_failures_never_fall_back(dummy_providers, failure):
+    class Failed:
+        def available(self):
+            return True
+
+        def transcribe(self, *args, **kwargs):
+            raise failure
+
+    registry._FACTORIES["failed"] = lambda cfg: Failed()
+    try:
+        with pytest.raises(type(failure), match=str(failure)):
+            registry.transcribe_with_fallback(AUDIO, _cfg("failed", ["dummy"]))
+    finally:
+        registry._FACTORIES.pop("failed", None)
+
+
+def test_retryable_failure_uses_explicit_fallback(dummy_providers, canned):
+    class Retryable:
+        def available(self):
+            return True
+
+        def transcribe(self, *args, **kwargs):
+            raise RetryableProviderError("temporary outage")
+
+    registry._FACTORIES["retryable"] = lambda cfg: Retryable()
+    try:
+        assert registry.transcribe_with_fallback(
+            AUDIO, _cfg("retryable", ["dummy"])
+        ) is canned
+    finally:
+        registry._FACTORIES.pop("retryable", None)
+
+
 def test_no_provider_available_raises(dummy_providers):
     cfg = _cfg("brokenprimary", fallback=["brokenprimary"])
     with pytest.raises(AsrUnavailable):
@@ -102,6 +142,9 @@ def test_fallback_uses_its_own_resolved_model_and_options(canned):
     class Broken:
         def available(self):
             return False
+
+        def transcribe(self, *args, **kwargs):
+            raise AsrUnavailable("provider runtime is unavailable")
 
     class Fallback:
         def __init__(self, cfg):

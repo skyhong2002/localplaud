@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ..providers.failures import RetryableProviderError, is_retryable_sdk_failure, sdk_failure_label
 from .base import LLMError, LLMUnavailable
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ class OpenAILLM:
         max_tokens: int = 2048,
     ) -> str:
         if not self.cfg.api_key:
-            raise LLMUnavailable("OpenAI LLM: no API key configured")
+            raise LLMError("OpenAI LLM: no API key configured")
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -53,16 +54,22 @@ class OpenAILLM:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        resp = client.chat.completions.create(
-            model=self.cfg.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        try:
+            resp = client.chat.completions.create(
+                model=self.cfg.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception as exc:  # SDK boundary; classify before fallback
+            label = sdk_failure_label(exc)
+            if is_retryable_sdk_failure(exc):
+                raise RetryableProviderError(f"OpenAI LLM transient failure: {label}") from exc
+            raise LLMError(f"OpenAI LLM request failed: {label}") from exc
         if getattr(resp, "usage", None):
             self.usage["input_tokens"] += getattr(resp.usage, "prompt_tokens", 0) or 0
             self.usage["output_tokens"] += getattr(resp.usage, "completion_tokens", 0) or 0
         content = resp.choices[0].message.content
-        if content is None:
+        if content is None or not content.strip():
             raise LLMError("OpenAI LLM: empty completion")
         return content

@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from localplaud.config import Settings
@@ -37,3 +39,17 @@ def test_env_secret_reference_resolves_without_entering_snapshot(monkeypatch):
     routed = settings_for_route(settings, "summarize", snapshot)
     assert routed.llm.openai.api_key == "resolved-secret"
     assert "resolved-secret" not in str(snapshot)
+
+
+def test_dotenv_secret_reference_resolves_without_exporting_or_snapshot_leak(
+    monkeypatch, tmp_path,
+):
+    from localplaud.providers.routing import _resolve_secret_ref
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LOCALPLAUD_TEST_DOTENV_KEY", raising=False)
+    (tmp_path / ".env").write_text(
+        "LOCALPLAUD_TEST_DOTENV_KEY=dotenv-secret\n", encoding="utf-8"
+    )
+    assert _resolve_secret_ref("env:LOCALPLAUD_TEST_DOTENV_KEY") == "dotenv-secret"
+    assert "LOCALPLAUD_TEST_DOTENV_KEY" not in os.environ

@@ -8,10 +8,15 @@ from pathlib import Path
 from ..asr.base import Segment, Transcript, Word
 from ..asr.remote_worker_provider import _parse_transcript
 from ..config import AlignConfig
+from ..providers.failures import ProviderUnavailableError, allows_provider_fallback
 from ..providers.remote_inference import run_remote_audio_json
 
 
 class AlignmentUnavailable(RuntimeError):
+    pass
+
+
+class AlignmentProviderUnavailable(AlignmentUnavailable, ProviderUnavailableError):
     pass
 
 
@@ -39,13 +44,17 @@ def align(audio: Path, transcript: Transcript, config: AlignConfig,
             return result, {"method": "remote-worker", "forced": True,
                             "words": sum(len(row.words) for row in result.segments)}
         except Exception as exc:
-            raise AlignmentUnavailable(f"remote alignment failed: {exc}") from exc
+            if not allows_provider_fallback(exc):
+                raise
+            raise AlignmentProviderUnavailable(f"remote alignment failed: {exc}") from exc
     if config.provider != "whisperx":
         raise AlignmentUnavailable(f"unknown alignment provider: {config.provider}")
     try:
         import whisperx
     except ImportError as exc:
-        raise AlignmentUnavailable("WhisperX is not installed; install the alignment extra") from exc
+        raise AlignmentProviderUnavailable(
+            "WhisperX is not installed; install the alignment extra"
+        ) from exc
     language = transcript.language
     if not language or language == "auto":
         raise AlignmentUnavailable("WhisperX alignment requires a detected transcript language")
@@ -65,8 +74,8 @@ def align(audio: Path, transcript: Transcript, config: AlignConfig,
                         for row in transcript.segments]
         result = whisperx.align(raw_segments, model, metadata, str(audio), device,
                                 return_char_alignments=False)
-    except Exception as exc:  # noqa: BLE001
-        raise AlignmentUnavailable(f"WhisperX alignment failed: {exc}") from exc
+    except Exception:
+        raise
     segments = []
     for row in result.get("segments", []):
         words = [Word(text=item.get("word", ""), start=float(item.get("start", row["start"])),

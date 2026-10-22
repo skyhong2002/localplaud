@@ -6,7 +6,8 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
 ## Status snapshot (2026-07-10)
 
 - Full app built & published: <https://github.com/skyhong2002/localplaud> (MIT).
-  Active development is merged directly to `main` (259 tests passing locally).
+  The current local worktree has 333 tests passing; the latest P0 hardening is
+  not yet committed or pushed.
 - **Production is LIVE on SkyLabMac** (M4 Mac mini): launchd service `com.localplaud.agent` runs `localplaud run`; reverse-proxied by the existing Caddy at **https://plaud.observe.tw** (basic_auth). Local ASR = mlx-whisper (Metal); LLM/embeddings = ollama.
 - **Real account verified**: the official Open API provider is live in production
   (OAuth auto-refresh verified) and returns the account's **full history (~750
@@ -18,9 +19,12 @@ No secrets here — those live in `.env` / the Caddyfile, never committed.
   restarted on the current `main` with `artifact_mode = "independent"` and
   `prefer_cloud_artifacts = false`; local transcript revisions preserve provenance,
   mind maps are resumable, and a real failed mind-map stage was retried successfully
-  after fixing thinking-only Ollama completions. The remaining production quality
-  blocker is diarization: pyannote is configured, but model-term acceptance and a
-  Hugging Face token are still missing, so affected files remain usable `partial`.
+  after fixing thinking-only Ollama completions. Pyannote Community-1 access is now
+  authenticated and a 192-second real recording completed with two stable speakers,
+  107 assigned segments, and 445 assigned words. **Diarization backfill complete
+  (2026-07-11):** all 25 previously degraded/interrupted recordings resumed
+  successfully overnight — 33 recordings now have completed diarize stages and
+  zero degraded/failed remain.
 - Dev env on SkyLabMac: `~/Projects/localplaud` (venv, ffmpeg static, config.toml, `.env`). Claude Code CLI installed (`~/.local/bin/claude`).
 
 ## TODO — prioritized
@@ -110,10 +114,28 @@ Backend implementation status:
   retryable errors, expiring claim leases/heartbeats, crashed-runner recovery,
   stale-owner rejection, checksum validation, and a remote ASR adapter with no
   Plaud credentials.
-- Remaining external acceptance: authenticated pyannote on real audio, NVIDIA/CPU
-  host execution, a separately isolated rentable GPU, and consented Taiwan Mandarin
-  / Mandarin-English benchmark runs. The code/harness must not be mistaken for
-  those real-world acceptance results.
+- Remaining external acceptance: NVIDIA/CPU host execution, a separately isolated
+  rentable GPU, and official OpenAI cloud execution. OpenCode Go is verified as a
+  deliberately text-only compatible connection; it does not satisfy audio or
+  embedding evidence.
+- ✅ **Rentable GPU trial PASSED (2026-07-10, gputw.ai):** full API-driven lifecycle
+  (catalog → node → create → RUNNING in ~20 s → stop), RTX 3090 x2 NVLink pod at
+  $0.4681/hr per-second billing. Reference worker deployed with zero Plaud
+  credentials; HMAC handshake over the public `8080-<instance-id>.gputw.ai` HTTPS
+  proxy; signed `/api/worker-input/` audio fetch through a Caddy basic_auth bypass;
+  two real Mandarin recordings transcribed end-to-end (196 s audio → 10.8 s wall,
+  RTF ≈ 0.06 with cached large-v3-turbo on CUDA). Caveats: SSH public keys are
+  dashboard-only (no API); one single-3090 node was stuck "releasing the previous
+  instance"; creating an instance rents the whole node (2 GPUs / 24 cores), so
+  costs above the headline per-GPU price. Instance `267f6c1d…` is kept STOPPED for
+  reuse; worker deploy = rsync/tar + `uv` + `worker_main.py` (see acceptance
+  matrix). gputw.ai stays in the dev flow as the rentable-GPU path.
+- **Benchmark decision (2026-07-10):** Sky explicitly deprioritized the consented
+  Taiwan Mandarin / Mandarin-English benchmark acceptance — the core pipeline (ASR,
+  diarization, summary, mind map, Ask) runs without it. The `benchmark-speech`
+  harness stays available, but benchmark runs no longer block P0 completion; they
+  remain a prerequisite only for changing defaults that need accuracy evidence
+  (e.g. enabling VAD by default or adopting forced alignment).
 
 Implement this P0 in the following order:
 
@@ -182,9 +204,10 @@ embedding raw provider credentials or model settings in each rule.
   CUDA/CPU still needs the equivalent turbo deployment verified on its target host.
 - ✅ Updated the diarization integration from legacy pyannote 3.1 to the current
   open-source `speaker-diarization-community-1` API, including word/segment speaker
-  assignment, model provenance, and actionable health checks. SkyLabMac still needs
-  the optional dependency plus acceptance of the gated model terms and a Hugging
-  Face token before real-audio verification. VAD and word-level alignment remain.
+  assignment, model provenance, and actionable health checks. Model terms/token and
+  a real SkyLabMac smoke are verified: a 192-second recording completed in 99.44
+  seconds with two stable speakers, 107 assigned segments, and 445 assigned words.
+  VAD and forced-alignment quality still require the private benchmark set.
 - ✅ Added optional VAD groundwork behind a **default-off** `asr.vad.enabled` flag
   (`asr/vad.py`): provider-agnostic silero-vad detection + region merge/pad/split
   planning, ffmpeg region slicing, and honest `health()`. The mlx path transcribes

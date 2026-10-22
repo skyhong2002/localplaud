@@ -85,7 +85,9 @@ class OllamaEmbedder:
                 return vectors
         except EmbeddingError:
             raise
-        except httpx.HTTPError as exc:
+        except httpx.TransportError as exc:
             raise EmbeddingUnavailable(f"Ollama embeddings request failed: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise EmbeddingError(f"Ollama embeddings request failed: {exc}") from exc
         except (KeyError, TypeError, ValueError) as exc:
             raise EmbeddingError(f"unexpected Ollama embeddings response: {exc}") from exc

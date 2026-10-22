@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from ..providers.failures import ProviderUnavailableError
+
 
 @dataclass
 class Word:
@@ -62,9 +64,9 @@ class AsrError(RuntimeError):
     """Raised when a provider fails to transcribe."""
 
 
-class AsrUnavailable(AsrError):
+class AsrUnavailable(AsrError, ProviderUnavailableError):
     """Raised when a provider can't run in this environment (missing GPU,
-    model, dependency, or API key). Triggers fallback to the next provider."""
+    model, dependency, or reachable runtime). Triggers explicit fallback."""
 
 
 @runtime_checkable

@@ -24,6 +24,15 @@ SUPPORTED_PROVIDERS = LOCAL_PROVIDERS | {
     "openai", "deepgram", "assemblyai", "anthropic", "codex-local", "remote-worker",
 }
 
+_DEFAULT_SECRET_REFS = {
+    "openai": "env:OPENAI_API_KEY",
+    "deepgram": "env:LOCALPLAUD_ASR__DEEPGRAM__API_KEY",
+    "assemblyai": "env:LOCALPLAUD_ASR__ASSEMBLYAI__API_KEY",
+    "anthropic": "env:LOCALPLAUD_LLM__ANTHROPIC__API_KEY",
+    "remote-worker": "env:LOCALPLAUD_REMOTE_WORKER_TOKEN",
+}
+_DEFAULT_BASE_URLS = {"openai": "https://api.openai.com/v1"}
+
 
 def _egress(provider: str) -> str:
     return "local_only" if provider in LOCAL_PROVIDERS else "external"
@@ -113,6 +122,34 @@ def bootstrap_legacy_profile(session: Session, settings: Settings) -> ExecutionP
                                   STAGE_CAPABILITY.get(stage))
     session.flush()
     _bootstrap_starting_profiles(session, profile)
+    return profile
+
+
+def sync_system_default_profile(session: Session, settings: Settings) -> ExecutionProfile:
+    """Explicitly refresh the managed system default from legacy settings.
+
+    This is separate from bootstrap and resolution so ordinary reads never
+    overwrite durable profile state. Only the system-default row is changed.
+    """
+    profile = session.scalar(
+        select(ExecutionProfile).where(ExecutionProfile.is_system_default)
+    )
+    if profile is None:
+        raise RuntimeError("no system-default execution profile; run localplaud init")
+    stages, policy = legacy_profile_spec(settings)
+    profile.stages = stages
+    profile.policy = policy
+    profile.description = "Imported from config.toml/environment"
+    profile.version = (profile.version or 0) + 1
+    for stage, route in stages.items():
+        for candidate in [route, *route.get("fallback", [])]:
+            _ensure_catalog_entry(
+                session,
+                candidate["provider"],
+                candidate.get("model"),
+                STAGE_CAPABILITY.get(stage),
+            )
+    session.flush()
     return profile
 
 
@@ -253,19 +290,34 @@ def _ensure_named_model(session: Session, connection_name: str, model: str,
 
 def _ensure_catalog_entry(session: Session, provider: str, model: str | None,
                           capability: str | None) -> None:
+    normalized = provider.upper().replace("-", "_")
+    default_secret_ref = _DEFAULT_SECRET_REFS.get(
+        provider, f"env:LOCALPLAUD_{normalized}_API_KEY"
+    )
     connection = session.scalar(select(ProviderConnection).where(
         ProviderConnection.name == provider
     ))
     if connection is None:
-        normalized = provider.upper().replace("-", "_")
         connection = ProviderConnection(
             name=provider, provider_type=provider,
             secret_ref=None if _egress(provider) == "local_only"
-            else f"env:LOCALPLAUD_{normalized}_API_KEY",
+            else default_secret_ref,
+            base_url=_DEFAULT_BASE_URLS.get(provider),
             configuration={"egress": _egress(provider)},
         )
         session.add(connection)
         session.flush()
+    elif _egress(provider) != "local_only":
+        old_default = f"env:LOCALPLAUD_{normalized}_API_KEY"
+        changed = False
+        if connection.secret_ref in {None, old_default} and connection.secret_ref != default_secret_ref:
+            connection.secret_ref = default_secret_ref
+            changed = True
+        if not connection.base_url and provider in _DEFAULT_BASE_URLS:
+            connection.base_url = _DEFAULT_BASE_URLS[provider]
+            changed = True
+        if changed:
+            connection.version = (connection.version or 0) + 1
     if not model or not capability:
         return
     row = session.scalar(select(ProviderModel).where(

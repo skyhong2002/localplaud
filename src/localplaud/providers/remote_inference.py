@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from ..asr.remote_worker_provider import sign_input
+from .failures import ProviderUnavailableError, RetryableProviderError
 from .remote_worker import JobInput, RemoteWorkerClient, WorkerJobRequest
 
 
@@ -21,7 +22,7 @@ def run_remote_json(cfg, capability: str, options: dict) -> dict:
         advertised = next((item for item in handshake.capabilities
                            if item.name == capability), None)
         if advertised is None or cfg.model not in advertised.models:
-            raise RuntimeError(f"worker does not advertise {capability}:{cfg.model}")
+            raise ProviderUnavailableError(f"worker does not advertise {capability}:{cfg.model}")
         logical = hashlib.sha256(json.dumps(
             {"capability": capability, "model": cfg.model, "options": options},
             sort_keys=True, separators=(",", ":")
@@ -35,12 +36,14 @@ def run_remote_json(cfg, capability: str, options: dict) -> dict:
         while status.state in {"queued", "running"}:
             if time.monotonic() >= deadline:
                 client.cancel(status.job_id)
-                raise RuntimeError("remote inference timed out")
+                raise RetryableProviderError("remote inference timed out")
             time.sleep(min(cfg.poll_interval_seconds, 5))
             status = client.status(status.job_id)
         if status.state != "completed" or status.artifact is None \
                 or status.artifact.payload is None:
             message = status.error.message if status.error else f"job ended as {status.state}"
+            if status.error and status.error.retryable:
+                raise RetryableProviderError(message)
             raise RuntimeError(message)
         payload = status.artifact.payload
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -74,18 +77,20 @@ def run_remote_audio_json(cfg, input_cfg, audio_path: Path, capability: str,
         advertised = next((item for item in handshake.capabilities
                            if item.name == capability), None)
         if advertised is None or cfg.model not in advertised.models:
-            raise RuntimeError(f"worker does not advertise {capability}:{cfg.model}")
+            raise ProviderUnavailableError(f"worker does not advertise {capability}:{cfg.model}")
         status = client.submit(request)
         deadline = time.monotonic() + cfg.timeout_seconds
         while status.state in {"queued", "running"}:
             if time.monotonic() >= deadline:
                 client.cancel(status.job_id)
-                raise RuntimeError("remote audio inference timed out")
+                raise RetryableProviderError("remote audio inference timed out")
             time.sleep(min(cfg.poll_interval_seconds, 5))
             status = client.status(status.job_id)
         if status.state != "completed" or status.artifact is None \
                 or status.artifact.payload is None:
             message = status.error.message if status.error else f"job ended as {status.state}"
+            if status.error and status.error.retryable:
+                raise RetryableProviderError(message)
             raise RuntimeError(message)
         payload = status.artifact.payload
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()

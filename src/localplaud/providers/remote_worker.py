@@ -16,6 +16,8 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from .failures import RetryableProviderError
+
 PROTOCOL_VERSION = "1"
 
 
@@ -122,10 +124,19 @@ class RemoteWorkerClient:
 
     def _request(self, method: str, path: str, payload: dict | None = None) -> httpx.Response:
         body = json.dumps(payload, separators=(",", ":")).encode() if payload is not None else b""
-        response = self.client.request(method, path, content=body,
-                                       headers={"Content-Type": "application/json",
-                                                **signed_headers(self.token, method, path, body)})
-        response.raise_for_status()
+        try:
+            response = self.client.request(method, path, content=body,
+                                           headers={"Content-Type": "application/json",
+                                                    **signed_headers(self.token, method, path, body)})
+            response.raise_for_status()
+        except httpx.TransportError as exc:
+            raise RetryableProviderError("remote worker transport failed") from exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {408, 425, 429} or exc.response.status_code >= 500:
+                raise RetryableProviderError(
+                    f"remote worker returned HTTP {exc.response.status_code}"
+                ) from exc
+            raise
         return response
 
     def handshake(self) -> WorkerHandshake:

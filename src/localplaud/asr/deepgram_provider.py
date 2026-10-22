@@ -30,7 +30,7 @@ class DeepgramProvider:
 
     def transcribe(self, audio_path: Path, language: str = "auto") -> Transcript:
         if not self.cfg.api_key:
-            raise AsrUnavailable("Deepgram api_key is not set")
+            raise AsrError("Deepgram api_key is not set")
         try:
             from deepgram import DeepgramClient, PrerecordedOptions
         except ImportError as exc:

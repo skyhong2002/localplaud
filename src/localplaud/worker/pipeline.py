@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import delete, or_, select, update
@@ -37,6 +37,7 @@ from ..db.models import (
 from ..db.models import Summary as SummaryRow
 from ..db.models import Transcript as TranscriptRow
 from ..db.session import session_scope
+from ..providers.failures import allows_provider_fallback
 from ..providers.materialize import materialize_snapshot
 from ..providers.resolver import resolve_profile
 from ..providers.routing import settings_for_route
@@ -156,6 +157,12 @@ def _set_stage(
             run.attempts = (run.attempts or 0) + 1
             run.started_at = now
             run.completed_at = None
+            run.provider = None
+            run.model = None
+            run.artifact_source = None
+            run.usage = {}
+            run.actual_cost = None
+            run.latency_ms = None
             route = (run.profile_snapshot or {}).get("route", {})
             run.estimated_cost = route.get("estimated_cost")
             session.add(StageAttempt(
@@ -196,6 +203,7 @@ def _set_stage(
             attempt = session.scalar(select(StageAttempt).where(
                 StageAttempt.file_id == file_id, StageAttempt.stage == stage,
                 StageAttempt.attempt == run.attempts,
+                StageAttempt.status == StageStatus.running,
             ))
             if attempt is not None:
                 attempt.status = status
@@ -246,7 +254,7 @@ def _run_with_fallback(file_id: str, stage: StageName, settings: Settings, opera
             return operation(routed), routed, route, fallback_index
         except Exception as exc:  # noqa: BLE001 - explicit ordered fallback boundary
             errors.append(f"{route.get('provider')}: {exc}")
-            if fallback_index + 1 < len(routes):
+            if fallback_index + 1 < len(routes) and allows_provider_fallback(exc):
                 log.warning("%s stage provider %s failed; trying explicit fallback: %s",
                             stage.value, route.get("provider"), exc)
                 continue
@@ -646,7 +654,7 @@ def process_file(
                         file_id, StageName.summarize, settings,
                         lambda routed: summarize.summarize(transcript, routed),
                     )
-                    _persist_summary(file_id, result)
+                    _persist_summary(file_id, result, transcript_source)
                     _finish_stage(
                         file_id,
                         StageName.summarize,
@@ -697,7 +705,7 @@ def process_file(
                             transcript, routed, summary_md
                         ),
                     )
-                    _persist_summary(file_id, result)
+                    _persist_summary(file_id, result, transcript_source)
                     _finish_stage(
                         file_id,
                         StageName.mind_map,
@@ -773,13 +781,25 @@ def process_file(
             )
 
         with session_scope() as session:
+            retry_count = 0
+            retry_after = None
+            current = session.get(PlaudFile, file_id)
+            has_retryable_failure = any(
+                run.status == StageStatus.failed for run in current.stage_runs
+            )
+            if partial_errors and has_retryable_failure:
+                retry_count = (current.retry_count or 0) + 1
+                max_attempts, base_seconds, max_seconds = _retry_policy(file_id, settings)
+                if retry_count < max_attempts:
+                    delay = min(max_seconds, base_seconds * (2 ** (retry_count - 1)))
+                    retry_after = datetime.now(UTC) + timedelta(seconds=delay)
             finished = session.execute(
                 update(PlaudFile)
                 .where(PlaudFile.id == file_id, PlaudFile.processing_token == claim_token)
                 .values(
                     status=FileStatus.partial if partial_errors else FileStatus.done,
                     error="; ".join(partial_errors)[:2000] if partial_errors else None,
-                    retry_count=0, retry_after=None, processing_token=None,
+                    retry_count=retry_count, retry_after=retry_after, processing_token=None,
                     processing_lease_until=None,
                 )
                 .execution_options(synchronize_session=False)
@@ -802,8 +822,6 @@ def process_file(
             max_attempts, base_seconds, max_seconds = _retry_policy(file_id, settings)
             if r.retry_count < max_attempts:
                 delay = min(max_seconds, base_seconds * (2 ** (r.retry_count - 1)))
-                from datetime import timedelta
-
                 r.retry_after = datetime.now(UTC) + timedelta(seconds=delay)
             else:
                 r.retry_after = None
@@ -983,7 +1001,7 @@ def _persist_transcript(
     return transcript
 
 
-def _persist_summary(file_id: str, result: dict) -> None:
+def _persist_summary(file_id: str, result: dict, transcript_source: str = "local") -> None:
     template = result.get("template", "default")
     with session_scope() as session:
         existing = session.scalar(select(SummaryRow).where(
@@ -1003,9 +1021,8 @@ def _persist_summary(file_id: str, result: dict) -> None:
             ))
             session.delete(existing)
         file = session.get(PlaudFile, file_id)
-        transcript_revision = (
-            file.corrected_transcript.revision if file.corrected_transcript is not None else None
-        )
+        corrected = file.corrected_transcript_for_source(transcript_source)
+        transcript_revision = corrected.revision if corrected is not None else None
         stage = StageName.mind_map if template == "mind_map" else StageName.summarize
         run = session.scalar(select(StageRun).where(
             StageRun.file_id == file_id, StageRun.stage == stage,
@@ -1071,18 +1088,30 @@ def process_pending(
     with session_scope() as session:
         now = datetime.now(UTC)
         stmt = (
-            select(PlaudFile.id)
+            select(PlaudFile.id, PlaudFile.status, PlaudFile.retry_count)
             .where(or_(
                 PlaudFile.status == FileStatus.downloaded,
                 (PlaudFile.status == FileStatus.error)
                 & (PlaudFile.retry_after.is_not(None))
                 & (PlaudFile.retry_after <= now),
+                (PlaudFile.status == FileStatus.partial)
+                & (PlaudFile.retry_after.is_not(None))
+                & (PlaudFile.retry_after <= now)
+                & PlaudFile.stage_runs.any(StageRun.status == StageStatus.failed),
             ))
             .order_by(PlaudFile.start_time_ms.desc().nulls_last(), PlaudFile.created_at.desc())
         )
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        ids = list(session.scalars(stmt))
+        candidates = list(session.execute(stmt))
+    ids: list[str] = []
+    for file_id, status, retry_count in candidates:
+        if (
+            status != FileStatus.downloaded
+            and (retry_count or 0) >= _retry_policy(file_id, settings)[0]
+        ):
+            continue
+        ids.append(file_id)
+        if limit is not None and len(ids) >= limit:
+            break
     if not ids:
         return 0
 
@@ -1125,7 +1154,7 @@ def generate_note(file_id: str, template: str, settings: Settings | None = None)
         result, _, route, fallback_index = _run_with_fallback(
             file_id, StageName.summarize, settings, generate
         )
-        _persist_summary(file_id, result)
+        _persist_summary(file_id, result, source)
         _finish_stage(file_id, StageName.summarize, provider=result.get("provider"),
                       model=result.get("model"), artifact_source="local",
                       detail={"template": result.get("template"),

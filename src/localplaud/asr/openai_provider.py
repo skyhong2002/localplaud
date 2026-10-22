@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from ..providers.failures import RetryableProviderError, is_retryable_sdk_failure, sdk_failure_label
 from .base import AsrError, AsrUnavailable, Segment, Transcript, Word
 from .registry import register
 
@@ -35,7 +36,7 @@ class OpenAIProvider:
 
     def transcribe(self, audio_path: Path, language: str = "auto") -> Transcript:
         if not self.cfg.api_key:
-            raise AsrUnavailable("OpenAI ASR api_key is not set")
+            raise AsrError("OpenAI ASR api_key is not set")
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -74,7 +75,12 @@ class OpenAIProvider:
         except AsrError:
             raise
         except Exception as exc:
-            raise AsrError(f"OpenAI transcription failed: {exc}") from exc
+            label = sdk_failure_label(exc)
+            if is_retryable_sdk_failure(exc):
+                raise RetryableProviderError(
+                    f"OpenAI transcription transient failure: {label}"
+                ) from exc
+            raise AsrError(f"OpenAI transcription failed: {label}") from exc
 
         raw_segments = getattr(resp, "segments", None) or []
         segments = [

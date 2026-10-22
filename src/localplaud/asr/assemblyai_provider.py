@@ -33,7 +33,7 @@ class AssemblyAIProvider:
 
     def transcribe(self, audio_path: Path, language: str = "auto") -> Transcript:
         if not self.cfg.api_key:
-            raise AsrUnavailable("AssemblyAI api_key is not set")
+            raise AsrError("AssemblyAI api_key is not set")
         try:
             import assemblyai as aai
         except ImportError as exc:

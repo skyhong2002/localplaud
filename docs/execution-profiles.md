@@ -82,6 +82,15 @@ inline transcript is accepted only when its canonical JSON checksum matches.
 Production deployment must route `/api/worker-input/` through the reverse proxy
 without interactive basic authentication while retaining its signature validation.
 Use a distinct worker HMAC token and input-signing secret, and configure an explicit
-worker fetch-host allowlist. Validate the worker with
+worker fetch-host allowlist. The reference runner requires credential-free HTTPS on
+TCP/443, rejects redirects, validates every DNS answer as globally routable, and
+checks the connected peer address again before reading the response body. Standard
+TLS hostname/SNI verification remains enabled. Because httpx does not provide a
+supported DNS-pinning hook that preserves that TLS behavior, this is defense in
+depth rather than a proof against every resolver/transport TOCTOU. The safe
+deployment constraint is therefore mandatory outbound firewall/proxy policy: the
+worker may connect on TCP/443 only to the explicitly allowlisted public object-store
+or localplaud input hosts (and any separately required provider endpoints), never to
+private, loopback, link-local, metadata, or other internal networks. Validate the worker with
 a self-owned NVIDIA host and a separately isolated rentable GPU before marking those
 acceptance rows complete.

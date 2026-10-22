@@ -1,7 +1,15 @@
 import json
 
+import httpx
+import pytest
+
 from localplaud.providers.remote_worker import JobInput, WorkerJobRequest
-from localplaud.providers.remote_worker_runner import RemoteWorkerRunner, WorkerHandlerError
+from localplaud.providers.remote_worker_runner import (
+    RemoteWorkerRunner,
+    WorkerHandlerError,
+    _validate_connected_peer,
+    _validate_fetch_url,
+)
 from localplaud.providers.remote_worker_server import RemoteWorkerJobStore
 
 
@@ -59,3 +67,34 @@ def test_runner_preserves_handler_retry_classification(tmp_path):
     assert status.error.retryable is True
     assert status.error.detail == {"retry_after": 30}
     assert store.submit(job).state == "queued"
+
+
+class _Stream:
+    def __init__(self, peer):
+        self.peer = peer
+
+    def get_extra_info(self, name):
+        return self.peer if name == "server_addr" else None
+
+
+def test_fetch_destination_requires_strict_https_host_and_port(monkeypatch):
+    monkeypatch.setattr("socket.getaddrinfo", lambda *args, **kwargs: [
+        (2, 1, 6, "", ("93.184.216.34", 443)),
+    ])
+    _validate_fetch_url("https://audio.example/file", {"AUDIO.EXAMPLE."})
+    with pytest.raises(ValueError, match="port 443"):
+        _validate_fetch_url("https://audio.example:8443/file", {"audio.example"})
+
+
+@pytest.mark.parametrize("peer", [("127.0.0.1", 443), ("10.0.0.2", 443), None])
+def test_connected_peer_validation_fails_closed_for_private_or_missing_peer(peer):
+    response = httpx.Response(200, extensions={"network_stream": _Stream(peer)})
+    with pytest.raises(ValueError, match="peer|non-global"):
+        _validate_connected_peer(response)
+
+
+def test_connected_peer_validation_accepts_public_peer():
+    response = httpx.Response(
+        200, extensions={"network_stream": _Stream(("93.184.216.34", 443))}
+    )
+    _validate_connected_peer(response)

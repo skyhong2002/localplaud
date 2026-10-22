@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 
 from .hardware import detect_hardware
@@ -33,8 +32,9 @@ def check_provider(provider_type: str, secret_ref: str | None = None,
                 {"runtime_installed": ok,
                  "note": "model terms, token, and model access require an authenticated smoke test"})
     if provider_type in {"openai", "deepgram", "assemblyai", "anthropic"}:
-        configured = bool(secret_ref and secret_ref.startswith("env:")
-                          and os.getenv(secret_ref.removeprefix("env:")))
+        from .routing import _resolve_secret_ref
+
+        configured = bool(secret_ref and _resolve_secret_ref(secret_ref))
         return ("degraded" if configured else "unavailable",
                 {"secret_configured": configured,
                  "note": "credentials are present but no paid request was sent"})

@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ..providers.failures import ProviderUnavailableError
+
 if TYPE_CHECKING:
     from ..config import EmbeddingsConfig
 
@@ -20,9 +22,9 @@ class EmbeddingError(RuntimeError):
     """Raised when a provider fails to embed."""
 
 
-class EmbeddingUnavailable(EmbeddingError):
+class EmbeddingUnavailable(EmbeddingError, ProviderUnavailableError):
     """Raised when a provider can't run in this environment (missing
-    dependency, model, or API key)."""
+    dependency, model, or reachable runtime)."""
 
 
 @runtime_checkable
@@ -69,4 +71,4 @@ def build_embedder(cfg: EmbeddingsConfig) -> Embedder:
         from .remote_worker import RemoteWorkerEmbedder
 
         return RemoteWorkerEmbedder(cfg.remote_worker)
-    raise EmbeddingUnavailable(f"unknown embedding provider: {cfg.provider!r}")
+    raise ValueError(f"unknown embedding provider: {cfg.provider!r}")

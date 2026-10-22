@@ -119,8 +119,9 @@ def build_asr_handler(config: AsrConfig, *, allowed_fetch_hosts: set[str],
             digest = hashlib.sha256()
             size = 0
             with httpx.stream("GET", request.input.location, timeout=120,
-                              follow_redirects=False) as response:
+                              follow_redirects=False, trust_env=False) as response:
                 response.raise_for_status()
+                _validate_connected_peer(response)
                 with path.open("wb") as output:
                     for chunk in response.iter_bytes():
                         if cancelled():
@@ -222,15 +223,40 @@ def _validate_fetch_url(value: str, allowed_hosts: set[str]) -> None:
     parsed = urlparse(value)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError("worker fetch URL must be credential-free HTTPS")
-    if parsed.hostname not in allowed_hosts:
+    if parsed.port not in (None, 443) or parsed.fragment:
+        raise ValueError("worker fetch URL must use HTTPS port 443 without a fragment")
+    hostname = parsed.hostname.rstrip(".").lower()
+    normalized_hosts = {host.rstrip(".").lower() for host in allowed_hosts}
+    if hostname not in normalized_hosts:
         raise ValueError("worker fetch host is not allowlisted")
     try:
-        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, 443,
+        addresses = {item[4][0] for item in socket.getaddrinfo(hostname, 443,
                                                                type=socket.SOCK_STREAM)}
     except OSError as exc:
         raise ValueError("worker fetch host cannot be resolved") from exc
     if any(not ipaddress.ip_address(address).is_global for address in addresses):
         raise ValueError("worker fetch URL resolves to a non-global address")
+
+
+def _validate_connected_peer(response: httpx.Response) -> None:
+    """Reject a rebinding/private peer before consuming any response body.
+
+    httpx does not expose a supported way to pin a resolved address while retaining
+    ordinary TLS hostname/SNI verification.  The network stream does expose the
+    connected peer on the standard transport; fail closed if it is absent.  Operators
+    must still restrict outbound traffic so this worker can reach only the explicitly
+    allowlisted public object-store hosts on TCP/443.
+    """
+    stream = response.extensions.get("network_stream")
+    peer = stream.get_extra_info("server_addr") if stream is not None else None
+    if not peer or not isinstance(peer, tuple) or not peer[0]:
+        raise ValueError("worker fetch connected peer could not be verified")
+    try:
+        address = ipaddress.ip_address(peer[0])
+    except ValueError as exc:
+        raise ValueError("worker fetch connected peer is not an IP address") from exc
+    if not address.is_global:
+        raise ValueError("worker fetch connected to a non-global address")
 
 
 def _transcript_payload(transcript: Transcript) -> dict[str, Any]:

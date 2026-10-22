@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from .base import LLMUnavailable
+from ..providers.failures import RetryableProviderError, is_retryable_sdk_failure, sdk_failure_label
+from .base import LLMError, LLMUnavailable
 
 if TYPE_CHECKING:
     from ..config import AnthropicLlmConfig
@@ -34,7 +35,7 @@ class AnthropicLLM:
         max_tokens: int = 2048,
     ) -> str:
         if not self.cfg.api_key:
-            raise LLMUnavailable("Anthropic LLM: no API key configured")
+            raise LLMError("Anthropic LLM: no API key configured")
         try:
             import anthropic
         except ImportError as exc:
@@ -43,13 +44,19 @@ class AnthropicLLM:
             ) from exc
 
         client = anthropic.Anthropic(api_key=self.cfg.api_key)
-        resp = client.messages.create(
-            model=self.cfg.model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system=system if system is not None else anthropic.NOT_GIVEN,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        try:
+            resp = client.messages.create(
+                model=self.cfg.model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system if system is not None else anthropic.NOT_GIVEN,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception as exc:  # SDK boundary; classify before fallback
+            label = sdk_failure_label(exc)
+            if is_retryable_sdk_failure(exc):
+                raise RetryableProviderError(f"Anthropic transient failure: {label}") from exc
+            raise LLMError(f"Anthropic request failed: {label}") from exc
         if getattr(resp, "usage", None):
             self.usage["input_tokens"] += getattr(resp.usage, "input_tokens", 0) or 0
             self.usage["output_tokens"] += getattr(resp.usage, "output_tokens", 0) or 0

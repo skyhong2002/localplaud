@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..providers.remote_inference import run_remote_json
-from .base import EmbeddingError, EmbeddingUnavailable
+from .base import EmbeddingError
 
 
 class RemoteWorkerEmbedder:
@@ -21,7 +21,7 @@ class RemoteWorkerEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not self.available():
-            raise EmbeddingUnavailable("remote-worker embeddings are not configured")
+            raise EmbeddingError("remote-worker embeddings are not configured")
         try:
             payload = run_remote_json(self.cfg, "embeddings", {"texts": texts})
             vectors = payload.get("vectors")

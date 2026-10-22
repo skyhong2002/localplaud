@@ -18,6 +18,7 @@ from ..db.models import Chunk, ExecutionProfile, PlaudFile, StageName
 from ..db.session import session_scope
 from ..embeddings.base import build_embedder
 from ..llm.base import build_llm
+from ..providers.failures import allows_provider_fallback
 from ..providers.materialize import materialize_snapshot
 from ..providers.resolver import resolve_profile
 from ..providers.routing import settings_for_route
@@ -185,6 +186,8 @@ def answer(
             break
         except Exception as exc:  # noqa: BLE001 - explicit ordered fallback boundary
             last_error = exc
+            if not allows_provider_fallback(exc):
+                raise
     else:
         raise RuntimeError(f"all Ask providers failed: {last_error}") from last_error
     provider = routed.llm.provider

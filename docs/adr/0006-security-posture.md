@@ -19,8 +19,11 @@ addressing before wider use.
   the recommended front line is Caddy `basic_auth`.
 - **Fetches are SSRF-guarded.** URLs pulled from API responses must be `https`
   and must not resolve to private/loopback/link-local/reserved IPs; redirects
-  are not followed after the check. This blocks a compromised or MITM'd response
-  from steering the client at cloud-metadata or internal services.
+  are not followed after the check. Remote-worker input fetches additionally require
+  an exact host allowlist, TCP/443, and a globally routable connected peer before any
+  body bytes are consumed. TLS hostname verification remains enabled. Since this is
+  post-connect validation rather than DNS pinning, production workers must also have
+  outbound network policy limiting TCP/443 to those allowlisted public destinations.
 - **Downloads are bounded.** Audio is capped (2 GiB) and gzip assets use a
   size-bounded decompress (128 MiB) to defend against decompression bombs.
 - **Cloud ids are validated before use in filesystem paths**

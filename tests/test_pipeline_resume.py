@@ -172,6 +172,135 @@ def test_index_failure_keeps_transcript_and_summary(monkeypatch, tmp_path):
         assert index_run.status == StageStatus.failed
         assert index_run.attempts == 1
         assert "embedding model unavailable" in index_run.error
+        assert f.retry_count == 1
+        assert f.retry_after is not None
+
+
+def test_due_partial_retry_resumes_only_failed_downstream_stage(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageStatus
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import process_file, process_pending
+
+    init_db()
+    audio = tmp_path / "partial-retry.wav"
+    audio.write_bytes(b"RIFFfake")
+    with session_scope() as session:
+        session.add(PlaudFile(id="partial-retry", status=FileStatus.downloaded,
+                              audio_path=str(audio)))
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
+    _install_fakes(monkeypatch, counters)
+    original_embed = __import__("localplaud.worker.pipeline", fromlist=["index"]).index.embed_chunks
+    monkeypatch.setattr(
+        "localplaud.worker.pipeline.index.embed_chunks",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("temporary index failure")),
+    )
+    process_file("partial-retry")
+    assert counters == {"asr": 1, "sum": 1, "mm": 1, "emb": 0}
+    with session_scope() as session:
+        row = session.get(PlaudFile, "partial-retry")
+        row.retry_after = datetime.now(UTC) - timedelta(seconds=1)
+    monkeypatch.setattr("localplaud.worker.pipeline.index.embed_chunks", original_embed)
+    assert process_pending() == 1
+    assert counters == {"asr": 1, "sum": 1, "mm": 1, "emb": 1}
+    with session_scope() as session:
+        row = session.get(PlaudFile, "partial-retry")
+        assert row.status == FileStatus.done
+        assert row.retry_count == 0 and row.retry_after is None
+        assert len(row.summaries) == 2 and len(row.chunks) == 1
+        runs = {run.stage: run for run in row.stage_runs}
+        assert runs[StageName.transcribe].attempts == 1
+        assert runs[StageName.index].attempts == 2
+        assert runs[StageName.index].status == StageStatus.completed
+
+
+def test_partial_pending_requires_due_failed_stage_and_stops_when_exhausted(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from datetime import UTC, datetime, timedelta
+
+    from localplaud.db.models import FileStatus, PlaudFile, StageName, StageRun, StageStatus
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import process_pending
+
+    init_db()
+    now = datetime.now(UTC)
+    with session_scope() as session:
+        for file_id, retry_count, retry_after, stage_status in (
+            ("due", 1, now - timedelta(seconds=1), StageStatus.failed),
+            ("not-due", 1, now + timedelta(hours=1), StageStatus.failed),
+            ("no-failure", 1, now - timedelta(seconds=1), StageStatus.completed),
+            ("degraded", 1, now - timedelta(seconds=1), StageStatus.degraded),
+            ("exhausted", 3, None, StageStatus.failed),
+            ("exhausted-due", 3, now - timedelta(seconds=1), StageStatus.failed),
+        ):
+            session.add(PlaudFile(id=file_id, status=FileStatus.partial,
+                                  audio_path=f"/{file_id}.wav", retry_count=retry_count,
+                                  retry_after=retry_after))
+            session.add(StageRun(file_id=file_id, stage=StageName.index,
+                                 status=stage_status))
+    processed = []
+    monkeypatch.setattr("localplaud.worker.pipeline.process_file",
+                        lambda file_id, settings, force=False: processed.append(file_id))
+    assert process_pending() == 1
+    assert processed == ["due"]
+
+
+def test_terminal_stage_attempt_is_not_rewritten_by_duplicate_finish(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, StageAttempt, StageName, StageStatus
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import _begin_stage, _finish_stage
+
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="immutable-attempt", status=FileStatus.downloaded))
+    _begin_stage("immutable-attempt", StageName.summarize)
+    _finish_stage("immutable-attempt", StageName.summarize, provider="first", detail={"one": 1})
+    with session_scope() as session:
+        original = session.query(StageAttempt).filter_by(file_id="immutable-attempt").one()
+        completed_at = original.completed_at
+    _finish_stage("immutable-attempt", StageName.summarize, provider="aggregate",
+                  detail={"duplicate": True})
+    with session_scope() as session:
+        attempt = session.query(StageAttempt).filter_by(file_id="immutable-attempt").one()
+        run = session.get(PlaudFile, "immutable-attempt").stage_runs[0]
+        assert attempt.status == StageStatus.completed
+        assert attempt.provider == "first" and attempt.detail == {"one": 1}
+        assert attempt.completed_at == completed_at
+        assert run.status == StageStatus.completed
+        assert run.provider == "aggregate" and run.detail == {"duplicate": True}
+
+
+def test_new_attempt_does_not_inherit_prior_usage_cost_or_provider(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, PlaudFile, StageAttempt, StageName, StageStatus
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.worker.pipeline import _begin_stage, _fail_stage, _finish_stage
+
+    init_db()
+    with session_scope() as session:
+        session.add(PlaudFile(id="fresh-attempt", status=FileStatus.downloaded))
+    _begin_stage("fresh-attempt", StageName.summarize)
+    _finish_stage(
+        "fresh-attempt", StageName.summarize, provider="first", model="old-model",
+        usage={"tokens": 99}, actual_cost=3.5,
+    )
+    _begin_stage("fresh-attempt", StageName.summarize)
+    _fail_stage("fresh-attempt", StageName.summarize, RuntimeError("failed before usage"))
+    with session_scope() as session:
+        attempts = session.query(StageAttempt).filter_by(
+            file_id="fresh-attempt"
+        ).order_by(StageAttempt.attempt).all()
+        run = session.get(PlaudFile, "fresh-attempt").stage_runs[0]
+        assert len(attempts) == 2
+        assert attempts[0].provider == "first" and attempts[0].usage == {"tokens": 99}
+        assert attempts[0].actual_cost == 3.5
+        assert attempts[1].status == StageStatus.failed
+        assert attempts[1].provider != "first" and attempts[1].model != "old-model"
+        assert attempts[1].usage == {} and attempts[1].actual_cost is None
+        assert run.provider is None and run.usage == {} and run.actual_cost is None
 
 
 def test_pipeline_error_schedules_bounded_exponential_retry(monkeypatch, tmp_path):

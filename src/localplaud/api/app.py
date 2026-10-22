@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
-from contextlib import asynccontextmanager
+import tempfile
+import threading
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -1913,14 +1916,61 @@ def api_transcript_revisions(file_id: str) -> JSONResponse:
 # --------------------------------------------------------------------------- #
 
 
+class AsrSettingsInput(BaseModel):
+    provider: Literal[
+        "faster-whisper", "mlx-whisper", "whispercpp", "openai", "deepgram",
+        "assemblyai", "remote-worker",
+    ]
+    model: str = Field(default="", max_length=512)
+    language: str = Field(min_length=2, max_length=32)
+
+
+class LlmSettingsInput(BaseModel):
+    provider: Literal["ollama", "openai", "anthropic", "codex-local", "remote-worker"]
+    model: str = Field(default="", max_length=512)
+
+
+class EmbeddingsSettingsInput(BaseModel):
+    provider: Literal["local", "openai", "ollama", "remote-worker"]
+    model: str = Field(default="", max_length=512)
+
+
+class DiarizeSettingsInput(BaseModel):
+    provider: Literal["pyannote", "remote-worker", "none"]
+
+
+class AlignSettingsInput(BaseModel):
+    provider: Literal["whisper-timestamps", "whisperx", "remote-worker", "none"]
+
+
+class PipelineStagesInput(BaseModel):
+    convert: bool
+    transcribe: bool
+    align: bool
+    diarize: bool
+    correct: bool
+    summarize: bool
+    mind_map: bool
+    index: bool
+
+
+class PipelineSettingsInput(BaseModel):
+    stages: PipelineStagesInput
+    summary_template: str = Field(min_length=1, max_length=128)
+
+
+class PollerSettingsInput(BaseModel):
+    interval_seconds: int = Field(ge=30, le=3600)
+
+
 class SettingsInput(BaseModel):
-    asr: dict[str, str]
-    llm: dict[str, str]
-    embeddings: dict[str, str]
-    diarize: dict[str, str]
-    align: dict[str, str]
-    pipeline: dict
-    poller: dict[str, int]
+    asr: AsrSettingsInput
+    llm: LlmSettingsInput
+    embeddings: EmbeddingsSettingsInput
+    diarize: DiarizeSettingsInput
+    align: AlignSettingsInput
+    pipeline: PipelineSettingsInput
+    poller: PollerSettingsInput
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -1967,9 +2017,13 @@ def _get_asr_model(settings) -> str:
     if p == "faster-whisper":
         return settings.asr.faster_whisper.model
     if p == "whispercpp":
-        return settings.asr.whispercpp.model_path.name
+        return str(settings.asr.whispercpp.model_path)
     if p == "openai":
         return settings.asr.openai.model
+    if p == "deepgram":
+        return settings.asr.deepgram.model
+    if p == "remote-worker":
+        return settings.asr.remote_worker.model
     return ""
 
 
@@ -1981,6 +2035,10 @@ def _get_llm_model(settings) -> str:
         return settings.llm.openai.model
     if p == "anthropic":
         return settings.llm.anthropic.model
+    if p == "codex-local":
+        return settings.llm.codex_local.model or ""
+    if p == "remote-worker":
+        return settings.llm.remote_worker.model
     return ""
 
 
@@ -1992,121 +2050,149 @@ def _get_embeddings_model(settings) -> str:
         return settings.embeddings.openai.model
     if p == "ollama":
         return settings.embeddings.ollama.model
+    if p == "remote-worker":
+        return settings.embeddings.remote_worker.model
     return ""
+
+
+_SETTINGS_THREAD_LOCK = threading.Lock()
+
+
+@contextmanager
+def _settings_transaction_lock(config_path: Path):
+    """Serialize the TOML + database-profile update across threads/processes."""
+    import fcntl
+    import hashlib
+
+    digest = hashlib.sha256(str(config_path.resolve()).encode()).hexdigest()[:24]
+    lock_path = Path(tempfile.gettempdir()) / f"localplaud-settings-{digest}.lock"
+    with _SETTINGS_THREAD_LOCK, lock_path.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 @app.post("/api/settings")
 def api_save_settings(payload: SettingsInput) -> JSONResponse:
-    import tomllib
-
     config_path = Path(os.environ.get("LOCALPLAUD_CONFIG", "config.toml"))
     if not config_path.exists():
         return JSONResponse({"error": "config.toml not found"}, status_code=404)
+    with _settings_transaction_lock(config_path):
+        return _save_settings_locked(payload, config_path)
 
-    # Read existing config
-    with config_path.open("rb") as f:
-        existing = tomllib.load(f)
 
-    # Build new config sections
-    new_config: dict = {}
+def _save_settings_locked(payload: SettingsInput, config_path: Path) -> JSONResponse:
+    import tomllib
 
-    # ASR
-    asr_cfg = existing.get("asr", {})
-    asr_cfg["provider"] = payload.asr.get("provider", asr_cfg.get("provider"))
-    asr_cfg["language"] = payload.asr.get("language", asr_cfg.get("language"))
-    provider_key = payload.asr.get("provider", "").replace("-", "_")
-    model = payload.asr.get("model", "")
-    if model and provider_key in asr_cfg:
-        asr_cfg[provider_key] = asr_cfg.get(provider_key, {})
-        if provider_key == "whispercpp":
-            asr_cfg[provider_key]["model_path"] = model
-        else:
-            asr_cfg[provider_key]["model"] = model
-    new_config["asr"] = asr_cfg
+    import tomlkit
 
-    # LLM
-    llm_cfg = existing.get("llm", {})
-    llm_cfg["provider"] = payload.llm.get("provider", llm_cfg.get("provider"))
-    llm_provider_key = payload.llm.get("provider", "")
-    llm_model = payload.llm.get("model", "")
-    if llm_model and llm_provider_key in llm_cfg:
-        llm_cfg[llm_provider_key] = llm_cfg.get(llm_provider_key, {})
-        llm_cfg[llm_provider_key]["model"] = llm_model
-    new_config["llm"] = llm_cfg
+    from ..config import Settings
+    from ..providers.bootstrap import sync_system_default_profile
 
-    # Embeddings
-    emb_cfg = existing.get("embeddings", {})
-    emb_cfg["provider"] = payload.embeddings.get("provider", emb_cfg.get("provider"))
-    emb_provider_key = payload.embeddings.get("provider", "")
-    emb_model = payload.embeddings.get("model", "")
-    if emb_model and emb_provider_key in emb_cfg:
-        emb_cfg[emb_provider_key] = emb_cfg.get(emb_provider_key, {})
-        emb_cfg[emb_provider_key]["model"] = emb_model
-    new_config["embeddings"] = emb_cfg
-
-    # Diarize
-    dia_cfg = existing.get("diarize", {})
-    dia_cfg["provider"] = payload.diarize.get("provider", dia_cfg.get("provider"))
-    new_config["diarize"] = dia_cfg
-
-    # Align
-    align_cfg = existing.get("align", {})
-    align_cfg["provider"] = payload.align.get("provider", align_cfg.get("provider"))
-    new_config["align"] = align_cfg
-
-    # Pipeline
-    pipe_cfg = existing.get("pipeline", {})
-    stages = payload.pipeline.get("stages", {})
-    for key in ("convert", "transcribe", "align", "diarize", "correct", "summarize", "mind_map", "index"):
-        if key in stages:
-            pipe_cfg[key] = stages[key]
-    if "summary_template" in payload.pipeline:
-        pipe_cfg["summary_template"] = payload.pipeline["summary_template"]
-    new_config["pipeline"] = pipe_cfg
-
-    # Poller
-    poller_cfg = existing.get("poller", {})
-    if "interval_seconds" in payload.poller:
-        poller_cfg["interval_seconds"] = payload.poller["interval_seconds"]
-    new_config["poller"] = poller_cfg
-
-    # Merge with existing (preserve sections not touched)
-    merged = {**existing, **new_config}
-
-    # Write back
+    # tomlkit mutates only selected values, preserving operator comments and
+    # ordering.  Every section/subtable may be absent in a minimal config, so
+    # create it deliberately rather than replacing unrelated configuration.
     try:
-        import tomli_w
-        with config_path.open("w") as f:
-            tomli_w.dump(merged, f)
-    except ImportError:
-        # Fallback: manual TOML write for simple values
-        lines = []
-        for section, values in merged.items():
-            lines.append(f"[{section}]")
-            for k, v in values.items():
-                if isinstance(v, dict):
-                    lines.append(f"  [{section}.{k}]")
-                    for dk, dv in v.items():
-                        lines.append(f'  {dk} = {_toml_value(dv)}')
-                else:
-                    lines.append(f'{k} = {_toml_value(v)}')
-            lines.append("")
-        with config_path.open("w") as f:
-            f.write("\n".join(lines))
+        original_text = config_path.read_text(encoding="utf-8")
+        document = tomlkit.parse(original_text)
 
-    return JSONResponse({"ok": True, "message": "Settings saved. Restart required."})
+        def section(name: str):
+            current = document.get(name)
+            if current is None:
+                current = tomlkit.table()
+                document[name] = current
+            return current
 
+        def subtable(parent, name: str):
+            current = parent.get(name)
+            if current is None:
+                current = tomlkit.table()
+                parent[name] = current
+            return current
 
-def _toml_value(v) -> str:
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if isinstance(v, int):
-        return str(v)
-    if isinstance(v, float):
-        return str(v)
-    if isinstance(v, str):
-        return f'"{v}"'
-    if isinstance(v, list):
-        items = ", ".join(_toml_value(x) for x in v)
-        return f"[{items}]"
-    return str(v)
+        asr = section("asr")
+        asr["provider"] = payload.asr.provider
+        asr["language"] = payload.asr.language
+        if payload.asr.model:
+            asr_provider = subtable(asr, payload.asr.provider.replace("-", "_"))
+            asr_provider[
+                "model_path" if payload.asr.provider == "whispercpp" else "model"
+            ] = payload.asr.model
+
+        llm = section("llm")
+        llm["provider"] = payload.llm.provider
+        if payload.llm.model:
+            subtable(llm, payload.llm.provider.replace("-", "_"))["model"] = payload.llm.model
+
+        embeddings = section("embeddings")
+        embeddings["provider"] = payload.embeddings.provider
+        if payload.embeddings.model:
+            subtable(embeddings, payload.embeddings.provider.replace("-", "_"))["model"] = (
+                payload.embeddings.model
+            )
+
+        section("diarize")["provider"] = payload.diarize.provider
+        section("align")["provider"] = payload.align.provider
+
+        pipeline = section("pipeline")
+        for key, value in payload.pipeline.stages.model_dump().items():
+            pipeline[key] = value
+        pipeline["summary_template"] = payload.pipeline.summary_template
+        section("poller")["interval_seconds"] = payload.poller.interval_seconds
+
+        rendered = tomlkit.dumps(document)
+        parsed = tomllib.loads(rendered)
+        # Fail closed before replacing the live file if a future schema change
+        # makes one of the edited values invalid.
+        Settings.model_validate(parsed)
+    except (OSError, ValueError, TypeError) as exc:
+        return JSONResponse({"error": f"settings validation failed: {exc}"}, status_code=400)
+
+    mode = config_path.stat().st_mode & 0o777
+
+    def replace_config(contents: str) -> None:
+        temp_name: str | None = None
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=config_path.parent, prefix=f".{config_path.name}.",
+            suffix=".tmp", delete=False,
+        ) as temp:
+            temp_name = temp.name
+            temp.write(contents)
+            temp.flush()
+            os.fsync(temp.fileno())
+        try:
+            os.chmod(temp_name, mode)
+            os.replace(temp_name, config_path)
+        except OSError:
+            Path(temp_name).unlink(missing_ok=True)
+            raise
+
+    try:
+        replace_config(rendered)
+    except OSError as exc:
+        return JSONResponse({"error": f"settings write failed: {exc}"}, status_code=500)
+
+    try:
+        effective_settings = get_settings(reload=True)
+        with session_scope() as session:
+            sync_system_default_profile(session, effective_settings)
+    except Exception as exc:  # noqa: BLE001 - compensate cross-store update
+        try:
+            replace_config(original_text)
+        except OSError as restore_exc:
+            get_settings(reload=True)
+            return JSONResponse({
+                "error": (
+                    f"profile sync failed ({exc}); config rollback also failed ({restore_exc})"
+                )
+            }, status_code=500)
+        get_settings(reload=True)
+        return JSONResponse({"error": f"profile sync failed; config restored: {exc}"},
+                            status_code=500)
+
+    return JSONResponse({
+        "ok": True,
+        "message": "Settings saved. Restart the service to apply scheduler changes.",
+    })

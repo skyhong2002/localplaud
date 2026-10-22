@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
+from ..providers.failures import RetryableProviderError
 from ..providers.remote_worker import JobInput, RemoteWorkerClient, WorkerJobRequest
 from .base import AsrError, AsrUnavailable, Segment, Transcript, Word
 from .registry import register
@@ -31,7 +32,7 @@ class RemoteWorkerAsrProvider:
 
     def transcribe(self, audio_path: Path, language: str = "auto") -> Transcript:
         if not self.available():
-            raise AsrUnavailable(
+            raise AsrError(
                 "remote worker requires base_url, token, input_base_url, and input_signing_secret"
             )
         file_id = audio_path.parent.name
@@ -59,11 +60,13 @@ class RemoteWorkerAsrProvider:
             while status.state in {"queued", "running"}:
                 if time.monotonic() >= deadline:
                     client.cancel(status.job_id)
-                    raise AsrError("remote worker ASR timed out")
+                    raise RetryableProviderError("remote worker ASR timed out")
                 time.sleep(min(self.cfg.poll_interval_seconds, 5))
                 status = client.status(status.job_id)
             if status.state != "completed" or status.artifact is None:
                 message = status.error.message if status.error else f"job ended as {status.state}"
+                if status.error and status.error.retryable:
+                    raise RetryableProviderError(message)
                 raise AsrError(f"remote worker ASR failed: {message}")
             data = status.artifact.payload
             if data is None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..providers.remote_inference import run_remote_json
-from .base import LLMError, LLMUnavailable
+from .base import LLMError
 
 
 class RemoteWorkerLLM:
@@ -17,7 +17,7 @@ class RemoteWorkerLLM:
     def complete(self, prompt: str, system: str | None = None, temperature: float = 0.3,
                  max_tokens: int = 2048) -> str:
         if not self.available():
-            raise LLMUnavailable("remote-worker text provider is not configured")
+            raise LLMError("remote-worker text provider is not configured")
         try:
             payload = run_remote_json(self.cfg, self.cfg.capability, {
                 "prompt": prompt, "system": system, "temperature": temperature,

@@ -11,6 +11,7 @@ import logging
 from collections.abc import Callable
 
 from ..config import AsrConfig
+from ..providers.failures import allows_provider_fallback
 from .base import AsrProvider, AsrUnavailable, Transcript
 
 log = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ def build_provider(name: str, cfg: AsrConfig) -> AsrProvider:
     # precisely this state).
     _load_builtin_factories()
     if name not in _FACTORIES:
-        raise AsrUnavailable(f"unknown ASR provider: {name!r}")
+        raise ValueError(f"unknown ASR provider: {name!r}")
     return _FACTORIES[name](cfg)
 
 
@@ -84,15 +85,13 @@ def transcribe_with_fallback(audio_path, cfg: AsrConfig) -> Transcript:
             log.warning("ASR provider %s could not be built: %s", name, exc)
             last_err = exc
             continue
-        if not provider.available():
-            log.warning("ASR provider %s is not available here; trying next", name)
-            last_err = AsrUnavailable(f"{name} unavailable")
-            continue
         try:
             log.info("Transcribing with ASR provider %s", name)
             return provider.transcribe(audio_path, language=candidate_cfg.language)
-        except AsrUnavailable as exc:
-            log.warning("ASR provider %s unavailable mid-run: %s", name, exc)
+        except Exception as exc:
+            if not allows_provider_fallback(exc):
+                raise
+            log.warning("ASR provider %s unavailable or retryable mid-run: %s", name, exc)
             last_err = exc
             continue
     raise AsrUnavailable(
@@ -124,6 +123,6 @@ def _candidate_config(cfg: AsrConfig, route: dict) -> AsrConfig:
 
         value = _resolve_secret_ref(route["secret_ref"])
         if not value:
-            raise AsrUnavailable(f"secret reference {route['secret_ref']!r} is unavailable")
+            raise ValueError(f"secret reference {route['secret_ref']!r} is unavailable")
         target.api_key = value
     return candidate
