@@ -24,6 +24,12 @@ SAFE_TARGETS = {
     "_llm_health",
     # Daemon slot: rotates through every workspace explicitly.
     "self._parallel_cycle",
+    # Maintenance admission: ``run`` forwards a caller target that is audited at
+    # its tracked_thread/tracked_submit call site; the status reporter and the
+    # deferred remote-job dispatch touch only the gate and remote job ledger.
+    "run",
+    "report",
+    "dispatch",
 }
 BOUND = ("run_in_current_workspace(", "copy_context().run")
 
@@ -35,10 +41,12 @@ def _spawns():
             if not isinstance(node, ast.Call):
                 continue
             name = ast.unparse(node.func)
-            if name.endswith("Thread"):
+            if name.endswith(("Thread", "tracked_thread")):
                 target = next((k.value for k in node.keywords if k.arg == "target"), None)
             elif name.endswith(("pool.submit", "executor.submit")) and node.args:
                 target = node.args[0]
+            elif name.endswith("tracked_submit") and len(node.args) > 1:
+                target = node.args[1]
             else:
                 continue
             if target is not None:

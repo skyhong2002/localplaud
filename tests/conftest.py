@@ -31,6 +31,25 @@ def _isolate_web_login_environment(monkeypatch):
     monkeypatch.setenv("LOCALPLAUD_API__SESSION_SECRET", "")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_maintenance_gates():
+    """Give every test fresh maintenance gates.
+
+    Gates are cached per download directory for the process lifetime. A test that
+    fakes ``threading.Thread`` reserves admission in ``tracked_thread`` but never
+    runs the target, so the reservation is never released; a later Web lifespan
+    sharing that gate would then wait for idle forever on shutdown.
+    """
+    yield
+    from localplaud import maintenance
+
+    with maintenance._gates_lock:
+        gates = list(maintenance._gates.values())
+        maintenance._gates.clear()
+    for gate in gates:
+        gate.close()
+
+
 @pytest.fixture
 def force_journal_mode():
     """Rebind an engine's pooled connections to a given SQLite journal mode.

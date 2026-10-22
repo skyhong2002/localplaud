@@ -1712,7 +1712,7 @@ def test_generate_notes_only_queues_derived_stages(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.text == "notes and mind map queued"
     assert started and started[0][1] == ("r1",)
-    assert started[0][0].__name__ == "process_derived_artifacts"
+    assert started[0][0].__wrapped__.__name__ == "process_derived_artifacts"
 
     with session_scope() as session:
         recording = session.get(PlaudFile, "r1")

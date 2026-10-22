@@ -171,6 +171,10 @@ def test_cli_status_binds_fresh_process_request_and_abort_resume(gate, monkeypat
     with gate.activity(): pass
 
 
+@pytest.mark.skipif(
+    not getattr(sys, "_localplaud_runtime_guard", False),
+    reason="requires interpreter-startup isolation: use tests/run_runtime_offline.sh",
+)
 def test_voice_admitted_pass_drains_before_next_pass_and_request_persists(tmp_path):
     from tests.test_service_signals import FIXTURE, await_event, events
     root = tmp_path

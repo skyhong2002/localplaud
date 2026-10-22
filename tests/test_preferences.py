@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import threading
 from pathlib import Path
 
 import pytest
@@ -173,7 +172,9 @@ def test_api_startup_resumes_remote_jobs_only_when_auto_processing_is_enabled(
     monkeypatch.setattr(
         app_module, "resume_pending_jobs", lambda: calls.append("resumed")
     )
-    monkeypatch.setattr(threading, "Thread", ImmediateThread)
+    # Patch only the startup resume dispatch; the maintenance status reporter
+    # is a long-lived loop that must keep running on a real thread.
+    monkeypatch.setattr(app_module, "tracked_thread", ImmediateThread)
     with client:
         assert client.get("/healthz").status_code == 200
     assert calls == ["resumed"] * expected_calls

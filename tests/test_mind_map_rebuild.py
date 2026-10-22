@@ -925,7 +925,7 @@ def test_rebuild_route_queues_only_the_mind_map_stage(monkeypatch, tmp_path):
     assert queued.status_code == 200
     assert "mind map rebuild queued" in queued.text
     assert len(started) == 1
-    assert started[0]["target"] is process_mind_map_only
+    assert started[0]["target"].__wrapped__ is process_mind_map_only
     assert started[0]["args"] == ("r1",)
     repeated = c.post("/file/r1/rebuild-mind-map")
     assert repeated.status_code == 409
