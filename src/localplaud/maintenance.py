@@ -67,7 +67,12 @@ def read_json(fd, name):
                 and before.st_size <= 4096):
             raise ValueError("unsafe maintenance record")
         raw = os.read(handle, 4097)
-        if len(raw) != before.st_size or os.fstat(handle) != before:
+        # Ignore access time: the read itself may bump it.
+        def identity(st):
+            return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_uid,
+                    st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+        if len(raw) != before.st_size or identity(os.fstat(handle)) != identity(before):
             raise ValueError("maintenance record changed")
         value = json.loads(raw)
         if not isinstance(value, dict):
@@ -290,6 +295,7 @@ def tracked_thread(*, target, args=(), kwargs=None, **options):
         with ticket.activate():
             return target(*a, **kw)
 
+    run.__wrapped__ = target  # keep the dispatched callable introspectable
     thread = threading.Thread(target=run, args=args, kwargs=kwargs or {}, **options)
     original_start = thread.start
 
