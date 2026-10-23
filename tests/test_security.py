@@ -131,6 +131,13 @@ def test_favicon_is_public_and_served(monkeypatch, tmp_path):
     client = TestClient(app, base_url="https://testserver")
     # The library is gated, but the icon browsers probe by convention is not,
     # so the root /favicon.ico request resolves instead of logging a 404.
+    for response in (
+        client.get("/", headers={"Accept": "text/html"}, follow_redirects=False),
+        client.get("/api/files"),
+        client.get("/", headers={"HX-Request": "true"}),
+    ):
+        assert response.status_code in {303, 401}
+        assert response.headers["x-robots-tag"] == "noindex, nofollow"
     assert client.get("/", headers={"Accept": "text/html"}, follow_redirects=False).status_code == 303
     icon = client.get("/favicon.ico")
     assert icon.status_code == 200

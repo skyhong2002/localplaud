@@ -234,6 +234,14 @@ def _login_context(next_path: str, error: bool) -> dict:
 @app.middleware("http")
 async def _auth_gate(request: Request, call_next):
     """Protect the Web App with a revocable opaque session and APIs with a token."""
+    response = await _gate_request(request, call_next)
+    # Login redirects and 401/403 rejections never reach a route, so mark them
+    # here too: nothing this private instance serves belongs in a search index.
+    response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+    return response
+
+
+async def _gate_request(request: Request, call_next):
     settings = get_settings().api
     if request.url.path == completion_path:
         # This single read-only route validates its own scoped machine credential.
@@ -285,7 +293,6 @@ async def _auth_gate(request: Request, call_next):
                     return RedirectResponse(url=login_url, status_code=303)
             return JSONResponse({"error": "unauthorized"}, status_code=401)
     response = await call_next(request)
-    response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
     if public_share:
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
         response.headers["Cache-Control"] = "private, no-store"

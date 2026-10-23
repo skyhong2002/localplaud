@@ -171,6 +171,23 @@ def test_pending_cannot_reach_any_private_route(client):
     assert response.headers["HX-Redirect"] == "/account"
 
 
+def test_signed_out_rejections_are_marked_noindex(client):
+    # robots.txt alone cannot keep a linked URL out of an index; the login
+    # redirect and every 401/403 rejection must also say noindex.
+    responses = [
+        client.get("/"),
+        client.get("/sitemap.xml"),
+        client.get("/api/files"),
+        client.get("/", headers={"HX-Request": "true"}),
+        client.get("/", headers={"Accept": "text/html"}),
+        client.post("/api/files", headers={"Origin": "https://elsewhere.example"}),
+    ]
+    assert [r.status_code for r in responses] == [401, 401, 401, 401, 303, 403]
+    for response in responses:
+        assert response.headers["X-Robots-Tag"] == "noindex, nofollow"
+        assert response.headers["Cache-Control"] == "private, no-store"
+
+
 def test_legacy_tokens_and_unbound_sessions_rejected(client):
     for headers, query in [
         ({"X-Auth-Token": "old-secret"}, ""),
