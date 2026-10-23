@@ -266,6 +266,33 @@ If the UI is reachable from anything but localhost:
 
 See [ADR 0006](adr/0006-security-posture.md).
 
+### Search-indexing boundary (GSC-20261023)
+
+The production instance is private and is meant to stay out of search results.
+An unauthenticated home page that returns 401 and an "unknown" home page in
+Google Search Console are expected; do not loosen authentication to change that.
+
+- `robots.txt` disallows everything for every crawler. Only the user-triggered
+  assistant fetchers (`ChatGPT-User`, `Claude-User`, `Perplexity-User`,
+  `MistralAI-User`) may fetch `/share/` so that a link a user hands an
+  assistant still works.
+- Every response, including the 303 login redirect and 401/403 rejections,
+  sends `X-Robots-Tag: noindex, nofollow` and `Cache-Control: private, no-store`.
+  The login page also carries `<meta name="robots" content="noindex,nofollow">`.
+- There is no sitemap. `/sitemap.xml`, recordings, transcripts, Ask, the API
+  and OpenAPI docs all require a session. Do not submit a sitemap for this host.
+
+On 2026-10-23, commit `9b54ecb4` fixed a gap: the auth gate's early returns
+(login redirect, 401, 403) skipped the `X-Robots-Tag` default, so the anonymous
+home page and `/sitemap.xml` relied on `robots.txt` alone. After deployment,
+`https://plaud.observe.tw/`, `/sitemap.xml`, `/api/files`, `/recordings/1`,
+`/docs` and `/openapi.json` returned 401 with `noindex, nofollow`; browser
+navigation to `/` returned 303 to `/login?next=%2F` with the same header.
+`http://plaud.observe.tw/` redirects with 308 to HTTPS, and the retired
+`https://plaud.skyhong.tw/` redirects with 301 to `https://plaud.observe.tw/`.
+These checks show what the server sends. They do not show what Google has
+indexed.
+
 ## Operating it
 
 - Logs: `docker compose --profile <p> logs -f`
