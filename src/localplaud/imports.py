@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from .maintenance import tracked_thread
-
 import hashlib
 import math
 import threading
@@ -19,11 +17,14 @@ from .config import Settings, get_settings
 from .db.models import FileStatus, ImportRun, PlaudFile, Summary, Transcript
 from .db.session import session_scope
 from .db.tenancy import run_in_current_workspace
+from .maintenance import tracked_thread
 from .plaud import make_plaud_client
 from .poller.poll import (
     AUDIO_RESTORABLE_STATUSES,
     _apply_dto,
+    _catalog_baseline_complete,
     _download_one,
+    new_file_status,
     refresh_cloud_artifacts_for,
 )
 from .worker.convert import ConversionError, _raw_packet_count, to_wav
@@ -123,6 +124,7 @@ def _run_plaud_metadata_import(
         _update_run(run_id, status="running", started_at=datetime.now(UTC))
         with make_plaud_client(settings.plaud) as client:
             files = list(client.iter_files(include_trash=settings.poller.include_trash))
+            catalog_initialized = _catalog_baseline_complete()
             _update_run(run_id, total=len(files))
             for dto in files:
                 is_new = False
@@ -132,9 +134,14 @@ def _run_plaud_metadata_import(
                 with session_scope() as session:
                     row = session.get(PlaudFile, dto.id)
                     if row is None:
+                        # Same rule as the poller: a post-baseline upload stays
+                        # queued for automatic download even if this import
+                        # observes it first.
                         row = PlaudFile(
                             id=dto.id,
-                            status=FileStatus.metadata_only,
+                            status=new_file_status(
+                                dto, settings, catalog_initialized=catalog_initialized
+                            ),
                             origin="plaud",
                         )
                         session.add(row)
@@ -149,8 +156,9 @@ def _run_plaud_metadata_import(
                     )
                     _apply_dto(row, dto)
                     row.origin = "plaud"
-                    if not row.audio_path and row.status != FileStatus.downloading:
-                        row.status = FileStatus.metadata_only
+                    # Existing rows keep their local lifecycle. Processed
+                    # recordings whose audio was evicted are still done/partial,
+                    # and queued downloads must stay queued.
                     if needs_refresh:
                         row.cloud_artifacts_synced_at = None
                     else:

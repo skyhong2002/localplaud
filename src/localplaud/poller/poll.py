@@ -224,6 +224,24 @@ def _apply_dto(row: PlaudFile, dto: PlaudFileDTO) -> None:
     row.raw = {**(row.raw or {}), **dto.model_dump(exclude_unset=True)}
 
 
+def is_overlong(dto: PlaudFileDTO, settings: Settings) -> bool:
+    skip_ms = settings.pipeline.auto_skip_threshold_ms()
+    return skip_ms is not None and dto.duration is not None and dto.duration >= skip_ms
+
+
+def new_file_status(
+    dto: PlaudFileDTO, settings: Settings, *, catalog_initialized: bool
+) -> FileStatus:
+    """Initial status for a recording first seen in the Plaud listing.
+
+    Every listing path (poller or manual metadata import) must use this, so a
+    new upload is queued for download no matter which path observes it first.
+    """
+    if settings.poller.auto_download and catalog_initialized and not is_overlong(dto, settings):
+        return FileStatus.discovered
+    return FileStatus.metadata_only
+
+
 def sync_file_list(client, settings: Settings) -> tuple[int, int]:
     """Upsert the cloud listing. Returns (new_count, changed_count).
 
@@ -262,23 +280,14 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
                         download_lease_until=None,
                     )
                 )
-            skip_ms = settings.pipeline.auto_skip_threshold_ms()
             for dto in files:
                 row = session.get(PlaudFile, dto.id)
                 if row is None:
-                    overlong = (
-                        skip_ms is not None
-                        and dto.duration is not None
-                        and dto.duration >= skip_ms
-                    )
+                    overlong = is_overlong(dto, settings)
                     row = PlaudFile(
                         id=dto.id,
-                        status=(
-                            FileStatus.discovered
-                            if settings.poller.auto_download
-                            and catalog_initialized
-                            and not overlong
-                            else FileStatus.metadata_only
+                        status=new_file_status(
+                            dto, settings, catalog_initialized=catalog_initialized
                         ),
                         origin="plaud",
                     )

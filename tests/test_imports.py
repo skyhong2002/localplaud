@@ -806,3 +806,46 @@ def test_cloud_note_direct_https_image_is_mirrored_without_download_map(monkeypa
     assert "signature" not in rendered
     assert urls == [url]
     assert "authorization" not in route.calls[0].request.headers
+
+
+def test_metadata_import_queues_new_uploads_and_keeps_processed_status(
+    monkeypatch, tmp_path
+):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, ImportRun, KeyValue, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.imports import _run_plaud_metadata_import
+    from localplaud.plaud.models import PlaudFileDTO
+
+    init_db()
+    with session_scope() as session:
+        session.add(KeyValue(key="plaud_catalog_baseline_v1", value={}))
+        # Processed recording whose local audio was evicted after processing.
+        session.add(
+            PlaudFile(id="processed", filename="Processed", origin="plaud", status=FileStatus.done)
+        )
+        session.add(
+            PlaudFile(id="queued", filename="Queued", origin="plaud", status=FileStatus.discovered)
+        )
+        session.add(ImportRun(id="run", source="plaud", status="queued"))
+
+    class FakeClient:
+        def iter_files(self, include_trash=False):
+            yield PlaudFileDTO(id="new-upload", filename="New upload")
+            yield PlaudFileDTO(id="processed", filename="Processed")
+            yield PlaudFileDTO(id="queued", filename="Queued")
+
+    @contextmanager
+    def fake_factory(_cfg):
+        yield FakeClient()
+
+    monkeypatch.setattr("localplaud.imports.make_plaud_client", fake_factory)
+    monkeypatch.setattr(
+        "localplaud.imports.refresh_cloud_artifacts_for", lambda _c, _id: (False, False)
+    )
+    _run_plaud_metadata_import("run", settings)
+
+    with session_scope() as session:
+        assert session.get(PlaudFile, "new-upload").status == FileStatus.discovered
+        assert session.get(PlaudFile, "processed").status == FileStatus.done
+        assert session.get(PlaudFile, "queued").status == FileStatus.discovered
