@@ -198,12 +198,11 @@
           <div class="sub local-import-status" id="local-import-status" role="status" aria-live="polite" style="text-align:center;margin-top:10px"></div>
         </div>
         <div class="plaud-import-card" id="plaud-import-panel" role="tabpanel" aria-labelledby="plaud-import-tab" hidden>
-          <span class="import-icon">{{ icon('cloud') }}</span><strong>{{ t('Mirror your Plaud library') }}</strong>
-          <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Syncs all recording metadata and any existing Plaud transcripts and notes. Audio stays in Plaud until you request it from a recording.') }}</p>
-          <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">{{ t('Sync Plaud recordings and notes') }}</button>
+          <span class="import-icon">{{ icon('cloud') }}</span><strong>{{ t('Check Plaud for new recordings') }}</strong>
+          <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Looks for recordings uploaded to Plaud since the last check. New ones download and process automatically. localplaud also checks on its own every few minutes.') }}</p>
+          <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">{{ t('Check now') }}</button>
           <div id="plaud-import-progress" role="status" aria-live="polite" hidden style="width:100%;max-width:440px">
-            <div class="import-progress" role="progressbar" aria-labelledby="plaud-import-progress-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span style="width:0%"></span></div>
-            <div class="sub" id="plaud-import-progress-label" data-progress-label></div>
+            <div class="sub" id="plaud-import-progress-label" data-progress-label style="margin-top:12px;text-align:center"></div>
           </div>
         </div>
       </div>
@@ -283,7 +282,7 @@
       </label>
       <button class="add-option" type="button" data-add-sync>
         <span class="add-option-icon">{{ icon('refresh') }}</span>
-        <span class="add-option-text"><strong>{{ t('Sync from Plaud now') }}</strong><small>{{ t('Metadata first · audio on demand') }}</small></span>
+        <span class="add-option-text"><strong>{{ t('Check Plaud now') }}</strong><small>{{ t('New uploads download and process automatically') }}</small></span>
       </button>
       <div class="add-progress" data-add-progress hidden>
         <div class="import-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="add-progress-label"><span style="width:0%"></span></div>

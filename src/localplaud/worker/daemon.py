@@ -123,6 +123,11 @@ class DaemonJobs:
 
         return self._run(self.sync_lock, discover)
 
+    def request_sync(self):
+        """Run the scheduled poll now (downloads queued uploads, wakes the worker)."""
+        if self.settings.poller.enabled and not self.stopped.is_set():
+            self.scheduler.modify_job("sync", next_run_time=datetime.now(UTC))
+
     def work(self):
         from ..cli import process_automatic_pending
 

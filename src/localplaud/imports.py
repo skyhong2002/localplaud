@@ -26,6 +26,7 @@ from .poller.poll import (
     _download_one,
     new_file_status,
     refresh_cloud_artifacts_for,
+    sync_file_list,
 )
 from .worker.convert import ConversionError, _raw_packet_count, to_wav
 
@@ -68,6 +69,42 @@ def recover_interrupted_imports() -> int:
             )
         ).rowcount
     return count
+
+
+def check_plaud_now(settings: Settings | None = None) -> dict:
+    """Read the Plaud listing once and report recordings seen for the first time.
+
+    This is the same incremental discovery the poller runs on its schedule: no
+    per-recording cloud requests, and new uploads are queued for the normal
+    automatic download and processing. Raises ``CatalogSyncBusy`` when a poll is
+    already reading the listing.
+    """
+    settings = settings or get_settings()
+    with session_scope() as session:
+        known = set(session.scalars(select(PlaudFile.id)))
+    with make_plaud_client(settings.plaud) as client:
+        new_count, _changed = sync_file_list(client, settings, raise_if_busy=True)
+    recordings: list[dict] = []
+    if new_count:
+        with session_scope() as session:
+            rows = session.scalars(
+                select(PlaudFile)
+                .where(PlaudFile.origin == "plaud", PlaudFile.id.not_in(known))
+                .order_by(PlaudFile.start_time_ms.desc())
+            ).all()
+            recordings = [
+                {
+                    "id": row.id,
+                    "title": row.local_title or row.filename,
+                    "queued": row.status == FileStatus.discovered,
+                }
+                for row in rows
+            ]
+    return {
+        "new": new_count,
+        "queued": sum(item["queued"] for item in recordings),
+        "recordings": recordings,
+    }
 
 
 def latest_import_run() -> dict | None:

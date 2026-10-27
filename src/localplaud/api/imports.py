@@ -12,12 +12,13 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from ..db.models import FileStatus, PlaudFile
 from ..db.session import session_scope
 from ..imports import (
     audio_import_status,
+    check_plaud_now,
     latest_import_run,
     start_plaud_audio_import,
     start_plaud_metadata_import,
@@ -42,6 +43,24 @@ _ALLOWED_EXTENSIONS = {
     "amr",
 }
 _MAX_UPLOAD_BYTES = MAX_UPLOAD_BYTES
+
+
+@router.post("/plaud/check")
+def check_plaud(request: Request) -> dict:
+    """Check Plaud for new uploads now instead of waiting for the next poll."""
+    from ..poller.poll import CatalogSyncBusy
+
+    try:
+        result = check_plaud_now()
+    except CatalogSyncBusy:
+        result = {"new": 0, "queued": 0, "recordings": [], "busy": True}
+    except Exception as exc:  # noqa: BLE001 - provider adapters share no base error
+        raise HTTPException(status_code=502, detail="Could not reach Plaud") from exc
+    jobs = getattr(request.app.state, "daemon_jobs", None)
+    if jobs is not None and (result["queued"] or result.get("busy")):
+        # Download now; the next scheduled poll could be minutes away.
+        jobs.request_sync()
+    return result
 
 
 @router.post("/plaud/metadata", status_code=202)

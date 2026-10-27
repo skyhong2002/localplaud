@@ -301,6 +301,9 @@ def run():
             if stop.requested:
                 return
             scheduler.start()
+            from .api.app import app as web_app
+
+            web_app.state.daemon_jobs = jobs
             console.print("[green]✓[/] poller + worker ready; starting web UI…")
             if not stop.requested:
                 _serve(

@@ -317,7 +317,8 @@ def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
     assert 'role="tabpanel" aria-labelledby="device-import-tab"' in response_assets
     assert 'id="audio-drop-zone" role="button" tabindex="0"' in response_assets
     assert 'id="local-import-status" role="status" aria-live="polite"' in response_assets
-    assert 'role="progressbar" aria-labelledby="plaud-import-progress-label"' in response_assets
+    assert 'id="plaud-import-progress" role="status" aria-live="polite"' in response_assets
+    assert "/api/imports/plaud/check" in response_assets
     assert "const importModal=window.localplaudModal" in response_assets
     assert "typeof background==='function'?background():background" in response_assets
     assert "background:()=>[document.getElementById('app-view')" in response_assets
@@ -331,7 +332,7 @@ def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
     assert "choose(item.dataset.importMode,button)" in response_assets
     assert "requestController?.abort()" in response_assets
     assert "if(error.name==='AbortError')throw error" in response_assets
-    assert "'Could not start Plaud import',[409]" in response_assets
+    assert "requestJson('/api/imports/plaud/check',{method:'POST'},'Could not reach Plaud')" in response_assets
     assert "setDialogBusy(true)" in response_assets
     assert "input.value=''" in response_assets
     assert "event.stopPropagation();if(!busy)closeImport()" in response_assets
@@ -339,15 +340,15 @@ def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
     assert "closeButton.disabled=value" in response_assets
     assert "event.target===backdrop&&!backdrop.hidden&&!busy" in response_assets
     assert "setMenu(false,{restoreFocus:true})" in response_assets
-    assert "progress.setAttribute('aria-valuenow',String(pct))" in response_assets
-    assert "if(running)progressTimer=setTimeout(pollPlaudImport,1000)" in response_assets
+    assert "showCheckResult(lp.plaudCheckMessage(data))" in response_assets
 
     from localplaud.i18n import catalog
 
     messages = catalog("zh-Hant-TW")
     assert messages["Audio source"] == "音訊來源"
     assert messages["Could not upload audio"] == "無法上傳音訊"
-    assert messages["Could not start Plaud import"] == "無法開始 Plaud 匯入"
+    assert messages["Could not reach Plaud"] == "無法連線至 Plaud"
+    assert messages["No new recordings"] == "沒有新錄音"
     assert messages["unsupported audio/video format"] == "不支援的音訊或影片格式"
     assert messages["file exceeds 2 GB limit"] == "檔案超過 2 GB 上限"
 

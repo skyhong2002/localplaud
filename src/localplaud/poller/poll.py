@@ -242,7 +242,13 @@ def new_file_status(
     return FileStatus.metadata_only
 
 
-def sync_file_list(client, settings: Settings) -> tuple[int, int]:
+class CatalogSyncBusy(RuntimeError):
+    """Another poll is already reading the Plaud listing for this workspace."""
+
+
+def sync_file_list(
+    client, settings: Settings, *, raise_if_busy: bool = False
+) -> tuple[int, int]:
     """Upsert the cloud listing. Returns (new_count, changed_count).
 
     Works with either official provider; both use the same file ids. A fresh
@@ -253,6 +259,8 @@ def sync_file_list(client, settings: Settings) -> tuple[int, int]:
     """
     sync_token = _claim_catalog_sync()
     if sync_token is None:
+        if raise_if_busy:
+            raise CatalogSyncBusy("Plaud is already being checked")
         log.info("Skipping Plaud listing because another poll owns the catalog sync")
         return (0, 0)
     try:

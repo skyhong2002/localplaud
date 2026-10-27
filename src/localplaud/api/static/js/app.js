@@ -520,6 +520,14 @@
     });
   });
 
+  // Result line for POST /api/imports/plaud/check (sheet and import dialog).
+  lp.plaudCheckMessage = data => {
+    if (data.busy) return lp.t('Plaud is already being checked; new recordings will appear shortly');
+    if (!data.new) return lp.t('No new recordings');
+    const found = lp.t('Found {count} new recordings').replace('{count}', data.new);
+    return data.queued ? `${found} · ${lp.t('downloading and processing automatically')}` : found;
+  };
+
   /* ------------------------------- phone "+" sheet: upload / Plaud sync */
   whenReady(() => {
     const sheet = document.getElementById('add-sheet');
@@ -563,37 +571,18 @@
       xhr.addEventListener('error', () => { busy(false); file.value = ''; setProgress(0, lp.t('Could not upload audio')); lp.toast(lp.t('Could not upload audio'), {type: 'error'}); });
       xhr.send(body);
     });
-    let pollTimer = null;
-    const poll = async () => {
-      try {
-        const response = await fetch('/api/imports/plaud/metadata/status');
-        const data = await response.json();
-        const pct = data.total ? (data.processed / data.total) * 100 : 5;
-        if (['queued', 'running'].includes(data.status)) {
-          setProgress(pct, `${data.processed || 0} ${lp.t('of')} ${data.total || '…'} · ${lp.t('metadata only, audio not downloaded')}`);
-          pollTimer = setTimeout(poll, 1000); return;
-        }
-        busy(false);
-        if (data.status === 'completed') {
-          setProgress(100, `${lp.t('Complete')} · ${data.processed} ${lp.t('recordings')}`);
-          lp.toast(`${lp.t('Plaud sync complete')} · ${data.new || 0} ${lp.t('new')}`, {type: 'success', action: {label: lp.t('Refresh'), onClick: () => location.reload()}});
-        } else if (data.status === 'failed') {
-          const message = `${lp.t('Import stopped')} · ${lp.t(data.error || 'Unknown error')}`;
-          setProgress(0, message); lp.toast(message, {type: 'error'});
-        }
-      } catch (_error) { busy(false); setProgress(0, lp.t('Could not check Plaud import status')); }
-    };
     sync.addEventListener('click', async () => {
       if (sheet.dataset.busy === 'true') return;
-      busy(true); setProgress(2, lp.t('Starting Plaud sync…'));
+      busy(true); setProgress(30, lp.t('Checking Plaud…'));
       try {
-        const response = await fetch('/api/imports/plaud/metadata', {method: 'POST'});
-        if (!response.ok && response.status !== 409) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(typeof data.detail === 'string' ? lp.t(data.detail) : lp.t('Could not start Plaud import'));
-        }
-        clearTimeout(pollTimer); poll();
-      } catch (failure) { busy(false); setProgress(0, failure.message); lp.toast(failure.message, {type: 'error'}); }
+        const response = await fetch('/api/imports/plaud/check', {method: 'POST'});
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(typeof data.detail === 'string' ? lp.t(data.detail) : lp.t('Could not reach Plaud'));
+        const message = lp.plaudCheckMessage(data);
+        setProgress(100, message);
+        lp.toast(message, data.new ? {type: 'success', action: {label: lp.t('Refresh'), onClick: () => location.reload()}} : {});
+      } catch (failure) { setProgress(0, failure.message); lp.toast(failure.message, {type: 'error'}); }
+      finally { busy(false); }
     });
   });
 
@@ -846,9 +835,9 @@
     function setMenu(open,{restoreFocus=false}={}){menu.hidden=!open;button.setAttribute('aria-expanded',String(open));if(!open&&restoreFocus)button.focus();}
     function stopImportWork(){if(progressTimer)clearTimeout(progressTimer);progressTimer=null;requestController?.abort();requestController=null;}
     function setDialogBusy(value){busy=value;importModal.setBusy(value);closeButton.disabled=value;tabs.forEach(tab=>{tab.disabled=value;});input.disabled=value;drop.setAttribute('aria-disabled',String(value));}
-    function setPlaudBusy(value){plaudButton.disabled=value;plaudButton.textContent=tr(value?'Importing…':'Sync Plaud recordings and notes');}
+    function setPlaudBusy(value){plaudButton.disabled=value;plaudButton.textContent=tr(value?'Checking Plaud…':'Check now');}
     async function requestJson(url,options,fallback,acceptableStatuses=[]){const controller=new AbortController();requestController?.abort();requestController=controller;let response;try{response=await fetch(url,{...options,signal:controller.signal});}catch(error){if(error.name==='AbortError')throw error;throw new Error(tr(fallback));}finally{if(requestController===controller)requestController=null;}let data={};try{data=await response.json();}catch(_error){}if(!response.ok&&!acceptableStatuses.includes(response.status))throw new Error(detailMessage(data,fallback));return data;}
-    function selectMode(mode,{focus=false}={}){stopImportWork();setDialogBusy(false);setPlaudBusy(false);devicePanel.hidden=mode!=='device';plaudPanel.hidden=mode!=='plaud';for(const tab of tabs){const active=tab.dataset.importTab===mode;tab.classList.toggle('on',active);tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;if(active&&focus)tab.focus();}document.getElementById('import-title').textContent=tr(mode==='plaud'?'Import from Plaud':'Import audio');if(mode==='plaud')pollPlaudImport();}
+    function selectMode(mode,{focus=false}={}){stopImportWork();setDialogBusy(false);setPlaudBusy(false);devicePanel.hidden=mode!=='device';plaudPanel.hidden=mode!=='plaud';for(const tab of tabs){const active=tab.dataset.importTab===mode;tab.classList.toggle('on',active);tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;if(active&&focus)tab.focus();}document.getElementById('import-title').textContent=tr(mode==='plaud'?'Import from Plaud':'Import audio');if(mode==='plaud')showCheckResult(null);}
     function choose(mode,trigger){setMenu(false);lp.closeMenus();document.body.classList.remove('nav-open');selectMode(mode);importModal.open(trigger,tabs.find(tab=>tab.dataset.importTab===mode));}
     function closeImport(){if(busy)return false;stopImportWork();setPlaudBusy(false);return importModal.close();}
     lp.openImport=(mode='device',trigger=null)=>choose(mode==='plaud'?'plaud':'device',trigger);
@@ -872,17 +861,10 @@
       setDialogBusy(true);localStatus.textContent=`${tr('Importing')} ${file.name}…`;const body=new FormData();body.append('file',file);
       try{const data=await requestJson('/api/imports/local/audio',{method:'POST',body},'Could not upload audio');localStatus.textContent=tr('Imported. Opening recording…');location.href=`/file/${encodeURIComponent(data.id)}`;}catch(error){if(error.name!=='AbortError')localStatus.textContent=error.message||tr('Import failed');}finally{setDialogBusy(false);input.value='';}
     }
-    plaudButton.addEventListener('click',async()=>{if(plaudButton.disabled)return;setPlaudBusy(true);setDialogBusy(true);try{await requestJson('/api/imports/plaud/metadata',{method:'POST'},'Could not start Plaud import',[409]);setDialogBusy(false);pollPlaudImport();}catch(error){if(error.name!=='AbortError')showProgress({status:'failed',error:error.message});setDialogBusy(false);setPlaudBusy(false);}});
-    async function pollPlaudImport(){
-      try{const data=await requestJson('/api/imports/plaud/metadata/status',{},'Could not check Plaud import status');showProgress(data);const running=['queued','running'].includes(data.status);setPlaudBusy(running);if(running)progressTimer=setTimeout(pollPlaudImport,1000);}catch(error){if(error.name!=='AbortError'){showProgress({status:'failed',error:error.message});setPlaudBusy(false);}}
-    }
-    function showProgress(data){
-      const box=document.getElementById('plaud-import-progress'),label=box.querySelector('[data-progress-label]'),progress=box.querySelector('[role="progressbar"]'),bar=progress.querySelector('span');
-      if(data.status==='idle'){box.hidden=true;progress.setAttribute('aria-valuenow','0');return;}box.hidden=false;const pct=data.total?Math.round(data.processed/data.total*100):0;bar.style.width=`${pct}%`;progress.setAttribute('aria-valuenow',String(pct));
-      const skipped=tr('skipped {value}').replace('{value}',data.skipped||0);
-      if(data.status==='completed')label.textContent=`${tr('Complete')} · ${data.processed} ${tr('recordings')} · ${data.transcripts} ${tr('transcripts')} · ${data.summaries} ${tr('summaries')} · ${skipped}`;
-      else if(data.status==='failed')label.textContent=`${tr('Import stopped')} · ${tr(data.error||'Unknown error')}`;
-      else label.textContent=`${data.processed||0} ${tr('of')} ${data.total||'…'} · ${skipped} · ${tr('metadata only, audio not downloaded')}`;
+    plaudButton.addEventListener('click',async()=>{if(plaudButton.disabled)return;setPlaudBusy(true);setDialogBusy(true);showCheckResult(tr('Checking Plaud…'));try{const data=await requestJson('/api/imports/plaud/check',{method:'POST'},'Could not reach Plaud');showCheckResult(lp.plaudCheckMessage(data));if(data.new)lp.toast(lp.plaudCheckMessage(data),{type:'success',action:{label:tr('Refresh'),onClick:()=>location.reload()}});}catch(error){if(error.name!=='AbortError')showCheckResult(error.message);}finally{setDialogBusy(false);setPlaudBusy(false);}});
+    function showCheckResult(message){
+      const box=document.getElementById('plaud-import-progress'),label=box.querySelector('[data-progress-label]');
+      box.hidden=!message;label.textContent=message||'';
     }
   });
 

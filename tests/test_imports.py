@@ -849,3 +849,53 @@ def test_metadata_import_queues_new_uploads_and_keeps_processed_status(
         assert session.get(PlaudFile, "new-upload").status == FileStatus.discovered
         assert session.get(PlaudFile, "processed").status == FileStatus.done
         assert session.get(PlaudFile, "queued").status == FileStatus.discovered
+
+
+def test_check_plaud_now_queues_only_new_uploads_without_cloud_artifacts(
+    monkeypatch, tmp_path
+):
+    settings = _reset_db(monkeypatch, tmp_path)
+    from localplaud.db.models import FileStatus, KeyValue, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.imports import check_plaud_now
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import CatalogSyncBusy
+
+    init_db()
+    with session_scope() as session:
+        session.add(KeyValue(key="plaud_catalog_baseline_v1", value={}))
+        session.add(
+            PlaudFile(id="processed", filename="Processed", origin="plaud", status=FileStatus.done)
+        )
+
+    class FakeClient:
+        def iter_files(self, include_trash=False):
+            yield PlaudFileDTO(id="new-upload", filename="New upload", start_time=2)
+            yield PlaudFileDTO(id="processed", filename="Processed", start_time=1)
+
+        def get_detail(self, _file_id):
+            raise AssertionError("a check must not fetch per-recording cloud data")
+
+    @contextmanager
+    def fake_factory(_cfg):
+        yield FakeClient()
+
+    monkeypatch.setattr("localplaud.imports.make_plaud_client", fake_factory)
+    result = check_plaud_now(settings)
+    assert result == {
+        "new": 1,
+        "queued": 1,
+        "recordings": [{"id": "new-upload", "title": "New upload", "queued": True}],
+    }
+    assert check_plaud_now(settings) == {"new": 0, "queued": 0, "recordings": []}
+    with session_scope() as session:
+        assert session.get(PlaudFile, "new-upload").status == FileStatus.discovered
+        assert session.get(PlaudFile, "processed").status == FileStatus.done
+
+    monkeypatch.setattr("localplaud.poller.poll._claim_catalog_sync", lambda: None)
+    try:
+        check_plaud_now(settings)
+    except CatalogSyncBusy:
+        pass
+    else:
+        raise AssertionError("a concurrent poll must be reported as busy")

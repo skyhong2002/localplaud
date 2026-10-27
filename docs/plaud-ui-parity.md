@@ -692,7 +692,9 @@ click-or-drop zone (cloud-upload glyph 48, "Click or drag audio files to upload"
 14px), footer hint 12px #A3A3A3 "Max file length: 24 hrs. Supports … (MP3, MP4,
 WAV, OGG …)". A separate dismissible promo bar sits above the dialog. The older
 "Import from Plaud" option is gone from Plaud Web. localplaud: menu = Record in
-browser (future), Import audio (device), Sync from Plaud now.
+browser (future), Import audio (device), Check Plaud now. The check reads the
+Plaud listing once (`POST /api/imports/plaud/check`) and queues new uploads for
+the normal automatic download and processing; it does not re-import the library.
 
 ### 6.7 Notifications, plan widget
 

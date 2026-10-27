@@ -279,9 +279,9 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         assert "對外資料傳送須明確啟用" in settings_assets
         assert "SMTP 傳送須明確啟用" in settings_assets
         assert "診斷檔只包含彙總計數" in settings_assets
-        assert "同步 Plaud 錄音與會議記錄" in settings_assets
+        assert "檢查 Plaud 新錄音" in settings_assets
         assert "localStatus.textContent=`${tr('Importing')}" in settings_assets
-        assert "label.textContent=`${tr('Complete')}" in settings_assets
+        assert "showCheckResult(tr('Checking Plaud…'))" in settings_assets
         assert "button.textContent=tr('Uploading…')" in settings_assets
         assert "out.textContent=tr('Authorizing…')" in settings_assets
         assert "confirm(tr('Revoke this backup destination? Upload history is preserved.'))" in settings_assets
