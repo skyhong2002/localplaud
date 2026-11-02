@@ -281,7 +281,7 @@ SSRF-checked. Keep secrets and OAuth tokens out of source control. Workspace
 ## Development
 
 ```bash
-uv sync --extra dev
+uv sync --extra dev --extra cloud  # provider tests use mocked SDK calls
 uv pip install "torch>=2.8"  # tensor tests; no model weights required
 uv run --no-sync ruff check .
 uv run --no-sync pytest

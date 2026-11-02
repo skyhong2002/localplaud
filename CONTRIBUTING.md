@@ -25,12 +25,13 @@ Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in every project space.
 ```bash
 git clone https://github.com/skyhong2002/localplaud.git
 cd localplaud
-uv sync --extra dev
+uv sync --extra dev --extra cloud
 uv pip install "torch>=2.8"
 ```
 
-The full suite uses PyTorch for synthetic audio-feature tests; it does not need
-model weights. CI installs its CPU build. Use Python 3.11 or newer. The main CI
+The full suite uses cloud SDKs with mocked transports and PyTorch for synthetic
+audio-feature tests; it does not need provider credentials or model weights.
+CI installs the CPU PyTorch build. Use Python 3.11 or newer. The main CI
 matrix covers Python 3.11 and 3.12. Install
 ffmpeg and the relevant optional extras when working on media or model runtimes;
 see the [quickstart](README.md#quickstart). Keep private configuration, tokens,
