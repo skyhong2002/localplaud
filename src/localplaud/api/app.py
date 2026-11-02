@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from ..maintenance import tracked_thread, tracked_submit
-
 import hashlib
 import hmac
 import json
@@ -74,6 +72,7 @@ from ..db.models import (
 from ..db.session import init_db, session_scope
 from ..error_redaction import sanitize_error
 from ..i18n import SUPPORTED_LOCALES, catalog, translator
+from ..maintenance import tracked_submit, tracked_thread
 from ..markdown import render_markdown as _render_markdown
 from ..markdown import render_markdown_blocks as _render_markdown_blocks
 from ..note_history import content_fingerprint, restore_summary_version
@@ -5545,4 +5544,5 @@ _NOTE_TEMPLATE_ITEM = note_template_item
 
 # Outermost, including auth, multipart and streaming/background-response lifetime.
 from ..maintenance import MaintenanceMiddleware  # noqa: E402
+
 app.add_middleware(MaintenanceMiddleware)

@@ -1,13 +1,13 @@
 """Private gate/drain, accepted-work handoff and isolated crash/resume tests."""
+
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -20,6 +20,7 @@ def restore_settings_cache(monkeypatch):
     # Settings are cached independently of monkeypatch's environment restoration.
     monkeypatch.undo()
     from localplaud.config import get_settings
+
     get_settings(reload=True)
 
 
@@ -33,6 +34,7 @@ def gate(tmp_path, monkeypatch):
     g = m.Gate(tmp_path / ".maintenance")
     g.serving = True
     from localplaud.worker import daemon
+
     monkeypatch.setattr(m, "get_gate", lambda: g)
     monkeypatch.setattr(daemon, "get_gate", lambda: g)
     yield g
@@ -78,8 +80,12 @@ def test_thread_double_start_and_start_failure_do_not_leak_or_underflow(gate, mo
     assert gate.active == 0
 
     class Broken:
-        def __init__(self, **kwargs): pass
-        def start(self): raise RuntimeError("synthetic start failure")
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("synthetic start failure")
+
     monkeypatch.setattr(threading, "Thread", Broken)
     with pytest.raises(RuntimeError):
         m.tracked_thread(target=lambda: None).start()
@@ -106,16 +112,19 @@ def test_corrupt_oversized_symlink_and_foreign_mode_fail_closed(gate, tmp_path):
     request = gate.path / "request.json"
     for body in (b"{}", b"x" * 5000):
         request.write_bytes(body)
-        with pytest.raises(m.MaintenancePaused): gate.reserve()
+        with pytest.raises(m.MaintenancePaused):
+            gate.reserve()
     request.unlink()
     target = tmp_path / "other"
-    target.write_text('{"request_id":"' + 'a' * 32 + '"}')
+    target.write_text('{"request_id":"' + "a" * 32 + '"}')
     request.symlink_to(target)
-    with pytest.raises(m.MaintenancePaused): gate.reserve()
+    with pytest.raises(m.MaintenancePaused):
+        gate.reserve()
     request.unlink()
-    request.write_text('{"request_id":"' + 'a' * 32 + '"}')
+    request.write_text('{"request_id":"' + "a" * 32 + '"}')
     request.chmod(0o644)
-    with pytest.raises(m.MaintenancePaused): gate.reserve()
+    with pytest.raises(m.MaintenancePaused):
+        gate.reserve()
     assert target.read_text().startswith('{"request_id"')
 
 
@@ -131,8 +140,12 @@ def test_asgi_full_stream_and_background_lifetime_are_tracked_and_health_stays_o
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await send({"type": "http.response.body", "body": b"ok"})
 
-    async def send(message): messages.append(message)
-    async def receive(): return {"type": "http.request", "body": b""}
+    async def send(message):
+        messages.append(message)
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
     async def exercise():
         app = m.MaintenanceMiddleware(application)
         existing = asyncio.create_task(app({"type": "http", "path": "/api/work"}, receive, send))
@@ -146,6 +159,7 @@ def test_asgi_full_stream_and_background_lifetime_are_tracked_and_health_stays_o
         finish.set()
         await existing
         assert gate.snapshot()["quiescent"]
+
     asyncio.run(exercise())
 
 
@@ -154,6 +168,7 @@ def test_cli_status_binds_fresh_process_request_and_abort_resume(gate, monkeypat
         monkeypatch.setattr(sys, "argv", ["maintenance", "--control-dir", str(gate.path), *args])
         rc = m.main()
         return rc, json.loads(capsys.readouterr().out)
+
     rc, request = cli("begin")
     assert rc == 0
     value = gate.snapshot() | {"process_birth": m.process_birth(os.getpid())}
@@ -165,10 +180,12 @@ def test_cli_status_binds_fresh_process_request_and_abort_resume(gate, monkeypat
     with m.directory(gate.path) as fd:
         m.write_json(fd, "voice.json", value | {"role": "voice", "process_birth": "stale birth"})
     assert cli("status", "--main-pid", str(os.getpid()), "--voice-pid", str(os.getpid()))[0] == 2
-    with pytest.raises(ValueError): cli("resume", "--request-id", "b" * 32)
+    with pytest.raises(ValueError):
+        cli("resume", "--request-id", "b" * 32)
     assert gate.request() is not None
     assert cli("resume", "--request-id", request["request_id"])[1]["resumed"]
-    with gate.activity(): pass
+    with gate.activity():
+        pass
 
 
 @pytest.mark.skipif(
@@ -177,11 +194,18 @@ def test_cli_status_binds_fresh_process_request_and_abort_resume(gate, monkeypat
 )
 def test_voice_admitted_pass_drains_before_next_pass_and_request_persists(tmp_path):
     from tests.test_service_signals import FIXTURE, await_event, events
+
     root = tmp_path
     env = dict(os.environ, LOCALPLAUD_POLLER__DOWNLOAD_DIR=str(root / "audio"))
-    child = subprocess.Popen([sys.executable, str(FIXTURE), "watch-active", str(root)],
-                             cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             text=True, start_new_session=True)
+    child = subprocess.Popen(
+        [sys.executable, str(FIXTURE), "watch-active", str(root)],
+        cwd=root,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
     try:
         await_event(child, root, "child-started")
         control = root / ".maintenance"
@@ -189,17 +213,22 @@ def test_voice_admitted_pass_drains_before_next_pass_and_request_persists(tmp_pa
         until = time.monotonic() + 3
         while True:
             with m.directory(control) as fd:
-                try: receipt = m.read_json(fd, "voice.json")
-                except FileNotFoundError: receipt = None
-            if receipt: break
+                try:
+                    receipt = m.read_json(fd, "voice.json")
+                except FileNotFoundError:
+                    receipt = None
+            if receipt:
+                break
             assert time.monotonic() < until
             time.sleep(0.02)
         assert receipt["active"] == 1 and not receipt["quiescent"]
         (root / "release-child").touch()
         until = time.monotonic() + 3
         while True:
-            with m.directory(control) as fd: receipt = m.read_json(fd, "voice.json")
-            if receipt["quiescent"]: break
+            with m.directory(control) as fd:
+                receipt = m.read_json(fd, "voice.json")
+            if receipt["quiescent"]:
+                break
             assert time.monotonic() < until
             time.sleep(0.02)
         assert events(root).count("child-admitted") == 1
@@ -212,10 +241,11 @@ def test_voice_admitted_pass_drains_before_next_pass_and_request_persists(tmp_pa
 
 
 def setup_pipeline(monkeypatch, tmp_path):
-    from tests.test_pipeline_resume import _reset_db, _install_fakes
     from localplaud.config import get_settings
     from localplaud.db.models import FileStatus, PlaudFile
     from localplaud.db.session import init_db, session_scope
+    from tests.test_pipeline_resume import _install_fakes, _reset_db
+
     _reset_db(monkeypatch, tmp_path)
     monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "audio"))
     settings = get_settings(reload=True)
@@ -224,19 +254,29 @@ def setup_pipeline(monkeypatch, tmp_path):
         audio = tmp_path / (name + ".wav")
         audio.write_bytes(b"synthetic original retained")
         with session_scope() as db:
-            db.add(PlaudFile(id=name, filename=name, origin="local",
-                            status=FileStatus.downloaded, audio_path=str(audio)))
+            db.add(
+                PlaudFile(
+                    id=name,
+                    filename=name,
+                    origin="local",
+                    status=FileStatus.downloaded,
+                    audio_path=str(audio),
+                )
+            )
     counters = dict(asr=0, sum=0, mm=0, emb=0)
     _install_fakes(monkeypatch, counters)
     return settings, counters
 
 
-def test_daemon_real_pipeline_longer_than60_drains_and_leaves_pending_durable(gate, monkeypatch, tmp_path):
+def test_daemon_real_pipeline_longer_than60_drains_and_leaves_pending_durable(
+    gate, monkeypatch, tmp_path
+):
     from localplaud import cli
     from localplaud.db.models import FileStatus, PlaudFile
     from localplaud.db.session import session_scope
     from localplaud.worker import pipeline
     from localplaud.worker.daemon import DaemonJobs
+
     settings, counters = setup_pipeline(monkeypatch, tmp_path)
     settings.pipeline.concurrency = 1
     # Queue orders newest IDs first; pin the admitted recording without changing
@@ -253,8 +293,11 @@ def test_daemon_real_pipeline_longer_than60_drains_and_leaves_pending_durable(ga
         entered.set()
         finished.wait(61.5)  # fake provider only; no audio decoding/model/network
         return original(*args, **kwargs)
+
     monkeypatch.setattr(pipeline.transcribe, "run_asr", long_asr)
-    monkeypatch.setattr(cli, "process_automatic_pending", lambda *a, **k: pipeline.process_pending(settings))
+    monkeypatch.setattr(
+        cli, "process_automatic_pending", lambda *a, **k: pipeline.process_pending(settings)
+    )
     jobs = DaemonJobs(settings, "synthetic-daemon", object())
     thread = threading.Thread(target=jobs.work)
     thread.start()
@@ -285,9 +328,10 @@ def test_killed_stage_recovers_prior_owner_without_repeating_completed_asr(tmp_p
     from localplaud.db.session import session_scope
     from localplaud.poller.poll import reset_inflight
     from localplaud.worker import pipeline
+
     settings, counters = setup_pipeline(monkeypatch, tmp_path)
     ready = tmp_path / "stage-admitted"
-    source = '''import time,sys,pytest
+    source = """import time,sys,pytest
 from pathlib import Path
 from tests.test_pipeline_resume import _install_fakes
 from localplaud.worker import pipeline
@@ -299,9 +343,13 @@ def interrupted(*a,**k):
  while True: time.sleep(0.1)
 p.setattr(pipeline.summarize,'summarize',interrupted)
 with processing_owner('synthetic-crashed-owner'): pipeline.process_file('first')
-'''
-    child = subprocess.Popen([sys.executable, "-c", source, str(ready)],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+"""
+    child = subprocess.Popen(
+        [sys.executable, "-c", source, str(ready)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     try:
         until = time.monotonic() + 10
         while not ready.exists():
@@ -311,7 +359,9 @@ with processing_owner('synthetic-crashed-owner'): pipeline.process_file('first')
         child.kill()  # exact disposable fixture process; never a service PID
         child.communicate(timeout=3)
     finally:
-        if child.poll() is None: child.kill(); child.wait(timeout=3)
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=3)
     control = tmp_path / ".maintenance"
     begin(control)
     paused = m.Gate(control)
@@ -320,11 +370,20 @@ with processing_owner('synthetic-crashed-owner'): pipeline.process_file('first')
         row = db.get(PlaudFile, "first")
         transcript_id = row.local_transcript.id
         assert row.processing_token is None and row.status == FileStatus.downloaded
-        assert next(r for r in row.stage_runs if r.stage == StageName.transcribe).status == StageStatus.completed
-        assert next(r for r in row.stage_runs if r.stage == StageName.summarize).status == StageStatus.failed
-    with pytest.raises(m.MaintenancePaused): paused.reserve()
-    with m.directory(control) as fd: os.unlink("request.json", dir_fd=fd)
-    with paused.activity(): pipeline.process_file("first", get_settings())
+        assert (
+            next(r for r in row.stage_runs if r.stage == StageName.transcribe).status
+            == StageStatus.completed
+        )
+        assert (
+            next(r for r in row.stage_runs if r.stage == StageName.summarize).status
+            == StageStatus.failed
+        )
+    with pytest.raises(m.MaintenancePaused):
+        paused.reserve()
+    with m.directory(control) as fd:
+        os.unlink("request.json", dir_fd=fd)
+    with paused.activity():
+        pipeline.process_file("first", get_settings())
     assert counters["asr"] == 0 and counters["sum"] == 1
     with session_scope() as db:
         row = db.get(PlaudFile, "first")
@@ -333,50 +392,82 @@ with processing_owner('synthetic-crashed-owner'): pipeline.process_file('first')
     assert (tmp_path / "first.wav").read_bytes() == b"synthetic original retained"
 
 
-def test_remote_admitted_job_finishes_poll_download_cancel_and_owner_refresh_under_pause(gate, monkeypatch, tmp_path):
-    from tests.test_remote_worker import _client, _request
+def test_remote_admitted_job_finishes_poll_download_cancel_and_owner_refresh_under_pause(
+    gate, monkeypatch, tmp_path
+):
+    from sqlalchemy import select
+
     from localplaud.db.models import RemoteJob
     from localplaud.db.session import session_scope
-    from localplaud.poller.poll import register_daemon_owner, refresh_daemon_owner, release_daemon_owner
+    from localplaud.poller.poll import (
+        refresh_daemon_owner,
+        register_daemon_owner,
+        release_daemon_owner,
+    )
     from localplaud.remote import server
     from localplaud.remote.protocol import JobStatus
-    from sqlalchemy import select
+    from tests.test_remote_worker import _client, _request
 
     client = _client(monkeypatch, tmp_path)
     gate.start_reporting("main")
     headers = {"Authorization": "Bearer worker-secret"}
     entered, finish = threading.Event(), threading.Event()
     calls, responses = [], []
+
     def execute(request):
         calls.append(request.idempotency_key)
         entered.set()
         assert finish.wait(5)
         return [server._artifact("result.json", "application/json", b"completed")]
+
     monkeypatch.setattr(server, "_execute", execute)
-    request = threading.Thread(target=lambda: responses.append(client.post(
-        "/api/worker/v1/jobs", json=_request("accepted"), headers=headers)))
+    request = threading.Thread(
+        target=lambda: responses.append(
+            client.post("/api/worker/v1/jobs", json=_request("accepted"), headers=headers)
+        )
+    )
     request.start()
     try:
         assert entered.wait(3)
         with session_scope() as db:
-            accepted_id = db.scalar(select(RemoteJob.id).where(RemoteJob.idempotency_key == "accepted"))
+            accepted_id = db.scalar(
+                select(RemoteJob.id).where(RemoteJob.idempotency_key == "accepted")
+            )
             for name in ("queued", "cancel"):
-                db.add(RemoteJob(id=("b" if name == "queued" else "c") * 32,
-                    idempotency_key=name, stage="summarize", model="test", status=JobStatus.queued,
-                    input_manifest=_request(name), options={}))
+                db.add(
+                    RemoteJob(
+                        id=("b" if name == "queued" else "c") * 32,
+                        idempotency_key=name,
+                        stage="summarize",
+                        model="test",
+                        status=JobStatus.queued,
+                        input_manifest=_request(name),
+                        options={},
+                    )
+                )
         owner, _ = register_daemon_owner()
         begin(gate.path)
         assert refresh_daemon_owner(owner)  # Existing epoch/lease stays live while draining.
         assert client.get("/healthz").status_code == 200
-        assert client.post("/api/worker/v1/jobs", json=_request("rejected"), headers=headers).status_code == 503
+        assert (
+            client.post(
+                "/api/worker/v1/jobs", json=_request("rejected"), headers=headers
+            ).status_code
+            == 503
+        )
         url = "/api/worker/v1/jobs/" + accepted_id
         assert client.get(url).status_code == 401  # Exemption never bypasses worker auth.
         assert client.get(url, headers=headers).json()["status"] == "running"
-        assert client.post("/api/worker/v1/jobs/" + "c" * 32 + "/cancel", headers=headers).status_code == 200
+        assert (
+            client.post("/api/worker/v1/jobs/" + "c" * 32 + "/cancel", headers=headers).status_code
+            == 200
+        )
         assert server.execute_job("b" * 32) is False
         with session_scope() as db:
             assert db.get(RemoteJob, "b" * 32).status == JobStatus.queued
-            assert db.get(RemoteJob, "b" * 32).input_manifest["inputs"][0]["value"] == {"segments": []}
+            assert db.get(RemoteJob, "b" * 32).input_manifest["inputs"][0]["value"] == {
+                "segments": []
+            }
             assert db.get(RemoteJob, "c" * 32).input_manifest["input_payloads_released"]
         finish.set()
         request.join(3)
@@ -385,8 +476,11 @@ def test_remote_admitted_job_finishes_poll_download_cancel_and_owner_refresh_und
         assert client.get(url + "/artifacts/result.json", headers=headers).content == b"completed"
         assert gate.snapshot()["quiescent"]
         assert calls == ["accepted"]
-        monkeypatch.setattr(sys, "argv", ["maintenance", "--control-dir", str(gate.path),
-                                        "resume", "--request-id", "a" * 32])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["maintenance", "--control-dir", str(gate.path), "resume", "--request-id", "a" * 32],
+        )
         assert m.main() == 0
         until = time.monotonic() + 3
         while calls != ["accepted", "queued"]:
@@ -399,44 +493,69 @@ def test_remote_admitted_job_finishes_poll_download_cancel_and_owner_refresh_und
 
 
 @pytest.mark.parametrize("resume_before_restart", [False, True])
-def test_standalone_restart_resumes_only_explicitly_deferred_jobs_with_auto_off(gate, monkeypatch, tmp_path, resume_before_restart):
-    from tests.test_remote_worker import _client, _request
+def test_standalone_restart_resumes_only_explicitly_deferred_jobs_with_auto_off(
+    gate, monkeypatch, tmp_path, resume_before_restart
+):
     from localplaud.db.models import RemoteJob
     from localplaud.db.session import session_scope
     from localplaud.preferences import get_workspace_preferences, save_workspace_preferences
     from localplaud.remote import server
     from localplaud.remote.protocol import JobStatus
+    from tests.test_remote_worker import _client, _request
+
     client = _client(monkeypatch, tmp_path)
     with session_scope() as db:
         save_workspace_preferences(db, {"auto_process_new_recordings": False})
         assert get_workspace_preferences(db)["auto_process_new_recordings"] is False
         for job_id, key in (("d" * 32, "deferred"), ("e" * 32, "historical")):
-            db.add(RemoteJob(id=job_id, idempotency_key=key, stage="summarize", model="test",
-                            status=JobStatus.queued, input_manifest=_request(key), options={}))
+            db.add(
+                RemoteJob(
+                    id=job_id,
+                    idempotency_key=key,
+                    stage="summarize",
+                    model="test",
+                    status=JobStatus.queued,
+                    input_manifest=_request(key),
+                    options={},
+                )
+            )
     begin(gate.path)
     assert server.execute_job("d" * 32) is False  # Real paused execution writes durable marker.
     assert not (gate.path / "main.json").exists()
+
     def resume():
-        monkeypatch.setattr(sys, "argv", ["maintenance", "--control-dir", str(gate.path),
-                                        "resume", "--request-id", "a" * 32])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["maintenance", "--control-dir", str(gate.path), "resume", "--request-id", "a" * 32],
+        )
         assert m.main() == 0
+
     if resume_before_restart:
         resume()
     replacement = m.Gate(gate.path)  # Fresh process owns no in-memory pause history.
     monkeypatch.setattr(m, "get_gate", lambda: replacement)
     calls = []
-    monkeypatch.setattr(server, "_execute", lambda request: (
-        calls.append(request.idempotency_key) or
-        [server._artifact("result.json", "application/json", b"done")]))
+    monkeypatch.setattr(
+        server,
+        "_execute",
+        lambda request: (
+            calls.append(request.idempotency_key)
+            or [server._artifact("result.json", "application/json", b"done")]
+        ),
+    )
     original_resume = server.resume_deferred_jobs
     attempts = []
+
     def scan_fail_once():
         attempts.append(True)
         if len(attempts) == 1:
             raise server.DeferredScanUnavailable("synthetic read unavailable")
         return original_resume()
+
     monkeypatch.setattr(server, "resume_deferred_jobs", scan_fail_once)
     from localplaud.api.app import app
+
     monkeypatch.setattr(app.state, "managed_daemon", False, raising=False)
     with client:
         assert replacement.reporter and replacement.serving
@@ -455,6 +574,8 @@ def test_standalone_restart_resumes_only_explicitly_deferred_jobs_with_auto_off(
         with session_scope() as db:
             assert db.get(RemoteJob, "d" * 32).status == JobStatus.succeeded
             assert db.get(RemoteJob, "e" * 32).status == JobStatus.queued
-            assert db.get(RemoteJob, "e" * 32).input_manifest["inputs"][0]["value"] == {"segments": []}
+            assert db.get(RemoteJob, "e" * 32).input_manifest["inputs"][0]["value"] == {
+                "segments": []
+            }
     assert replacement.reporter is None
     assert len(attempts) >= 2

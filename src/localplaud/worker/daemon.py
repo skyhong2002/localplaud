@@ -7,8 +7,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
-from .claims import processing_owner
 from ..maintenance import MaintenancePaused, get_gate
+from .claims import processing_owner
 
 log = logging.getLogger(__name__)
 

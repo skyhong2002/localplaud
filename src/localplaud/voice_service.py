@@ -30,8 +30,8 @@ from sqlalchemy import exists, select
 from .config import get_settings
 from .db.models import PlaudFile, Speaker, Transcript
 from .db.session import get_engine, session_scope
-from .service_signals import ServiceSignals
 from .maintenance import MaintenancePaused, get_gate
+from .service_signals import ServiceSignals
 from .voice_identity import (
     VoiceSample,
     apply_match,

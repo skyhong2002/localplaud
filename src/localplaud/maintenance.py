@@ -11,7 +11,6 @@ import contextvars
 import fcntl
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import subprocess
@@ -19,6 +18,7 @@ import threading
 import time
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 _admitted = contextvars.ContextVar("maintenance_admitted", default=False)
 _gates = {}

@@ -26,8 +26,6 @@ pending, running, or has failed, so the UI never loses a usable outline.
 
 from __future__ import annotations
 
-from ..maintenance import tracked_thread
-
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -39,6 +37,7 @@ from ..config import get_settings
 from ..db.models import Outline, PlaudFile, StageName, StageStatus
 from ..db.session import session_scope
 from ..db.tenancy import run_in_current_workspace, scoped_to_file
+from ..maintenance import tracked_thread
 
 router = APIRouter()
 

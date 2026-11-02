@@ -7,8 +7,6 @@ included from ``app.py`` without a circular import.
 
 from __future__ import annotations
 
-from ..maintenance import tracked_thread, tracked_submit
-
 import json
 import re
 import secrets
@@ -24,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import distinct, func, select
 
 from ..db.tenancy import run_in_current_workspace
+from ..maintenance import tracked_submit, tracked_thread
 
 router = APIRouter(tags=["surfaces"])
 

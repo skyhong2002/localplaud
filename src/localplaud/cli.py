@@ -249,6 +249,7 @@ def run():
 
     from .ask_threads import recover_ask_request_claims
     from .db.session import init_db
+    from .maintenance import get_gate
     from .poller.poll import (
         register_daemon_owner,
         release_daemon_owner,
@@ -257,7 +258,6 @@ def run():
     from .providers.usage import recover_provider_dispatch_reservations
     from .service_signals import ServiceSignals
     from .worker.daemon import DaemonJobs
-    from .maintenance import get_gate
 
     # Under launchd the log files otherwise fill with thousands of
     # carriage-returned "Loading weights" progress bars per model load.
