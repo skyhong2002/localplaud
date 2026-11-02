@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, setup help, and ideas
+    url: https://github.com/skyhong2002/localplaud/discussions
+    about: Start a discussion for support and open-ended product feedback.
+  - name: Report a security vulnerability privately
+    url: https://github.com/skyhong2002/localplaud/security/advisories/new
+    about: Keep unpatched vulnerabilities and sensitive details out of public issues.
+  - name: Documentation
+    url: https://github.com/skyhong2002/localplaud#documentation
+    about: Find setup, deployment, provider, backup, and recovery guides.

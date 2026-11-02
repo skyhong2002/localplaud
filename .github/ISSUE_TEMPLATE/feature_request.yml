@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest a concrete improvement to the recording workflow.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the workflow you want to improve. For open-ended ideas or setup
+        questions, start at https://github.com/skyhong2002/localplaud/discussions.
+        Keep private recording content and account details out of your examples.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Who needs this, in what situation, and what is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the outcome and an example of how you would use it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and tradeoffs
+      description: Include any workaround, provider needs, privacy boundary, or cost implications.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: How would we know it works?
+      description: Suggest observable success criteria for the user journey.

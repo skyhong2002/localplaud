@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible problem in localplaud.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve localplaud. Search existing issues first.
+        Use synthetic examples and redact recording content, account identifiers,
+        credentials, private paths, and signed URLs. For vulnerabilities, use
+        https://github.com/skyhong2002/localplaud/security/advisories/new instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the affected screen or command and a minimal synthetic example.
+      placeholder: |
+        1. Open…
+        2. Choose…
+        3. Observe…
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Version or commit
+      description: Find the build in Settings → Support & About, or run git rev-parse --short HEAD.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, hardware, native/Docker/remote worker, browser, and relevant provider/model. No secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted diagnostics or screenshots
+      description: Include stage status and error details if relevant. Never attach a real recording or database.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked for existing reports and removed private data and credentials.
+          required: true

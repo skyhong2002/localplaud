@@ -1,387 +1,306 @@
 <p align="center">
-  <img src="src/localplaud/api/static/wordmark.svg" alt="localplaud" height="52">
+  <img src="src/localplaud/api/static/wordmark.svg" alt="localplaud" height="56">
 </p>
 
-<h1 align="center"></h1>
+<h1 align="center">Your recordings. Your intelligence.</h1>
 
 <p align="center">
-  <b>A self-hosted replacement for the Plaud Intelligence workflow.</b> Keep using
-  your physical Plaud recorder and its raw-audio upload path; localplaud takes over
-  transcription, speakers, notes, search, Ask, and export on machines you control.
+  Turn Plaud recordings into editable transcripts, useful notes, and answers you can trace.<br>
+  An open-source, self-hosted alternative to the Plaud Intelligence workflow.
 </p>
 
 <p align="center">
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#quickstart">Quickstart</a> ·
-  <a href="#configuration">Configuration</a> ·
-  <a href="#asr-providers">ASR providers</a> ·
-  <a href="#deploying-to-your-own-machines">Deploy</a>
+  <a href="https://github.com/skyhong2002/localplaud/actions/workflows/ci.yml"><img src="https://github.com/skyhong2002/localplaud/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
+  <a href="#asr-providers"><img src="https://img.shields.io/badge/runs_on-Apple_Silicon_%7C_NVIDIA_%7C_CPU-667085" alt="Runs on Apple Silicon, NVIDIA, and CPU"></a>
+  <a href="#project-status"><img src="https://img.shields.io/badge/status-active_development-8F53ED" alt="Status: active development"></a>
+</p>
+
+<p align="center">
+  <a href="#what-you-can-do">Explore features</a> ·
+  <a href="#quickstart">Get started</a> ·
+  <a href="docs/deploy.md">Self-host</a> ·
+  <a href="#documentation">Documentation</a> ·
+  <a href="https://github.com/skyhong2002/localplaud/discussions">Community</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
 ---
 
-## Why
+## Keep the recorder. Own what comes next.
 
-Plaud's hardware and device sync are useful; its paid Intelligence workflow should
-be optional. **localplaud** treats the official Plaud cloud as a transport and source
-of truth for *raw audio* only, then independently rebuilds the useful workflow —
-download, transcode, transcribe, align, diarize, correct, summarize, map, search,
-Ask, and export — on hardware you control. It replaces the subscription processing
-experience, not the recorder or the App's device-upload role.
+Your recorder captures the conversation. **localplaud turns it into knowledge you
+can edit, search, and use again**—in a workspace you host.
 
-The browser runtime is self-contained: HTMX is vendored with its upstream license
-and pinned checksum, so normal Web App interaction does not depend on a CDN.
+Keep recording and uploading through the official Plaud App. localplaud downloads
+the raw audio and handles transcription, speaker labels, notes, mind maps, search,
+Ask, and export independently. **No Plaud Generate button or Plaud-generated
+transcript is required.** You can also upload audio directly in the Web App.
 
-> Record and upload as usual, but do not need to press Plaud's Generate button.
-> localplaud polls the read-only official Open API or MCP, downloads the audio, and owns every
-> derived artifact. See the [target product workflow](docs/product-workflow.md).
+Choose local models, explicitly configured cloud providers, or your own remote
+worker for each processing stage. The software is MIT-licensed; your hardware,
+hosting, and any cloud-provider usage are separate costs.
 
-## Status
+## What you can do
 
-The October 2 Mini integration adds a shared desktop/mobile shell, persistent
-playback across navigation, streamed Ask controls, editable Templates/AutoFlow,
-and [timestamped chapter outlines](docs/chapter-outline.md). Chapters use the
-corrected local transcript and preserve revisions; model-free time sections are
-an explicit alternative to AI topic chapters. Automatic generation is off by
-default. Speaker naming now updates bound speaker mentions in existing generated
-notes and mind maps without a model rerun, preserving previous versions. Unknown
-voices have friendly Speaker 1/2 labels. Older unlinked personal names remain
-unchanged with a review notice; stale notes stay readable with an explicit status.
-The UI is staged, not deployed. See [integration and rollout notes](docs/mini-integration-20261002.md).
-No private-content service worker cache is enabled.
+| From recording to… | What you get |
+| --- | --- |
+| **A transcript you can trust and correct** | Listen alongside timestamped text, click to seek, rename speakers, edit inline, and compare corrected text with raw ASR. |
+| **Notes that fit the conversation** | Generate structured notes with reusable templates, keep multiple outputs, and edit a copy while preserving the original AI artifact. Long recordings use full-transcript coverage. |
+| **The bigger picture** | Explore a collapsible mind map and export it as an image. Generate timestamped chapters when you want another way to navigate. |
+| **Answers with sources** | Ask about one recording or your library. Transcript citations jump to the audio; note citations open the exact note. Save useful answers as editable notes. |
+| **A library you can find things in** | Search titles, transcripts, and notes; organize with folders and tags; filter by date, duration, source, and processing state. Text search works without embeddings. |
+| **Less repeat work** | Use AutoFlow rules to choose templates and processing profiles, organize files, export transcripts, and deliver notifications to authorized destinations. |
+| **Work you can take with you** | Export audio, transcripts, subtitles, notes, and mind maps—or create a revocable public recording link with the content you choose. |
 
-The core skeleton works: OAuth polling through **Plaud's official Open API or MCP**,
-a safe metadata-only first catalog sync followed by automatic download of new raw
-audio, pluggable local ASR, diarization, LLM notes, embeddings/Q&A, audio
-playback, and a FastAPI Web App. It runs natively and in Docker profiles.
+Use it for meeting decisions and follow-ups, interview review, lecture notes, or
+finding the conversation where an idea first came up. The Web App supports desktop
+and mobile layouts, with English and Traditional Chinese (Taiwan) interfaces;
+translation of some diagnostic and helper text is still expanding.
 
-The subscription-replacement experience is **in progress**, not complete. The
-default `independent` artifact mode refuses Plaud transcripts as pipeline input,
-preserves them as visibly labelled imports, and safely requeues legacy cloud-derived
-rows for local ASR. Durable stage records preserve attempts, provider/model
-provenance, timing, and actionable failures; optional-stage failures retain usable
-transcripts and notes for targeted resume. Full-transcript hierarchical notes,
-resumable mind maps, OpenCode Go contextual transcript polishing, transcript
-revisions, editable per-recording speaker names,
-single-file Ask with playable citations, richer library filters, and Plaud-style
-Add audio / Import from Plaud flows are implemented. A Plaud import refreshes the
-entire metadata catalog plus any existing Plaud transcript/summary while leaving raw
-audio remote until the user requests one recording. Imports also resolve link-backed
-note/transcript bodies, retain Plaud note names and stable links, and mirror supported
-images. An empty Notes workspace offers a direct import action; app-only summary
-cards without a downloadable image are explicitly labelled as unavailable.
-After that baseline, scheduled
-polling automatically downloads recordings first observed as new uploads. The
-optional `store.evict_plaud_audio_after_processing` policy releases completed
-Plaud-backed audio while retaining every local artifact, then restores the raw
-audio on demand for playback, export, or reprocessing. The recording export dialog
-produces transcript TXT/SRT/VTT/DOCX/PDF formats with timestamp/speaker controls.
-PDF embeds a portable Traditional Chinese font. Generated and Saved notes export as
-Markdown, TXT, DOCX, or PDF; original-audio, mind-map image, and Markdown archive
-exports remain available. Transcript and current notes can be copied directly, and
-the Library can export up to 50 selected recordings as one provenance-aware ZIP with
-a partial-availability manifest. Library and recording Ask surfaces also provide a
-searchable, paginated conversation-history drawer with rename/delete controls;
-deleting a conversation preserves any Saved notes created from its answers. Blank
-manual notes are no longer created; notes made that way earlier keep the same search,
-edit, copy, export, backup, and local-data preservation paths as other user-owned
-notes. One recording-wide Find & replace searches the transcript and every note
-together, and Replace all updates the transcript (one revision) and every editable
-note (AI notes through their editable copy) in one action. Durable note knowledge
-documents also let recording and library Ask rank current local generated notes and
-Saved notes alongside corrected transcript chunks. Note citations open the exact
-artifact, and independent retry/fencing keeps an embedding failure from changing the
-note or recording pipeline state. Transcript and note retrieval reject vectors whose
-embedding identity cannot be proven, query every configured current fallback identity, and
-durably queue profile-change reindexing without starting provider work. Provider
-cost reservations share one recording/library ceiling across pipeline, note-index,
-and Ask calls; processing-history cleanup retains cumulative spend. Existing Ask
-threads use a durable request lease so separate clients cannot issue competing
-follow-ups. With automatic processing disabled, startup only records/requeues
-derived index metadata, does not resume remote jobs, and performs no provider work. Durable
-provider/model/execution profiles, explicit
-stage fallbacks, remote workers, local AutoFlow rules, inbox notifications,
-TXT/SRT/VTT AutoFlow exports, scoped authorized webhooks, and authorized SMTP email
-delivery are also implemented.
-The remaining work centers on broader integrations and Plaud-level Web App polish.
-Plaud-produced
-transcripts and summaries may be imported for
-migration or comparison, but are not part of the target primary workflow.
+## Built to keep your work
 
-To share a recording, open **Share → Public share link → Create public link → Copy**. Choose which
-content to include before creating the link; recipients can read it without signing
-in. **Disable link** revokes access. The separate workspace link requires login.
-The same Share sheet groups clipboard actions and audio, transcript, note, and
-mind-map exports; selecting a row opens its options inside the sheet.
-On mobile, the recording player stays at the bottom while you read notes; generation
-settings expand from **Generate notes** or the notes **+** menu.
+- **Your edits stay yours.** Raw ASR and user corrections have separate revision
+  history. Re-index corrected text without running speech recognition again.
+- **A failed stage does not erase a good result.** Transcripts and notes remain
+  usable when a later stage fails. Resume the affected work with visible errors.
+- **You choose where AI runs.** Stage-specific profiles record the provider, model,
+  and configuration. Cloud fallback requires an explicit policy.
+- **You can inspect the source.** Generated artifacts retain provenance and
+  revision relationships. Imported Plaud AI content is labelled separately and
+  excluded from the independent processing path.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    plaud["Plaud device<br/>→ App → Cloud"] -->|"read-only"| ingest
+    recorder["Plaud recorder"] --> app["Plaud App + cloud<br/>raw-audio upload"]
+    app -->|"read-only sync"| audio
+    upload["Upload your own audio"] --> audio
 
-    subgraph localplaud["localplaud"]
-        direction LR
-        ingest["poll + download<br/>→ store"] --> worker["convert → ASR → align<br/>→ diarize → notes/map → index"]
-        worker --> web["Web App<br/>review · edit · Ask · export"]
+    subgraph localplaud["Your localplaud workspace"]
+        audio["Raw audio"] --> transcript["Transcribe · align<br/>identify speakers · correct"]
+        transcript --> knowledge["Notes · mind map · index"]
+        knowledge --> use["Listen · edit · Ask<br/>organize · export"]
     end
 ```
 
-- **poller** — polls the Plaud cloud API, detects new or updated files (via
-  `version`/`version_ms`), downloads the `.opus` audio.
-- **store** — audio bytes on the filesystem; metadata, transcripts, summaries
-  and embeddings in SQLite.
-- **worker** — the independent pipeline: audio → Whisper large-v3-turbo → durable
-  word alignment (selectable WhisperX/wav2vec2 forced alignment) → speaker diarization
-  → notes/mind map → embeddings.
-- **api / ui** — the primary daily-use Web App: browse, listen, review, edit,
-  regenerate, organize, Ask, and export.
+Plaud handles device transfer and raw-audio upload. localplaud owns the derived
+workflow: audio on disk, metadata and artifacts in SQLite, resumable processing,
+and a Web App for daily use. See the [product specification](docs/product-workflow.md).
+
+## Project status
+
+**Active development.** The core workflow is implemented, but full Plaud-level
+workflow parity, broader integrations, UI polish, and the hardware/language
+acceptance matrix are still in progress. Deployment may lag repository changes;
+see the [UI rollout notes](docs/mini-integration-20261002.md).
+
+Speech quality depends on the configured models and your recordings. Missing
+speaker diarization is a visible degraded state. Voice activity detection and
+forced word alignment need explicit setup; neither is enabled by the copied
+configuration alone. Taiwan Mandarin and mixed Mandarin/English remain primary
+evaluation cases, with broader benchmarks still open.
+
+A recording's Web workspace includes a subscription-independence checklist for
+local provenance, speakers, notes, indexing, exports, and other required evidence.
+The [acceptance guide](docs/acceptance.md) explains what it verifies.
 
 ## Quickstart
 
-Requirements: **Python 3.11+**, **ffmpeg**, and (for local ASR) a Whisper
-backend. [uv](https://github.com/astral-sh/uv) is recommended.
+You'll need **Python 3.11+**, **ffmpeg**, [uv](https://docs.astral.sh/uv/), and enough
+memory and disk for your selected models. The local setup below also uses
+[Ollama](https://ollama.com/) for text generation. Install and start Ollama first.
+Models download on first use; processing speed depends on your hardware.
+
+### 1. Install
 
 ```bash
-git clone https://github.com/skyhong2002/localplaud
+git clone https://github.com/skyhong2002/localplaud.git
 cd localplaud
 
-# install (choose extras for the ASR you want — see below)
-uv sync --extra faster-whisper          # local ASR, CPU/CUDA
-# Add --extra forced-align for selectable WhisperX/wav2vec2 word alignment.
-#   or: pip install -e ".[faster-whisper]"
-# Apple Silicon: uv sync --extra mlx
-#   or: pip install -e ".[mlx]"
-
-cp config.example.toml config.toml      # edit to taste
-cp .env.example .env                    # put secrets here (git-ignored)
-
-localplaud init                         # create the database
-localplaud auth login                   # one-time browser OAuth (official API)
-localplaud auth check                   # verify your Plaud session works
-localplaud poll --once                  # pull the file list + download audio
-localplaud work --once                  # run the pipeline on downloaded files
-localplaud serve                        # web UI at http://localhost:8080
+# CPU: local Whisper, speaker diarization, VAD, and embeddings
+uv sync --extra faster-whisper --extra diarize --extra vad --extra local-llm
 ```
 
-The MLX extra constrains NumPy to the range currently supported by numba, which
-mlx-whisper uses for word timestamps. `localplaud doctor` reports the underlying
-import error if that local speech stack becomes incompatible.
-
-Or run everything as a daemon (poll on a schedule + process continuously):
+For **Apple Silicon**, use this install command instead:
 
 ```bash
-localplaud run
+uv sync --extra mlx --extra diarize --extra vad --extra local-llm
 ```
 
-Automatic processing is a durable workspace preference under **Settings → Workspace**.
-When it is paused, the daemon continues polling and downloading new raw audio, while
-recordings wait for an explicit Resume/Reprocess action before any AI provider is used.
-Discovery/download and processing run as separate, single-flight jobs: a slow speech
-or text provider does not delay the next cloud sync. Downloads wake an idle worker;
-the worker also checks the durable queue at least every 30 seconds while idle.
-Enabled stages run from raw audio through contextual correction and its independent
-review, notes, mind map, and indexing without a per-recording Generate action.
-Failed stages retain completed work and retry with the configured backoff; exhausted
-retries remain visible for Resume. See [automation acceptance](docs/acceptance.md).
+For **NVIDIA/CUDA**, replace `--extra faster-whisper` with `--extra cuda` to include
+the CUDA runtime libraries. Docker and remote-worker options are
+[documented separately](docs/deploy.md).
 
-### Commands
+### 2. Configure your models
 
-| Command | What it does |
-| --- | --- |
-| `localplaud init` | Create the database + data dirs |
-| `localplaud auth login` / `auth check` | One-time OAuth sign-in / verify the session |
-| `localplaud doctor` | Check ffmpeg + your ASR/LLM/embedding providers + auth |
-| `localplaud prepare-independent [--force]` | Preserve imports and requeue legacy cloud-derived files for local ASR |
-| `localplaud poll [--once]` | Sync the cloud listing + download audio |
-| `localplaud work [--once] [--force]` | Run the pipeline on downloaded recordings |
-| `localplaud run` | Poll + process + serve, all together |
-| `localplaud ls` / `status` | List recordings / counts by stage |
-| `localplaud ask "…"` | Q&A across all transcripts |
-| `localplaud reprocess <id>` | Re-run the pipeline on one recording |
-| `localplaud export <id> [-o …]` | Export a recording to Markdown |
-| `localplaud serve` | Web UI only |
+```bash
+cp config.example.toml config.toml
+cp .env.example .env
+ollama pull llama3.1:8b
+```
 
-### Connect Plaud
+In `config.toml`:
 
-localplaud never sees your Plaud password. The default provider is **Plaud's
-official Open API**: run `localplaud auth login` once — it opens your browser
-for native S256 PKCE OAuth (no Node.js required) and caches an
-auto-refreshing token set in `~/.plaud/tokens.json`. The official Plaud MCP is
-also supported with `plaud.provider = "mcp"`; install and authorize it with
-`npx -y @plaud-ai/mcp@latest install`.
+- Choose `asr.provider = "mlx-whisper"` on Apple Silicon; CPU/CUDA uses
+  `"faster-whisper"` by default.
+- Set `enabled = true` under `[asr.vad]` to enable speech detection.
+- Keep `pipeline.artifact_mode = "independent"` for the raw-audio workflow.
 
-`localplaud auth check` confirms whichever provider is configured. See
-[`docs/plaud-api.md`](docs/plaud-api.md) for API details.
+For speaker labels, accept the Hugging Face terms for
+[`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1)
+and put your token in `.env`:
+
+```dotenv
+LOCALPLAUD_DIARIZE__HF_TOKEN=hf_your_token_here
+```
+
+This setup uses Whisper large-v3-turbo, pyannote, Ollama, and local embeddings.
+To add forced word alignment, include `--extra forced-align` in your install
+command and select the `align:whisperx` provider in an execution profile. The default alignment stage
+validates Whisper timestamps; it does not perform forced alignment. See
+[speech setup](docs/speech-quality.md) and [acceptance requirements](docs/acceptance.md).
+
+### 3. Connect and launch
+
+```bash
+uv run localplaud init
+uv run localplaud auth login     # one-time Plaud OAuth in your browser
+uv run localplaud auth check
+uv run localplaud doctor         # check auth, ffmpeg, and configured providers
+uv run localplaud run            # sync + process + serve the Web App
+```
+
+Open **[localhost:8080](http://localhost:8080)**. After setup, use the Web App to
+review, edit, generate, organize, and export.
+
+### 4. Process your first recording
+
+The first Plaud sync catalogs your existing recordings **without downloading the
+whole library**. Open an existing recording and choose **Import audio** to fetch
+it. Subsequent newly discovered uploads download automatically.
+
+Control **Automatic processing** in **Settings → Workspace**. When paused,
+sync/download continues and AI processing waits for an explicit Resume/Reprocess
+action. To use recording or library Q&A, enable **Show Ask** in Workspace
+preferences; its navigation is hidden by default.
 
 ## Configuration
 
-All configuration lives in `config.toml` (copy from
-[`config.example.toml`](config.example.toml)). Every value can be overridden by
-an environment variable prefixed `LOCALPLAUD_` with `__` between levels, so
-**secrets stay out of the file** and in `.env`:
+Start with the commented [config.example.toml](config.example.toml). Settings can
+be overridden with environment variables: prefix `LOCALPLAUD_` and separate nested
+keys with `__`. Keep credentials in the git-ignored `.env`, for example:
 
-```bash
-LOCALPLAUD_ASR__OPENAI__API_KEY="sk-..."
-LOCALPLAUD_DIARIZE__HF_TOKEN="hf_..."
+```dotenv
+LOCALPLAUD_LLM__OPENAI__API_KEY=your_api_key_here
 ```
 
-`pipeline.artifact_mode = "independent"` is the default and accepts only locally
-generated transcripts as pipeline completion. Explicit `migration` mode can import
-Plaud Intelligence artifacts for comparison/backfill; imported rows keep their
-provenance and never silently replace a later local transcript.
+Providers and execution profiles let you select models per stage, define allowed
+fallbacks, and set privacy or cost boundaries. Notes support `standard`, `evidence`,
+and `legacy` quality modes; `standard` is the current default. See
+[note quality](docs/note-quality.md) for coverage, verification, and tradeoffs.
 
-For Ollama-backed LLMs or embeddings, `localplaud doctor` validates the configured
-model as well as the daemon. A missing model is reported with the exact `ollama pull`
-command; embedding uses Ollama's batch `/api/embed` endpoint when available.
+### ASR providers
 
-Transcript correction is an explicit stage-scoped LLM selection. The initial profile
-uses the configured `[llm]` provider, while later profile versions may select any
-catalog model that advertises the `correct` capability, including Ollama, OpenAI,
-Anthropic, OpenCode Go, or the AI gateway. The resolved connection,
-model, non-secret configuration,
-privacy boundary, and secret reference are persisted before dispatch; unavailable
-providers fail visibly unless the profile declares an allowed fallback. For OpenCode
-Go, the tracked `transcript-polish` agent denies every tool and OpenCode continues to
-own its credential. Correction batching is provider-aware: conservative runtimes use
-bounded requests, while large-context providers start with a larger batch. A valid
-partial response keeps its usable corrections and preserves the immutable source for
-omitted or emptied segments; only malformed JSON, duplicate/unknown IDs, or an
-explicit context limit can bisect a batch. Transport and quota failures are never
-converted into additional split calls.
+| Where speech recognition runs | Options |
+| --- | --- |
+| Apple Silicon, natively | MLX Whisper or whisper.cpp; large-v3-turbo is the baseline. |
+| NVIDIA/CUDA or CPU, natively | faster-whisper with large-v3-turbo. CPU processing can be slow. |
+| An authenticated remote worker | Run supported speech stages on separate hardware using the [worker protocol](docs/remote-worker.md). |
+| An explicitly selected cloud service | OpenAI, Deepgram, or AssemblyAI; privacy and usage charges follow that provider. |
 
-The `ai-gateway` adapter sends transcript correction, notes, mind maps and Ask to a
-central OpenAI-compatible gateway that maps semantic aliases (for example
-`sky-quality`) to concrete models. Profiles select the alias, never a concrete model. Each stage attempt records the
-alias it requested and the model that answered, and each resolved profile records the
-alias's current target from the gateway's policy file, so a remapped alias is not
-treated as the model that produced an existing artifact. When the gateway spends a
-ChatGPT subscription, the adapter reads that subscription's window through a Codex
-login (`quota_codex_home`, optionally pinned with `quota_account_id`) before every
-call and fails closed unless the configured reserve plus call headroom remains (5% +
-2% by default); the read spends no model turn. The client key is a
-`secret_ref` environment reference. See [docs/gpt6-settings.md](docs/gpt6-settings.md).
-The earlier `codex-local` backend, which ran `codex exec` per call, has been removed:
-profile versions and artifacts that name it stay readable with their provenance, but
-new profiles, connections and catalog models cannot select it. The generic `openai`
-provider has no default model; name one explicitly when it is used.
-
-Recording notes default to an evidence workflow: timestamped facts, source-based
-extraction checks, topic planning, section drafting and a separate verification
-pass. Failed checks preserve existing notes; successful regeneration archives them.
-The default complete-request budget is 120,000 characters, capped by the selected
-provider. Mind-map and explicit legacy summary paths retain their own budgets.
-See [note quality, configuration and evaluation limits](docs/note-quality.md).
-
-## ASR providers
-
-ASR remains pluggable, but the subscription-independent quality baseline is local
-**Whisper large-v3-turbo**. On Apple Silicon the target model is
-`mlx-community/whisper-large-v3-turbo`; on CUDA/CPU use the equivalent
-faster-whisper/CTranslate2 model. Cloud ASR remains an explicit operator choice,
-not a silent fallback.
-
-Whisper does not identify speakers. Plaud-like speaker results require a complete
-pipeline of VAD, turbo ASR, word-level alignment, diarization (pyannote or a
-benchmarked equivalent), and speaker assignment. A provider returning only text is
-therefore not considered the complete default experience.
-
-Enable `[asr.vad] enabled = true` on every host performing ASR, including remote
-workers. Shared Silero limits decoding to speech and empty results never generate
-AI notes or titles. See [speech quality and safe recovery](docs/speech-quality.md)
-for installation, degraded paths, and repairing old hallucinated transcripts.
-
-The open-source diarization default is
-`pyannote/speaker-diarization-community-1`. Before first use, accept that gated
-model's Hugging Face terms and set `LOCALPLAUD_DIARIZE__HF_TOKEN`;
-`localplaud doctor` reports missing package/token state explicitly.
-
-| Provider          | Type   | Runs on                    | Diarization |
-| ----------------- | ------ | -------------------------- | ----------- |
-| `faster-whisper`  | local  | CPU / NVIDIA CUDA          | via pyannote |
-| `whispercpp`      | local  | Apple Silicon (Metal) / CPU | via pyannote |
-| `mlx-whisper`     | local  | Apple Silicon (MLX)        | via pyannote |
-| `openai`          | cloud  | any                        | via pyannote |
-| `deepgram`        | cloud  | any                        | built-in    |
-| `assemblyai`      | cloud  | any                        | built-in    |
-
-See [ADR 0003](docs/adr/0003-pluggable-asr.md) for the target quality contract.
-
-For planned service restarts, operators can explicitly pause new work and wait
-for admitted work to finish with the [maintenance procedure](docs/maintenance.md).
-Normal Web use requires no maintenance CLI.
+**Whisper transcribes speech; it does not identify speakers.** Local speaker labels
+come from the separate diarization stage. See the
+[speech architecture](docs/adr/0003-pluggable-asr.md) and
+[Qwen + Nemotron profile](docs/qwen-nemotron-production.md) for the evaluated CUDA alternative.
 
 ## Deploying to your own machines
 
-localplaud ships a single Docker Compose file with **profiles** so one repo runs
-on very different hardware:
+Run natively for Apple Silicon Metal acceleration. For Linux, Docker Compose
+includes a CUDA `gpu` profile and a slim `cpu` profile for explicitly configured
+cloud providers. macOS containers cannot access Metal; the `mac` profile needs a
+separately configured speech provider. Caddy provides HTTPS for domain deployments.
 
-| Profile | Target machine        | ASR                                   |
-| ------- | --------------------- | ------------------------------------- |
-| `mac`   | Apple Silicon Mac     | local Whisper (Metal, outside Docker) |
-| `gpu`   | NVIDIA (CUDA)         | local Whisper in-container (CUDA)      |
-| `cpu`   | small/cloud CPU boxes | cloud ASR API                         |
+Follow the **[deployment guide](docs/deploy.md)** for your hardware and the
+[accounts guide](docs/accounts.md) to configure authenticated access.
 
-A bundled Caddy reverse proxy terminates HTTPS for your domain automatically.
-See [`docs/deploy.md`](docs/deploy.md).
-For explicitly requested recovery of failed recordings or model migrations, see
-[`docs/processing-repair.md`](docs/processing-repair.md).
+## FAQ
+
+**Do I need a paid Plaud Intelligence plan?**
+
+The independent pipeline works from raw audio and metadata. It does not require
+Plaud-generated transcripts, summaries, or other paid Intelligence artifacts. You
+still need access to your recordings through Plaud's upload and read-only API path.
+
+**Is everything local?**
+
+The Plaud recorder path still uploads audio through Plaud's App and cloud. After
+download, processing can use local models. Cloud providers and remote workers are
+explicit choices; self-hosting alone does not make a cloud profile local.
+
+**Can I use it without a Plaud recorder?**
+
+Yes. Use **Add audio** in the Web App to upload your own files. See
+[supported formats and limits](docs/uploads.md).
+
+**Can I bring my existing Plaud notes?**
+
+Yes, through explicit import. They remain labelled Plaud content, with their
+provenance preserved. Independent processing derives its own artifacts from audio.
+
+**What can I export?**
+
+Transcripts: TXT, SRT, VTT, DOCX, and PDF, with timestamp and speaker-label controls.
+Notes: Markdown, TXT, DOCX, and PDF. Audio, mind-map PNG, Markdown archives, and
+library ZIP exports are also available; library ZIPs support up to 50 selected recordings.
+
+## Security
+
+The Web App binds to `127.0.0.1` by default. Before exposing it to a network,
+configure [Web App accounts](docs/accounts.md), a session secret, and HTTPS.
+Accounts have private workspaces and revocable sessions; AI providers and workers
+are shared infrastructure managed by the owner.
+
+Plaud access is read-only. External audio/import downloads are bounded and
+SSRF-checked. Keep secrets and OAuth tokens out of source control. Workspace
+[backups](docs/backups.md) exclude configuration secrets and Plaud tokens.
+
+## Documentation
+
+| I want to… | Read |
+| --- | --- |
+| Install and operate my instance | [Deployment](docs/deploy.md) · [Accounts](docs/accounts.md) · [Backups](docs/backups.md) |
+| Tune transcription and speakers | [Speech quality](docs/speech-quality.md) · [Remote workers](docs/remote-worker.md) · [Speaker identities](docs/cross-recording-speakers.md) |
+| Improve notes and navigation | [Note quality](docs/note-quality.md) · [Chapter outlines](docs/chapter-outline.md) |
+| Connect other tools | [Webhooks](docs/webhooks.md) · [Email delivery](docs/email-integrations.md) |
+| Understand the product and API | [Product workflow](docs/product-workflow.md) · [Plaud API](docs/plaud-api.md) · [Architecture decisions](docs/adr/) |
+| Check readiness or recover a failure | [Acceptance](docs/acceptance.md) · [Processing repair](docs/processing-repair.md) · [Maintenance](docs/maintenance.md) · [Support](docs/support.md) |
 
 ## Development
 
 ```bash
 uv sync --extra dev
-ruff check . && pytest
+uv pip install "torch>=2.8"  # tensor tests; no model weights required
+uv run --no-sync ruff check .
+uv run --no-sync pytest
 ```
 
-Audit a processed recording against the subscription-independent raw-audio product
-gate with `localplaud acceptance-check RECORDING_ID`; use `--json` in automation.
-The recording workspace shows the same expandable evidence without CLI access. See
-[`docs/acceptance.md`](docs/acceptance.md).
+For a processed recording, `uv run localplaud acceptance-check RECORDING_ID`
+audits the subscription-independence gate; add `--json` for automation. The Web App
+exposes the same checklist. See [acceptance tests](docs/acceptance.md) and
+[UI verification](tests/ui/README.md).
 
-## Security
-
-- Secrets (Plaud session, API keys, HF token) go in `.env` or environment
-variables — **never** in a committed file. `config.toml`, `.env`, `*.cookie`
-  and `*.token` are git-ignored.
-- localplaud only ever issues **read-only** requests against the Plaud cloud,
-  and refuses to fetch non-`https` or private-IP URLs (SSRF-guarded), with
-  bounded downloads.
-- The web UI binds to `127.0.0.1` by default. **Before exposing it**, configure
-  [Web App accounts](docs/accounts.md) with Google/local password login, a session
-  secret and HTTPS. New accounts wait for the owner's approval; each account then
-  has its own private workspace and Plaud connection. Account mode
-  rejects legacy shared passwords/API tokens; those are only available with
-  accounts disabled. See [ADR 0006](docs/adr/0006-security-posture.md).
-- Settings can create private, checksummed workspace backups from a consistent
-  SQLite snapshot, optionally including local media, then upload them to an
-  explicitly authorized HTTPS or private/LAN destination with durable, idempotent
-  retries. Secrets, configuration, and Plaud OAuth tokens are excluded; configure,
-  verify, and restore using
-  [`docs/backups.md`](docs/backups.md).
-- Settings reports the built-in Web login and API-token boundary, lists revocable
-  browser sessions, and can download aggregate, redacted diagnostics for support. See
-  [`docs/support.md`](docs/support.md).
-- Workspace preferences can persist English or Traditional Chinese (Taiwan) for the
-  shared shell and primary library, search, notes, automation, template, and status
-  pages and the recording workspace, with matching document language and local date
-  formatting. Settings navigation and primary configuration/integration controls are
-  also translated; dynamic helper, health, and error/action coverage is still expanding.
+Found a rough edge? [Report a bug](https://github.com/skyhong2002/localplaud/issues/new/choose).
+For setup questions and workflow ideas, join
+[Discussions](https://github.com/skyhong2002/localplaud/discussions).
+Read the [contribution guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md)
+before contributing. Report vulnerabilities through the [private security channel](SECURITY.md).
 
 ## License
 
 [MIT](LICENSE) © 2026 Sky Hong
 
-> localplaud is an independent, unofficial project and is not affiliated with,
-> endorsed by, or connected to Plaud. It only accesses your own account's data.
-
-For the evaluated CUDA speech alternative and safe unfinished-recording rollout,
-see [Qwen + Nemotron production profile](docs/qwen-nemotron-production.md).
-
-In restricted new-recording mode, the configured recent-transcription retry window
-also admits queued reindexing after automatic speaker naming or transcript edits.
-Historical index backfills stay paused; name edits retain notes and mind maps as
-stale until explicit regeneration. Recovery closes orphaned running stage records
-without discarding artifacts or resetting retry budgets.
+localplaud is an independent, unofficial project and is not affiliated with or
+endorsed by Plaud. It accesses only the authenticated user's own account and data.
