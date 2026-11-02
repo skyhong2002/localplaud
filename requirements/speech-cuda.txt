@@ -23,7 +23,7 @@ humanize==4.16.0
 # Security floors: NeMo declares hydra-core<=1.3.2 and lightning<=2.4.0, but those
 # versions carry GHSA-c3wx-c55w-pxjq / GHSA-2cp2-2r3c-7p7r and GHSA-qqmf-gpg7-g8gw.
 # Installed with --no-deps above NeMo's caps; verify the Sortformer import on rebuild.
-hydra-core==1.3.6
+hydra-core==1.3.8
 indic_numtowords==1.1.0
 intervaltree==3.2.1
 kaldialign==0.12.0
