@@ -70,6 +70,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/localplaud"]
 
+[tool.uv]
+# Security floors for transitive packages in uv.lock (Dependabot advisories).
+# These constrain only uv's resolution: the pip-based Docker images keep their
+# deliberately pinned CUDA torch stack (see Dockerfile.cuda).
+constraint-dependencies = [
+    "torch>=2.13.0",
+    "transformers>=5.10.0",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
