@@ -26,46 +26,45 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/screenshots/desktop-transcript.webp" alt="localplaud recording workspace with a speaker-labelled transcript and synchronized audio player" width="900">
+  <img src="docs/assets/screenshots/hero.webp" alt="localplaud on desktop and mobile: a speaker-labelled transcript with synchronized audio" width="100%">
 </p>
 
 Keep recording with your Plaud device and the official Plaud App. localplaud
 downloads the raw audio and does the rest on hardware you control—**no Plaud
 Generate button, no paid Intelligence plan.** You can also upload any audio file.
 
-## What you get
+## Features
 
-- **Transcripts you can correct** — synchronized audio, click-to-seek, speaker labels, inline edits, raw vs. corrected views.
-- **Notes from your templates** — full-transcript coverage for long recordings, multiple outputs, mind maps, and chapters.
-- **Answers with sources** — Ask one recording or your whole library; citations jump to the exact moment in the audio.
-- **A searchable library** — folders, tags, filters, and full-text search that works without embeddings.
-- **Automation and export** — AutoFlow rules, notifications, and exports to TXT, SRT, VTT, DOCX, PDF, Markdown, and more.
+### Transcripts with speakers you can name
 
-Your edits are never overwritten, a failed stage never discards good results, and
-every artifact records which provider and model produced it. You choose per stage
-whether AI runs locally, on your own remote worker, or with an explicitly
-configured cloud provider.
+Shown above: Whisper large-v3-turbo plus pyannote diarization. Click any line to seek, rename
+speakers once, fix text inline, and compare the corrected transcript with raw ASR.
 
-<table>
-  <tr>
-    <td width="33%"><img src="docs/assets/screenshots/desktop-notes.webp" alt="Template-generated notes with provenance"></td>
-    <td width="33%"><img src="docs/assets/screenshots/desktop-mind-map.webp" alt="Expandable mind map of a recording"></td>
-    <td width="33%"><img src="docs/assets/screenshots/desktop-ask.webp" alt="Library-wide Ask answer with numbered citations"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Notes from your templates</sub></td>
-    <td align="center"><sub>Mind map</sub></td>
-    <td align="center"><sub>Ask across your library</sub></td>
-  </tr>
-</table>
+### Notes from your own templates
 
-The same workspace on your phone:
+Full-transcript coverage for long recordings, several note styles per recording,
+and every note shows which model and transcript revision produced it.
 
-<p align="center">
-  <img src="docs/assets/screenshots/mobile-library.webp" alt="Mobile recordings library" width="240">&nbsp;&nbsp;
-  <img src="docs/assets/screenshots/mobile-transcript.webp" alt="Mobile transcript with speaker labels" width="240">&nbsp;&nbsp;
-  <img src="docs/assets/screenshots/mobile-notes.webp" alt="Mobile notes view with audio player" width="240">
-</p>
+<p align="center"><img src="docs/assets/screenshots/notes.webp" alt="Template-generated notes with provenance and audio player" width="100%"></p>
+
+### A mind map of every conversation
+
+<p align="center"><img src="docs/assets/screenshots/mindmap.webp" alt="Expandable mind map with export" width="100%"></p>
+
+### Ask your whole library
+
+Answers cite the recordings they came from; each citation jumps to the moment in the audio.
+
+<p align="center"><img src="docs/assets/screenshots/ask.webp" alt="Library-wide Ask answer with numbered citations" width="100%"></p>
+
+### Made for your phone, too
+
+<p align="center"><img src="docs/assets/screenshots/mobile.webp" alt="Mobile library, transcript, and notes views" width="100%"></p>
+
+Plus folders, tags, full-text search, AutoFlow automation, and exports to TXT,
+SRT, VTT, DOCX, PDF, and Markdown. Your edits are never overwritten, a failed
+stage never discards good results, and you choose per stage whether AI runs
+locally, on your own worker, or with a cloud provider.
 
 <sub>Screenshots use the synthetic demo library from <code>scripts/seed_demo.py</code>.</sub>
 
