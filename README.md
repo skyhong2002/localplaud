@@ -18,6 +18,7 @@
 </p>
 
 <p align="center">
+  <a href="https://skyhong2002.github.io/localplaud/demo/"><b>Live demo</b></a> ·
   <a href="#quickstart">Get started</a> ·
   <a href="docs/deploy.md">Self-host</a> ·
   <a href="#documentation">Docs</a> ·

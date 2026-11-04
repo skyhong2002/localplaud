@@ -37,7 +37,8 @@ Alternatives:
 > machine. No minute caps, editable speakers, open source (MIT). Not affiliated
 > with Plaud.
 
-**Links:** <https://github.com/skyhong2002/localplaud>
+**Links:** Website <https://skyhong2002.github.io/localplaud/> (live demo at
+`/demo/`) · Source <https://github.com/skyhong2002/localplaud>
 
 **Topics:** Open Source · Productivity · Artificial Intelligence · Note-taking ·
 Meetings · Privacy
@@ -74,6 +75,7 @@ Meetings · Privacy
 > installs. Cross-recording voice ID needs extra setup. Taiwan Mandarin and mixed
 > Mandarin/English are what I test hardest.
 >
+> Try the read-only demo at https://skyhong2002.github.io/localplaud/demo/ first.
 > I'd love to know where setup gets stuck and which Plaud workflow you'd want next.
 > If anything in the comparison table is wrong, tell me and I'll fix it today.
 
@@ -99,6 +101,20 @@ Meetings · Privacy
   v4 app speaker behavior was not verified. Correct errors quickly and publicly.
 - **Expectations:** cross-recording voice identification is an optional service.
   Don't present it as out-of-the-box.
+
+## Website and live demo
+
+The site (landing page plus a read-only snapshot of the real Web App) is built
+from `website/` and the synthetic demo library, then published to the
+`gh-pages` branch:
+
+```bash
+LOCALPLAUD_API__ACCOUNTS_ENABLED=false KEEP=1 scripts/serve_demo.sh 8792
+scripts/build_pages.sh /tmp/site && scripts/deploy_pages.sh /tmp/site
+```
+
+The demo answers requests from recorded responses through a service worker.
+Every write returns a "read-only demo" notice, and nothing reaches a server.
 
 ## Regenerating the assets
 
