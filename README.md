@@ -171,7 +171,7 @@ end; full Plaud parity and broader language/hardware benchmarks are in progress.
 | Speech and speakers | [Speech quality](docs/speech-quality.md) · [Remote workers](docs/remote-worker.md) · [Speaker identities](docs/cross-recording-speakers.md) |
 | Notes | [Note quality](docs/note-quality.md) · [Chapter outlines](docs/chapter-outline.md) |
 | Integrations | [Webhooks](docs/webhooks.md) · [Email delivery](docs/email-integrations.md) |
-| Product and API | [Product workflow](docs/product-workflow.md) · [Plaud API](docs/plaud-api.md) · [ADRs](docs/adr/) |
+| Product and API | [Changelog](CHANGELOG.md) · [Product workflow](docs/product-workflow.md) · [Plaud API](docs/plaud-api.md) · [ADRs](docs/adr/) |
 | Troubleshooting | [Acceptance](docs/acceptance.md) · [Processing repair](docs/processing-repair.md) · [Support](docs/support.md) |
 
 ## Contributing
