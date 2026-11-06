@@ -55,7 +55,7 @@ pytorch-lightning==2.6.6
 sacrebleu==2.6.0
 sentencepiece==0.2.2
 setuptools==84.1.0
-smart_open==8.0.1
+smart_open==9.0.1
 soundfile==0.14.0
 soxr==1.1.0
 StrEnum==0.4.15
