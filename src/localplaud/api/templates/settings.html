@@ -12,8 +12,9 @@
 <div class="content"><div class="pane-inner settings-page" data-surface="settings">
   <header class="sf-settings-head">
     <h1 class="page sf-large-title">{{ t('Settings') }}</h1>
-    <p class="sub">{{ t('Account, processing, templates, integrations, and the execution boundary for this local workspace.') }}</p>
+    <p class="sub">{{ t('Manage processing, connections, and preferences for this workspace.') }}</p>
   </header>
+  {% include "_settings_shortcuts.html" %}
   <div class="sf-settings-index" data-sf-settings-index hidden>
     <section class="sf-profile" aria-label="{{ t('Workspace profile') }}">
       <span class="sf-avatar" aria-hidden="true">{{ workspace_preferences.workspace_name | initials }}</span>
@@ -54,7 +55,7 @@
       <a href="#vocabulary" data-sf-nav-target="vocabulary">{{ t('Custom vocabulary') }}</a>
       <a href="#note-templates" data-sf-nav-target="note-templates">{{ t('Note templates') }}</a>
       {% if system_admin %}
-      <div class="sf-nav-caption">{{ t('Speech & AI providers') }}</div>
+      <div class="sf-nav-caption">{{ t('Advanced') }}</div>
       <a href="#hardware-profiles" data-sf-nav-target="hardware-profiles">{{ t('ASR & diarization') }}</a>
       <a href="#starting-profiles" data-sf-nav-target="starting-profiles">{{ t('Cloud & remote profiles') }}</a>
       <a href="#connections" data-sf-nav-target="connections">{{ t('Providers & connections') }}</a>
@@ -144,7 +145,7 @@
       </div></div></div>
       <label class="sub settings-field">{{ t('Display density') }}<select class="search-input select" name="density"><option value="comfortable" {% if workspace_preferences.density=='comfortable' %}selected{% endif %}>{{ t('Comfortable') }}</option><option value="compact" {% if workspace_preferences.density=='compact' %}selected{% endif %}>{{ t('Compact') }}</option></select></label>
       <label class="sub settings-field">{{ t('Clock') }}<select class="search-input select" name="hour_cycle"><option value="24" {% if workspace_preferences.hour_cycle=='24' %}selected{% endif %}>{{ t('24-hour') }}</option><option value="12" {% if workspace_preferences.hour_cycle=='12' %}selected{% endif %}>{{ t('12-hour') }}</option></select></label>
-      <label class="sub settings-check settings-check-divided"><input type="checkbox" name="auto_process_new_recordings" {% if workspace_preferences.auto_process_new_recordings %}checked{% endif %}> <strong>{{ t('Process new recordings automatically') }}</strong></label>
+      <label class="sub settings-check settings-check-divided" id="auto-process-setting"><input type="checkbox" name="auto_process_new_recordings" {% if workspace_preferences.auto_process_new_recordings %}checked{% endif %}> <strong>{{ t('Process new recordings automatically') }}</strong></label>
       <label class="sub settings-check" style="grid-column:1/-1"><input type="checkbox" name="ask_enabled" {% if workspace_preferences.ask_enabled %}checked{% endif %}> <strong>{{ t('Show Ask') }}</strong> · {{ t('Adds Ask to the sidebar, Search, and every recording. Turning it off keeps your past conversations.') }}</label>
       <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Save preferences') }}</button><span id="workspace-preferences-result" class="sub"></span></div>
     </form>
@@ -231,7 +232,9 @@
   </section>
   {% if system_admin %}
   <section class="sf-settings-group" id="group-processing" data-sf-group="processing" aria-labelledby="group-processing-title">
-  <h2 class="sf-settings-group-title" id="group-processing-title">{{ t('Speech & AI providers') }}</h2>
+  <h2 class="sf-settings-group-title" id="group-processing-title">{{ t('Advanced') }}</h2>
+  <details class="settings-provider-details" data-settings-provider-details>
+  <summary>{{ t('Speech & AI providers') }}</summary>
   <div class="panel sf-settings-panel" id="hardware-profiles">
     <div class="settings-panel-top" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
       <div><strong>{{ t('Recommended for this host') }}</strong><div class="sub" style="font-size:12px;margin-top:3px">{{ t('Evidence-based local ASR profiles; no accelerator is claimed unless detected.') }}</div></div>
@@ -429,6 +432,7 @@
       <div class="settings-form-actions"><button class="btn" type="submit">{{ t('Register worker') }}</button><span id="worker-result" class="sub"></span></div>
     </form>
   </div>
+  </details>
   </section>
   <section class="sf-settings-group" id="group-data" data-sf-group="data" aria-labelledby="group-data-title">
   <h2 class="sf-settings-group-title" id="group-data-title">{{ t('Sync, backup & privacy') }}</h2>
