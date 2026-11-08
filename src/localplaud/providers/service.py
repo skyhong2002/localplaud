@@ -343,6 +343,16 @@ def bootstrap_default_profile(session: Session, settings: Settings) -> Execution
             return existing
         return _upgrade_default_profile(session, existing, settings)
 
+    # A managed deployment can supply its own default profile. Do not seed a
+    # second default after the unused Settings profile has been removed.
+    configured = session.scalar(
+        select(ExecutionProfile)
+        .where(ExecutionProfile.is_system_default)
+        .order_by(ExecutionProfile.version.desc(), ExecutionProfile.id.desc())
+    )
+    if configured is not None:
+        return configured
+
     entries = _ensure_settings_entries(session, settings)
 
     cloud = any(connection.data_egress for connection, _ in entries.values())

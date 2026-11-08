@@ -166,6 +166,29 @@ def test_bootstrap_requires_an_explicit_openai_text_model(tmp_path):
         assert session.get(ModelCatalogEntry, selection.model_id).model_key == "explicit-model"
 
 
+def test_bootstrap_does_not_recreate_deleted_settings_profile(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'configured-default.db'}")
+    Base.metadata.create_all(engine)
+    settings = Settings()
+    with Session(engine) as session:
+        legacy = bootstrap_default_profile(session, settings)
+        configured = create_profile_version(
+            session,
+            {
+                "key": "configured-default",
+                "name": "Configured default",
+                "is_system_default": True,
+                "stages": list_profiles(session)[0]["stages"],
+            },
+        )
+        delete_profile(session, legacy.id)
+        session.commit()
+
+    with Session(engine) as session:
+        assert bootstrap_default_profile(session, settings).id == configured["id"]
+        assert list_profiles(session) == [configured]
+
+
 def test_recording_embed_profile_change_durably_requeues_transcript_index(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'profile-reindex.db'}")
     Base.metadata.create_all(engine)
