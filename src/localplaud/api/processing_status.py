@@ -57,9 +57,9 @@ def processing_overview(session, settings, *, plaud_connected):
     steps = []
     selections = {item.stage: item for item in default.stage_selections} if default else {}
     for stage, label, icon in (
-        ("transcribe", "Transcription", "audio-lines"),
+        ("transcribe", "Transcription", "waveform"),
         ("diarize", "Speaker recognition", "activity"),
-        ("summarize", "Summaries", "sticky-note"),
+        ("summarize", "Summaries", "note"),
     ):
         selection = selections.get(stage)
         state, checked_at = "unknown", None

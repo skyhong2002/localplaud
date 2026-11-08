@@ -10,7 +10,11 @@
         {% if overview.issue_stage %} · {{ t(overview.issue_stage) }}{% endif %}
       </div>
     </div>
+    {% if overview.link == '/settings#remote-workers' and account_user|default(None) and account_user.role != 'owner' %}
+    <a href="/status">{{ t('System status') }} {{ icon('chevron-right', 'sm') }}</a>
+    {% else %}
     <a href="{{ overview.link }}">{{ t(overview.action) }} {{ icon('chevron-right', 'sm') }}</a>
+    {% endif %}
   </div>
   {% if not compact_processing_status|default(false) %}
   <ol class="processing-overview-stages">

@@ -400,6 +400,37 @@ def test_processing_overview_links_to_failed_stage_on_both_pages(monkeypatch, tm
     assert 'processing-overview-stages' in client.get("/settings").text
 
 
+def test_processing_overview_marks_old_worker_checks_unknown(monkeypatch, tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from localplaud.api.processing_status import processing_overview
+    from localplaud.config import get_settings
+    from localplaud.db.models import ExecutionProfile, RemoteWorker
+    from localplaud.db.session import session_scope
+
+    _client(monkeypatch, tmp_path)
+    with session_scope() as session:
+        profile = session.scalar(select(ExecutionProfile).where(ExecutionProfile.is_system_default))
+        speech = next(stage for stage in profile.stage_selections if stage.stage == "transcribe")
+        speech.connection.key = "worker:test"
+        worker = RemoteWorker(key="test", name="Test worker", base_url="http://worker.invalid")
+        session.add(worker)
+        now = datetime.now(UTC)
+        worker.health = {"status": "unavailable", "checked_at": now.isoformat()}
+        result = processing_overview(session, get_settings(), plaud_connected=True)
+        assert result["steps"][0]["state"] == "unavailable"
+        assert result["link"] == "/settings#remote-workers"
+
+        worker.health = {
+            "status": "unavailable", "checked_at": (now - timedelta(minutes=6)).isoformat()
+        }
+        result = processing_overview(session, get_settings(), plaud_connected=False)
+        assert result["steps"][0]["state"] == "unknown"
+        assert result["link"] == "/settings#plaud-account"
+
+
 def test_home_renders_recent_recordings_and_operational_cards(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
