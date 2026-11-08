@@ -10,6 +10,7 @@
 {% block body %}
 {% set system_admin = not account_user|default(None) or account_user.role == 'owner' %}
 <div class="content"><div class="pane-inner settings-page" data-surface="settings">
+  {% include "_processing_status.html" %}
   <header class="sf-settings-head">
     <h1 class="page sf-large-title">{{ t('Settings') }}</h1>
     <p class="sub">{{ t('Account, processing, templates, integrations, and the execution boundary for this local workspace.') }}</p>

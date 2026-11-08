@@ -6,6 +6,8 @@
 {% endblock %}
 {% block body %}
 <div class="library-page home-page"><div class="page-frame">
+  {% set compact_processing_status = true %}
+  {% include "_processing_status.html" %}
   <section class="home-section" aria-labelledby="home-recent-title">
     <div class="section-head">
       <h1 class="page-title" id="home-recent-title">{{ t('Recent files') }}</h1>

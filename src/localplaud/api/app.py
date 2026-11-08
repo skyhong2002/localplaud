@@ -97,6 +97,7 @@ from .note_templates import _item as note_template_item
 from .note_templates import router as note_templates_router
 from .notes import router as notes_router
 from .outline import router as outline_router
+from .processing_status import processing_overview
 from .providers import router as providers_router
 from .share_links import router as share_links_router
 from .storage import router as storage_router
@@ -2086,8 +2087,10 @@ def home(request: Request):
 
     with session_scope() as session:
         plaud_connected = connection_status(session, get_settings())["ok"]
+        overview = processing_overview(session, get_settings(), plaud_connected=plaud_connected)
     ctx = _base_ctx(request, "home") | {
         "plaud_connected": plaud_connected,
+        "processing_overview": overview,
         "recent_files": recent_files,
         "attention_files": attention_files,
         "attention_stages": attention_stages,
@@ -3766,6 +3769,9 @@ def settings_page(request: Request):
             ],
             "hardware_recommendations": hardware_recommendations(),
             "plaud_auth": plaud_auth,
+            "processing_overview": processing_overview(
+                session, settings, plaud_connected=plaud_auth["ok"]
+            ),
             "plaud_provider": plaud_auth["provider"],
             "workspace_backups": workspace_backups,
             "backup_error": backup_error,
