@@ -387,6 +387,19 @@ def test_browser_runtime_is_vendored_and_checksum_pinned(monkeypatch, tmp_path):
     assert b"lucide-menu" in menu_icon.content
 
 
+def test_processing_overview_links_to_failed_stage_on_both_pages(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    for path in ("/home", "/settings"):
+        response = client.get(path)
+        assert response.status_code == 200
+        overview = response.text.split('class="panel processing-overview"', 1)[1].split(
+            "</section>", 1
+        )[0]
+        assert 'href="/file/r1"' in overview
+    assert 'processing-overview-stages' in client.get("/settings").text
+
+
 def test_home_renders_recent_recordings_and_operational_cards(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()

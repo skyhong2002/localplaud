@@ -14,6 +14,7 @@
     <h1 class="page sf-large-title">{{ t('Settings') }}</h1>
     <p class="sub">{{ t('Account, processing, templates, integrations, and the execution boundary for this local workspace.') }}</p>
   </header>
+  {% include "_processing_status.html" %}
   <div class="sf-settings-index" data-sf-settings-index hidden>
     <section class="sf-profile" aria-label="{{ t('Workspace profile') }}">
       <span class="sf-avatar" aria-hidden="true">{{ workspace_preferences.workspace_name | initials }}</span>
