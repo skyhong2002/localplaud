@@ -1,0 +1,42 @@
+<nav class="settings-shortcuts" aria-label="{{ t('Common settings') }}">
+  <section class="panel">
+    <h2>{{ t('Processing') }}</h2>
+    {% if system_admin %}
+    {% set defaults = profiles|selectattr('is_system_default')|sort(attribute='version,id')|list %}
+    {% if defaults %}
+      {% set profile = defaults|last %}
+      <p><strong>{{ profile.name }}</strong> · {{ t('System default') }}</p>
+      <dl class="settings-processing-facts">
+        {% for key, label in [('transcribe', 'Transcription'), ('summarize', 'Summaries')] %}
+          {% set stage = profile.stages.get(key) %}
+          {% if stage %}
+            {% set connection = connections|selectattr('key', 'equalto', stage.connection)|first %}
+            <div><dt>{{ t(label) }}</dt><dd>{{ connection.name if connection else stage.connection }} · {{ stage.model }}</dd></div>
+          {% endif %}
+        {% endfor %}
+      </dl>
+    {% endif %}
+    <p class="sub">{{ t('Configured transcription language') }} · {{ t('Auto detect') if speech_prefs.language == 'auto' else speech_prefs.language }}</p>
+    {% endif %}
+    <a href="#auto-process-setting">{{ t('Process new recordings automatically') }} · {{ t('On') if workspace_preferences.auto_process_new_recordings else t('Off') }}</a>
+  </section>
+  <section class="panel">
+    <h2>{{ t('Connections') }}</h2>
+    <a href="#plaud-account">{{ t('Plaud account') }} · {{ t('connected') if plaud_auth.ok else t('sign-in required') }}</a>
+    {% if system_admin and workers %}<a href="#remote-workers">{{ t('Remote workers') }}</a>{% endif %}
+    {% if system_admin %}<a href="#starting-profiles">{{ t('Optional cloud & remote profiles') }}</a>{% endif %}
+    <a href="#email-integrations">{{ t('Email') }}</a>
+  </section>
+  <section class="panel">
+    <h2>{{ t('Preferences') }}</h2>
+    <a href="#workspace-preferences">{{ t('Personalization & locale') }}</a>
+    <a href="#vocabulary">{{ t('Custom vocabulary') }}</a>
+    <a href="/templates">{{ t('Note templates') }}</a>
+  </section>
+  <section class="panel">
+    <h2>{{ t('Advanced') }}</h2>
+    {% if system_admin %}<a href="#group-processing">{{ t('Speech & AI providers') }}</a>{% endif %}
+    <a href="#automation">{{ t('Automation') }}</a>
+    <a href="/status">{{ t('System status') }}</a>
+  </section>
+</nav>

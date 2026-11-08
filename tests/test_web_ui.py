@@ -1411,6 +1411,18 @@ def test_status_page_renders(monkeypatch, tmp_path):
     assert "Needs attention" in r.text and "embedding model unavailable" in r.text
 
 
+def test_settings_shortcuts_keep_existing_controls_and_default_profile(monkeypatch, tmp_path):
+    response = _client(monkeypatch, tmp_path).get("/settings")
+    assert response.status_code == 200
+    html = response.text
+    shortcuts = html.split('class="settings-shortcuts"', 1)[1].split("</nav>", 1)[0]
+    assert "Current Settings" in shortcuts
+    for target in ("auto-process-setting", "plaud-account", "vocabulary", "group-processing"):
+        assert f'href="#{target}"' in shortcuts
+        assert f'id="{target}"' in html
+    assert "data-settings-provider-details" in html
+
+
 def test_settings_editor_renders_models_and_profile_builder(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     from localplaud.db.models import ExecutionProfile
