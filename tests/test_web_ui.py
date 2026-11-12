@@ -370,7 +370,7 @@ def test_product_pages_use_centered_responsive_layout(monkeypatch, tmp_path):
 def test_browser_runtime_is_vendored_and_checksum_pinned(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     page = c.get("/")
-    assert '<script src="/static/htmx-1.9.12.min.js"></script>' in page.text
+    assert '<script src="/static/htmx-1.9.12.min.js" defer></script>' in page.text
     assert "unpkg.com" not in page.text
     runtime = c.get("/static/htmx-1.9.12.min.js")
     assert runtime.status_code == 200

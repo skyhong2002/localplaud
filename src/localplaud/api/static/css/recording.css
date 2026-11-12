@@ -633,7 +633,7 @@ body.ws-mm-full-open { overflow: hidden; }
 .ws-head .recording-meta { flex-wrap: nowrap; min-width: 0; overflow: hidden; white-space: nowrap; }
 .ws-head .recording-meta > span { flex: none; }
 .ws-head .recording-meta > .ws-source { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ws-head .recording-meta .st { padding: 1px 7px; font-size: 11px; line-height: 16px; border-radius: 999px; }
+.ws-head .recording-meta .st { padding: 1px 7px; font-size: 12px; line-height: 16px; border-radius: 999px; }
 .ws-head .recording-org .chip { border: 1px solid var(--c-border, #EBEBEB); background: var(--c-surface-2, #F7F7F7); color: var(--c-text-body, #3D3D3D); font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 5px; box-shadow: none; }
 .ws-head .recording-org .chip.on { color: var(--c-text, #000); }
 /* Chips are separated by their own borders; a leading "·" only orphans at the
