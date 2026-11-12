@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>無法連線 · localplaud</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <style>
+    :root { color-scheme: light dark; --bg: #FFFFFF; --text: #000000; --text-2: #6F6F6F; --primary: #111111; --on-primary: #FFFFFF; --focus: #2F6FED; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #161616; --text: #F5F5F5; --text-2: #A0A0A0; --primary: #F5F5F5; --on-primary: #111111; --focus: #8AB4FF; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: var(--bg); color: var(--text);
+      font: 16px/1.6 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Noto Sans CJK TC", sans-serif; text-align: center; }
+    main { max-width: 420px; display: grid; gap: 12px; justify-items: center; }
+    img { width: 56px; height: 56px; }
+    h1 { margin: 8px 0 0; font-size: 28px; font-weight: 400; line-height: 1.3; }
+    p { margin: 0; color: var(--text-2); }
+    button { margin-top: 12px; min-height: 44px; padding: 0 20px; border: 0; border-radius: 6px; background: var(--primary); color: var(--on-primary); font: inherit; cursor: pointer; }
+    button:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/static/logo.svg" alt="">
+    <h1>無法連線到 localplaud</h1>
+    <p>這部裝置目前離線，或無法連到你的 localplaud 伺服器。錄音與筆記都安全保存在伺服器上，恢復連線後即可繼續。</p>
+    <p lang="en">You're offline, or your localplaud server can't be reached. Your recordings and notes are safe on the server.</p>
+    <button type="button" id="retry">重試 · Try again</button>
+  </main>
+  <script>document.getElementById('retry').addEventListener('click', () => location.reload());</script>
+</body>
+</html>

@@ -47,6 +47,7 @@ PUBLIC = {
     "/healthz",
     "/favicon.ico",
     "/robots.txt",
+    "/sw.js",
 }
 # System administration shared by every workspace: only the owner may use it.
 # Everything else acts on the signed-in account's own workspace.

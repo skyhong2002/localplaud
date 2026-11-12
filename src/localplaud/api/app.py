@@ -11,6 +11,7 @@ import secrets
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from html import escape
 from pathlib import Path
 from threading import Lock
@@ -259,7 +260,7 @@ async def _gate_request(request: Request, call_next):
         return response
     token = settings.auth_token
     login_password = settings.login_password
-    public_paths = {"/healthz", "/login", "/favicon.ico", "/robots.txt"}
+    public_paths = {"/healthz", "/login", "/favicon.ico", "/robots.txt", "/sw.js"}
     public_share = request.url.path.startswith("/share/")
     if (
         (token or login_password)
@@ -338,6 +339,39 @@ def i18n_catalog(locale: str, v: str | None = None) -> Response:
         body,
         media_type="text/javascript",
         headers={"Cache-Control": cache, "ETag": f'"{version}"'},
+    )
+
+
+@lru_cache(maxsize=1)
+def _service_worker_script() -> str | None:
+    from .ui import asset_version
+
+    worker = _static / "sw.js"
+    if not worker.exists():
+        return None
+    source = worker.read_text()
+    digest = hashlib.sha256(asset_version().encode())
+    for name in ("sw.js", "offline.html", "logo.svg", "favicon.svg"):
+        path = _static / name
+        if path.exists():
+            digest.update(path.read_bytes())
+    return source.replace("__LP_VERSION__", digest.hexdigest()[:12])
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker() -> Response:
+    """Static-asset service worker with an offline page; scope covers the whole app.
+
+    It never stores pages or API responses (see static/sw.js). Public so that a
+    background update check after the session expires does not fail on a redirect.
+    """
+    script = _service_worker_script()
+    if script is None:
+        return Response(status_code=404)
+    return Response(
+        script,
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
     )
 
 
@@ -498,7 +532,6 @@ templates.env.filters["markdown_blocks"] = _render_markdown_blocks
 
 def _static_asset_version(*names: str) -> str:
     """Content hash for cache-busting the recording workspace's static assets."""
-    import hashlib
 
     digest = hashlib.sha256()
     for name in names:
