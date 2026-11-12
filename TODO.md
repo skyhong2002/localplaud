@@ -226,12 +226,20 @@ open issues, not successful end-to-end completion.
   `localplaud benchmark-speech` harness now exists with synthetic metric regression
   tests, manifest references, CER/mixed WER/MER, DER, hallucination indicators,
   timestamp deviation, RTF and sampled peak CPU memory. See `docs/speech-quality.md`.
-  Real-recording benchmarking has not been run; the validation debt remains open.
+  Added 2026-11-13: script-folded CER, `source` labels (owned/public/synthetic),
+  `--save-transcripts`, `benchmark-speech-compare` with proposed not-worse gates,
+  and a synthetic Taiwan Mandarin cohort generator. A CPU smoke run on that
+  synthetic cohort is tooling evidence only. Real-recording benchmarking has not
+  been run; follow `docs/speech-benchmark-runbook.md` (steps 2–4) on the
+  production hosts. The validation debt remains open.
 - **Cross-host artifact contract for the live Mac↔WSL pair.** Per-artifact
   SHA-256 verification is tested, but nothing compares the same recording's
   artifacts produced on the two production hosts —
   `docs/product-workflow.md` acceptance scenarios 8 and 12 have no executable
-  form. (Rentable-GPU host validation was dropped with the 2026-07-31
+  form. Scenario 8 now has one: `benchmark-speech --save-transcripts` on each
+  host, then `benchmark-speech-compare --hypotheses-a/--hypotheses-b`
+  (runbook step 3). It has not been run on the Mac and WSL hosts yet.
+  Scenario 12 still has no cross-host executable check. (Rentable-GPU host validation was dropped with the 2026-07-31
   single-deployment decision below.)
 
 ### P0 — operations

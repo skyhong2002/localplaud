@@ -257,3 +257,28 @@ def test_tree_memory_includes_descendants(monkeypatch):
 
     monkeypatch.setattr(speech.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout="10 1 100\n11 10 200\n12 11 300\n99 1 900\n"))
     assert speech._tree_rss(10) == 600 * 1024
+
+
+def test_script_folded_cer_separates_recognition_from_script_choice():
+    from localplaud.zh import fold_script
+
+    if fold_script("这") == "这":
+        pytest.skip("OpenCC is needed for script folding")
+    result = speech.text_metrics("這個預算上限", "这个预算上限")
+    assert result["cer"]["rate"] == pytest.approx(3 / 6)  # strict: 這/个/预 differ
+    assert result["cer_script_folded"]["rate"] == 0
+    assert result["cer_script_folded"]["script_folding"] is True
+    wrong = speech.text_metrics("這個預算上限", "这个预算上线")
+    assert wrong["cer_script_folded"]["rate"] == pytest.approx(1 / 6)
+
+
+def test_aggregate_tolerates_reports_without_folded_cer():
+    old = {"metrics": {name: {"errors": 1, "reference_units": 4, "substitutions": 1, "insertions": 0,
+                              "deletions": 0, "hits": 3} for name in ("cer", "wer", "mer")}
+           | {"der": None, "timestamps": None,
+              "hallucination": {"repeated_ngram_loops": [], "text_in_non_speech": None,
+                                "non_speech_regions_available": False}},
+           "audio_seconds": 4, "execution": {"elapsed_seconds": 1, "peak_memory_bytes": 1}}
+    total = speech.aggregate([old])
+    assert total["cer"]["rate"] == 0.25
+    assert total["cer_script_folded"] is None

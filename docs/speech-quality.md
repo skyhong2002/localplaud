@@ -221,8 +221,11 @@ Use full reference text for the complete recording, either `text` or `text_file`
 `words`, `segments` (same text/start/end shape), RTTM speaker turns and `non_speech`
 are optional. All times are finite seconds. Inline `speaker_turns` accept
 `{start, end, speaker}` objects. Multi-recording RTTM files require
-`rttm_recording_id`. `owned: true` is required on every manifest recording.
-Do not use a partial reference as if it covered the full recording.
+`rttm_recording_id`. Each recording declares a `source`: `owned` (the default,
+which also requires `owned: true`), `public` (requires a `license`) or `synthetic`.
+Reports carry the source per recording; only owned recordings are evidence for a
+production default. Do not use a partial reference as if it covered the full
+recording.
 
 Choose a durable profile by database ID, or pass an explicit speech JSON file:
 
@@ -257,6 +260,9 @@ without bootstrapping or editing it; all three speech selections must be local.
 Cloud/remote text stages in that profile are not executed. A full local benchmark
 requires the optional ASR, VAD, alignment and diarization dependencies and ffmpeg.
 
+`--save-transcripts DIR` also writes each predicted transcript (segments, words,
+speakers, provider/model) as private JSON for host-to-host comparison.
+
 The default output is a readable table; `--json` prints the full versioned report.
 `--output` saves the same JSON in either mode. Reports contain recording IDs,
 configuration/provenance, errors and reference-derived diagnostic positions; keep
@@ -271,6 +277,11 @@ text, RTTM or selected speech-config file. Original audio and references are rea
   Rates are `(substitutions + deletions + insertions) / reference units` and may
   exceed 100%. Empty references with hypothesis text have an undefined (`null`)
   rate and retain insertion counts; both empty yields zero.
+- **Script-folded CER** folds Simplified characters to Traditional with OpenCC on
+  both sides before scoring. Raw Whisper Mandarin is Simplified and the correction
+  stage converts it later, so this isolates recognition errors from script choice.
+  It equals strict CER (`script_folding: false`) when OpenCC is not installed.
+  Comparisons gate on it whenever both reports include it.
 - **Mixed WER/MER** uses one token per Mandarin Han character and one per English
   word, with case-insensitive Unicode normalization, apostrophes within English
   words, and contiguous digit runs. Chinese/English boundaries work without spaces.
@@ -303,6 +314,16 @@ text, RTTM or selected speech-config file. Original audio and references are rea
   sampling can miss brief peaks. GPU VRAM is excluded; it is not a GPU memory claim.
   Aggregate peak is the maximum observed recording peak, and aggregate RTF uses
   total elapsed time divided by total audio duration.
+
+### Comparisons, synthetic cohort and host runbook
+
+`localplaud benchmark-speech-compare` compares a candidate report with a baseline
+report (is the candidate not worse?) and/or two `--save-transcripts` directories
+from different hosts (are their timestamped, diarized artifacts comparable?).
+`scripts/benchmark/synthesize_speech_cohort.py` builds a short synthetic Taiwan
+Mandarin / code-switch cohort with exact references for tooling checks. Gates,
+commands and the WSL CUDA and Mac↔WSL steps are in
+[speech-benchmark-runbook.md](speech-benchmark-runbook.md).
 
 Pure metric tests use synthetic text, turns and timings, and harness tests use fake
 execution. They download no models and do not establish real speech quality. Run a
