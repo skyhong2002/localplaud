@@ -201,6 +201,11 @@ open issues, not successful end-to-end completion.
   passed fidelity review; broader quality evaluation and recovery of inadequate
   transcripts remain open. See
   [note quality](docs/note-quality.md).
+  `localplaud eval-notes` now scores candidate notes against a human answer key
+  (coverage per importance and per third, reversals, owner/deadline attribution,
+  leakage, unsupported numbers) with a synthetic Taiwan Mandarin fixture. Still
+  open: write keys for a private cohort of owned recordings and record the
+  local-model vs hosted-model results before changing note defaults.
 
 - **WhisperX forced-alignment validation.** `align:whisperx` /
   `wav2vec2-auto` are now the production default. A real 43-second Mandarin

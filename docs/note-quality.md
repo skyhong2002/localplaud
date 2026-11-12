@@ -154,6 +154,66 @@ human evaluation; they are not established by this implementation. Qualify real
 candidates before bulk regeneration and record failures instead of claiming that
 all recordings reached completion.
 
+### Scoring a note against an answer key
+
+`localplaud eval-notes MANIFEST` scores one or more candidate notes for the same
+fixed transcript against a human-written answer key. It reads files only: no model
+is called, no library data is read or changed, and nothing leaves the machine.
+Use it to compare a local model, a hosted model and (as a reference only) a Plaud
+note on identical input before changing a note default.
+
+```sh
+localplaud eval-notes private/notes/manifest.json --output private/notes/report.json
+localplaud eval-notes tests/fixtures/note_fidelity/manifest.json --report-only
+```
+
+Export the corrected transcript as TXT with timestamps, or as JSON segments, and
+each note as Markdown from the recording's Share sheet. The manifest names them:
+
+```json
+{"version": 1, "cases": [{
+  "id": "weekly-sync", "source": "owned",
+  "transcript_file": "weekly-sync.txt", "key": "weekly-sync.key.json",
+  "notes": {"local-qwen": "qwen.md", "gpt": "gpt.md", "plaud-reference": "plaud.md"}
+}]}
+```
+
+`source` is `owned`, `public` or `synthetic`. A synthetic case shows that the
+scorer works; it is not evidence about real recordings.
+
+The key (see `tests/fixtures/note_fidelity/key.json` for a complete example) has:
+
+- `items`: what a faithful note must say. `importance` is `critical` (weight 3),
+  `major` (2) or `minor` (1). `match` lists alternative term groups; an item is
+  covered when every term of one group appears in the note after NFKC, case
+  folding and whitespace removal. Actions add `owner` and `deadline`, which must
+  appear on the same note line as the matched terms. `evidence` (an exact
+  transcript phrase) or `at` (seconds) places the item in the early, middle or
+  late third of the recording.
+- `contradictions`: wording that reverses the recording, such as a deferred
+  feature described as shipping. Any match is a critical reversal.
+- `must_not_contain`: template instructions, placeholders or names that must not
+  leak into a note.
+- `allowed_numbers`: numbers a note may state that the transcript does not
+  (for example a computed total).
+
+Reported metrics: weighted and critical coverage, coverage per third (a low late
+third usually means a truncated tail), reversals, leaks, owner/deadline errors,
+duplicate lines, repeated n-gram loops, numbers absent from the transcript (with
+Chinese numerals, 萬/億 and 點 decimals folded) and note-to-transcript length.
+
+Default review gates encode the targets above and are not measured results:
+100% critical coverage, at least 95% weighted coverage, at least 80% in each
+third, and zero reversals, leaks, attribution errors or duplicate lines. Override
+them with `--gates gates.json`. A note that passes the gates but has warnings
+(unsupported numbers, loops, unlocated key items) is marked `review`. The command
+exits 1 when any note fails unless `--report-only` is given.
+
+Matching is lexical, so a miss can be a paraphrase. Check each missed item ID in
+the note; when the note is right, add that wording as another `match` group
+instead of discounting the miss. Write the key from the transcript before reading
+any candidate, and keep keys, notes and reports private.
+
 Automatic transcript correction is a prerequisite of both ingestion and notes-only
 reprocessing when `pipeline.polish` is enabled. `transcript-polish/v4` reviews
 proposed edits automatically; no operator approval is required. A correction or
