@@ -843,6 +843,9 @@ def benchmark_speech_command(
     speech_config: str | None = typer.Option(None, "--speech-config", help="JSON ASR/VAD/align/diarize configuration."),
     output: str | None = typer.Option(None, "--output", help="Save complete JSON report (private)."),
     json_output: bool = typer.Option(False, "--json", help="Print JSON instead of the readable table."),
+    save_transcripts: str | None = typer.Option(
+        None, "--save-transcripts", help="Directory for each predicted transcript (private), for benchmark-speech-compare."
+    ),
 ):
     """Evaluate speech locally, without uploading audio or modifying library artifacts."""
     from pathlib import Path
@@ -854,7 +857,14 @@ def benchmark_speech_command(
         settings, alignment, provenance = configuration(
             get_settings(), profile_id=profile_id, explicit=explicit
         )
-        report = benchmark(Path(manifest), settings, alignment, provenance)
+        hypotheses = Path(save_transcripts) if save_transcripts else None
+        if hypotheses is not None:
+            from .benchmark_speech import load_manifest
+
+            inputs = {item["audio"].resolve().parent for item in load_manifest(Path(manifest))}
+            if hypotheses.resolve() in inputs | {Path(manifest).resolve().parent}:
+                raise ValueError("--save-transcripts must be a separate directory from the manifest and audio")
+        report = benchmark(Path(manifest), settings, alignment, provenance, hypotheses=hypotheses)
     except (ValueError, OSError, KeyError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
@@ -880,7 +890,8 @@ def benchmark_speech_command(
         print(serialized)
     else:
         table = Table(title="Local speech benchmark")
-        for column in ("Recording", "CER", "Mixed WER/MER", "DER", "Time MAE (s)", "RTF", "Peak CPU MiB", "Indicators"):
+        for column in ("Recording", "CER", "CER (script-folded)", "Mixed WER/MER", "DER", "Time MAE (s)", "RTF",
+                       "Peak CPU MiB", "Indicators"):
             table.add_column(column, overflow="fold", min_width=9 if column == "Recording" else None)
 
         def number(value, percent=False):
@@ -889,14 +900,16 @@ def benchmark_speech_command(
         for row in report["recordings"] + [{"id": "Aggregate", "metrics": report["aggregate"],
                                             "execution": report["aggregate"], **report["aggregate"]}]:
             if "error" in row:
-                table.add_row(row["id"], "FAILED", "", "", "", "", "", row["error"])
+                table.add_row(row["id"], "FAILED", "", "", "", "", "", "", row["error"])
                 continue
             metrics = row["metrics"]
             hallucination = metrics["hallucination"]
             loops = hallucination.get("recordings_with_loops", len(hallucination.get("repeated_ngram_loops", [])))
             silence = hallucination.get("recordings_with_non_speech_text", len(hallucination.get("text_in_non_speech") or []))
             memory = row["execution"].get("peak_memory_bytes")
-            table.add_row(row["id"], number(metrics["cer"]["rate"], True), number(metrics["mer"]["rate"], True),
+            table.add_row(row["id"], number(metrics["cer"]["rate"], True),
+                          number((metrics.get("cer_script_folded") or {}).get("rate"), True),
+                          number(metrics["mer"]["rate"], True),
                           number((metrics.get("der") or {}).get("rate"), True),
                           number((metrics.get("timestamps") or {}).get("mean_absolute_seconds")),
                           number(row.get("real_time_factor")), number(memory / 2**20 if memory is not None else None),
@@ -958,6 +971,73 @@ def eval_notes_command(
                     console.print(f"[dim]{case['id']} / {label}:[/dim] {line}")
     summary = report["summary"]
     if not report_only and (summary["fail"] or summary["error"]):
+        raise typer.Exit(1)
+
+
+@app.command("benchmark-speech-compare")
+def benchmark_speech_compare_command(
+    baseline: str | None = typer.Option(None, "--baseline", help="benchmark-speech report of the current default."),
+    candidate: str | None = typer.Option(None, "--candidate", help="benchmark-speech report of the proposed setting."),
+    hypotheses_a: str | None = typer.Option(None, "--hypotheses-a", help="--save-transcripts directory from host A."),
+    hypotheses_b: str | None = typer.Option(None, "--hypotheses-b", help="--save-transcripts directory from host B."),
+    gates: str | None = typer.Option(None, "--gates", help="JSON file overriding the comparison thresholds."),
+    output: str | None = typer.Option(None, "--output", help="Save the comparison JSON (private)."),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON instead of the summary."),
+):
+    """Compare two speech runs: candidate vs baseline and/or host A vs host B. Offline."""
+    from pathlib import Path
+
+    from .benchmark_compare import compare
+
+    def path(value):
+        return Path(value) if value else None
+
+    try:
+        overrides = json.loads(Path(gates).read_text()) if gates else None
+        result = compare(baseline=path(baseline), candidate=path(candidate), hypotheses_a=path(hypotheses_a),
+                         hypotheses_b=path(hypotheses_b), gates=overrides)
+        if output and Path(output).resolve() in {p.resolve() for p in map(path, (baseline, candidate, gates)) if p}:
+            raise ValueError("comparison output must not overwrite its inputs")
+    except (ValueError, OSError, KeyError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    serialized = json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)
+    if output:
+        Path(output).write_text(serialized + "\n")
+    if json_output:
+        print(serialized)
+    else:
+        def pct(value):
+            return "—" if value is None else f"{value * 100:+.2f} pp"
+
+        if "reports" in result:
+            part = result["reports"]
+            d = part["deltas"]
+            console.print(f"[bold]Candidate vs baseline[/bold] ({len(part['shared_recordings'])} shared, "
+                          f"evidence: {part['evidence']}): {part['verdict'].upper()}")
+            mae = d["timestamp_mae_seconds"]
+            rtf = d["rtf_ratio"]
+            console.print(f"  CER {pct(d['cer'])} (script-folded {pct(d['cer_script_folded'])}) · "
+                          f"MER {pct(d['mer'])} · DER {pct(d['der'])} · "
+                          f"time MAE {'—' if mae is None else f'{mae:+.3f} s'} · "
+                          f"RTF ×{'—' if rtf is None else f'{rtf:.2f}'}")
+        if "hosts" in result:
+            part = result["hosts"]
+            table = Table(title=f"Host A vs host B: {part['verdict'].upper()}")
+            for column in ("Recording", "Cross CER", "Time MAE (s)", "Speaker diff", "Speakers A/B", "Problems"):
+                table.add_column(column, overflow="fold")
+            for row in part["recordings"]:
+                def num(value, scale=1.0):
+                    return "—" if value is None else f"{value * scale:.3f}"
+
+                table.add_row(row["id"], num(row["cross_host_cer"], 100) + "%", num(row["timestamp_mae_seconds"]),
+                              num(row["speaker_disagreement"], 100) + "%",
+                              f"{row['contract']['a']['speakers']}/{row['contract']['b']['speakers']}",
+                              "; ".join(row["problems"]) or "—")
+            console.print(table)
+        for part in (result.get("reports"), result.get("hosts")):
+            for line in (part or {}).get("failures", []):
+                console.print(f"[dim]-[/dim] {line}")
+    if not result["passed"]:
         raise typer.Exit(1)
 
 
