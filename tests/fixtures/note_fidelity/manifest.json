@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "synthetic-launch-sync",
+      "source": "synthetic",
+      "transcript_file": "transcript.json",
+      "key": "key.json",
+      "notes": {"faithful": "note-faithful.md", "flawed": "note-flawed.md"}
+    }
+  ]
+}

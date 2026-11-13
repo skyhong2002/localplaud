@@ -906,6 +906,61 @@ def benchmark_speech_command(
         raise typer.Exit(1)
 
 
+@app.command("eval-notes")
+def eval_notes_command(
+    manifest: str = typer.Argument(help="Version-1 JSON manifest of transcripts, answer keys and candidate notes."),
+    gates: str | None = typer.Option(None, "--gates", help="JSON file overriding the review thresholds."),
+    output: str | None = typer.Option(None, "--output", help="Save the complete JSON report (private)."),
+    json_output: bool = typer.Option(False, "--json", help="Print JSON instead of the readable table."),
+    report_only: bool = typer.Option(False, "--report-only", help="Exit 0 even when a note fails its gates."),
+):
+    """Score notes against a human answer key. Offline; reads files only, calls no model."""
+    from pathlib import Path
+
+    from .eval_notes import evaluate, protected_inputs
+
+    try:
+        overrides = json.loads(Path(gates).read_text()) if gates else None
+        report = evaluate(Path(manifest), overrides)
+        if output and Path(output).resolve() in protected_inputs(Path(manifest)):
+            raise ValueError("report output must not overwrite the manifest, transcripts, keys or notes")
+    except (ValueError, OSError, KeyError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
+    if output:
+        Path(output).write_text(serialized + "\n")
+    if json_output:
+        print(serialized)
+    else:
+        table = Table(title="Note fidelity against answer key")
+        for column in ("Case", "Note", "Verdict", "Weighted", "Critical", "Early/Mid/Late",
+                       "Reversals", "Leaks", "Owner/date", "Missed"):
+            table.add_column(column, overflow="fold")
+
+        def pct(value):
+            return "—" if value is None else f"{value * 100:.0f}%"
+
+        for case in report["cases"]:
+            for label, result in case["candidates"].items():
+                if result["verdict"] == "error":
+                    table.add_row(case["id"], label, "ERROR", "", "", "", "", "", "", result["error"])
+                    continue
+                metrics = result["metrics"]
+                thirds = "/".join(pct(metrics["third_coverage"][t]) for t in ("early", "middle", "late"))
+                table.add_row(case["id"], label, result["verdict"].upper(), pct(metrics["weighted_coverage"]),
+                              pct(metrics["critical_coverage"]), thirds, str(metrics["contradictions"]),
+                              str(metrics["leaks"]), str(metrics["action_attribution_errors"]),
+                              ", ".join(result["missed"]) or "—")
+        console.print(table)
+        for case in report["cases"]:
+            for label, result in case["candidates"].items():
+                for line in result.get("failures", []) + result.get("warnings", []):
+                    console.print(f"[dim]{case['id']} / {label}:[/dim] {line}")
+    summary = report["summary"]
+    if not report_only and (summary["fail"] or summary["error"]):
+        raise typer.Exit(1)
+
+
 @app.command("recover-owner-password")
 def recover_owner_password_command():
     """Set an existing owner's local password from a private interactive prompt."""
