@@ -30,7 +30,7 @@ def test_catalog_is_a_cached_script_instead_of_inline_page_data(monkeypatch, tmp
         versioned = client.get(match.group(1))
         assert versioned.status_code == 200
         assert versioned.headers["content-type"].startswith("text/javascript")
-        assert versioned.headers["cache-control"] == "public, max-age=31536000, immutable"
+        assert versioned.headers["cache-control"] == "private, max-age=31536000, immutable"
         assert versioned.headers["etag"] == f'"{match.group(2)}"'
         assert versioned.text.startswith("window.localplaudCatalog=Object.freeze({")
         assert '"Settings sections":"設定區段"' in versioned.text
@@ -38,7 +38,7 @@ def test_catalog_is_a_cached_script_instead_of_inline_page_data(monkeypatch, tmp
         # A stale or missing version revalidates instead of pinning old copy for a year.
         stale = client.get("/i18n/zh-Hant-TW.js?v=000000000000")
         assert stale.status_code == 200
-        assert stale.headers["cache-control"] == "no-cache"
+        assert stale.headers["cache-control"] == "private, no-cache"
         assert client.get("/i18n/en.js").status_code == 404
         assert client.get("/i18n/xx.js").status_code == 404
 
@@ -56,7 +56,7 @@ def test_shell_scripts_are_deferred_in_dependency_order(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     with client:
         page = client.get("/home").text
-        htmx = page.index('<script src="/static/htmx-1.9.12.min.js" defer></script>')
+        htmx = page.index('<script src="/static/htmx-1.9.12.min.js?v=')
         app_js = page.index('<script src="/static/js/app.js?v=')
         assert htmx < app_js
         assert re.search(r'<script src="/static/js/app\.js\?v=[0-9a-f]+" defer></script>', page)
@@ -71,7 +71,7 @@ def test_recording_scripts_defer_after_the_shared_runtime(monkeypatch, tmp_path)
         page = client.get("/file/r1").text
         order = [
             page.index('/static/js/app.js?v='),
-            page.index('/static/recording-share.js?v=3" defer'),
+            page.index('/static/recording-share.js?v='),
             page.index('/static/js/workspace.js?v='),
             page.index('/static/js/surfaces.js?v='),
         ]

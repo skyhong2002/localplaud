@@ -28,7 +28,6 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 from pydantic import BaseModel, Field, field_validator
@@ -100,6 +99,13 @@ from .notes import router as notes_router
 from .outline import router as outline_router
 from .providers import router as providers_router
 from .share_links import router as share_links_router
+from .static_assets import (
+    NO_STORE,
+    PRIVATE_IMMUTABLE,
+    PRIVATE_REVALIDATE,
+    StaticAssets,
+    keeps_own_cache_policy,
+)
 from .storage import router as storage_router
 from .system import router as system_router
 from .ui import register as register_ui_helpers
@@ -175,7 +181,7 @@ app.include_router(share_links_router)
 
 _static = _HERE / "static"
 if _static.exists():
-    app.mount("/static", StaticFiles(directory=str(_static)), name="static")
+    app.mount("/static", StaticAssets(directory=str(_static)), name="static")
 
 _SESSION_COOKIE = "localplaud_session"
 
@@ -238,6 +244,11 @@ async def _auth_gate(request: Request, call_next):
     # Login redirects and 401/403 rejections never reach a route, so mark them
     # here too: nothing this private instance serves belongs in a search index.
     response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+    # One cache policy for every auth mode: pages, fragments, API, audio,
+    # exports, share links and /sw.js are never stored. Only successful
+    # /static and /i18n responses keep the caching their route chose.
+    if not keeps_own_cache_policy(request.url.path, response):
+        response.headers["Cache-Control"] = NO_STORE
     return response
 
 
@@ -246,7 +257,6 @@ async def _gate_request(request: Request, call_next):
     if request.url.path == completion_path:
         # This single read-only route validates its own scoped machine credential.
         response = await call_next(request)
-        response.headers["Cache-Control"] = "private, no-store"
         response.headers["Vary"] = "Authorization"
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
         return response
@@ -254,8 +264,8 @@ async def _gate_request(request: Request, call_next):
         from .accounts import gate
 
         response = await gate(request, call_next)
-        response.headers["Cache-Control"] = "private, no-store"
-        response.headers.setdefault("Vary", "Cookie")
+        if not keeps_own_cache_policy(request.url.path, response):
+            response.headers.setdefault("Vary", "Cookie")
         response.headers["Referrer-Policy"] = "same-origin"
         return response
     token = settings.auth_token
@@ -295,7 +305,6 @@ async def _gate_request(request: Request, call_next):
     response = await call_next(request)
     if public_share:
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
-        response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -329,12 +338,14 @@ def i18n_catalog(locale: str, v: str | None = None) -> Response:
 
     A request carrying the current content version is immutable and cached for a
     year; any other request revalidates, so an upgrade never serves stale copy.
+    The catalog sits behind the session gate, so browsers may cache it but
+    shared caches may not.
     """
     script = catalog_script(locale)
     if script is None:
         return Response(status_code=404)
     body, version = script
-    cache = "public, max-age=31536000, immutable" if v == version else "no-cache"
+    cache = PRIVATE_IMMUTABLE if v == version else PRIVATE_REVALIDATE
     return Response(
         body,
         media_type="text/javascript",
@@ -364,6 +375,7 @@ def service_worker() -> Response:
 
     It never stores pages or API responses (see static/sw.js). Public so that a
     background update check after the session expires does not fail on a redirect.
+    Served ``private, no-store`` like pages, so every update check sees a release.
     """
     script = _service_worker_script()
     if script is None:
@@ -371,7 +383,7 @@ def service_worker() -> Response:
     return Response(
         script,
         media_type="text/javascript",
-        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+        headers={"Service-Worker-Allowed": "/"},
     )
 
 
@@ -529,22 +541,6 @@ templates.env.filters["mmss"] = _mmss
 templates.env.filters["markdown"] = _render_markdown
 templates.env.filters["markdown_blocks"] = _render_markdown_blocks
 
-
-def _static_asset_version(*names: str) -> str:
-    """Content hash for cache-busting the recording workspace's static assets."""
-
-    digest = hashlib.sha256()
-    for name in names:
-        path = _HERE / "static" / name
-        if path.exists():
-            digest.update(path.read_bytes())
-    return digest.hexdigest()[:12]
-
-
-templates.env.globals["workspace_asset_version"] = _static_asset_version(
-    "css/recording.css", "js/workspace.js", "js/note-editor.js"
-)
-
 _NOTE_ASSET_NAME = re.compile(r"[0-9a-f]{16}\.(?:png|jpe?g|gif|webp)")
 _NOTE_ASSET_MEDIA_TYPES = {
     "png": "image/png",
@@ -570,11 +566,8 @@ def note_asset(file_id: str, name: str):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="note asset not found")
     extension = name.rsplit(".", 1)[-1]
-    return FileResponse(
-        path,
-        media_type=_NOTE_ASSET_MEDIA_TYPES[extension],
-        headers={"Cache-Control": "private, max-age=86400"},
-    )
+    # Private user content: _auth_gate marks it private, no-store like audio.
+    return FileResponse(path, media_type=_NOTE_ASSET_MEDIA_TYPES[extension])
 
 
 def _file_summary(r: PlaudFile) -> dict:

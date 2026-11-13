@@ -15,7 +15,6 @@ const CORE = [
   OFFLINE_URL,
   '/static/logo.svg',
   '/static/favicon.svg',
-  '/static/htmx-1.9.12.min.js',
 ];
 const NO_FALLBACK = /^\/(?:api|audio|share|login|logout|oauth|auth|register|healthz|i18n)(?:\/|$)/;
 

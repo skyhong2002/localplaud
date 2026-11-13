@@ -7,9 +7,9 @@
   <title>{% block title %}帳號{% endblock %} · localplaud</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <script>try{const m=localStorage.getItem('localplaud:appearance')||'system';document.documentElement.dataset.appearance=m==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):m;}catch(e){}</script>
-  <link rel="stylesheet" href="/static/css/app.css?v={{ asset_version }}">
-  <link rel="stylesheet" href="/static/css/accounts.css?v={{ asset_version }}">
-  <script src="/static/js/accounts.js?v={{ asset_version }}" defer></script>
+  <link rel="stylesheet" href="{{ static_url('css/app.css') }}">
+  <link rel="stylesheet" href="{{ static_url('css/accounts.css') }}">
+  <script src="{{ static_url('js/accounts.js') }}" defer></script>
 </head>
 <body class="auth-shell">
   <a class="skip-link" href="#content">跳至主要內容</a>
