@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
+from functools import cache
 
 SUPPORTED_LOCALES = {"en": "English", "zh-Hant-TW": "繁體中文（台灣）"}
 
@@ -1255,6 +1258,23 @@ CATALOGS = {"zh-Hant-TW": _with_extensions("zh-Hant-TW", _ZH_HANT_TW)}
 def catalog(locale: str) -> dict[str, str]:
     """Return a copy safe to expose to the browser for dynamic UI messages."""
     return dict(CATALOGS.get(locale, {}))
+
+
+@cache
+def catalog_script(locale: str) -> tuple[str, str] | None:
+    """Browser catalog as a cacheable script body plus its content version.
+
+    Pages reference it as ``/i18n/<locale>.js?v=<version>`` instead of
+    embedding the whole dictionary in every HTML response. ``None`` means the
+    locale needs no catalog (English source strings).
+    """
+    messages = CATALOGS.get(locale)
+    if not messages:
+        return None
+    payload = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    body = f"window.localplaudCatalog=Object.freeze({payload});\n"
+    version = hashlib.sha256(body.encode()).hexdigest()[:12]
+    return body, version
 
 
 def translator(locale: str) -> Callable[[str], str]:

@@ -24,9 +24,12 @@
   <link rel="stylesheet" href="/static/css/app.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/css/workspace.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/css/surfaces.css?v={{ asset_version }}">
-  <script src="/static/htmx-1.9.12.min.js"></script>
+  {%- if i18n_script %}
+  <script src="{{ i18n_script }}"></script>
+  {%- endif %}
+  <script src="/static/htmx-1.9.12.min.js" defer></script>
   <script>
-    window.localplaudT = message => ({{ translations|tojson }})[message] || message;
+    window.localplaudT = message => (window.localplaudCatalog || {})[message] || message;
     window.spkColor = (() => { const m={}, n=8; let i=0;
       return s => { if(!s) return null; if(!(s in m)) m[s]=i++%n; return m[s]; }; })();
     window.localplaudModal = ({backdrop,background=[],cleanupSignal,dirtyMessage}) => {
@@ -65,7 +68,7 @@
       return {open,close,setDirty:value=>{backdrop.dataset.dirty=String(Boolean(value));},setBusy:value=>{backdrop.dataset.busy=String(Boolean(value));if(value)backdrop.setAttribute('aria-busy','true');else backdrop.removeAttribute('aria-busy');}};
     };
   </script>
-  <script src="/static/js/app.js?v={{ asset_version }}"></script>
+  <script src="/static/js/app.js?v={{ asset_version }}" defer></script>
   {% block page_head %}{% endblock %}
 </head>
 <body class="app{% if show_tabbar %} has-tabbar{% endif %}"{% if ask_enabled|default(false) %} data-ask-enabled{% endif %}{% if account_user|default(None) %} hx-history="false"{% endif %}>

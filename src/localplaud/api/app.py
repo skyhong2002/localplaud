@@ -71,7 +71,7 @@ from ..db.models import (
 )
 from ..db.session import init_db, session_scope
 from ..error_redaction import sanitize_error
-from ..i18n import SUPPORTED_LOCALES, catalog, translator
+from ..i18n import SUPPORTED_LOCALES, catalog_script, translator
 from ..maintenance import tracked_submit, tracked_thread
 from ..markdown import render_markdown as _render_markdown
 from ..markdown import render_markdown_blocks as _render_markdown_blocks
@@ -315,6 +315,30 @@ def robots() -> Response:
     Share pages still send ``noindex`` so nothing ends up in search results.
     """
     return Response(_ROBOTS_TXT, media_type="text/plain")
+
+
+def _i18n_script_url(locale: str) -> str | None:
+    script = catalog_script(locale)
+    return f"/i18n/{locale}.js?v={script[1]}" if script else None
+
+
+@app.get("/i18n/{locale}.js", include_in_schema=False)
+def i18n_catalog(locale: str, v: str | None = None) -> Response:
+    """Serve the browser translation catalog once instead of inlining it per page.
+
+    A request carrying the current content version is immutable and cached for a
+    year; any other request revalidates, so an upgrade never serves stale copy.
+    """
+    script = catalog_script(locale)
+    if script is None:
+        return Response(status_code=404)
+    body, version = script
+    cache = "public, max-age=31536000, immutable" if v == version else "no-cache"
+    return Response(
+        body,
+        media_type="text/javascript",
+        headers={"Cache-Control": cache, "ETag": f'"{version}"'},
+    )
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -770,7 +794,7 @@ def _base_ctx(request: Request, active: str) -> dict:
         "ask_enabled": workspace_preferences["ask_enabled"],
         "supported_locales": SUPPORTED_LOCALES,
         "t": translator(workspace_preferences["locale"]),
-        "translations": catalog(workspace_preferences["locale"]),
+        "i18n_script": _i18n_script_url(workspace_preferences["locale"]),
         "partial_response": partial_response,
     }
 

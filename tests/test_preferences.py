@@ -266,7 +266,9 @@ def test_interface_locale_translates_shell_and_primary_pages(monkeypatch, tmp_pa
         assert 'aria-label="設定區段"' in settings_assets
         assert 'aria-label="Settings sections"' not in settings.text
         assert 'const tr=window.localplaudT' in settings_assets
-        assert 'window.localplaudT = message => ({' in settings_assets
+        assert "window.localplaudT = message => (window.localplaudCatalog || {})" in settings.text
+        assert 'window.localplaudCatalog=Object.freeze({' in settings_assets
+        assert '"Settings sections":"設定區段"' in settings_assets
         assert "建立含資訊清單與 SHA-256 的一致性 SQLite 快照" in settings_assets
         assert "目前沒有工作區備份" in settings_assets
         assert "已授權的備份目的地" in settings_assets

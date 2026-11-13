@@ -696,7 +696,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/recording-share.js?v=3"></script>
+<script src="/static/recording-share.js?v=3" defer></script>
 <script>
 (()=>{
   const cleanupController=new AbortController(),appView=document.getElementById('app-view');
@@ -996,7 +996,7 @@
   "fallback_names": f.speaker_fallback_names | default({}),
   "title": f.filename,
 } | tojson }}</script>
-<script src="/static/js/workspace.js?v={{ workspace_asset_version }}"></script>
-<script src="/static/js/note-editor.js?v={{ workspace_asset_version }}"></script>
-<script src="/static/js/speaker-suggestions.js?v={{ workspace_asset_version }}"></script>
+<script src="/static/js/workspace.js?v={{ workspace_asset_version }}" defer></script>
+<script src="/static/js/note-editor.js?v={{ workspace_asset_version }}" defer></script>
+<script src="/static/js/speaker-suggestions.js?v={{ workspace_asset_version }}" defer></script>
 {% endblock %}
