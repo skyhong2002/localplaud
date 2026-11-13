@@ -566,11 +566,8 @@ def note_asset(file_id: str, name: str):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="note asset not found")
     extension = name.rsplit(".", 1)[-1]
-    return FileResponse(
-        path,
-        media_type=_NOTE_ASSET_MEDIA_TYPES[extension],
-        headers={"Cache-Control": "private, max-age=86400"},
-    )
+    # Private user content: _auth_gate marks it private, no-store like audio.
+    return FileResponse(path, media_type=_NOTE_ASSET_MEDIA_TYPES[extension])
 
 
 def _file_summary(r: PlaudFile) -> dict:

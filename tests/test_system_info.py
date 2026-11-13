@@ -95,7 +95,7 @@ def test_about_and_diagnostics_are_truthful_aggregate_and_redacted(monkeypatch, 
 
         response = client.get("/api/system/diagnostics.json")
         assert response.status_code == 200
-        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["cache-control"] == "private, no-store"
         assert 'filename="localplaud-diagnostics.json"' in response.headers[
             "content-disposition"
         ]

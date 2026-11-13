@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from localplaud.api.static_assets import static_url
 from tests.assets import with_assets
 from tests.workspace import set_ask_enabled
 
@@ -370,7 +371,7 @@ def test_product_pages_use_centered_responsive_layout(monkeypatch, tmp_path):
 def test_browser_runtime_is_vendored_and_checksum_pinned(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     page = c.get("/")
-    assert '<script src="/static/htmx-1.9.12.min.js" defer></script>' in page.text
+    assert f'<script src="{static_url("htmx-1.9.12.min.js")}" defer></script>' in page.text
     assert "unpkg.com" not in page.text
     runtime = c.get("/static/htmx-1.9.12.min.js")
     assert runtime.status_code == 200
@@ -1540,7 +1541,7 @@ def test_bulk_export_route_streams_zip_and_reports_partial_availability(monkeypa
     assert response.headers["content-disposition"] == (
         'attachment; filename="localplaud-recordings.zip"'
     )
-    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["cache-control"] == "private, no-store"
     assert response.headers["x-localplaud-export-emitted"] == "2"
     assert response.headers["x-localplaud-export-skipped"] == "2"
     assert int(response.headers["content-length"]) == len(response.content)
@@ -1990,7 +1991,7 @@ def test_recording_reading_and_share_entrypoints(monkeypatch, tmp_path):
     assert 'data-share-view="notes"' in share
     assert 'id="export-backdrop"' not in html
     assert client.get('/api/files/r1/share-link').json()['active'] is False
-    assert 'src="/static/recording-share.js?v=3"' in html
+    assert f'src="{static_url("recording-share.js")}"' in html
     assert "url.searchParams.set('tab',requested)" in html
     assert "if(requested==='transcript')url.searchParams.delete('tab')" not in html
 
@@ -2021,10 +2022,10 @@ def test_share_sheet_is_available_in_progressive_workspace(monkeypatch, tmp_path
     assert 'data-share-panel="transcript"' in page.text
     assert 'data-share-panel="notes"' in page.text
     assert 'id="export-backdrop"' not in page.text
-    assert '/static/recording-share.js?v=3' in page.text
+    assert static_url("recording-share.js") in page.text
     # HTMX retains the outer shell: its old CSS must not size the new sheet.
-    assert '<link rel="stylesheet" href="/static/recording-share.css?v=4">' in page.text
-    stylesheet = client.get('/static/recording-share.css?v=4')
+    assert f'<link rel="stylesheet" href="{static_url("recording-share.css")}">' in page.text
+    stylesheet = client.get(static_url("recording-share.css"))
     assert stylesheet.status_code == 200
     assert stylesheet.headers['content-type'].startswith('text/css')
     # Fanboy Social's generic ##.share-body rule hides essential app controls.
@@ -2032,7 +2033,7 @@ def test_share_sheet_is_available_in_progressive_workspace(monkeypatch, tmp_path
     assert 'class="import-body lp-recording-actions-body"' in page.text
     assert not re.search(r'class="[^"]*(?<![\w-])share-body(?![\w-])', page.text)
     assert '.lp-recording-actions-body' in stylesheet.text
-    assert client.get('/static/recording-share.js?v=3').status_code == 200
+    assert client.get(static_url("recording-share.js")).status_code == 200
     assert client.get('/api/files/r1/share-link').json()['active'] is False
 
 
