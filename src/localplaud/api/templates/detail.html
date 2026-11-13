@@ -14,8 +14,8 @@
 {# One shared active target keeps the highlighted tab and the initially
    visible panel in lockstep even if either list's ordering changes. #}
 {% set active_note_target = (('saved-' ~ f.selected_note_id) if f.selected_note_id else (('sum-' ~ notes[0].id) if notes else (('saved-' ~ f.user_notes[0].id) if f.user_notes else none))) %}
-<link rel="stylesheet" href="/static/css/recording.css?v={{ workspace_asset_version }}">
-<link rel="stylesheet" href="/static/css/speaker-suggestions.css?v={{ workspace_asset_version }}">
+<link rel="stylesheet" href="{{ static_url('css/recording.css') }}">
+<link rel="stylesheet" href="{{ static_url('css/speaker-suggestions.css') }}">
 <div class="shell recording-shell" data-active-panel="{{ active_tab }}">
   {% set active_id = f.id %}
   <header class="detail-topbar ws-topbar">
@@ -696,7 +696,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/recording-share.js?v=3" defer></script>
+<script src="{{ static_url('recording-share.js') }}" defer></script>
 <script>
 (()=>{
   const cleanupController=new AbortController(),appView=document.getElementById('app-view');
@@ -996,7 +996,7 @@
   "fallback_names": f.speaker_fallback_names | default({}),
   "title": f.filename,
 } | tojson }}</script>
-<script src="/static/js/workspace.js?v={{ workspace_asset_version }}" defer></script>
-<script src="/static/js/note-editor.js?v={{ workspace_asset_version }}" defer></script>
-<script src="/static/js/speaker-suggestions.js?v={{ workspace_asset_version }}" defer></script>
+<script src="{{ static_url('js/workspace.js') }}" defer></script>
+<script src="{{ static_url('js/note-editor.js') }}" defer></script>
+<script src="{{ static_url('js/speaker-suggestions.js') }}" defer></script>
 {% endblock %}

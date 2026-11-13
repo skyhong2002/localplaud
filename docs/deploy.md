@@ -277,7 +277,13 @@ Google Search Console are expected; do not loosen authentication to change that.
   `MistralAI-User`) may fetch `/share/` so that a link a user hands an
   assistant still works.
 - Every response, including the 303 login redirect and 401/403 rejections,
-  sends `X-Robots-Tag: noindex, nofollow` and `Cache-Control: private, no-store`.
+  sends `X-Robots-Tag: noindex, nofollow` and, in every auth mode,
+  `Cache-Control: private, no-store`. The only exceptions are successful shell
+  assets that hold no user data: `/static/*` whose `?v=` equals the file's
+  content hash is `public, max-age=31536000, immutable` (otherwise `no-cache`),
+  and the session-gated translation catalog `/i18n/<locale>.js?v=<hash>` is
+  `private, max-age=31536000, immutable` (stale versions `private, no-cache`).
+  `/sw.js` stays `private, no-store`.
   The login page also carries `<meta name="robots" content="noindex,nofollow">`.
 - There is no sitemap. `/sitemap.xml`, recordings, transcripts, Ask, the API
   and OpenAPI docs all require a session. Do not submit a sitemap for this host.

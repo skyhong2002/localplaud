@@ -14,8 +14,8 @@
 </div>
 {% endblock %}
 {% block page_head %}
-<link rel="stylesheet" href="/static/css/accounts.css?v={{ asset_version }}">
-<script src="/static/js/accounts.js?v={{ asset_version }}" defer></script>
+<link rel="stylesheet" href="{{ static_url('css/accounts.css') }}">
+<script src="{{ static_url('js/accounts.js') }}" defer></script>
 {% endblock %}
 {% block content %}<div class="account-page">{{ self.account_content() }}</div>{% endblock %}
 {% block account_content %}{% endblock %}

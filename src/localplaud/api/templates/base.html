@@ -21,13 +21,13 @@
     root.dataset.appearanceMode=mode;root.dataset.appearance=mode==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):mode;
     if(localStorage.getItem('localplaud:nav-collapsed')==='1')root.classList.add('lp-nav-collapsed');
     if(localStorage.getItem('localplaud:list-collapsed')==='1')root.classList.add('lp-list-collapsed');}catch(_e){}</script>
-  <link rel="stylesheet" href="/static/css/app.css?v={{ asset_version }}">
-  <link rel="stylesheet" href="/static/css/workspace.css?v={{ asset_version }}">
-  <link rel="stylesheet" href="/static/css/surfaces.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="{{ static_url('css/app.css') }}">
+  <link rel="stylesheet" href="{{ static_url('css/workspace.css') }}">
+  <link rel="stylesheet" href="{{ static_url('css/surfaces.css') }}">
   {%- if i18n_script %}
   <script src="{{ i18n_script }}"></script>
   {%- endif %}
-  <script src="/static/htmx-1.9.12.min.js" defer></script>
+  <script src="{{ static_url('htmx-1.9.12.min.js') }}" defer></script>
   <script>
     window.localplaudT = message => (window.localplaudCatalog || {})[message] || message;
     window.spkColor = (() => { const m={}, n=8; let i=0;
@@ -68,7 +68,7 @@
       return {open,close,setDirty:value=>{backdrop.dataset.dirty=String(Boolean(value));},setBusy:value=>{backdrop.dataset.busy=String(Boolean(value));if(value)backdrop.setAttribute('aria-busy','true');else backdrop.removeAttribute('aria-busy');}};
     };
   </script>
-  <script src="/static/js/app.js?v={{ asset_version }}" defer></script>
+  <script src="{{ static_url('js/app.js') }}" defer></script>
   {% block page_head %}{% endblock %}
 </head>
 <body class="app{% if show_tabbar %} has-tabbar{% endif %}"{% if ask_enabled|default(false) %} data-ask-enabled{% endif %}{% if account_user|default(None) %} hx-history="false"{% endif %}>
@@ -304,7 +304,7 @@
   </section>
   <div class="offline-banner" id="lp-offline-banner" role="status" hidden>{{ icon('cloud', 'sm') }}<span>{{ t('You are offline. Reconnect to load recordings or save changes.') }}</span></div>
   <div class="toast-region" id="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
-  <script src="/static/js/surfaces.js?v={{ asset_version }}" defer></script>
+  <script src="{{ static_url('js/surfaces.js') }}" defer></script>
 </body>
 </html>
 {% endif %}

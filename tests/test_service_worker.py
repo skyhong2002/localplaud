@@ -20,7 +20,8 @@ def test_service_worker_is_served_at_root_scope_with_a_release_version(monkeypat
     response = client.get("/sw.js")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/javascript")
-    assert response.headers["cache-control"] == "no-cache"
+    # Never stored, so every update check sees the current release.
+    assert response.headers["cache-control"] == "private, no-store"
     assert response.headers["service-worker-allowed"] == "/"
     assert "__LP_VERSION__" not in response.text
     assert re.search(r"const VERSION = 'lp-[0-9a-f]{12}';", response.text)

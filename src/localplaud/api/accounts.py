@@ -33,6 +33,7 @@ from ..db.models import (
 from ..db.session import session_scope
 from ..db.tenancy import workspace_scope
 from ..workspaces import ensure_user_workspace
+from .static_assets import keeps_own_cache_policy
 
 router = APIRouter()
 COOKIE = "localplaud_session"
@@ -270,9 +271,10 @@ async def gate(request, call_next):
     with workspace_scope(workspace_id):
         response = await call_next(request)
     response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
-    response.headers["Cache-Control"] = "private, no-store"
     response.headers["Referrer-Policy"] = "same-origin"
-    response.headers["Vary"] = ", ".join(filter(None, [response.headers.get("Vary"), "Cookie"]))
+    if not keeps_own_cache_policy(path, response):
+        # Cache-Control itself is applied for every auth mode by app._auth_gate.
+        response.headers["Vary"] = ", ".join(filter(None, [response.headers.get("Vary"), "Cookie"]))
     return response
 
 
