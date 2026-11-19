@@ -534,6 +534,37 @@ def test_wait_clamps_poll_and_artifact_requests_to_one_deadline(monkeypatch):
     client.close()
 
 
+@pytest.mark.parametrize("failed_polls", [1, 3])
+def test_wait_retries_transient_status_errors_without_resubmitting(monkeypatch, failed_polls):
+    monkeypatch.setattr("localplaud.remote.client.time.sleep", lambda _seconds: None)
+    job = JobResponse(
+        job_id="job",
+        idempotency_key="key",
+        stage=JobStage.transcribe,
+        status=JobStatus.running,
+        progress=0.5,
+    )
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        if len(calls) <= failed_polls:
+            raise httpx.ReadError("connection reset by peer", request=request)
+        finished = job.model_copy(update={"status": JobStatus.succeeded, "progress": 1})
+        return httpx.Response(200, json=finished.model_dump(mode="json"))
+
+    client = RemoteWorkerClient("http://worker/", "token", transport=httpx.MockTransport(handler))
+    try:
+        if failed_polls == 3:
+            with pytest.raises(httpx.ReadError):
+                client.wait(job)
+        else:
+            assert client.wait(job).job.status == JobStatus.succeeded
+    finally:
+        client.close()
+    assert calls == [("GET", "/api/worker/v1/jobs/job")] * min(failed_polls + 1, 3)
+
+
 def test_submit_and_wait_includes_submit_in_the_end_to_end_deadline(monkeypatch):
     import localplaud.remote.client as client_module
 

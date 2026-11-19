@@ -124,11 +124,19 @@ class RemoteWorkerClient:
                 raise RemoteWorkerError("remote worker timed out", retryable=True)
             return min(self._request_timeout, remaining)
 
+        poll_failures = 0
         while job.status in {JobStatus.queued, JobStatus.running}:
             remaining = remaining_timeout()
             time.sleep(min(backoff, remaining))
             backoff = min(max_backoff, backoff * 1.7)
-            job = self.status(job.job_id, timeout=remaining_timeout())
+            try:
+                job = self.status(job.job_id, timeout=remaining_timeout())
+            except (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError):
+                poll_failures += 1
+                if poll_failures >= 3:
+                    raise
+                continue
+            poll_failures = 0
             remaining_timeout()
         if job.status != JobStatus.succeeded:
             error = job.error

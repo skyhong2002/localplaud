@@ -18,6 +18,7 @@ import logging
 import math
 import os
 import re
+import sqlite3
 import threading
 import time
 from contextlib import nullcontext
@@ -28,9 +29,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.exc import OperationalError
 
 from ..asr.base import Segment, Transcript, Word
-from ..config import Settings, get_settings
+from ..config import Settings, VadConfig, get_settings
 from ..db.models import (
     Chunk,
     FileStatus,
@@ -298,8 +300,18 @@ def _claim_processing(
 
 
 def _assert_processing_claim(file_id: str, token: str) -> None:
+    """Check the lease with a read-only query between write transactions."""
+    active = current_processing_claim()
+    if active is not None and active.file_id != file_id:
+        raise PipelineAlreadyRunning(
+            f"processing claim for {active.file_id} cannot check recording {file_id}"
+        )
     with session_scope() as session:
-        _assert_processing_claim_in_session(session, file_id, token=token)
+        row = session.get(PlaudFile, file_id)
+        if row is None:
+            raise ValueError(f"unknown file {file_id}")
+        if row.processing_token != token or not processing_claim_active(row):
+            raise PipelineAlreadyRunning(f"processing claim for {file_id} is no longer active")
 
 
 def _assert_processing_claim_in_session(
@@ -442,6 +454,8 @@ def _settings_for_stage(settings: Settings, snapshot: dict, stage: str) -> Setti
         setattr(family_config, provider.replace("-", "_"), validated_provider)
 
     if stage == "transcribe":
+        # Profile options come from JSON and may replace the typed VAD settings.
+        family_config.vad = VadConfig.model_validate(family_config.vad)
         # Provider-name fallback is intentionally disabled. Only the validated,
         # ordered stage selections in Profile fallback_policy may change provider.
         family_config.fallback = []
@@ -740,29 +754,35 @@ def _set_stage(
 
 def _update_stage_progress(file_id: str, stage: StageName, progress: dict) -> None:
     """Persist bounded live progress without completing the active attempt."""
-    with session_scope() as session:
-        _assert_processing_claim_in_session(session, file_id)
-        run = session.scalar(
-            select(StageRun).where(
-                StageRun.file_id == file_id,
-                StageRun.stage == stage,
-                StageRun.status == StageStatus.running,
+    try:
+        with session_scope() as session:
+            _assert_processing_claim_in_session(session, file_id)
+            run = session.scalar(
+                select(StageRun).where(
+                    StageRun.file_id == file_id,
+                    StageRun.stage == stage,
+                    StageRun.status == StageStatus.running,
+                )
             )
-        )
-        if run is None:
-            raise RuntimeError(f"{stage.value} progress has no active stage run")
-        run.detail = dict(run.detail or {}) | {"progress": dict(progress)}
-        attempt = session.scalar(
-            select(StageAttempt)
-            .where(
-                StageAttempt.file_id == file_id,
-                StageAttempt.stage == stage,
-                StageAttempt.status == StageStatus.running,
+            if run is None:
+                raise RuntimeError(f"{stage.value} progress has no active stage run")
+            run.detail = dict(run.detail or {}) | {"progress": dict(progress)}
+            attempt = session.scalar(
+                select(StageAttempt)
+                .where(
+                    StageAttempt.file_id == file_id,
+                    StageAttempt.stage == stage,
+                    StageAttempt.status == StageStatus.running,
+                )
+                .order_by(StageAttempt.attempt.desc())
             )
-            .order_by(StageAttempt.attempt.desc())
-        )
-        if attempt is not None:
-            attempt.usage = dict(attempt.usage or {}) | {"progress": dict(progress)}
+            if attempt is not None:
+                attempt.usage = dict(attempt.usage or {}) | {"progress": dict(progress)}
+    except OperationalError as exc:
+        sqlite_code = getattr(exc.orig, "sqlite_errorcode", 0) & 0xFF
+        if sqlite_code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise
+        log.debug("Skipping %s progress update during SQLite write contention", stage.value)
 
 
 def _begin_stage_in_session(session, file_id: str, stage: StageName) -> str | None:
@@ -1181,7 +1201,9 @@ def _llm_projected_usage(
     reduce_tokens = 600 if sectioned else summarize._reduction_max_tokens(chunk_chars)
     final_tokens = 800 if sectioned and chunks > 1 else 3000
     if stage == "mind_map":
-        final_tokens = 1500
+        map_tokens, reduce_tokens, final_tokens = mindmap.output_token_budgets(
+            settings.llm.provider, chunk_chars
+        )
     max_output_tokens = (
         chunks * map_tokens + reduce_calls * reduce_tokens + final_tokens
         if chunks > 1

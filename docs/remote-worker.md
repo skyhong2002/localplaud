@@ -22,6 +22,8 @@ The authenticated API is mounted at `/api/worker/v1`:
 Jobs and artifact metadata live in SQLite, so queued/running work is recovered after
 an API restart. Artifacts carry SHA-256 digests and the controller verifies every
 download before accepting it. Errors include a stable code and `retryable` flag.
+The controller tolerates up to two consecutive transient transport failures while
+polling a job. It keeps the same job ID and the original end-to-end deadline.
 
 Inputs are stage-specific `inline_json`, `inline_base64`, or short-lived `url`
 references. Credential-shaped fields such as OAuth/access/refresh tokens, cookies,
