@@ -14,6 +14,8 @@ ZH_HANT_TW = {
     "Kept draft · review before saving": "已保留的草稿 · 儲存前可先試聽",
     "Draft kept on this device · not uploaded": "草稿已保留在此裝置 · 尚未上傳",
     "Draft kept on this device for up to 7 days": "草稿已保留在此裝置，最多 7 天",
+    "Your workspace changed. Reopen this page in the original workspace to save the recording.": "工作區已變更。請回到原工作區重新開啟頁面，再儲存錄音。",
+    "The recording start time is in the future.": "錄音的開始時間不可晚於現在。",
     "This recording is too large to keep on this device. Save or discard it.": "這段錄音太大，無法保留在此裝置。請儲存或捨棄。",
     "This device already keeps 3 drafts for this workspace. Save or delete one first.": "此裝置已為這個工作區保留 3 份草稿。請先儲存或刪除其中一份。",
     "Not enough browser storage to keep this draft. Save or discard the recording.": "瀏覽器儲存空間不足，無法保留草稿。請儲存或捨棄這段錄音。",

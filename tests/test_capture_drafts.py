@@ -29,7 +29,7 @@ const blob = (size, type = 'audio/webm') => new File([new Uint8Array(size)], 'Re
   // A scope is mandatory: never fall back to an unscoped shared store.
   assert.throws(() => createDraftStore({backend, scope: ''}), DraftError);
 
-  const kept = await mine.keep(blob(1024), {durationSeconds: 61.4});
+  const kept = await mine.keep(blob(1024), {durationSeconds: 61.4, capturedAt: clock - 60_000});
   assert.equal(kept.durationSeconds, 61);
   assert.equal(kept.expiresAt, kept.createdAt + POLICY.ttlMs);
   assert.equal((await mine.list()).length, 1);
@@ -42,6 +42,7 @@ const blob = (size, type = 'audio/webm') => new File([new Uint8Array(size)], 'Re
   const opened = await mine.open(kept.id);
   assert.equal(opened.file.size, 1024);
   assert.equal(opened.file.type, 'audio/webm');
+  assert.equal(opened.draft.capturedAt, clock - 60_000);
 
   // Bounded: size and per-scope count are refused, not evicted.
   await assert.rejects(mine.keep(blob(POLICY.maxBytes + 1)), {code: 'too-large'});
@@ -49,6 +50,13 @@ const blob = (size, type = 'audio/webm') => new File([new Uint8Array(size)], 'Re
   await mine.keep(blob(10)); await mine.keep(blob(10));
   await assert.rejects(mine.keep(blob(10)), {code: 'limit'});
   assert.equal((await other.keep(blob(10))).size, 10);
+
+  const shared = memoryBackend();
+  const writers = Array.from({length: POLICY.maxPerScope + 1}, () =>
+    createDraftStore({backend: shared, scope: 'shared', estimate: null}));
+  const writes = await Promise.allSettled(writers.map(writer => writer.keep(blob(10))));
+  assert.equal(writes.filter(result => result.status === 'fulfilled').length, POLICY.maxPerScope);
+  assert.equal(writes.find(result => result.status === 'rejected').reason.code, 'limit');
 
   // Storage-pressure estimate refuses before writing.
   const tight = createDraftStore({backend: memoryBackend(), scope: 's', now: () => clock,
@@ -151,3 +159,29 @@ def test_other_account_gets_a_different_scope(accounts_client):  # noqa: F811
         login(accounts_client, name)
         scopes.add(re.search(r'data-capture-draft-scope="([^"]+)"', accounts_client.get("/home").text).group(1))
     assert len(scopes) == 2
+
+
+def test_stale_capture_cannot_upload_into_another_workspace(accounts_client, monkeypatch):  # noqa: F811
+    from localplaud.api import imports
+
+    create_user("sky", role="owner")
+    create_user("member")
+    login(accounts_client, "sky")
+    sheet = _sheet(accounts_client.get("/home").text)
+    stale_scope = re.search(r'data-capture-draft-scope="([^"]+)"', sheet).group(1)
+    accounts_client.cookies.clear()
+    login(accounts_client, "member")
+
+    def forbid_write(_file_id):
+        pytest.fail("the stale tab's recording reached storage")
+
+    monkeypatch.setattr(imports, "file_dir", forbid_write)
+    for scope in (None, stale_scope):
+        data = {"capture_source": "browser_recording"}
+        if scope is not None:
+            data["capture_scope"] = scope
+        response = accounts_client.post(
+            "/api/imports/local/audio", data=data, files={"file": ("test.webm", b"private audio")}
+        )
+        assert response.status_code == 409
+        assert "workspace changed" in response.json()["detail"]

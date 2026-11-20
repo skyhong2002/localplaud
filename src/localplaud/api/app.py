@@ -90,6 +90,7 @@ from .automations import router as automations_router
 from .backups import router as backups_router
 from .completion_feed import PATH as completion_path
 from .completion_feed import router as completion_router
+from .imports import capture_draft_scope
 from .imports import router as imports_router
 from .integrations import router as integrations_router
 from .media import audio_file_response
@@ -832,6 +833,7 @@ def _base_ctx(request: Request, active: str) -> dict:
         "web_login_configured": bool(get_settings().api.accounts_enabled or get_settings().api.login_password),
         "accounts_enabled": get_settings().api.accounts_enabled,
         "account_user": getattr(request.state, "account_user", None),
+        "capture_draft_scope": capture_draft_scope(request),
         "unread_notifications": unread_notifications,
         "sidebar": {
             "folders": organization["folders"],
@@ -1932,8 +1934,8 @@ def bulk_files(body: BulkFilesBody) -> dict:
     return {"action": body.action, "updated": len(file_ids), "queued": file_ids}
 
 
-@app.post("/api/files/generate-notes")
-def batch_generate_notes(body: BatchGenerateNotesBody) -> dict:
+@app.post("/api/files/generate-notes", response_model=None)
+def batch_generate_notes(body: BatchGenerateNotesBody) -> dict | JSONResponse:
     """Preview (``dry_run``) or durably queue note-only regeneration for a selection.
 
     Speech stages are never rerun and nothing is sent to Plaud. Queued recordings
@@ -1948,9 +1950,12 @@ def batch_generate_notes(body: BatchGenerateNotesBody) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not body.dry_run and not result["queued"] and not result["already_queued"]:
-        raise HTTPException(
+        return JSONResponse(
             status_code=409,
-            detail="No selected recording can generate notes right now.",
+            content={
+                "detail": "No selected recording can generate notes right now.",
+                "skipped": result["skipped"],
+            },
         )
     return result
 

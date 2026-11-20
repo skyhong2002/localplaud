@@ -109,6 +109,10 @@ def _seed():
                         attempts=1,
                         detail={"mind_map_only": True},
                     ),
+                    StageRun(
+                        stage=StageName.outline, status=StageStatus.failed,
+                        detail={"outline_only": True, "outline_retry_count": 100},
+                    ),
                 ],
             )
         )
@@ -256,6 +260,8 @@ def test_confirm_queues_note_only_regeneration_durably(monkeypatch, tmp_path):
                 assert runs[stage].detail["stale"] is True
                 assert runs[stage].detail["reason"] == "library batch generate notes"
             assert "mind_map_only" not in runs["mind_map"].detail
+            assert "outline_only" not in runs["outline"].detail
+            assert "outline_retry_count" not in runs["outline"].detail
             assert [t.text for t in row.transcripts] == ["hello"]
             # The daemon will admit it as note-only (derived) work — even without audio.
             assert _pending_scope(row, get_settings(), datetime.now(UTC)) == "derived"
@@ -297,6 +303,76 @@ def test_untranscribed_only_mode_refuses_to_strand_old_transcripts(monkeypatch, 
     data = c.post("/api/files/generate-notes", json={"file_ids": ["ready"], "dry_run": True}).json()
     assert data["eligible"] == []
     assert data["skipped"][0]["reason"] == "automatic_restricted"
+
+
+def test_paused_automatic_processing_does_not_strand_batch(monkeypatch, tmp_path):
+    from localplaud.db.session import session_scope
+    from localplaud.preferences import save_workspace_preferences
+
+    web = _client(monkeypatch, tmp_path)
+    _seed()
+    body = {"file_ids": ["ready"], "dry_run": True}
+    preview = web.post("/api/files/generate-notes", json=body)
+    assert preview.json()["eligible"] == ["ready"]
+
+    with session_scope() as session:
+        save_workspace_preferences(session, {"auto_process_new_recordings": False})
+
+    before = _snapshot()
+    paused = web.post("/api/files/generate-notes", json=body)
+    assert paused.json()["eligible"] == []
+    assert paused.json()["skipped"][0]["reason"] == "automatic_paused"
+    confirm = web.post("/api/files/generate-notes", json=body | {"dry_run": False})
+    assert confirm.status_code == 409
+    assert _snapshot() == before
+
+
+def test_batch_skips_silence_and_does_not_invalidate_live_evidence(monkeypatch, tmp_path):
+    from localplaud.db.models import AskThread, PlaudFile
+    from localplaud.db.session import session_scope
+
+    web = _client(monkeypatch, tmp_path)
+    _seed()
+    body = {"file_ids": ["ready", "fresh"]}
+    assert web.post("/api/files/generate-notes", json=body | {"dry_run": True}).json()["eligible"] == body["file_ids"]
+    with session_scope() as session:
+        silent = session.get(PlaudFile, "fresh").local_transcript
+        silent.text = ""
+        silent.segments = []
+        session.add(AskThread(id="active", file_id="ready", title="Test", request_token="active",
+                              request_lease_until=datetime.now(UTC) + timedelta(minutes=5)))
+
+    before = _snapshot()
+    confirmed = web.post("/api/files/generate-notes", json=body)
+    assert confirmed.status_code == 409
+    assert [row["reason"] for row in confirmed.json()["skipped"]] == ["evidence_in_use", "no_speech"]
+    assert _snapshot() == before
+
+
+def test_batch_worker_uses_existing_transcript_without_polishing(monkeypatch, tmp_path):
+    from localplaud.config import get_settings
+    from localplaud.worker import pipeline
+
+    process_derived = pipeline.process_derived_artifacts
+    web = _client(monkeypatch, tmp_path)
+    _seed()
+    confirmed = web.post("/api/files/generate-notes", json={"file_ids": ["ready"]})
+    assert confirmed.json()["queued"] == ["ready"]
+    calls = []
+
+    def record(_file_id, _settings, transcript, *_args, **_kwargs):
+        calls.append(transcript.text)
+        return []
+
+    def forbid(*_args, **_kwargs):
+        raise AssertionError("batch notes attempted to change the transcript")
+
+    monkeypatch.setattr(get_settings().pipeline, "polish", True)
+    monkeypatch.setattr(get_settings().pipeline, "concurrency", 2)
+    monkeypatch.setattr(pipeline, "_run_correction_stage", forbid)
+    monkeypatch.setattr(pipeline, "_run_derived_stages", record)
+    process_derived("ready")
+    assert calls == ["hello"]
 
 
 def test_library_offers_batch_generate_with_confirmation(monkeypatch, tmp_path):

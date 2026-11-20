@@ -278,14 +278,6 @@
       <div class="dialog-foot"><button class="btn-ghost btn" type="button" data-folder-create>{{ icon('folder-plus', 'sm') }}{{ t('New folder') }}</button><span style="flex:1"></span><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn" type="submit">{{ t('Move') }}</button></div>
     </form>
   </dialog>
-  {#- Kept phone-capture drafts are listed only for the signed-in account's own
-      workspace; with no reliable scope (signed out, pending) the option is absent. -#}
-  {%- set capture_workspace = request.state.workspace_id|default(none) if request is defined else none -%}
-  {%- if accounts_enabled|default(false) -%}
-    {%- set capture_draft_scope = ('account:' ~ account_user.id ~ ':workspace:' ~ capture_workspace) if (account_user|default(none)) and account_user.status == 'active' and capture_workspace else '' -%}
-  {%- else -%}
-    {%- set capture_draft_scope = 'single:workspace:1' -%}
-  {%- endif %}
   <dialog class="sheet" id="add-sheet" aria-labelledby="add-sheet-title"{% if capture_draft_scope %} data-capture-draft-scope="{{ capture_draft_scope }}"{% endif %}>
     <div class="sheet-grabber" aria-hidden="true"></div>
     <div class="dialog-head"><h2 class="dialog-title" id="add-sheet-title">{{ t('Add audio') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>

@@ -54,10 +54,22 @@
     const rows = new Map();
     return {
       async all() { return [...rows.values()]; },
-      async put(record) { rows.set(record.id, record); },
+      async add(record) {
+        requireSpace(rows.values(), record);
+        rows.set(record.id, record);
+      },
       async delete(id) { rows.delete(id); },
       rows,
     };
+  }
+
+  function requireSpace(rows, record) {
+    let count = 0;
+    for (const row of rows) {
+      if (row?.scope === record.scope && !staleReason(row, record.createdAt) && ++count >= POLICY.maxPerScope) {
+        throw new DraftError('limit');
+      }
+    }
   }
 
   function idbBackend(factory) {
@@ -99,7 +111,7 @@
         tx.oncomplete = () => resolve(result);
         tx.onerror = fail; tx.onabort = fail;
         try {
-          const request = work(tx.objectStore(STORE));
+          const request = work(tx.objectStore(STORE), reject);
           if (request) request.onsuccess = () => { result = request.result; };
         } catch (error) {
           reject(new DraftError(error?.name === 'QuotaExceededError' ? 'quota' : 'unavailable', error?.message));
@@ -108,7 +120,13 @@
     };
     return {
       all: () => run('readonly', store => store.getAll()).then(rows => rows || []),
-      put: record => run('readwrite', store => store.put(record)),
+      add: record => run('readwrite', (store, reject) => {
+        const request = store.getAll();
+        request.onsuccess = () => {
+          try { requireSpace(request.result, record); store.add(record); }
+          catch (error) { reject(error); }
+        };
+      }),
       delete: id => run('readwrite', store => store.delete(id)),
     };
   }
@@ -138,13 +156,14 @@
     const describe = row => ({
       id: row.id, name: row.name, mimeType: row.mimeType, size: row.blob.size,
       durationSeconds: row.durationSeconds, createdAt: row.createdAt, expiresAt: row.createdAt + POLICY.ttlMs,
+      capturedAt: finite(row.capturedAt) && row.capturedAt > 0 ? row.capturedAt : row.createdAt,
     });
 
     return {
       scope,
       policy: POLICY,
       async list() { return (await purge()).map(describe); },
-      async keep(file, {durationSeconds = 0} = {}) {
+      async keep(file, {durationSeconds = 0, capturedAt} = {}) {
         if (!isBlob(file) || !file.size) throw new DraftError('invalid');
         if (file.size > POLICY.maxBytes) throw new DraftError('too-large');
         const current = await purge();
@@ -157,11 +176,11 @@
         } catch (error) { if (error instanceof DraftError) throw error; /* estimate unsupported */ }
         const createdAt = now();
         const record = {
-          id: newId(), version: POLICY.version, scope, createdAt,
+          id: newId(), version: POLICY.version, scope, createdAt, capturedAt,
           durationSeconds: finite(durationSeconds) ? Math.max(0, Math.round(durationSeconds)) : 0,
           mimeType: file.type || 'application/octet-stream', name: String(file.name || 'Recording'), blob: file,
         };
-        await backend.put(record);
+        await backend.add(record);
         return describe(record);
       },
       /** The draft as a File, only when it belongs to this scope and is still valid. */

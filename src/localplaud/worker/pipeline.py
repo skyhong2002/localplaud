@@ -1232,7 +1232,9 @@ DERIVED_REGENERATION_STAGES = (
 )
 
 
-def queue_derived_regeneration(session, row: PlaudFile, *, reason: str) -> None:
+def queue_derived_regeneration(
+    session, row: PlaudFile, *, reason: str, preserve_transcript: bool = False
+) -> None:
     """Durably queue notes/mind map/outline/index regeneration for one recording.
 
     Speech stages, transcripts, and user edits are untouched. Existing derived
@@ -1250,6 +1252,7 @@ def queue_derived_regeneration(session, row: PlaudFile, *, reason: str) -> None:
         "stale": True,
         "stale_generation": stale_generation,
         "derived_only": True,
+        "preserve_transcript": preserve_transcript,
         "reason": reason,
     }
     present_stages = {run.stage for run in row.stage_runs}
@@ -1261,6 +1264,9 @@ def queue_derived_regeneration(session, row: PlaudFile, *, reason: str) -> None:
             detail = dict(run.detail or {}) | marker
             # A full regeneration supersedes any narrower pending rebuild.
             detail.pop("mind_map_only", None)
+            for key in tuple(detail):
+                if key.startswith("outline_"):
+                    detail.pop(key)
             run.detail = detail
     # A transcript can be durable before the first summarize pass creates
     # downstream StageRun rows. Derived-only queueing must create those missing
@@ -2336,6 +2342,12 @@ def _process_derived_artifacts_claimed(
     settings = settings or get_settings()
     with session_scope() as session:
         row = _assert_processing_claim_in_session(session, file_id)
+        preserve_transcript = any(
+            run.stage in DERIVED_REGENERATION_STAGES
+            and run.status != StageStatus.completed
+            and (run.detail or {}).get("preserve_transcript")
+            for run in row.stage_runs
+        )
         requested_template_key = row.note_template_key or settings.pipeline.summary_template
         snapshot = resolve_recording_profile(
             session,
@@ -2352,7 +2364,8 @@ def _process_derived_artifacts_claimed(
     profile_token = _PROFILE_SNAPSHOT.set(snapshot)
     try:
         correction_errors = (
-            _run_correction_stage(file_id, settings, snapshot) if settings.pipeline.polish else []
+            _run_correction_stage(file_id, settings, snapshot)
+            if settings.pipeline.polish and not preserve_transcript else []
         )
         if correction_errors:
             _finish_processing_cycle(file_id, settings, correction_errors, derived_only=True)
@@ -2367,7 +2380,10 @@ def _process_derived_artifacts_claimed(
             force=False,
             explicit_profile_id=profile_id,
         )
-        _finish_processing_cycle(file_id, settings, partial_errors, derived_only=True)
+        _finish_processing_cycle(
+            file_id, settings, partial_errors, derived_only=True,
+            preserve_transcript=preserve_transcript,
+        )
         log.info(
             "Derived pipeline %s for %s",
             "partial" if partial_errors else "complete",
@@ -3503,7 +3519,8 @@ def _run_derived_stages(
 
 
 def _finish_processing_cycle(
-    file_id: str, settings: Settings, partial_errors: list[str], *, derived_only: bool = False
+    file_id: str, settings: Settings, partial_errors: list[str], *,
+    derived_only: bool = False, preserve_transcript: bool = False,
 ) -> None:
     with session_scope() as session:
         row = _assert_processing_claim_in_session(session, file_id)
@@ -3522,6 +3539,8 @@ def _finish_processing_cycle(
                         StageStatus.pending,
                     }:
                         run.detail = dict(run.detail or {}) | {"derived_only": True}
+                        if preserve_transcript and run.stage in DERIVED_REGENERATION_STAGES:
+                            run.detail = run.detail | {"preserve_transcript": True}
             row.status = FileStatus.partial
             row.error = "; ".join(partial_errors)[:2000]
             _schedule_pipeline_retry(row, settings)

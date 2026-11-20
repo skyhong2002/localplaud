@@ -572,7 +572,7 @@
     const draftApi = window.localplaudCaptureDrafts, draftScope = sheet.dataset.captureDraftScope;
     let drafts = null;
     try { drafts = draftApi && draftScope ? draftApi.createDraftStore({backend: draftApi.idbBackend(), scope: draftScope}) : null; } catch (_error) { drafts = null; }
-    let keptDraftId = null, recordedSeconds = 0;
+    let keptDraftId = null, recordedSeconds = 0, capturedAt = null;
     const clock = seconds => {
       const total = Math.max(0, Math.round(seconds || 0)), h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
       return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
@@ -595,11 +595,12 @@
     };
     const busy = value => {
       const locked = value || captureActive;
-      sheet.dataset.busy = String(locked);
+      const dismissLocked = value || (captureActive && !keptDraftId);
+      sheet.dataset.busy = String(dismissLocked);
       file.disabled = locked; sync.disabled = locked; record.disabled = locked;
       save.disabled = value; discard.disabled = value; keep.disabled = value;
       draftsList?.querySelectorAll('button').forEach(button => { button.disabled = locked; });
-      sheet.querySelector('[data-dialog-close]').disabled = locked;
+      sheet.querySelector('[data-dialog-close]').disabled = dismissLocked;
       sheet.querySelectorAll('.add-option').forEach(item => item.classList.toggle('is-disabled', locked));
     };
     sheet.addEventListener('lp:dialog-open', () => { if (sheet.dataset.busy !== 'true') { box.hidden = true; label.textContent = ''; lp.updatePlaudCheckLink(checkLink); } refreshDrafts(); });
@@ -610,10 +611,11 @@
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       preview.removeAttribute('src'); preview.load(); previewUrl = null;
       recordingFile = null; captureActive = false; capture.hidden = true;
-      keptDraftId = null; keep.hidden = true; keepNote.hidden = true;
+      keptDraftId = null; capturedAt = null; keep.hidden = true; keepNote.hidden = true;
       window.removeEventListener('beforeunload', warnUnsaved);
       busy(false);
     };
+    sheet.addEventListener('lp:dialog-close', () => { if (keptDraftId) resetCapture(); });
     const showReview = (stateText, seconds) => {
       previewUrl = URL.createObjectURL(recordingFile);
       preview.src = previewUrl; preview.hidden = false; pause.hidden = true; stop.hidden = true;
@@ -628,7 +630,7 @@
       draftsList.replaceChildren(...rows.map(row => {
         const item = document.createElement('li'); item.className = 'add-draft';
         const text = document.createElement('span'); text.className = 'add-draft-text';
-        const title = document.createElement('strong'); title.textContent = `${draftDate(row.createdAt)} · ${clock(row.durationSeconds)}`;
+        const title = document.createElement('strong'); title.textContent = `${draftDate(row.capturedAt)} · ${clock(row.durationSeconds)}`;
         const meta = document.createElement('small'); meta.textContent = lp.t('Expires on {date}').replace('{date}', draftDate(row.expiresAt));
         text.append(title, meta);
         const review = document.createElement('button'); review.type = 'button'; review.className = 'btn sec';
@@ -656,18 +658,21 @@
       }
       if (!openId) return;
       let opened = null;
+      busy(true);
       try { opened = await drafts.open(openId); } catch (_error) { setProgress(0, draftErrorMessage(_error)); return; }
+      finally { busy(false); }
       if (!opened) { refreshDrafts(); setProgress(0, lp.t('This draft expired or is no longer on this device.')); return; }
-      box.hidden = true; captureActive = true; busy(false); capture.hidden = false;
-      recordingFile = opened.file; keptDraftId = opened.draft.id;
+      box.hidden = true; captureActive = true; capture.hidden = false;
+      recordingFile = opened.file; keptDraftId = opened.draft.id; capturedAt = opened.draft.capturedAt;
+      busy(false);
       showReview(lp.t('Kept draft · review before saving'), opened.draft.durationSeconds);
       save.focus();
     });
     keep.addEventListener('click', async () => {
       if (!drafts || !recordingFile || keptDraftId || keep.disabled) return;
-      keep.disabled = true;
+      busy(true);
       try {
-        const kept = await drafts.keep(recordingFile, {durationSeconds: recordedSeconds});
+        const kept = await drafts.keep(recordingFile, {durationSeconds: recordedSeconds, capturedAt});
         keptDraftId = kept.id; keep.hidden = true; keepNote.hidden = true;
         window.removeEventListener('beforeunload', warnUnsaved);
         captureState.textContent = lp.t('Draft kept on this device · not uploaded');
@@ -675,7 +680,7 @@
         refreshDrafts();
       } catch (error) {
         setProgress(0, draftErrorMessage(error));
-      } finally { keep.disabled = false; }
+      } finally { busy(false); }
     });
     // Signing out leaves kept drafts in this browser; offer to remove them so a
     // shared device does not keep this account's audio.
@@ -733,12 +738,13 @@
           if (!chunks.length) { resetCapture(); setProgress(0, lp.t('No audio was recorded. Try again.')); record.focus(); return; }
           const type = recorder.mimeType || mimeType;
           const extension = formats.get(type.split(';')[0]) || formats.get(mimeType);
-          const stamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+          const stamp = new Date(capturedAt).toISOString().slice(0, 19).replace(/:/g, '-');
           recordingFile = new File(chunks, `${lp.t('Recording')} ${stamp}.${extension}`, {type});
           recordedSeconds = elapsedSeconds();
           showReview(lp.t('Review before saving'), recordedSeconds); save.focus();
         });
         recorder.start(1000);
+        capturedAt = Date.now();
         pause.onclick = () => {
           if (recorder.state === 'recording') {
             recorder.pause();
@@ -778,7 +784,11 @@
       const fromMicrophone = chosen === recordingFile, savedDraftId = fromMicrophone ? keptDraftId : null;
       busy(true); setProgress(0, `${lp.t('Importing')} ${chosen.name}…`);
       const body = new FormData(); body.append('file', chosen);
-      if (fromMicrophone) body.append('capture_source', 'browser_recording');
+      if (fromMicrophone) {
+        body.append('capture_source', 'browser_recording');
+        body.append('capture_scope', draftScope || '');
+        if (capturedAt) body.append('captured_at_ms', String(capturedAt));
+      }
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/imports/local/audio');
       if (fromMicrophone) xhr.timeout = 300000;

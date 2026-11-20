@@ -581,8 +581,12 @@ def test_browser_capture_appears_in_recording_source_filter(monkeypatch, tmp_pat
         fixture.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
         fixture.writeframes(b"\x00\x00" * 800)
     files = {"file": ("capture.wav", audio.getvalue(), "audio/wav")}
+    captured_at = 1_700_000_000_000
     response = client.post(
-        "/api/imports/local/audio", data={"capture_source": "browser_recording"}, files=files
+        "/api/imports/local/audio",
+        data={"capture_source": "browser_recording", "capture_scope": "single:workspace:1",
+              "captured_at_ms": str(captured_at)},
+        files=files,
     )
     assert response.status_code == 201
     file_id = response.json()["id"]
@@ -590,6 +594,8 @@ def test_browser_capture_appears_in_recording_source_filter(monkeypatch, tmp_pat
         row = session.get(PlaudFile, file_id)
         assert row.origin == "local" and row.scene == 101
         assert row.raw["capture_source"] == "browser_recording"
+        assert row.start_time_ms == captured_at
+        assert row.downloaded_at.timestamp() * 1000 > captured_at
     assert [item["id"] for item in client.get("/api/files?scene=101").json()["files"]] == [file_id]
     assert client.get("/api/files?scene=102").json()["files"] == []
     assert client.post(

@@ -990,7 +990,11 @@
   const generateSkipReasons = {
     trash: 'In Trash. Restore it before generating notes.',
     no_local_transcript: 'No local transcript yet. Process the recording first.',
+    no_speech: 'The transcript has no recognizable speech.',
     processing: 'Already processing. Try again when it finishes.',
+    evidence_in_use: 'Recording evidence is in use. Try again when it finishes.',
+    notes_disabled: 'Note generation is disabled in the automatic processing settings.',
+    automatic_paused: 'Automatic processing is off. Open the recording to generate notes.',
     automatic_restricted: 'Automatic processing is limited to untranscribed recordings. Open the recording to generate notes.',
   };
   function renderGenerateSkipped(skipped) {
@@ -1006,7 +1010,11 @@
   async function generateFetch(fileIds, dryRun) {
     const response = await fetch('/api/files/generate-notes', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({file_ids:fileIds, dry_run:dryRun}), signal:cleanupController.signal});
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(response.status === 404 ? tr('A selected recording is no longer available') : organizationDetail(data, 'Could not queue note generation'));
+    if (!response.ok) {
+      const error = new Error(response.status === 404 ? tr('A selected recording is no longer available') : organizationDetail(data, 'Could not queue note generation'));
+      error.skipped = data.skipped;
+      throw error;
+    }
     return data;
   }
   async function openGenerateNotes(opener) {
@@ -1063,6 +1071,7 @@
       generateDialog.dataset.busy = 'false';
       generateSummary.textContent = '';
       generateStatus.textContent = error.message;
+      if (error.skipped) renderGenerateSkipped(error.skipped);
       generateConfirm.disabled = false;
     }
   }, {signal:cleanupController.signal});
