@@ -68,6 +68,7 @@
       return {open,close,setDirty:value=>{backdrop.dataset.dirty=String(Boolean(value));},setBusy:value=>{backdrop.dataset.busy=String(Boolean(value));if(value)backdrop.setAttribute('aria-busy','true');else backdrop.removeAttribute('aria-busy');}};
     };
   </script>
+  <script src="{{ static_url('js/capture-drafts.js') }}" defer></script>
   <script src="{{ static_url('js/app.js') }}" defer></script>
   {% block page_head %}{% endblock %}
 </head>
@@ -243,6 +244,7 @@
   <div class="menu row-menu" id="row-menu" role="menu" aria-label="{{ t('Recording actions') }}" hidden>
     <a class="menu-item" role="menuitem" href="#" data-row-action="open">{{ icon('external-link') }}{{ t('Open recording') }}</a>
     <a class="menu-item" role="menuitem" href="#" data-row-action="notes">{{ icon('note') }}{{ t('Notes') }}</a>
+    <a class="menu-item" role="menuitem" href="#" data-row-action="generate" hidden>{{ icon('sparkles') }}{{ t('Generate notes') }}</a>
     <div class="menu-sep"></div>
     <button class="menu-item" role="menuitem" type="button" data-row-action="rename">{{ icon('pencil') }}{{ t('Rename') }}</button>
     <button class="menu-item" role="menuitem" type="button" data-row-action="move">{{ icon('folder-input') }}{{ t('Move to folder') }}</button>
@@ -274,10 +276,39 @@
       <div class="dialog-foot"><button class="btn-ghost btn" type="button" data-folder-create>{{ icon('folder-plus', 'sm') }}{{ t('New folder') }}</button><span style="flex:1"></span><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn" type="submit">{{ t('Move') }}</button></div>
     </form>
   </dialog>
-  <dialog class="sheet" id="add-sheet" aria-labelledby="add-sheet-title">
+  {#- Kept phone-capture drafts are listed only for the signed-in account's own
+      workspace; with no reliable scope (signed out, pending) the option is absent. -#}
+  {%- set capture_workspace = request.state.workspace_id|default(none) if request is defined else none -%}
+  {%- if accounts_enabled|default(false) -%}
+    {%- set capture_draft_scope = ('account:' ~ account_user.id ~ ':workspace:' ~ capture_workspace) if (account_user|default(none)) and account_user.status == 'active' and capture_workspace else '' -%}
+  {%- else -%}
+    {%- set capture_draft_scope = 'single:workspace:1' -%}
+  {%- endif %}
+  <dialog class="sheet" id="add-sheet" aria-labelledby="add-sheet-title"{% if capture_draft_scope %} data-capture-draft-scope="{{ capture_draft_scope }}"{% endif %}>
     <div class="sheet-grabber" aria-hidden="true"></div>
     <div class="dialog-head"><h2 class="dialog-title" id="add-sheet-title">{{ t('Add audio') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
     <div class="dialog-body add-sheet-body">
+      <button class="add-option" type="button" data-add-record>
+        <span class="add-option-icon">{{ icon('mic') }}</span>
+        <span class="add-option-text"><strong>{{ t('Record audio') }}</strong><small>{{ t('Record on this device and review before uploading') }}</small></span>
+      </button>
+      <div class="add-capture" data-add-capture hidden>
+        <div class="add-capture-heading"><strong data-capture-state role="status"></strong><time data-capture-duration>0:00</time></div>
+        <audio controls preload="metadata" data-capture-preview hidden aria-label="{{ t('Recording preview') }}"></audio>
+        <div class="add-capture-actions">
+          <button class="btn sec" type="button" data-capture-pause hidden>{{ t('Pause recording') }}</button>
+          <button class="btn sec" type="button" data-capture-stop>{{ t('Stop recording') }}</button>
+          <button class="btn sec" type="button" data-capture-discard hidden>{{ t('Discard recording') }}</button>
+          <button class="btn sec" type="button" data-capture-keep hidden>{{ t('Keep draft on this device') }}</button>
+          <button class="btn" type="button" data-capture-save hidden>{{ t('Save recording') }}</button>
+        </div>
+        <p class="t-meta add-capture-note" data-capture-keep-note hidden>{{ t('Only stopped recordings can be kept. The draft expires after 7 days and is cleared the next time localplaud checks browser storage. It is not uploaded until you tap Save and is not encrypted by localplaud. Recordings interrupted before you tap Stop cannot be recovered.') }}</p>
+      </div>
+      <section class="add-drafts" data-capture-drafts aria-labelledby="add-drafts-title" hidden>
+        <h3 class="add-drafts-title" id="add-drafts-title">{{ t('Drafts kept on this device') }}</h3>
+        <p class="t-meta">{{ t('Not uploaded yet. Listed only in this account and workspace. Anyone with access to this browser profile may be able to read the stored audio.') }}</p>
+        <ul class="add-drafts-list" data-capture-drafts-list></ul>
+      </section>
       <label class="add-option" data-add-upload>
         <span class="add-option-icon">{{ icon('upload') }}</span>
         <span class="add-option-text"><strong>{{ t('Import audio') }}</strong><small>{{ t('MP3, MP4, M4A, WAV, OGG, Opus, WebM, FLAC or AAC · up to 2 GB') }}</small></span>
@@ -285,7 +316,7 @@
       </label>
       <button class="add-option" type="button" data-add-sync>
         <span class="add-option-icon">{{ icon('refresh') }}</span>
-        <span class="add-option-text"><strong>{{ t('Check Plaud now') }}</strong><small>{{ t('New uploads download and process automatically') }}</small></span>
+        <span class="add-option-text"><strong>{{ t('Check Plaud now') }}</strong><small>{{ t('Check for recordings already uploaded to Plaud Cloud') }}</small></span>
       </button>
       <div class="add-progress" data-add-progress hidden>
         <div class="import-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="add-progress-label"><span style="width:0%"></span></div>

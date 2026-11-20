@@ -1,0 +1,71 @@
+plugins {
+    id 'com.android.application' version '8.10.1'
+}
+
+import groovy.json.JsonOutput
+
+def appPackage = 'org.localplaud.android'
+def configuredOrigin = providers.gradleProperty('localplaudOrigin').orNull
+if (configuredOrigin == null) {
+    throw new GradleException('Set -PlocalplaudOrigin to the workspace origin, e.g. https://plaud.example.com')
+}
+
+URI origin
+try {
+    origin = URI.create(configuredOrigin)
+} catch (IllegalArgumentException error) {
+    throw new GradleException('localplaudOrigin is not a valid origin', error)
+}
+
+def scheme = origin.scheme?.toLowerCase(Locale.ROOT)
+def isLocalDebugOrigin = scheme == 'http' && origin.host == '127.0.0.1' && origin.port > 0
+if ((!isLocalDebugOrigin && scheme != 'https') || origin.host == null ||
+        origin.rawUserInfo != null || origin.rawQuery != null || origin.rawFragment != null ||
+        !(origin.rawPath in ['', '/']) || origin.port == 0 || origin.port > 65535) {
+    throw new GradleException('Use an HTTPS origin with no credentials, path, query or fragment; debug also accepts http://127.0.0.1:<port>')
+}
+
+def portSuffix = origin.port < 0 || (scheme == 'https' && origin.port == 443) ? '' : ":${origin.port}"
+def workspaceOrigin = "${scheme}://${origin.host.toLowerCase(Locale.ROOT)}${portSuffix}"
+def assetStatements = JsonOutput.toJson([[
+        relation: ['delegate_permission/common.handle_all_urls'],
+        target: [namespace: 'web', site: workspaceOrigin.toString()]
+]])
+
+android {
+    namespace appPackage
+    compileSdk 36
+
+    defaultConfig {
+        applicationId appPackage
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+        buildConfigField 'String', 'WORKSPACE_ORIGIN', JsonOutput.toJson(workspaceOrigin.toString())
+        resValue 'string', 'asset_statements', assetStatements.replace('"', '\\"')
+        manifestPlaceholders = [launchUrl: "${workspaceOrigin}/home"]
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+androidComponents {
+    beforeVariants(selector().withBuildType('release')) { variant ->
+        if (isLocalDebugOrigin) {
+            variant.enable = false
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.4'
+    testImplementation 'junit:junit:4.13.2'
+}

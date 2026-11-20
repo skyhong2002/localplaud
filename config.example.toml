@@ -245,6 +245,7 @@ port = 8080
 # owner_username = "sky"
 # owner_email = "owner@example.com"
 # public_url = "https://plaud.example.com"
+# android_signing_fingerprints = []  # Public certificate digests; see docs/android.md.
 # google_redirect_uri = "https://plaud.example.com/auth/google/callback"
 # Keep credentials in .env, never in this file:
 # LOCALPLAUD_API__SESSION_SECRET

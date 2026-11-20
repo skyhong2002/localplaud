@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name" translatable="false">localplaud</string>
+    <string name="files">All files</string>
+    <string name="search">Search</string>
+    <string name="explore">Explore</string>
+    <string name="sync_plaud">Sync Plaud</string>
+    <string name="plaud_app_unavailable">Install or enable the official Plaud app to sync your recorder.</string>
+</resources>

@@ -4,7 +4,8 @@
     One recording row for library tables, Home, Search results, folder previews.
     `f` is a dict from app._file_summaries(). The whole row opens the recording;
     the "…" button opens the shared row menu (#row-menu in base.html) whose
-    actions are wired in app.js (Open, Notes, Rename, Move to folder, Export).
+    actions are wired in app.js (Open, Notes, Generate notes, Rename, Move to
+    folder, Export). Generate notes only opens the recording's confirmation form.
 
   Import WITH CONTEXT so t() resolves:
     {% from "_library.html" import file_row with context %}
@@ -23,7 +24,7 @@
   <span class="row-date">{{ f.start_time_ms | dt }}</span>
   <span class="row-actions">
     {%- if f.has_transcript and not f.is_trash %}<a class="icon-btn reveal" href="/file/{{ f.id }}?tab=notes{{ '&return_to=' ~ return_to_param if return_to_param else '' }}" aria-label="{{ t('Notes') }} · {{ f.filename }}" data-tooltip="{{ t('Notes') }}">{{ icon('wand', 'sm') }}</a>{% endif -%}
-    <button class="icon-btn row-more" type="button" data-menu="row-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="row-menu" aria-label="{{ t('More actions') }} · {{ f.filename }}" data-file-id="{{ f.id }}" data-title="{{ f.filename }}" data-href="{{ href }}" data-folder-id="{{ f.folder.id if f.folder else '' }}" data-exportable="{{ '1' if (f.has_transcript or f.has_summary) else '0' }}" data-trash="{{ '1' if f.is_trash else '0' }}">{{ icon('more') }}</button>
+    <button class="icon-btn row-more" type="button" data-menu="row-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="row-menu" aria-label="{{ t('More actions') }} · {{ f.filename }}" data-file-id="{{ f.id }}" data-title="{{ f.filename }}" data-href="{{ href }}" data-folder-id="{{ f.folder.id if f.folder else '' }}" data-exportable="{{ '1' if (f.has_transcript or f.has_summary) else '0' }}" data-trash="{{ '1' if f.is_trash else '0' }}" data-can-generate="{{ '1' if (f.has_local_transcript and not f.is_trash and f.status != 'processing') else '0' }}">{{ icon('more') }}</button>
   </span>
 </li>
 {%- endmacro %}

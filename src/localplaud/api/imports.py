@@ -9,10 +9,10 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from ..db.models import FileStatus, PlaudFile
 from ..db.session import session_scope
@@ -95,7 +95,10 @@ def import_plaud_audio_status(file_id: str) -> dict:
 
 
 @_upload_router.post("/local/audio", status_code=201)
-def import_local_audio(file: Annotated[UploadFile, File()]) -> dict:
+def import_local_audio(
+    file: Annotated[UploadFile, File()],
+    capture_source: Annotated[Literal["browser_recording", "file_import"], Form()] = "file_import",
+) -> dict:
     original_name = Path(file.filename or "audio").name
     extension = Path(original_name).suffix.lower().lstrip(".")
     if extension not in _ALLOWED_EXTENSIONS:
@@ -132,8 +135,10 @@ def import_local_audio(file: Annotated[UploadFile, File()]) -> dict:
                     audio_path=str(destination),
                     downloaded_at=now,
                     origin="local",
+                    scene=101 if capture_source == "browser_recording" else 102,
                     raw={
                         "origin": "local",
+                        "capture_source": capture_source,
                         "original_filename": original_name,
                         "media_probe": probe.status,
                     },

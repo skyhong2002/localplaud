@@ -229,6 +229,21 @@
   <div class="file-table" id="library-table">
     {% if selectable %}
     <div class="bulkbar batch-bar" id="bulkbar">
+      {# Phone (<768px) selection card: count + Done, then icon-over-label touch actions.
+         Hidden at desktop widths, where the controls below stay unchanged. #}
+      <div class="batch-phone-head">
+        <span class="batch-phone-title" id="batch-phone-title" aria-live="polite">{{ t('Selected') }} (<span data-selected-count>0</span>)</span>
+        <button class="batch-done" type="button" id="bulk-done">{{ t('Done') }}</button>
+      </div>
+      <div class="batch-actions" role="toolbar" aria-label="{{ t('Selected recordings actions') }}">
+        <button class="batch-action" type="button" data-batch-action="move" aria-disabled="true">{{ icon('folder-input') }}<span>{{ t('Move') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        <button class="batch-action" type="button" data-batch-action="tag" aria-disabled="true" aria-haspopup="dialog">{{ icon('tag') }}<span>{{ t('Tag') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        <button class="batch-action" type="button" data-batch-action="rename" aria-disabled="true" aria-haspopup="dialog">{{ icon('pencil') }}<span>{{ t('Rename') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        <button class="batch-action" type="button" data-batch-action="export" aria-disabled="true" aria-haspopup="dialog">{{ icon('download') }}<span>{{ t('Export') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        <button class="batch-action" type="button" data-batch-action="resume" aria-disabled="true">{{ icon('rotate-cw') }}<span>{{ t('Resume') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        {% if lib.view != 'trash' %}<button class="batch-action" type="button" data-batch-action="generate" aria-disabled="true" aria-haspopup="dialog" aria-controls="bulk-generate-dialog">{{ icon('sparkles') }}<span>{{ t('Generate notes') }}</span><span class="visually-hidden" data-batch-reason></span></button>{% endif %}
+        <button class="batch-action danger" type="button" data-batch-action="delete" aria-disabled="true" aria-expanded="false" aria-controls="bulk-delete-confirm">{{ icon('trash') }}<span>{{ t('Delete local processing') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+      </div>
       <span class="batch-count"><input class="checkbox" id="select-all-batch" type="checkbox" aria-label="{{ t('Select all visible recordings') }}" checked><span>{{ t('Selected') }} (<span id="selected-count">0</span>)</span></span>
       <select class="select" id="bulk-action" aria-label="{{ t('Organization action') }}">
         <option value="folder">{{ t('Move to folder') }}</option>
@@ -238,6 +253,7 @@
       </select>
       <select class="select" id="bulk-target" aria-label="{{ t('Folder or tag') }}"></select>
       <button class="btn" type="button" id="bulk-apply">{{ t('Apply') }}</button>
+      {% if lib.view != 'trash' %}<button class="btn sec bulk-generate" type="button" id="bulk-generate-open" data-batch-action="generate" aria-disabled="true" aria-haspopup="dialog" aria-controls="bulk-generate-dialog">{{ icon('sparkles', 'sm') }}{{ t('Generate notes') }}<span class="visually-hidden" data-batch-reason></span></button>{% endif %}
       <button class="btn bulk-export" type="button" id="bulk-export-open">{{ icon('download', 'sm') }}{{ t('Export selected') }}</button>
       <button class="btn danger bulk-delete-processing" type="button" id="bulk-delete-processing" aria-expanded="false" aria-controls="bulk-delete-confirm">{{ icon('trash', 'sm') }}{{ t('Delete local processing') }}</button>
       <button class="text-btn batch-cancel" type="button" id="bulk-clear">{{ t('Cancel') }}</button>
@@ -360,6 +376,32 @@
 </div>
 {% endif %}
 {% if files and lib.view != 'trash' %}
+<dialog class="dialog sheet-on-phone" id="bulk-tag-dialog" aria-labelledby="bulk-tag-title">
+  <form id="bulk-tag-form">
+    <div class="sheet-grabber" aria-hidden="true"></div>
+    <div class="dialog-head"><h2 class="dialog-title" id="bulk-tag-title">{{ t('Tag recordings') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+    <div class="dialog-body bulk-tag-body">
+      <fieldset class="bulk-tag-mode"><legend class="visually-hidden">{{ t('Tag action') }}</legend>
+        <label><input type="radio" name="mode" value="add" checked>{{ icon('plus', 'sm') }}{{ t('Add tag') }}</label>
+        <label><input type="radio" name="mode" value="remove">{{ icon('minus', 'sm') }}{{ t('Remove tag') }}</label>
+      </fieldset>
+      <fieldset class="bulk-tag-fieldset"><legend class="visually-hidden">{{ t('Tags') }}</legend><ul class="sheet-list" id="bulk-tag-list"></ul></fieldset>
+      <p class="t-meta" id="bulk-tag-status" role="alert"></p>
+    </div>
+    <div class="dialog-foot"><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn" type="submit" id="bulk-tag-submit">{{ t('Apply') }}</button></div>
+  </form>
+</dialog>
+<dialog class="dialog sheet-on-phone" id="bulk-generate-dialog" aria-labelledby="bulk-generate-title" aria-describedby="bulk-generate-description">
+  <div class="sheet-grabber" aria-hidden="true"></div>
+  <div class="dialog-head"><h2 class="dialog-title" id="bulk-generate-title">{{ t('Generate notes') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+  <div class="dialog-body bulk-generate-body">
+    <p id="bulk-generate-description">{{ t('Regenerates notes, mind map, and search index from each local transcript with its automatic template and AI profile. Speech recognition is not rerun, and audio, transcripts, and edits stay unchanged.') }}</p>
+    <p class="bulk-generate-summary" id="bulk-generate-summary" role="status" aria-live="polite"></p>
+    <ul class="bulk-generate-skipped" id="bulk-generate-skipped" role="list" hidden></ul>
+    <p class="t-meta" id="bulk-generate-status" role="alert"></p>
+  </div>
+  <div class="dialog-foot"><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn" type="button" id="bulk-generate-confirm" disabled>{{ icon('sparkles', 'sm') }}<span id="bulk-generate-confirm-label">{{ t('Generate notes') }}</span></button></div>
+</dialog>
 <div class="import-backdrop" id="bulk-export-backdrop" hidden>
   <section class="import-modal" style="min-height:0;width:min(600px,100%)" role="dialog" aria-modal="true" aria-labelledby="bulk-export-title" aria-describedby="bulk-export-description">
     <div class="import-head"><span id="bulk-export-title">{{ t('Export selected recordings') }}</span><button class="import-close" id="bulk-export-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
@@ -488,6 +530,13 @@
   const exportDownload = document.getElementById('bulk-export-download');
   const exportTranscript = document.getElementById('bulk-export-transcript');
   const exportNotes = document.getElementById('bulk-export-notes');
+  const phoneDone = document.getElementById('bulk-done');
+  const phoneCount = bar?.querySelector('[data-selected-count]');
+  const phoneActions = bar ? [...bar.querySelectorAll('[data-batch-action]')] : [];
+  const phoneAction = name => phoneActions.find(button => button.dataset.batchAction === name);
+  const phoneMedia = matchMedia('(max-width: 767px)');
+  const libraryMoreTrigger = document.querySelector('[data-menu="library-more-menu"]');
+  let deleteOpener = null;
   const pageChangeBackdrop = document.getElementById('page-change-backdrop');
   const pageChangeClose = document.getElementById('page-change-close');
   const pageChangeCancel = document.getElementById('page-change-cancel');
@@ -531,14 +580,58 @@
       control.checked = n > 0 && n === checks.length;
       control.indeterminate = n > 0 && n < checks.length;
     });
-    if (!n) closeDeleteConfirm({restoreFocus:false});
+    closeDeleteConfirm({restoreFocus:false});
     const table = document.getElementById('library-table');
     table?.classList.toggle('has-selection', n > 0);
     if (n > 0) table?.classList.add('is-selecting');
     checks.forEach(c => c.closest('.file-row')?.classList.toggle('is-selected', c.checked));
     const batchAll = document.getElementById('select-all-batch');
     if (batchAll) { batchAll.checked = n > 0 && n === checks.length; batchAll.indeterminate = n > 0 && n < checks.length; }
+    syncPhoneCard(n);
   }
+  // Phone selection card: every action stays visible; unavailable ones carry
+  // aria-disabled plus a spoken reason instead of disappearing.
+  function syncPhoneCard(n = selected().length) {
+    const table = document.getElementById('library-table');
+    document.body.classList.toggle('library-selecting', Boolean(table?.classList.contains('is-selecting')));
+    if (phoneCount) phoneCount.textContent = n;
+    const ids = selected();
+    const reasons = {
+      move: n ? '' : tr('Select recordings first'),
+      tag: n ? '' : tr('Select recordings first'),
+      rename: n === 1 ? '' : n ? tr('Select one recording to rename') : tr('Select recordings first'),
+      export: !n ? tr('Select recordings first') : n > 50 ? tr('Select no more than 50 recordings') : '',
+      resume: n ? '' : tr('Select recordings first'),
+      generate: generateReason(ids),
+      delete: n ? '' : tr('Select recordings first'),
+    };
+    phoneActions.forEach(button => {
+      const reason = reasons[button.dataset.batchAction] || '';
+      button.setAttribute('aria-disabled', String(Boolean(reason) || button.dataset.busy === 'true'));
+      const hint = button.querySelector('[data-batch-reason]');
+      if (hint) hint.textContent = reason ? ` · ${reason}` : '';
+    });
+    const rename = phoneAction('rename');
+    if (rename) {
+      const more = n === 1 ? checks.find(c => c.value === ids[0])?.closest('.file-row')?.querySelector('.row-more') : null;
+      rename.dataset.fileId = more?.dataset.fileId || '';
+      rename.dataset.title = more?.dataset.title || '';
+    }
+  }
+  // Mirrors the row "Generate notes" flag; the server re-checks eligibility.
+  function generateReason(ids = selected()) {
+    if (!ids.length) return tr('Select recordings first');
+    if (ids.length > 50) return tr('Select no more than 50 recordings');
+    const eligible = ids.some(id => checks.find(c => c.value === id)?.closest('.file-row')?.querySelector('.row-more')?.dataset.canGenerate === '1');
+    return eligible ? '' : tr('No selected recording can generate notes right now.');
+  }
+  function exitSelectMode({restoreFocus=true}={}) {
+    checks.forEach(c => { c.checked = false; });
+    document.getElementById('library-table')?.classList.remove('is-selecting');
+    sync();
+    if (restoreFocus) libraryMoreTrigger?.focus();
+  }
+  cleanupController.signal.addEventListener('abort', () => document.body.classList.remove('library-selecting'), {once:true});
   document.getElementById('select-all-batch')?.addEventListener('change', event => {
     const everything = event.currentTarget.checked;
     checks.forEach(c => { c.checked = everything; });
@@ -549,6 +642,7 @@
       const table = document.getElementById('library-table');
       table?.classList.toggle('is-selecting');
       if (!table?.classList.contains('is-selecting')) { checks.forEach(c => { c.checked = false; }); sync(); }
+      else syncPhoneCard();
       return;
     }
     if (event.target.closest('[data-open-filters]') && filterMenu) { filterReturnFocus = document.activeElement; filterMenu.open = true; return; }
@@ -583,8 +677,11 @@
     if (!deleteConfirm || deleteConfirm.hidden) return;
     deleteConfirm.hidden = true;
     deleteProcessing?.setAttribute('aria-expanded','false');
+    phoneAction('delete')?.setAttribute('aria-expanded','false');
     if (deleteStatus) deleteStatus.textContent = '';
-    if (restoreFocus) deleteProcessing?.focus();
+    const opener = deleteOpener?.isConnected && deleteOpener.offsetParent ? deleteOpener : deleteProcessing;
+    deleteOpener = null;
+    if (restoreFocus) opener?.focus();
   }
   checks.forEach(c => c.addEventListener('change', sync));
   [all, mobileAll].filter(Boolean).forEach(control => control.addEventListener('change', () => {
@@ -617,13 +714,15 @@
   window.addEventListener('pageshow', syncMobileSortFromLocation, {signal:cleanupController.signal});
   clear?.addEventListener('click', () => { checks.forEach(c => c.checked = false); document.getElementById('library-table')?.classList.remove('is-selecting'); sync(); });
   action?.addEventListener('change', () => { closeDeleteConfirm({restoreFocus:false}); targets(); });
-  deleteProcessing?.addEventListener('click', () => {
-    if (!selected().length) return;
+  function openDeleteConfirm(opener) {
+    if (!selected().length || !deleteConfirm) return;
+    deleteOpener = opener;
     deleteConfirm.hidden = false;
-    deleteProcessing.setAttribute('aria-expanded','true');
+    opener.setAttribute('aria-expanded','true');
     if (deleteStatus) deleteStatus.textContent = '';
     deleteCancel?.focus();
-  });
+  }
+  deleteProcessing?.addEventListener('click', () => openDeleteConfirm(deleteProcessing));
   deleteCancel?.addEventListener('click', () => closeDeleteConfirm());
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !deleteConfirm || deleteConfirm.hidden) return;
@@ -661,18 +760,19 @@
   exportTranscript?.addEventListener('change', syncExportOptions);
   exportNotes?.addEventListener('change', syncExportOptions);
   syncExportOptions();
-  exportOpen?.addEventListener('click', event => {
+  exportOpen?.addEventListener('click', event => openExport(event.currentTarget));
+  function openExport(opener) {
     const fileIds = selected();
-    if (!fileIds.length) return;
+    if (!fileIds.length || !exportBackdrop) return;
     if (fileIds.length > 50) { show(tr('Select no more than 50 recordings'), true); return; }
-    exportOpener = event.currentTarget;
+    exportOpener = opener;
     document.getElementById('bulk-export-count').textContent = fileIds.length;
     exportStatus.textContent = '';
     exportBackdrop.hidden = false;
     setExportBackgroundInert(true);
     document.body.classList.add('dialog-open');
     requestAnimationFrame(() => exportFocusables()[0]?.focus());
-  });
+  }
   document.getElementById('bulk-export-close')?.addEventListener('click', () => closeExport());
   document.getElementById('bulk-export-cancel')?.addEventListener('click', () => closeExport());
   exportBackdrop?.addEventListener('click', event => { if (event.target === exportBackdrop) closeExport(); });
@@ -726,10 +826,12 @@
 
   deleteConfirmButton?.addEventListener('click', async () => {
     const fileIds = selected();
-    if (!fileIds.length) return;
+    if (deleteConfirm?.hidden || !fileIds.length) return;
     deleteConfirmButton.disabled = true;
     deleteCancel.disabled = true;
     deleteProcessing.disabled = true;
+    const phoneDelete = phoneAction('delete');
+    if (phoneDelete) { phoneDelete.dataset.busy = 'true'; syncPhoneCard(); }
     deleteStatus.textContent = tr('Removing local data…');
     try {
       const response = await fetch('/api/files/bulk', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file_ids:fileIds,action:'delete_local_processing'})});
@@ -742,7 +844,9 @@
       deleteConfirmButton.disabled = false;
       deleteCancel.disabled = false;
       deleteProcessing.disabled = false;
-      deleteConfirmButton.focus();
+      if (phoneDelete) { delete phoneDelete.dataset.busy; syncPhoneCard(); }
+      if (deleteConfirm.hidden) show(error.message, true);
+      else deleteConfirmButton.focus();
     }
   });
 
@@ -770,6 +874,213 @@
       apply.disabled = false;
     }
   });
+
+  // ---- Phone selection card (<768px). Reuses the bulk endpoints, the shared
+  // row rename/move dialogs, the bulk export dialog, and the delete confirm.
+  const tagDialog = document.getElementById('bulk-tag-dialog');
+  const tagForm = document.getElementById('bulk-tag-form');
+  const tagList = document.getElementById('bulk-tag-list');
+  const tagStatus = document.getElementById('bulk-tag-status');
+  const tagSubmit = document.getElementById('bulk-tag-submit');
+  async function openTagSheet(opener) {
+    if (!tagDialog || !window.lp?.openDialog) return;
+    tagForm.reset();
+    tagList.replaceChildren();
+    tagSubmit.disabled = true;
+    tagStatus.style.color = '';
+    tagStatus.textContent = tr('Loading…');
+    window.lp.openDialog(tagDialog, opener);
+    let data;
+    try { data = await getOrganization(); }
+    catch (error) { if (error.name !== 'AbortError') { tagStatus.style.color = 'var(--c-danger)'; tagStatus.textContent = error.message; } return; }
+    const glyph = document.querySelector('#i-tag') ? '<svg class="i" aria-hidden="true" focusable="false"><use href="#i-tag"></use></svg>' : '';
+    tagList.replaceChildren(...(data.tags || []).map(tag => {
+      const item = document.createElement('li');
+      const label = document.createElement('label');
+      label.className = 'sheet-row';
+      const input = document.createElement('input');
+      input.className = 'checkbox'; input.type = 'checkbox'; input.name = 'tag_id'; input.value = String(tag.id);
+      const name = document.createElement('span');
+      name.className = 'truncate'; name.textContent = tag.name;
+      label.append(input); label.insertAdjacentHTML('beforeend', glyph); label.append(name);
+      item.append(label);
+      return item;
+    }));
+    tagStatus.textContent = data.tags?.length ? '' : tr('No tags yet. Create tags from the Library organization panel.');
+    tagSubmit.disabled = !data.tags?.length;
+  }
+  tagForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const tagIds = [...tagForm.querySelectorAll('input[name="tag_id"]:checked')].map(input => Number(input.value));
+    const fileIds = selected();
+    tagStatus.style.color = 'var(--c-danger)';
+    if (!tagIds.length) { tagStatus.textContent = tr('Choose at least one tag'); return; }
+    if (!fileIds.length) { tagStatus.textContent = tr('Select recordings first'); return; }
+    const body = {file_ids: fileIds};
+    body[tagForm.elements.mode.value === 'remove' ? 'remove_tag_ids' : 'add_tag_ids'] = tagIds;
+    tagSubmit.disabled = true;
+    tagDialog.dataset.busy = 'true';
+    tagStatus.style.color = '';
+    tagStatus.textContent = tr('Saving organization…');
+    try {
+      const response = await fetch('/api/files/organize', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:cleanupController.signal});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(organizationDetail(data, 'Could not organize recordings'));
+      tagStatus.textContent = `${data.updated} ${tr('recordings updated')}`;
+      window.setTimeout(() => window.location.reload(), 350);
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      tagDialog.dataset.busy = 'false';
+      tagStatus.style.color = 'var(--c-danger)';
+      tagStatus.textContent = error.message;
+      tagSubmit.disabled = false;
+    }
+  }, {signal:cleanupController.signal});
+
+  async function resumeSelected(button) {
+    const fileIds = selected();
+    if (!fileIds.length) return;
+    button.dataset.busy = 'true';
+    syncPhoneCard();
+    show(tr('Saving organization…'));
+    try {
+      const response = await fetch('/api/files/bulk', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({file_ids:fileIds, action:'resume'}), signal:cleanupController.signal});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(organizationDetail(data, 'Could not organize recordings'));
+      show(`${data.updated} ${tr('recordings queued')}`);
+      window.setTimeout(() => window.location.reload(), 350);
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      show(error.message, true);
+      delete button.dataset.busy;
+      syncPhoneCard();
+    }
+  }
+
+  // ---- Batch Generate notes: preview eligibility, confirm, then durably queue
+  // note-only regeneration. Nothing is queued until the user confirms.
+  const generateDialog = document.getElementById('bulk-generate-dialog');
+  const generateSummary = document.getElementById('bulk-generate-summary');
+  const generateSkipped = document.getElementById('bulk-generate-skipped');
+  const generateStatus = document.getElementById('bulk-generate-status');
+  const generateConfirm = document.getElementById('bulk-generate-confirm');
+  const generateConfirmLabel = document.getElementById('bulk-generate-confirm-label');
+  let generatePreview = null;
+  let generateRequest = 0;
+  const generateSkipReasons = {
+    trash: 'In Trash. Restore it before generating notes.',
+    no_local_transcript: 'No local transcript yet. Process the recording first.',
+    processing: 'Already processing. Try again when it finishes.',
+    automatic_restricted: 'Automatic processing is limited to untranscribed recordings. Open the recording to generate notes.',
+  };
+  function renderGenerateSkipped(skipped) {
+    generateSkipped.replaceChildren(...skipped.map(item => {
+      const li = document.createElement('li');
+      const name = document.createElement('strong');
+      name.textContent = item.title;
+      li.append(name, document.createTextNode(` · ${tr(generateSkipReasons[item.reason] || item.message)}`));
+      return li;
+    }));
+    generateSkipped.hidden = !skipped.length;
+  }
+  async function generateFetch(fileIds, dryRun) {
+    const response = await fetch('/api/files/generate-notes', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({file_ids:fileIds, dry_run:dryRun}), signal:cleanupController.signal});
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(response.status === 404 ? tr('A selected recording is no longer available') : organizationDetail(data, 'Could not queue note generation'));
+    return data;
+  }
+  async function openGenerateNotes(opener) {
+    const fileIds = selected();
+    if (!generateDialog || !window.lp?.openDialog || !fileIds.length) return;
+    const request = ++generateRequest;
+    generatePreview = null;
+    generateDialog.dataset.busy = 'false';
+    generateConfirm.disabled = true;
+    generateConfirmLabel.textContent = tr('Generate notes');
+    generateSummary.textContent = tr('Checking selected recordings…');
+    generateStatus.textContent = '';
+    renderGenerateSkipped([]);
+    window.lp.openDialog(generateDialog, opener);
+    try {
+      const data = await generateFetch(fileIds, true);
+      if (request !== generateRequest) return;
+      generatePreview = {fileIds, eligible:data.eligible || []};
+      const ready = generatePreview.eligible.length;
+      const queued = (data.already_queued || []).length;
+      const parts = [`${ready} / ${data.requested} ${tr('recordings will generate notes')}`];
+      if (queued) parts.push(`${queued} ${tr('recordings already queued')}`);
+      if (data.skipped?.length) parts.push(`${data.skipped.length} ${tr('recordings skipped')}`);
+      generateSummary.textContent = parts.join(' · ');
+      renderGenerateSkipped(data.skipped || []);
+      generateConfirm.disabled = !ready;
+      generateConfirmLabel.textContent = ready ? `${tr('Generate notes')} (${ready})` : tr('Generate notes');
+      if (ready) generateConfirm.focus();
+    } catch (error) {
+      if (error.name === 'AbortError' || request !== generateRequest) return;
+      generateSummary.textContent = '';
+      generateStatus.textContent = error.message;
+    }
+  }
+  generateDialog?.addEventListener('lp:dialog-close', () => { generateRequest += 1; generatePreview = null; }, {signal:cleanupController.signal});
+  generateConfirm?.addEventListener('click', async () => {
+    if (!generatePreview?.eligible.length) return;
+    generateConfirm.disabled = true;
+    generateDialog.dataset.busy = 'true';
+    generateStatus.textContent = '';
+    generateSummary.textContent = tr('Queuing…');
+    try {
+      // Only the previewed, eligible recordings are sent; the server re-checks.
+      const data = await generateFetch(generatePreview.eligible, false);
+      const parts = [`${data.queued.length} ${tr('recordings queued for notes')}`];
+      if (data.already_queued?.length) parts.push(`${data.already_queued.length} ${tr('recordings already queued')}`);
+      if (data.skipped?.length) parts.push(`${data.skipped.length} ${tr('recordings skipped')}`);
+      generateSummary.textContent = `${parts.join(' · ')} — ${tr('Notes generate in the background.')}`;
+      renderGenerateSkipped(data.skipped || []);
+      show(parts.join(' · '));
+      window.setTimeout(() => window.location.reload(), 900);
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      generateDialog.dataset.busy = 'false';
+      generateSummary.textContent = '';
+      generateStatus.textContent = error.message;
+      generateConfirm.disabled = false;
+    }
+  }, {signal:cleanupController.signal});
+
+  bar?.addEventListener('click', event => {
+    const button = event.target.closest('[data-batch-action]');
+    if (!button) return;
+    if (button.getAttribute('aria-disabled') === 'true') {
+      const reason = button.querySelector('[data-batch-reason]')?.textContent.replace(/^ · /, '');
+      if (reason) show(reason, true);
+      return;
+    }
+    const kind = button.dataset.batchAction;
+    if (kind !== 'delete') closeDeleteConfirm({restoreFocus:false});
+    if (kind === 'move') {
+      const dialog = document.getElementById('move-dialog');
+      if (!dialog || !window.lp?.openDialog) return;
+      dialog.querySelectorAll('input[name="folder_id"]').forEach(radio => { radio.checked = false; });
+      const error = dialog.querySelector('[data-move-error]'); if (error) error.textContent = '';
+      dialog.dataset.fileIds = JSON.stringify(selected());
+      delete dialog.dataset.fileId;
+      window.lp.openDialog(dialog, button);
+    } else if (kind === 'tag') openTagSheet(button);
+    else if (kind === 'rename') { if (button.dataset.fileId) window.lp?.rowAction?.(button, 'rename'); }
+    else if (kind === 'export') openExport(button);
+    else if (kind === 'resume') resumeSelected(button);
+    else if (kind === 'generate') openGenerateNotes(button);
+    else if (kind === 'delete') { if (deleteConfirm?.hidden) openDeleteConfirm(button); else closeDeleteConfirm(); }
+  }, {signal:cleanupController.signal});
+  phoneDone?.addEventListener('click', () => { closeDeleteConfirm({restoreFocus:false}); exitSelectMode(); }, {signal:cleanupController.signal});
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || event.defaultPrevented || !phoneMedia.matches) return;
+    if (!document.getElementById('library-table')?.classList.contains('is-selecting')) return;
+    if (document.querySelector('dialog[open]') || (exportBackdrop && !exportBackdrop.hidden) || filterMenu?.open || document.querySelector('[data-menu][aria-expanded="true"]')) return;
+    if (deleteConfirm && !deleteConfirm.hidden) return;
+    event.preventDefault();
+    exitSelectMode();
+  }, {signal:cleanupController.signal});
 
   const retryAll = document.getElementById('attention-retry-button');
   const retryStatus = document.getElementById('attention-retry-status');

@@ -338,7 +338,16 @@
     document.addEventListener('htmx:beforeSwap', event => { if (event.detail?.target?.id === 'app-view' && event.detail?.shouldSwap !== false) park(); });
     // Back/forward restores #app-view from htmx's history cache without a beforeSwap;
     // this listener is registered before htmx's own popstate handler, so it runs first.
-    window.addEventListener('popstate', park);
+    window.addEventListener('popstate', event => {
+      const workspace = document.querySelector('.recording-shell');
+      const workspaceId = event.state?.localplaudTabWorkspace;
+      if (workspaceId && workspace?.dataset.tabWorkspace === workspaceId) {
+        event.stopImmediatePropagation();
+        workspace.dispatchEvent(new Event('lp:recording-tab-history'));
+        return;
+      }
+      park();
+    });
     return api;
   })();
 
@@ -408,8 +417,11 @@
       if (tray) return tray;
       const more = row.querySelector('.row-more');
       if (!more) return null;
+      // Generate notes only opens the recording's confirmation form; the same
+      // action is in the row "…" menu for keyboard and screen-reader users.
       const actions = more.dataset.trash === '1' ? [['open', 'external-link', 'Open recording']]
-        : [['notes', 'note', 'Notes'], ['move', 'folder-input', 'Move'], ['rename', 'pencil', 'Rename']];
+        : [['notes', 'note', 'Notes'], ...(more.dataset.canGenerate === '1' ? [['generate', 'sparkles', 'Generate notes']] : []),
+          ['move', 'folder-input', 'Move'], ['rename', 'pencil', 'Rename']];
       tray = document.createElement('div');
       tray.className = 'row-swipe'; tray.setAttribute('aria-hidden', 'true');
       for (const [action, iconName, text] of actions) {
@@ -535,6 +547,35 @@
     const box = sheet.querySelector('[data-add-progress]'), label = sheet.querySelector('[data-add-progress-label]');
     const bar = box.querySelector('[role="progressbar"]'), fill = bar.querySelector('span');
     const file = sheet.querySelector('[data-add-file]'), sync = sheet.querySelector('[data-add-sync]');
+    const record = sheet.querySelector('[data-add-record]'), capture = sheet.querySelector('[data-add-capture]');
+    const captureState = capture.querySelector('[data-capture-state]');
+    const duration = capture.querySelector('[data-capture-duration]'), preview = capture.querySelector('audio');
+    const pause = capture.querySelector('[data-capture-pause]');
+    const stop = capture.querySelector('[data-capture-stop]'), discard = capture.querySelector('[data-capture-discard]');
+    const save = capture.querySelector('[data-capture-save]');
+    const keep = capture.querySelector('[data-capture-keep]'), keepNote = capture.querySelector('[data-capture-keep-note]');
+    const draftsBox = sheet.querySelector('[data-capture-drafts]'), draftsList = sheet.querySelector('[data-capture-drafts-list]');
+    const formats = new Map([['audio/mp4', 'm4a'], ['audio/webm', 'webm'], ['audio/ogg', 'ogg']]);
+    let captureActive = false, recordingFile = null, previewUrl = null, stream = null;
+    // Opt-in drafts of *stopped* recordings, kept in this browser only and only
+    // for the account/workspace scope the server rendered (capture-drafts.js).
+    const draftApi = window.localplaudCaptureDrafts, draftScope = sheet.dataset.captureDraftScope;
+    let drafts = null;
+    try { drafts = draftApi && draftScope ? draftApi.createDraftStore({backend: draftApi.idbBackend(), scope: draftScope}) : null; } catch (_error) { drafts = null; }
+    let keptDraftId = null, recordedSeconds = 0;
+    const clock = seconds => {
+      const total = Math.max(0, Math.round(seconds || 0)), h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+      return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+    };
+    const draftDate = value => {
+      try { return new Intl.DateTimeFormat(document.documentElement.lang || undefined, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(value)); }
+      catch (_error) { return new Date(value).toLocaleString(); }
+    };
+    const draftErrorMessage = error => lp.t({
+      'too-large': 'This recording is too large to keep on this device. Save or discard it.',
+      limit: 'This device already keeps 3 drafts for this workspace. Save or delete one first.',
+      quota: 'Not enough browser storage to keep this draft. Save or discard the recording.',
+    }[error?.code] || 'This browser cannot keep drafts (private browsing or blocked storage). Save or discard the recording.');
     const setProgress = (pct, text) => {
       box.hidden = false;
       const value = Math.max(0, Math.min(100, Math.round(pct)));
@@ -542,34 +583,221 @@
       if (text) label.textContent = text;
     };
     const busy = value => {
-      sheet.dataset.busy = String(value);
-      file.disabled = value; sync.disabled = value;
-      sheet.querySelectorAll('.add-option').forEach(item => item.classList.toggle('is-disabled', value));
+      const locked = value || captureActive;
+      sheet.dataset.busy = String(locked);
+      file.disabled = locked; sync.disabled = locked; record.disabled = locked;
+      save.disabled = value; discard.disabled = value; keep.disabled = value;
+      draftsList?.querySelectorAll('button').forEach(button => { button.disabled = locked; });
+      sheet.querySelector('[data-dialog-close]').disabled = locked;
+      sheet.querySelectorAll('.add-option').forEach(item => item.classList.toggle('is-disabled', locked));
     };
-    sheet.addEventListener('lp:dialog-open', () => { if (sheet.dataset.busy !== 'true') { box.hidden = true; label.textContent = ''; } });
-    file.addEventListener('change', () => {
-      const chosen = file.files?.[0];
-      if (!chosen) return;
+    sheet.addEventListener('lp:dialog-open', () => { if (sheet.dataset.busy !== 'true') { box.hidden = true; label.textContent = ''; } refreshDrafts(); });
+    const warnUnsaved = event => { event.preventDefault(); event.returnValue = ''; };
+    const releaseMic = () => { stream?.getTracks().forEach(track => track.stop()); stream = null; };
+    const resetCapture = () => {
+      releaseMic();
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      preview.removeAttribute('src'); preview.load(); previewUrl = null;
+      recordingFile = null; captureActive = false; capture.hidden = true;
+      keptDraftId = null; keep.hidden = true; keepNote.hidden = true;
+      window.removeEventListener('beforeunload', warnUnsaved);
+      busy(false);
+    };
+    const showReview = (stateText, seconds) => {
+      previewUrl = URL.createObjectURL(recordingFile);
+      preview.src = previewUrl; preview.hidden = false; pause.hidden = true; stop.hidden = true;
+      discard.hidden = false; save.hidden = false; duration.textContent = clock(seconds);
+      keep.hidden = !drafts || !!keptDraftId; keepNote.hidden = keep.hidden;
+      captureState.textContent = stateText;
+    };
+    async function refreshDrafts() {
+      if (!drafts || !draftsBox) return;
+      let rows = [];
+      try { rows = await drafts.list(); } catch (_error) { draftsBox.hidden = true; return; }
+      draftsList.replaceChildren(...rows.map(row => {
+        const item = document.createElement('li'); item.className = 'add-draft';
+        const text = document.createElement('span'); text.className = 'add-draft-text';
+        const title = document.createElement('strong'); title.textContent = `${draftDate(row.createdAt)} · ${clock(row.durationSeconds)}`;
+        const meta = document.createElement('small'); meta.textContent = lp.t('Expires on {date}').replace('{date}', draftDate(row.expiresAt));
+        text.append(title, meta);
+        const review = document.createElement('button'); review.type = 'button'; review.className = 'btn sec';
+        review.textContent = lp.t('Review draft'); review.dataset.captureDraftOpen = row.id;
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn sec';
+        remove.textContent = lp.t('Delete draft'); remove.dataset.captureDraftDelete = row.id;
+        item.append(text, review, remove);
+        return item;
+      }));
+      draftsBox.hidden = !rows.length;
+      draftsList.querySelectorAll('button').forEach(button => { button.disabled = sheet.dataset.busy === 'true'; });
+    }
+    const confirmDeleteDraft = () => window.confirm(lp.t('Delete this draft from this device? It has not been uploaded and cannot be recovered.'));
+    const deleteDraft = async id => {
+      try { await drafts.discard(id); return true; }
+      catch (_error) { setProgress(0, lp.t('Could not delete the draft from this device.')); return false; }
+    };
+    draftsList?.addEventListener('click', async event => {
+      const openId = event.target.closest('[data-capture-draft-open]')?.dataset.captureDraftOpen;
+      const deleteId = event.target.closest('[data-capture-draft-delete]')?.dataset.captureDraftDelete;
+      if (!drafts || sheet.dataset.busy === 'true' || captureActive) return;
+      if (deleteId) {
+        if (!confirmDeleteDraft()) return;
+        await deleteDraft(deleteId); refreshDrafts(); return;
+      }
+      if (!openId) return;
+      let opened = null;
+      try { opened = await drafts.open(openId); } catch (_error) { setProgress(0, draftErrorMessage(_error)); return; }
+      if (!opened) { refreshDrafts(); setProgress(0, lp.t('This draft expired or is no longer on this device.')); return; }
+      box.hidden = true; captureActive = true; busy(false); capture.hidden = false;
+      recordingFile = opened.file; keptDraftId = opened.draft.id;
+      showReview(lp.t('Kept draft · review before saving'), opened.draft.durationSeconds);
+      save.focus();
+    });
+    keep.addEventListener('click', async () => {
+      if (!drafts || !recordingFile || keptDraftId || keep.disabled) return;
+      keep.disabled = true;
+      try {
+        const kept = await drafts.keep(recordingFile, {durationSeconds: recordedSeconds});
+        keptDraftId = kept.id; keep.hidden = true; keepNote.hidden = true;
+        window.removeEventListener('beforeunload', warnUnsaved);
+        captureState.textContent = lp.t('Draft kept on this device · not uploaded');
+        lp.toast(lp.t('Draft kept on this device for up to 7 days'), {type: 'success'});
+        refreshDrafts();
+      } catch (error) {
+        setProgress(0, draftErrorMessage(error));
+      } finally { keep.disabled = false; }
+    });
+    // Signing out leaves kept drafts in this browser; offer to remove them so a
+    // shared device does not keep this account's audio.
+    let signingOut = false;
+    document.addEventListener('submit', async event => {
+      const form = event.target;
+      if (!drafts || signingOut || !(form instanceof HTMLFormElement) || new URL(form.action, location.href).pathname !== '/logout') return;
+      event.preventDefault();
+      let rows = [];
+      try { rows = await drafts.list(); } catch (_error) { rows = []; }
+      if (rows.length && window.confirm(lp.t('Delete the {count} unsaved drafts kept on this device before signing out?').replace('{count}', rows.length))) {
+        for (const row of rows) await deleteDraft(row.id);
+      }
+      signingOut = true; form.submit();
+    });
+    refreshDrafts();
+    window.addEventListener('pagehide', releaseMic);
+    record.addEventListener('click', async () => {
+      if (sheet.dataset.busy === 'true') return;
+      const mimeType = window.MediaRecorder && [...formats.keys()].find(type => MediaRecorder.isTypeSupported(type));
+      if (!mimeType || !navigator.mediaDevices?.getUserMedia) {
+        setProgress(0, lp.t('Microphone recording requires HTTPS and a supported browser.'));
+        return;
+      }
+      captureActive = true; busy(false); box.hidden = true;
+      capture.hidden = false; preview.hidden = true; discard.hidden = true; save.hidden = true;
+      pause.hidden = true; pause.onclick = null;
+      stop.hidden = false; stop.disabled = true; stop.onclick = null; duration.textContent = '0:00';
+      captureState.textContent = lp.t('Waiting for microphone permission…');
+      window.addEventListener('beforeunload', warnUnsaved);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({audio: true});
+        const recorder = new MediaRecorder(stream, {mimeType});
+        const chunks = [];
+        let size = 0, timer, elapsed = 0, started = performance.now();
+        const elapsedSeconds = () => Math.floor((elapsed + (started === null ? 0 : performance.now() - started)) / 1000);
+        const updateDuration = () => {
+          const seconds = elapsedSeconds();
+          duration.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+          return seconds;
+        };
+        const finish = () => {
+          if (recorder.state === 'inactive') return;
+          updateDuration();
+          pause.disabled = true; stop.disabled = true;
+          recorder.stop();
+        };
+        recorder.addEventListener('dataavailable', event => {
+          if (!event.data.size) return;
+          size += event.data.size; chunks.push(event.data);
+          if (size >= 128 * 1024 * 1024) finish();
+        });
+        recorder.addEventListener('stop', () => {
+          clearInterval(timer); releaseMic();
+          if (!chunks.length) { resetCapture(); setProgress(0, lp.t('No audio was recorded. Try again.')); record.focus(); return; }
+          const type = recorder.mimeType || mimeType;
+          const extension = formats.get(type.split(';')[0]) || formats.get(mimeType);
+          const stamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+          recordingFile = new File(chunks, `${lp.t('Recording')} ${stamp}.${extension}`, {type});
+          recordedSeconds = elapsedSeconds();
+          showReview(lp.t('Review before saving'), recordedSeconds); save.focus();
+        });
+        recorder.start(1000);
+        pause.onclick = () => {
+          if (recorder.state === 'recording') {
+            recorder.pause();
+            elapsed += performance.now() - started;
+            started = null;
+            updateDuration();
+            pause.textContent = lp.t('Resume recording');
+            captureState.textContent = lp.t('Recording paused');
+          } else if (recorder.state === 'paused') {
+            recorder.resume();
+            started = performance.now();
+            pause.textContent = lp.t('Pause recording');
+            captureState.textContent = lp.t('Recording…');
+          }
+        };
+        timer = setInterval(() => {
+          if (updateDuration() >= 3600) finish();
+        }, 250);
+        captureState.textContent = lp.t('Recording…');
+        pause.textContent = lp.t('Pause recording'); pause.hidden = false; pause.disabled = false;
+        stop.disabled = false; stop.onclick = finish; stop.focus();
+      } catch (error) {
+        resetCapture();
+        setProgress(0, lp.t(error.name === 'NotAllowedError' ? 'Microphone access was denied. Allow it in your browser and try again.' : 'Could not start the microphone.'));
+        record.focus();
+      }
+    });
+    discard.addEventListener('click', async () => {
+      if (keptDraftId) {
+        if (!confirmDeleteDraft()) return;
+        if (!await deleteDraft(keptDraftId)) return;
+      }
+      resetCapture(); box.hidden = true; refreshDrafts(); record.focus();
+    });
+    save.addEventListener('click', () => { if (recordingFile && !save.disabled) uploadAudio(recordingFile); });
+    function uploadAudio(chosen) {
+      const fromMicrophone = chosen === recordingFile, savedDraftId = fromMicrophone ? keptDraftId : null;
       busy(true); setProgress(0, `${lp.t('Importing')} ${chosen.name}…`);
       const body = new FormData(); body.append('file', chosen);
+      if (fromMicrophone) body.append('capture_source', 'browser_recording');
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/imports/local/audio');
+      if (fromMicrophone) xhr.timeout = 300000;
       xhr.upload.addEventListener('progress', event => { if (event.lengthComputable) setProgress((event.loaded / event.total) * 100); });
       xhr.addEventListener('load', () => {
         busy(false); file.value = '';
         let data = {}; try { data = JSON.parse(xhr.responseText || '{}'); } catch (_error) { /* non-JSON */ }
         if (xhr.status >= 200 && xhr.status < 300 && data.id) {
+          if (fromMicrophone) resetCapture();
+          // The server confirmed the upload, so the kept local copy is no longer needed.
+          if (savedDraftId) {
+            drafts.discard(savedDraftId).catch(() => lp.toast(lp.t('Saved, but the local draft could not be deleted. Delete it from Add audio.'), {type: 'error'})).finally(refreshDrafts);
+          }
           setProgress(100, lp.t('Imported. Opening recording…'));
           sheet.close();
-          lp.toast(lp.t('Imported. Processing starts automatically.'), {type: 'success', action: {label: lp.t('Open'), onClick: () => { location.href = `/file/${encodeURIComponent(data.id)}`; }}});
+          lp.toast(lp.t(fromMicrophone ? 'Recording saved' : 'Imported. Processing starts automatically.'), {type: 'success', action: {label: lp.t('Open'), onClick: () => { location.href = `/file/${encodeURIComponent(data.id)}`; }}});
           const link = document.createElement('a'); link.href = `/file/${encodeURIComponent(data.id)}`; link.hidden = true; document.body.append(link); link.click(); link.remove();
         } else {
           const detail = typeof data.detail === 'string' ? lp.t(data.detail) : lp.t('Could not upload audio');
           setProgress(0, detail); lp.toast(detail, {type: 'error'});
         }
       });
-      xhr.addEventListener('error', () => { busy(false); file.value = ''; setProgress(0, lp.t('Could not upload audio')); lp.toast(lp.t('Could not upload audio'), {type: 'error'}); });
+      const uploadFailed = () => { busy(false); file.value = ''; setProgress(0, lp.t('Could not upload audio')); lp.toast(lp.t('Could not upload audio'), {type: 'error'}); };
+      xhr.addEventListener('error', uploadFailed);
+      xhr.addEventListener('timeout', uploadFailed);
       xhr.send(body);
+    }
+    file.addEventListener('change', () => {
+      const chosen = file.files?.[0];
+      if (chosen) uploadAudio(chosen);
     });
     sync.addEventListener('click', async () => {
       if (sheet.dataset.busy === 'true') return;
@@ -763,6 +991,11 @@
       menu.querySelector('[data-row-action="open"]').href = row.href;
       const notes = menu.querySelector('[data-row-action="notes"]');
       notes.href = `/file/${encodeURIComponent(row.fileId)}?tab=notes`;
+      const generate = menu.querySelector('[data-row-action="generate"]');
+      if (generate) {
+        generate.href = lp.generateNotesHref(row.fileId);
+        generate.hidden = row.canGenerate !== '1' || row.trash === '1';
+      }
       const exportLink = menu.querySelector('[data-row-action="export"]');
       exportLink.href = `/file/${encodeURIComponent(row.fileId)}/export.md`;
       exportLink.hidden = row.exportable !== '1';
@@ -772,6 +1005,9 @@
     window.addEventListener('scroll', () => { if (openMenuButton?.matches('.row-more')) lp.closeMenus(); }, true);
     const renameDialog = document.getElementById('rename-dialog'), moveDialog = document.getElementById('move-dialog');
     // Shared by the "…" menu, swipe actions, and the long-press sheet.
+    // Opens the recording's own Generate notes form; nothing is queued until
+    // the user confirms there.
+    lp.generateNotesHref = fileId => `/file/${encodeURIComponent(fileId)}?tab=notes&generate=notes`;
     lp.rowAction = (button, action) => {
       const data = {...button.dataset, button};
       if (action === 'rename') {
@@ -784,14 +1020,34 @@
         const form = moveDialog.querySelector('form');
         [...form.elements.folder_id].forEach(radio => { radio.checked = radio.value === (data.folderId || ''); });
         moveDialog.querySelector('[data-move-error]').textContent = '';
+        delete moveDialog.dataset.fileIds;
         moveDialog.dataset.fileId = data.fileId;
         lp.openDialog(moveDialog, button);
-      } else if (action === 'notes' || action === 'open') {
+      } else if (action === 'notes' || action === 'open' || action === 'generate') {
+        if (action === 'generate' && (data.canGenerate !== '1' || data.trash === '1')) return;
+        // A fresh link per activation: progressive navigation converts it to an
+        // htmx request and re-clicks it, so it must stay connected until then.
         const link = document.createElement('a');
-        link.href = action === 'notes' ? `/file/${encodeURIComponent(data.fileId)}?tab=notes` : data.href;
-        link.hidden = true; document.body.append(link); link.click(); link.remove();
+        link.href = action === 'notes' ? `/file/${encodeURIComponent(data.fileId)}?tab=notes`
+          : action === 'generate' ? lp.generateNotesHref(data.fileId) : data.href;
+        link.hidden = true; document.body.append(link);
+        const cleanup = () => link.remove();
+        link.addEventListener('htmx:afterRequest', cleanup, {once: true});
+        setTimeout(cleanup, 30000);
+        link.click();
       }
     };
+    // The shared menu reuses one <a> per item while its href changes per row,
+    // so plain activations navigate through a fresh link instead (modified
+    // clicks keep the browser's own new-tab behaviour).
+    document.addEventListener('click', event => {
+      const item = event.target.closest('#row-menu a[data-row-action="open"], #row-menu a[data-row-action="notes"], #row-menu a[data-row-action="generate"]');
+      if (!item || !row || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      const button = row.button;
+      lp.closeMenus();
+      lp.rowAction(button, item.dataset.rowAction);
+    }, true);
     menu.addEventListener('click', event => {
       const item = event.target.closest('[data-row-action]');
       if (!item || !row) return;
@@ -823,10 +1079,16 @@
     });
     moveDialog?.querySelector('form').addEventListener('submit', async event => {
       event.preventDefault();
+      // Multi-file mode (phone selection card) stores a JSON id list and starts
+      // with no folder checked, so an untouched sheet can never unfile everything.
+      const bulkIds = moveDialog.dataset.fileIds ? JSON.parse(moveDialog.dataset.fileIds) : null;
+      const radios = [...event.currentTarget.querySelectorAll('input[name="folder_id"]')];
+      const errorEl = moveDialog.querySelector('[data-move-error]');
+      if (bulkIds && !radios.some(radio => radio.checked)) { errorEl.textContent = lp.t('Choose a folder'); return; }
       const id = moveDialog.dataset.fileId, value = event.currentTarget.elements.folder_id.value;
-      const data = await submitJson(moveDialog, '/api/files/organize', 'POST', {file_ids: [id], folder_id: value ? Number(value) : null}, moveDialog.querySelector('[data-move-error]'), 'Could not move recording');
+      const data = await submitJson(moveDialog, '/api/files/organize', 'POST', {file_ids: bulkIds || [id], folder_id: value ? Number(value) : null}, errorEl, 'Could not move recording');
       if (!data) return;
-      lp.toast(lp.t('Recording moved'), {type: 'success'});
+      lp.toast(lp.t(bulkIds && bulkIds.length > 1 ? 'Recordings moved' : 'Recording moved'), {type: 'success'});
       setTimeout(() => location.reload(), 400);
     });
   });

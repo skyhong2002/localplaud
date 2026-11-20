@@ -549,7 +549,8 @@ def test_local_audio_upload_and_metadata_only_ui(monkeypatch, tmp_path):
     assert response.status_code == 201
     with session_scope() as session:
         row = session.get(PlaudFile, response.json()["id"])
-        assert row.origin == "local"
+        assert row.origin == "local" and row.scene == 102
+        assert row.raw["capture_source"] == "file_import"
         assert row.audio_path and row.filename == "interview"
     assert client.post(
         "/api/imports/local/audio", files={"file": ("bad.exe", b"x")}
@@ -563,6 +564,37 @@ def test_local_audio_upload_and_metadata_only_ui(monkeypatch, tmp_path):
     with session_scope() as session:
         row = session.get(PlaudFile, amr.json()["id"])
         assert row.audio_path and row.audio_path.endswith("audio.amr")
+
+
+def test_browser_capture_appears_in_recording_source_filter(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from fastapi.testclient import TestClient
+
+    from localplaud.api.app import app
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import init_db, session_scope
+
+    init_db()
+    client = TestClient(app)
+    audio = BytesIO()
+    with wave.open(audio, "wb") as fixture:
+        fixture.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+        fixture.writeframes(b"\x00\x00" * 800)
+    files = {"file": ("capture.wav", audio.getvalue(), "audio/wav")}
+    response = client.post(
+        "/api/imports/local/audio", data={"capture_source": "browser_recording"}, files=files
+    )
+    assert response.status_code == 201
+    file_id = response.json()["id"]
+    with session_scope() as session:
+        row = session.get(PlaudFile, file_id)
+        assert row.origin == "local" and row.scene == 101
+        assert row.raw["capture_source"] == "browser_recording"
+    assert [item["id"] for item in client.get("/api/files?scene=101").json()["files"]] == [file_id]
+    assert client.get("/api/files?scene=102").json()["files"] == []
+    assert client.post(
+        "/api/imports/local/audio", data={"capture_source": "plaud"}, files=files
+    ).status_code == 422
 
 
 def test_on_demand_plaud_audio_import_uses_its_existing_claim(monkeypatch, tmp_path):

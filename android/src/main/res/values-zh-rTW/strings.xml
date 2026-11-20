@@ -1,0 +1,7 @@
+<resources>
+    <string name="files">所有錄音</string>
+    <string name="search">搜尋</string>
+    <string name="explore">探索</string>
+    <string name="sync_plaud">同步 Plaud</string>
+    <string name="plaud_app_unavailable">請安裝或啟用官方 Plaud App，再同步錄音器。</string>
+</resources>

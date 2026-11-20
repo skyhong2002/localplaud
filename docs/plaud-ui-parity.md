@@ -10,6 +10,15 @@ DevTools. All content below is placeholder. Private screenshots live only in
 `data/audits/plaud-ui-20261002/web/` (gitignored), named `d-*.png` (desktop) and
 `m-*.png` (phone).
 
+**Plaud 4.x follow-up:** This document remains the historical signed-in audit,
+not a verified Plaud 4.1 checklist. The newer public help describes adding
+recordings from Home. localplaud now exposes **Home → New recording** on desktop
+and mobile, reuses the foreground capture and import sheet, and distinguishes
+new browser captures from file uploads in the library source filter. A signed-in
+4.1 comparison of Library, Sources, Notes, and Export is still pending, as are
+Pixel 7 and production acceptance. Ask Plaud and AutoFlow are out of scope for
+this pass; direct recorder sync is tracked separately in issue #28.
+
 Ground rules for builders:
 
 - Reproduce **layout, measurements, interaction model, and states**. Do not copy

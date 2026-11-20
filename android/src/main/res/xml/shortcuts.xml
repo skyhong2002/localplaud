@@ -1,0 +1,22 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="sync_plaud" android:shortcutShortLabel="@string/sync_plaud">
+        <intent android:action="org.localplaud.android.SYNC_PLAUD"
+            android:targetPackage="org.localplaud.android"
+            android:targetClass="org.localplaud.android.PlaudSyncActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="files" android:shortcutShortLabel="@string/files">
+        <intent android:action="org.localplaud.android.FILES"
+            android:targetPackage="org.localplaud.android"
+            android:targetClass="org.localplaud.android.WorkspaceActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="search" android:shortcutShortLabel="@string/search">
+        <intent android:action="org.localplaud.android.SEARCH"
+            android:targetPackage="org.localplaud.android"
+            android:targetClass="org.localplaud.android.WorkspaceActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="explore" android:shortcutShortLabel="@string/explore">
+        <intent android:action="org.localplaud.android.EXPLORE"
+            android:targetPackage="org.localplaud.android"
+            android:targetClass="org.localplaud.android.WorkspaceActivity" />
+    </shortcut>
+</shortcuts>

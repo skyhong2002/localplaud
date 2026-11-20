@@ -432,7 +432,7 @@ _ZH_HANT_TW = {
     "Other": "其他",
     "Plaud recorder": "Plaud 錄音筆",
     "Plaud recorder (other mode)": "Plaud 錄音筆（其他模式）",
-    "Phone app recording": "手機 App 錄音",
+    "App recording": "App 錄音",
     "Imported audio": "App 匯入音檔",
     "Selected recording": "目前錄音",
     "Recording list pages": "錄音清單分頁",

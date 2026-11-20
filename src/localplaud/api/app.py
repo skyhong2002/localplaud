@@ -184,6 +184,7 @@ if _static.exists():
     app.mount("/static", StaticAssets(directory=str(_static)), name="static")
 
 _SESSION_COOKIE = "localplaud_session"
+_ANDROID_ASSET_LINKS = "/.well-known/assetlinks.json"
 
 
 def _session_hash(token: str, secret: str) -> str:
@@ -270,7 +271,7 @@ async def _gate_request(request: Request, call_next):
         return response
     token = settings.auth_token
     login_password = settings.login_password
-    public_paths = {"/healthz", "/login", "/favicon.ico", "/robots.txt", "/sw.js"}
+    public_paths = {"/healthz", "/login", "/favicon.ico", "/robots.txt", "/sw.js", _ANDROID_ASSET_LINKS}
     public_share = request.url.path.startswith("/share/")
     if (
         (token or login_password)
@@ -367,6 +368,21 @@ def _service_worker_script() -> str | None:
         if path.exists():
             digest.update(path.read_bytes())
     return source.replace("__LP_VERSION__", digest.hexdigest()[:12])
+
+
+@app.get(_ANDROID_ASSET_LINKS, include_in_schema=False)
+def android_asset_links() -> JSONResponse:
+    fingerprints = get_settings().api.android_signing_fingerprints
+    if not fingerprints:
+        raise HTTPException(404)
+    return JSONResponse([{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "org.localplaud.android",
+            "sha256_cert_fingerprints": fingerprints,
+        },
+    }])
 
 
 @app.get("/sw.js", include_in_schema=False)
@@ -596,6 +612,7 @@ def _file_summary(r: PlaudFile) -> dict:
             ),
         },
         "has_transcript": transcript is not None,
+        "has_local_transcript": r.local_transcript is not None,
         "has_imported_transcript": r.plaud_transcript is not None,
         "has_summary": any(s.source == "local" for s in r.summaries),
         "has_imported_summary": any(s.source in {"cloud", "plaud"} for s in r.summaries),
@@ -693,6 +710,7 @@ def _file_summaries(session, rows: list[PlaudFile]) -> list[dict]:
                 "has_transcript": local_speakers is not None
                 if independent
                 else canonical_speakers is not None,
+                "has_local_transcript": local_speakers is not None,
                 "has_imported_transcript": imported_speakers is not None,
                 "has_summary": local_summary,
                 "has_imported_summary": bool(summary_sources[row.id] & {"cloud", "plaud"}),
@@ -912,7 +930,7 @@ _STATE_ALIASES = {
 _SCENE_NAMES = {
     1: "Plaud recorder",
     7: "Plaud recorder (other mode)",
-    101: "Phone app recording",
+    101: "App recording",
     102: "Imported audio",
 }
 
@@ -1482,6 +1500,11 @@ class BulkFilesBody(BaseModel):
     action: Literal["resume", "delete_local_processing"]
 
 
+class BatchGenerateNotesBody(BaseModel):
+    file_ids: list[str] = Field(min_length=1, max_length=50)
+    dry_run: bool = False
+
+
 class ReprocessAllBody(BaseModel):
     mode: Literal["resume", "force", "derived_only"] = "resume"
     statuses: list[str] | None = None
@@ -1592,6 +1615,25 @@ def _named_speaker_summary(session) -> list[dict]:
 def api_organization() -> dict:
     with session_scope() as session:
         return _organization_summary(session)
+
+
+@app.get("/api/speaker-names/recent")
+def api_recent_speaker_names(limit: int = 8, exclude_file_id: str | None = None) -> dict:
+    """Recently, manually assigned speaker names in the active workspace only."""
+    from ..speaker_names import (
+        RECENT_SPEAKER_NAMES_DEFAULT,
+        RECENT_SPEAKER_NAMES_MAX,
+        recent_speaker_names,
+    )
+
+    if limit < 1:
+        limit = RECENT_SPEAKER_NAMES_DEFAULT
+    limit = min(limit, RECENT_SPEAKER_NAMES_MAX)
+    with session_scope() as session:
+        names = recent_speaker_names(
+            session, limit=limit, exclude_file_id=(exclude_file_id or None)
+        )
+    return {"names": names, "limit": limit}
 
 
 def _create_organization_item(model, body: OrganizationItemBody) -> dict:
@@ -1870,6 +1912,29 @@ def bulk_files(body: BulkFilesBody) -> dict:
             row.pipeline_last_failure_at = now
             row.pipeline_next_retry_at = now
     return {"action": body.action, "updated": len(file_ids), "queued": file_ids}
+
+
+@app.post("/api/files/generate-notes")
+def batch_generate_notes(body: BatchGenerateNotesBody) -> dict:
+    """Preview (``dry_run``) or durably queue note-only regeneration for a selection.
+
+    Speech stages are never rerun and nothing is sent to Plaud. Queued recordings
+    use the automatic template and AI profile when the worker drains them.
+    """
+    from ..batch_notes import UnknownRecordings, queue_batch_note_generation
+
+    try:
+        result = queue_batch_note_generation(body.file_ids, dry_run=body.dry_run)
+    except UnknownRecordings as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not body.dry_run and not result["queued"] and not result["already_queued"]:
+        raise HTTPException(
+            status_code=409,
+            detail="No selected recording can generate notes right now.",
+        )
+    return result
 
 
 @app.post("/api/files/reprocess-all")
@@ -2170,6 +2235,18 @@ def home(request: Request):
         ),
     }
     return templates.TemplateResponse(request=request, name="home.html", context=ctx)
+
+
+@app.get("/calendar", response_class=HTMLResponse)
+def calendar_view(request: Request, month: str | None = None):
+    """Read-only month view; a day opens the matching Files date filter."""
+    from ..library_calendar import build_month
+
+    with session_scope() as session:
+        preferences = get_workspace_preferences(session)
+        cal = build_month(session, month, preferences["timezone"], preferences["locale"])
+    ctx = _base_ctx(request, "home") | {"cal": cal}
+    return templates.TemplateResponse(request=request, name="calendar.html", context=ctx)
 
 
 @app.get("/", response_class=HTMLResponse)

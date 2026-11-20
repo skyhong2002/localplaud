@@ -62,6 +62,9 @@ Answers cite the recordings they came from; each citation jumps to the moment in
 
 <p align="center"><img src="docs/assets/screenshots/mobile.webp" alt="Mobile library, transcript, and notes views" width="100%"></p>
 
+Install the mobile web app from your browser, or [build an Android APK](docs/android.md)
+for your self-hosted workspace.
+
 Plus folders, tags, full-text search, AutoFlow automation, and exports to TXT,
 SRT, VTT, DOCX, PDF, and Markdown. Your edits are never overwritten, a failed
 stage never discards good results, and you choose per stage whether AI runs

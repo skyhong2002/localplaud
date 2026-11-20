@@ -17,6 +17,7 @@ are.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Any, Literal
@@ -536,6 +537,18 @@ class ApiConfig(BaseModel):
     session_cookie_secure: bool = True
     # Used to build absolute links behind a reverse proxy; set per machine.
     public_url: str | None = None
+    android_signing_fingerprints: list[str] = Field(default_factory=list)
+
+    @field_validator("android_signing_fingerprints")
+    @classmethod
+    def normalize_android_signing_fingerprints(cls, values: list[str]) -> list[str]:
+        normalized = []
+        for value in values:
+            if not re.fullmatch(r"[0-9a-fA-F]{64}|[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){31}", value):
+                raise ValueError("Android signing fingerprints must be SHA-256 hex digests")
+            digest = value.replace(":", "").upper()
+            normalized.append(":".join(digest[index:index + 2] for index in range(0, 64, 2)))
+        return list(dict.fromkeys(normalized))
 
 
 # --------------------------------------------------------------------------- #

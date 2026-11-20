@@ -1224,6 +1224,61 @@ def reset_pipeline_retry(row: PlaudFile) -> None:
     row.pipeline_last_failure_at = None
 
 
+DERIVED_REGENERATION_STAGES = (
+    StageName.summarize,
+    StageName.mind_map,
+    StageName.outline,
+    StageName.index,
+)
+
+
+def queue_derived_regeneration(session, row: PlaudFile, *, reason: str) -> None:
+    """Durably queue notes/mind map/outline/index regeneration for one recording.
+
+    Speech stages, transcripts, and user edits are untouched. Existing derived
+    artifacts stay stored but are marked stale with a fresh generation token, and
+    any missing derived StageRun rows are created so ``_pending_scope`` sees the
+    work. The caller owns retry/status bookkeeping and eligibility checks.
+    """
+    import secrets
+
+    from .knowledge_index import invalidate_generated_documents
+
+    invalidate_generated_documents(session, row.id)
+    stale_generation = secrets.token_hex(16)
+    marker = {
+        "stale": True,
+        "stale_generation": stale_generation,
+        "derived_only": True,
+        "reason": reason,
+    }
+    present_stages = {run.stage for run in row.stage_runs}
+    for run in row.stage_runs:
+        if run.stage in DERIVED_REGENERATION_STAGES:
+            run.status = StageStatus.pending
+            run.error = None
+            run.completed_at = None
+            detail = dict(run.detail or {}) | marker
+            # A full regeneration supersedes any narrower pending rebuild.
+            detail.pop("mind_map_only", None)
+            run.detail = detail
+    # A transcript can be durable before the first summarize pass creates
+    # downstream StageRun rows. Derived-only queueing must create those missing
+    # rows or `_pending_scope` cannot see the work and the recording strands.
+    for stage in DERIVED_REGENERATION_STAGES:
+        if stage not in present_stages:
+            session.add(
+                StageRun(
+                    file_id=row.id,
+                    stage=stage,
+                    status=StageStatus.pending,
+                    attempts=0,
+                    detail=dict(marker),
+                )
+            )
+    row.status = FileStatus.partial
+
+
 def queue_library_reprocess(
     *,
     mode: str = "resume",
@@ -1244,8 +1299,6 @@ def queue_library_reprocess(
     first; ``limit`` caps how many are queued. ``dry_run`` changes nothing.
     ``include_trash=False`` limits the batch to what the library shows.
     """
-    import secrets
-
     if mode not in {"resume", "force", "derived_only"}:
         raise ValueError(f"unknown reprocess mode: {mode}")
     now = datetime.now(UTC)
@@ -1287,43 +1340,7 @@ def queue_library_reprocess(
                     run.completed_at = None
                 row.status = FileStatus.downloaded
             elif mode == "derived_only":
-                from .knowledge_index import invalidate_generated_documents
-
-                invalidate_generated_documents(session, row.id)
-                stale_generation = secrets.token_hex(16)
-                present_stages = {run.stage for run in row.stage_runs}
-                for run in row.stage_runs:
-                    if run.stage in derived:
-                        run.status = StageStatus.pending
-                        run.error = None
-                        run.completed_at = None
-                        run.detail = dict(run.detail or {}) | {
-                            "stale": True,
-                            "stale_generation": stale_generation,
-                            "derived_only": True,
-                            "reason": "reprocess-all derived_only",
-                        }
-                # A transcript can be durable before the first summarize pass
-                # creates downstream StageRun rows.  Derived-only queueing must
-                # create those missing rows or `_pending_scope` cannot see the
-                # work and the recording remains stranded forever.
-                for stage in derived:
-                    if stage not in present_stages:
-                        session.add(
-                            StageRun(
-                                file_id=row.id,
-                                stage=stage,
-                                status=StageStatus.pending,
-                                attempts=0,
-                                detail={
-                                    "stale": True,
-                                    "stale_generation": stale_generation,
-                                    "derived_only": True,
-                                    "reason": "reprocess-all derived_only",
-                                },
-                            )
-                        )
-                row.status = FileStatus.partial
+                queue_derived_regeneration(session, row, reason="reprocess-all derived_only")
             else:  # resume
                 row.status = FileStatus.partial if row.local_transcript else FileStatus.downloaded
             # Queue state is not an error. Preserve real failures in stage-run

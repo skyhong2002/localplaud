@@ -6,10 +6,13 @@
 {% endblock %}
 {% block body %}
 <div class="library-page home-page"><div class="page-frame">
+  <div class="home-capture-actions">
+    <button class="btn" type="button" data-home-new-recording data-dialog-open="add-sheet" aria-haspopup="dialog" aria-controls="add-sheet">{{ icon('plus', 'sm') }}{{ t('New recording') }}</button>
+  </div>
   <section class="home-section" aria-labelledby="home-recent-title">
     <div class="section-head">
       <h1 class="page-title" id="home-recent-title">{{ t('Recent files') }}</h1>
-      <a class="view-all" href="/">{{ t('View all') }}{{ icon('chevron-right') }}</a>
+      <span class="home-head-links"><a class="view-all home-calendar-link" href="/calendar" data-home-calendar aria-label="{{ t('Open the recording calendar') }}">{{ icon('calendar', 'sm') }}<span class="home-calendar-label">{{ t('Calendar') }}</span></a><a class="view-all" href="/">{{ t('View all') }}{{ icon('chevron-right') }}</a></span>
     </div>
     {% if recent_files %}
     <ul class="file-list file-list-plain" aria-label="{{ t('Recent files') }}">
