@@ -6,7 +6,7 @@ nagisa==0.3.0
 psutil==7.2.2
 soynlp==0.0.493
 aistore==1.26.0
-antlr4-python3-runtime==4.13.2
+antlr4-python3-runtime==4.9.3
 audioread==3.1.0
 braceexpand==0.1.7
 cffi==2.1.1
@@ -37,12 +37,12 @@ ml_dtypes==0.6.0
 msgpack==1.2.4
 msgspec==0.22.0
 multiprocess==0.70.19
-nemo-toolkit @ https://github.com/NVIDIA-NeMo/Speech/archive/cf724ac337d1ebc7d0dda1e23fb80916f52927a5.tar.gz#sha256=a095a36ce9bfd7901eb164552a4c579010473f01c0d9ccd54c9706185acc3c81
+nemo-toolkit @ https://github.com/NVIDIA-NeMo/Speech/archive/8bc3920bddc1222feca7f34361ee36d70cc033a6.tar.gz#sha256=ff288d5dc2da9be308b2215b6633d2b330679ded54ce2492e63689c8631609d2
 numba==0.68.1
 nv-one-logger-core==2.3.1
 nv-one-logger-pytorch-lightning-integration==2.3.1
 nv-one-logger-training-telemetry==2.3.1
-omegaconf==2.4.0
+omegaconf==2.3.0
 onnx==1.23.2
 overrides==7.7.0
 packaging==24.2
@@ -55,7 +55,7 @@ pytorch-lightning==2.6.6
 sacrebleu==2.6.0
 sentencepiece==0.2.2
 setuptools==84.2.1
-smart_open==8.0.1
+smart_open==9.0.1
 soundfile==0.14.0
 soxr==1.1.0
 StrEnum==0.4.15
