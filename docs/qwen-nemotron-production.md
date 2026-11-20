@@ -42,6 +42,8 @@ archive and hash because older published packages cannot load this checkpoint.
 The pinned NeMo revision includes its Lightning 2.6.6 compatibility fixes for
 OneLogger and Neptune. Hydra 1.3 requires ANTLR 4.9 and OmegaConf below 2.4;
 update those pins only alongside a compatible Hydra version.
+Keep `datasets` and `fsspec` compatible with each other and with the base image's
+`huggingface-hub`; the overlay deliberately does not replace the base Hub client.
 Keep the base image's immutable image ID with the deployment record.
 
 Apply `docker-compose.speech.yml` after the existing compose files. It selects
