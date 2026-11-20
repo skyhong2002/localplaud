@@ -9,3 +9,5 @@ RUN /opt/venv/bin/python -m venv /opt/speech \
     && /opt/speech/bin/python -c 'from transformers import AutoModelForMultimodalLM; from nemo.collections.asr.models import SortformerEncLabelModel; from faster_whisper.vad import get_speech_timestamps'
 RUN /opt/speech/bin/python -c 'from transformers.models.qwen3_asr.processing_qwen3_asr import Qwen3ASRProcessor as P; assert P.split_words_for_alignment(None, "안녕하세요 세계", "Korean"); assert P.split_words_for_alignment(None, "こんにちは世界", "Japanese")'
 USER localplaud
+ENV NUMBA_CACHE_DIR=/tmp/localplaud-numba-cache
+RUN /opt/speech/bin/python -c 'from librosa.filters import mel; assert mel(sr=16000, n_fft=512, n_mels=80).shape == (80, 257)'
