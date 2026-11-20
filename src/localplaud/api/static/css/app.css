@@ -247,7 +247,7 @@ a.chip:hover, button.chip:hover { background: var(--c-hover); color: var(--c-tex
 .state-ready { color: var(--c-ok); background: var(--c-ok-soft); }
 @keyframes lp-pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
 /* legacy .st status pills */
-.st { display: inline-flex; align-items: center; min-height: 20px; padding: 0 7px; border-radius: var(--radius); font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; white-space: nowrap; }
+.st { display: inline-flex; align-items: center; min-height: 20px; padding: 0 7px; border-radius: var(--radius); font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: 0; white-space: nowrap; }
 .st.done { color: var(--c-ok); background: var(--c-ok-soft); }
 .st.partial, .st.degraded { color: var(--c-warn); background: var(--c-warn-soft); }
 .st.error, .st.failed { color: var(--c-danger); background: var(--c-danger-soft); }
@@ -1073,7 +1073,7 @@ body.progressive-failed .progressive-error { display: flex; }
   body.has-tabbar .toast-region { bottom: calc(var(--tabbar-h) + 16px + var(--safe-bottom)); }
   body.has-tabbar .batch-bar { bottom: calc(var(--tabbar-h) + 12px + var(--safe-bottom)); }
   body.keyboard-open .m-tabbar { display: none; }
-  .file-row .row-sub .state { font-size: 11px; }
+  .file-row .row-sub .state { font-size: 12px; }
 }
 @media (min-width: 768px) { .m-tabbar { display: none !important; } }
 @media (max-width: 767px) {

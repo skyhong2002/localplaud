@@ -83,6 +83,7 @@ def test_slow_processing_does_not_block_sync_or_duplicate_worker(monkeypatch):
     monkeypatch.setattr(cli, "process_automatic_pending", work)
     monkeypatch.setattr("localplaud.poller.poll.poll_once", sync)
     jobs.install()
+    assert scheduler.jobs["sync"][1]["misfire_grace_time"] == 60
     thread = threading.Thread(target=scheduler.jobs["worker"][0])
     thread.start()
     try:

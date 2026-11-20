@@ -1,0 +1,12 @@
+{
+  "id": "zh-tw-silence-gap",
+  "description": "One speaker, a long low-noise pause in the middle, then speech again. Checks text invented over non-speech. Fictional.",
+  "language": "zh",
+  "voices": {"A": "zh-TW-YunJheNeural"},
+  "turns": [
+    {"speaker": "A", "text": "我先錄一段備忘：明天上午十點要跟客戶確認合約細節，記得帶上次的報價單。"},
+    {"silence": 12.0, "noise_dbfs": -58},
+    {"speaker": "A", "text": "剛剛想到，還要提醒會計在月底前開發票，金額是 4萬8千元。"},
+    {"silence": 4.0, "noise_dbfs": -60}
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "items": [
+    {"id": "launch-date", "kind": "decision", "importance": "critical",
+     "match": [["12月8日"], ["12/8"], ["十二月八日"]], "evidence": "上線日期就確定改成十二月八日"},
+    {"id": "delay-reason", "kind": "fact", "importance": "major",
+     "match": [["金流", "審核"], ["SDK", "審核"]], "evidence": "金流 SDK 的審核還沒下來"},
+    {"id": "ios-review-days", "kind": "fact", "importance": "minor",
+     "match": [["3", "工作天"], ["三個工作天"]], "evidence": "大概要三個工作天"},
+    {"id": "android-fallback", "kind": "condition", "importance": "critical",
+     "match": [["Apple", "Android"], ["iOS", "Android", "審核"]], "evidence": "如果 Apple 審核沒有過"},
+    {"id": "onboarding-steps", "kind": "fact", "importance": "minor",
+     "match": [["五步", "三步"], ["5", "3", "步"]], "evidence": "從五步縮成三步"},
+    {"id": "no-dark-mode", "kind": "decision", "importance": "critical",
+     "match": [["不做", "深色模式"], ["不做", "dark mode"], ["暫緩", "dark mode"], ["暫緩", "深色模式"]],
+     "evidence": "這一版不做深色模式"},
+    {"id": "design-handoff", "kind": "action", "importance": "major",
+     "match": [["onboarding", "設計稿"]], "owner": ["Speaker 3", "設計組"], "deadline": ["週五"],
+     "evidence": "週五前把 onboarding 新版的設計稿交出來"},
+    {"id": "budget-cap", "kind": "number", "importance": "critical",
+     "match": [["300萬"], ["三百萬"], ["3,000,000"]], "evidence": "上限是三百萬"},
+    {"id": "budget-scope", "kind": "fact", "importance": "minor",
+     "match": [["廣告", "KOL"]], "evidence": "廣告跟 KOL 合作都算在裡面"},
+    {"id": "crash-target", "kind": "action", "importance": "critical",
+     "match": [["crash", "0.5%"], ["crash", "百分之零點五"], ["當機率", "0.5%"]],
+     "owner": ["志明", "Speaker 2"], "deadline": ["下週三"], "evidence": "降到百分之零點五以下"},
+    {"id": "faq-owner", "kind": "action", "importance": "major",
+     "match": [["FAQ"]], "owner": ["Speaker 1", "怡君"], "deadline": ["上線前一週", "上線前"],
+     "evidence": "FAQ 我來負責"},
+    {"id": "beta-open", "kind": "open_question", "importance": "major",
+     "match": [["beta", "下次"], ["beta", "未決定"], ["beta", "尚未決定"], ["beta", "待討論"]],
+     "evidence": "今天先不決定"}
+  ],
+  "contradictions": [
+    {"id": "dark-mode-reversed", "match": [["加入深色模式"], ["決定做", "dark mode"], ["這版", "支援深色模式"]],
+     "reason": "The meeting deferred dark mode; the note says it ships in this version."},
+    {"id": "beta-decided", "match": [["決定進行", "beta"], ["確定", "beta 測試"]],
+     "reason": "Beta testing was explicitly left undecided."},
+    {"id": "launch-date-old", "match": [["12月1日上線"], ["十二月一日上線"]],
+     "reason": "December 1 was the superseded date."}
+  ],
+  "must_not_contain": ["請依照範本", "Plaud", "{{", "[Speaker Name]"],
+  "allowed_numbers": []
+}

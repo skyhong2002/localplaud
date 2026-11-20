@@ -125,6 +125,22 @@ def test_summary_context_is_passed_to_final_prompt(monkeypatch):
     assert "short recording" in final
 
 
+def test_gateway_mind_map_reserves_the_outline_output_budget(monkeypatch):
+    from localplaud.config import Settings
+    from localplaud.worker.pipeline import _llm_projected_usage
+
+    llm = _FakeLlm()
+    monkeypatch.setattr("localplaud.worker.mindmap.build_llm", lambda _cfg: llm)
+    transcript = _transcript(Segment(text="recording", start=0.0, end=1.0))
+    settings = Settings(llm={"provider": "ai-gateway"})
+
+    generate_mind_map(transcript, settings)
+
+    assert llm.options[0]["max_tokens"] == 6000
+    projected = _llm_projected_usage(transcript, settings, stage="mind_map")
+    assert projected["output_tokens"] == llm.options[0]["max_tokens"]
+
+
 def test_hyphenated_llm_provider_reports_configured_model(monkeypatch):
     from localplaud.config import Settings
 

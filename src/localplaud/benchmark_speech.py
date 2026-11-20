@@ -25,6 +25,10 @@ from .config import Settings
 
 _LOCAL_ASR = {"mlx-whisper", "faster-whisper", "whispercpp", "qwen"}
 _LOCAL_ALIGN = _LOCAL_ASR | {"provider-word-timestamps", "whisperx"}
+# owned: the user's own recordings (the only evidence for production defaults).
+# public: openly licensed corpora. synthetic: generated speech for tooling checks.
+_SOURCES = {"owned", "public", "synthetic"}
+HYPOTHESIS_SCHEMA = "localplaud-speech-hypothesis/v1"
 
 
 def normalize(text: str) -> str:
@@ -61,9 +65,23 @@ def edit_counts(reference: list[str], hypothesis: list[str]) -> dict:
 
 
 def text_metrics(reference: str, hypothesis: str) -> dict:
+    from .zh import fold_script
+
     mixed = edit_counts(mixed_tokens(reference), mixed_tokens(hypothesis))
+    folded_reference, folded_hypothesis = fold_script(reference), fold_script(hypothesis)
+    # Whisper emits Simplified Mandarin and the correction stage converts it later,
+    # so script-folded CER isolates recognition errors from script choice. It is
+    # identical to strict CER when OpenCC is unavailable (script_folding=False).
+    folded = edit_counts(characters(folded_reference), characters(folded_hypothesis))
+    folded["script_folding"] = _script_folding_available()
     return {"cer": edit_counts(characters(reference), characters(hypothesis)),
-            "wer": dict(mixed), "mer": dict(mixed)}
+            "cer_script_folded": folded, "wer": dict(mixed), "mer": dict(mixed)}
+
+
+def _script_folding_available() -> bool:
+    from .zh import fold_script
+
+    return fold_script("这") != "这"
 
 
 def _interval(item: dict) -> tuple[float, float]:
@@ -386,8 +404,13 @@ def load_manifest(path: Path) -> list[dict]:
         raise ValueError("manifest requires version 1 and non-empty recordings")
     items, seen = [], set()
     for row in payload["recordings"]:
-        if row.get("owned") is not True:
+        source = row.get("source", "owned")
+        if source == "owned" and row.get("owned") is not True:
             raise ValueError("every recording must declare owned: true")
+        if source not in _SOURCES:
+            raise ValueError(f"recording source must be one of {sorted(_SOURCES)}")
+        if source == "public" and not str(row.get("license") or "").strip():
+            raise ValueError("public recordings must name their license")
         identity = str(row["id"])
         if identity in seen:
             raise ValueError("recording ids must be unique")
@@ -405,14 +428,17 @@ def load_manifest(path: Path) -> list[dict]:
         audio = path.parent / row["audio"]
         if not audio.is_file():
             raise ValueError(f"recording {identity} audio does not exist")
-        items.append({"id": identity, "audio": audio, "reference": reference})
+        items.append({"id": identity, "audio": audio, "reference": reference, "source": source})
     return items
 
 
 def aggregate(records: list[dict]) -> dict:
     good = [r for r in records if r.get("metrics")]
     result = {"completed": len(good), "failed": len(records) - len(good)}
-    for name in ("cer", "wer", "mer"):
+    for name in ("cer", "cer_script_folded", "wer", "mer"):
+        if not all(name in r["metrics"] for r in good):
+            result[name] = None  # Reports written before this metric existed.
+            continue
         counts = {key: sum(r["metrics"][name][key] for r in good) for key in ("errors", "reference_units", "substitutions", "insertions", "deletions", "hits")}
         counts["rate"] = counts["errors"] / counts["reference_units"] if counts["reference_units"] else (0.0 if not counts["errors"] else None)
         result[name] = counts
@@ -431,13 +457,28 @@ def aggregate(records: list[dict]) -> dict:
     return result
 
 
-def benchmark(manifest: Path, settings: Settings, alignment: dict, provenance: dict, *, executor=execute_isolated) -> dict:
+def save_hypothesis(directory: Path, identity: str, transcript: Transcript, provenance: dict) -> Path:
+    """Write one recording's predicted transcript for cross-host comparison (private)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", identity) + ".json"
+    path = directory / name
+    payload = {"schema": HYPOTHESIS_SCHEMA, "id": identity, "configuration": provenance,
+               "provider": transcript.provider, "model": transcript.model, "language": transcript.language,
+               "duration": transcript.duration, "segments": [asdict(s) for s in transcript.segments]}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=1, allow_nan=False) + "\n")
+    return path
+
+
+def benchmark(manifest: Path, settings: Settings, alignment: dict, provenance: dict, *, executor=execute_isolated,
+              hypotheses: Path | None = None) -> dict:
     validate_local(settings, alignment)
     records = []
     for item in load_manifest(manifest):
-        row = {"id": item["id"]}
+        row = {"id": item["id"], "source": item["source"]}
         try:
             transcript, duration, execution = executor(item["audio"], settings, alignment)
+            if hypotheses is not None:
+                save_hypothesis(hypotheses, item["id"], transcript, provenance)
             row |= {"metrics": score_recording(item["reference"], transcript), "audio_seconds": duration,
                     "execution": execution, "real_time_factor": execution["elapsed_seconds"] / duration if duration else None,
                     "actual_asr": {"provider": transcript.provider, "model": transcript.model},
@@ -447,8 +488,11 @@ def benchmark(manifest: Path, settings: Settings, alignment: dict, provenance: d
 
             row["error"] = sanitize_error(str(exc))
         records.append(row)
+    sources = sorted({r["source"] for r in records})
     return {"schema": "localplaud-speech-benchmark/v1", "configuration": provenance, "recordings": records,
-            "aggregate": aggregate(records), "metric_policy": {
+            "sources": sources, "aggregate": aggregate(records), "metric_policy": {
+                "evidence": "only owned recordings support production default changes; public and synthetic "
+                            "results validate tooling and coarse regressions",
                 "normalization": "NFKC, casefold, punctuation/spacing ignored; Chinese script differences preserved",
                 "wer_mer": "Mandarin characters plus English words; MER=mixed error rate; WER uses the same mixed tokens",
                 "memory": "CPU RSS process tree sampled at 100ms; excludes GPU VRAM",

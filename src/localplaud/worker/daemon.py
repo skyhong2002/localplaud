@@ -70,6 +70,7 @@ class DaemonJobs:
                 id="sync",
                 max_instances=1,
                 coalesce=True,
+                misfire_grace_time=60,
                 next_run_time=datetime.now(UTC),
             )
 

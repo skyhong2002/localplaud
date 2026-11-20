@@ -1,0 +1,28 @@
+{
+  "note": "Synthetic Taiwan Mandarin / English product meeting written for evaluation. Fictional people and numbers; not a real recording.",
+  "segments": [
+    {"start": 0, "end": 18, "speaker": "Speaker 1", "text": "好，那我們開始今天的週會，主要是討論新版 App 的上線時程。"},
+    {"start": 18, "end": 52, "speaker": "Speaker 2", "text": "先講結論，原本排十二月一日上線，但是金流 SDK 的審核還沒下來，我建議延到十二月八日。"},
+    {"start": 52, "end": 80, "speaker": "Speaker 1", "text": "大家有意見嗎？沒有的話，上線日期就確定改成十二月八日。"},
+    {"start": 80, "end": 140, "speaker": "Speaker 3", "text": "我補充一下，iOS 的 review 現在大概要三個工作天，所以送審要提早。"},
+    {"start": 140, "end": 210, "speaker": "Speaker 2", "text": "對，如果 Apple 審核沒有過，我們就先上 Android，iOS 晚一點再補。"},
+    {"start": 210, "end": 300, "speaker": "Speaker 1", "text": "這個 fallback 我同意。那 Android 的 release note 我來寫。"},
+    {"start": 300, "end": 380, "speaker": "Speaker 3", "text": "設計這邊，onboarding 的流程我們重新整理過，從五步縮成三步。"},
+    {"start": 380, "end": 420, "speaker": "Speaker 2", "text": "三步很好，工程上沒問題。"},
+    {"start": 420, "end": 480, "speaker": "Speaker 1", "text": "接下來是 dark mode。有使用者一直在敲碗。"},
+    {"start": 480, "end": 560, "speaker": "Speaker 2", "text": "老實說這版做 dark mode 會來不及，所有元件都要重新驗色。"},
+    {"start": 560, "end": 610, "speaker": "Speaker 1", "text": "好，那這一版不做深色模式，放到明年第一季再評估。"},
+    {"start": 610, "end": 680, "speaker": "Speaker 3", "text": "那我週五前把 onboarding 新版的設計稿交出來，給大家 review。"},
+    {"start": 680, "end": 750, "speaker": "Speaker 1", "text": "預算的部分，行銷那邊上限是三百萬，不能再加。"},
+    {"start": 750, "end": 820, "speaker": "Speaker 2", "text": "三百萬包含廣告投放嗎？"},
+    {"start": 820, "end": 870, "speaker": "Speaker 1", "text": "包含，廣告跟 KOL 合作都算在裡面。"},
+    {"start": 870, "end": 950, "speaker": "Speaker 2", "text": "品質方面，現在 crash rate 大概百分之一點二，太高了。"},
+    {"start": 950, "end": 1010, "speaker": "Speaker 1", "text": "志明，可以請你下週三前把 crash rate 降到百分之零點五以下嗎？"},
+    {"start": 1010, "end": 1040, "speaker": "Speaker 2", "text": "可以，我下週三前處理，主要是登入流程那兩個 crash。"},
+    {"start": 1040, "end": 1100, "speaker": "Speaker 3", "text": "客服那邊要不要先準備 FAQ？上線第一週一定很多人問付款的問題。"},
+    {"start": 1100, "end": 1150, "speaker": "Speaker 1", "text": "要，FAQ 我來負責，上線前一週給客服。"},
+    {"start": 1150, "end": 1210, "speaker": "Speaker 2", "text": "還有要不要先做 beta 測試？"},
+    {"start": 1210, "end": 1260, "speaker": "Speaker 1", "text": "beta 測試要看時程，今天先不決定，下次會議再討論。"},
+    {"start": 1260, "end": 1290, "speaker": "Speaker 1", "text": "好，那今天就先到這裡，謝謝大家。"}
+  ]
+}

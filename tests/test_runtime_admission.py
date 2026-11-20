@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from localplaud.db.models import (
     ExecutionProfile,
@@ -78,6 +78,36 @@ def test_competing_distinct_recordings_reserve_only_host_capacity(runtime):
     replacement = pipeline.claim_processing_work(rejected, require_audio=False)
     pipeline.release_processing_claim(rejected, replacement)
     pipeline.release_processing_claim(*admitted[1])
+
+
+def test_processing_lease_and_live_progress_tolerate_sqlite_writer(runtime):
+    from localplaud.db.session import get_engine
+
+    engine = get_engine()
+
+    def disable_busy_wait(connection, _record, _proxy):
+        connection.execute("PRAGMA busy_timeout=0")
+
+    event.listen(engine, "checkout", disable_busy_wait)
+    try:
+        with workspace_scope(1):
+            token = pipeline.claim_processing_work("one", require_audio=False)
+            with processing_claim("one", token):
+                pipeline._begin_stage("one", StageName.correct)
+                with engine.connect() as writer:
+                    writer.exec_driver_sql("BEGIN IMMEDIATE")
+                    pipeline._assert_processing_claim("one", token)
+                    with pytest.raises(pipeline.PipelineAlreadyRunning):
+                        pipeline._assert_processing_claim("one", "displaced")
+                    pipeline._update_stage_progress("one", StageName.correct, {"processed": 1})
+                    writer.rollback()
+                pipeline._update_stage_progress("one", StageName.correct, {"processed": 2})
+            with session_scope() as session:
+                run = session.scalar(select(StageRun).where(StageRun.stage == StageName.correct))
+                assert run.detail["progress"] == {"processed": 2}
+            pipeline.release_processing_claim("one", token)
+    finally:
+        event.remove(engine, "checkout", disable_busy_wait)
 
 
 def test_independent_processes_share_the_durable_limit(runtime):
