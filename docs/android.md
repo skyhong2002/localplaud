@@ -36,11 +36,13 @@ recordings to generate notes individually.
    official Plaud app.
 2. Sync the recorder in Plaud as usual and wait for the raw audio to upload.
    There is no need to select **Generate** in Plaud.
-3. Open **localplaud** (or your usual browser bookmark) and check the library or
-   system status. With official OAuth and automatic raw-audio processing enabled,
-   the server picks up the recording on a later poll and processes it without
-   keeping either phone app open. The shortcut itself does not upload, run a poll,
-   trigger generation, or pass credentials between apps.
+3. Open **localplaud** (or your usual browser bookmark). Use **Home → Check
+   Plaud now → Check now** to look for the upload immediately, or let the server
+   find it automatically. A successful manual check links to the newly found
+   recording or the library. "Queued for audio download" does not mean the
+   download or processing has finished. Both follow the server settings and
+   continue without keeping either phone app open. The launcher shortcut itself
+   does not upload, run a poll, trigger generation, or pass credentials between apps.
 
 The HTTPS debug APK installed on Pixel 7 showed **Sync Plaud** in the launcher
 menu. A follow-up confirmed both apps were installed but could not exercise the
@@ -52,8 +54,12 @@ endpoint was still not configured, so the APK is not a verified standalone TWA.
 
 Use a new, short recording with non-sensitive content. Confirm the recorder
 has uploaded it in the official Plaud app, without selecting **Generate**.
-Wait for the next server poll (`[poller].interval_seconds`, 300 seconds by
-default), then find the recording in **All files**. Processing can take longer
+On a newly connected workspace, complete the first catalog check **before**
+uploading the test recording. The first check registers an existing catalog
+without automatically downloading its history.
+Run **Check Plaud now**, or wait for the next server poll
+(`[poller].interval_seconds`, 300 seconds by default), then find the recording in
+**All files**. Processing can take longer
 than a poll interval; follow the recording's stage state or open **Settings →
 System health**. Once ready, check playback, the editable speaker-labelled
 transcript, local notes, and export. This check does not require Ask or AutoFlow.
@@ -127,6 +133,17 @@ final HTTPS origin serves it as `application/json` without a redirect or login:
   }
 ]
 ```
+
+From the checkout, verify the public health, login, and certificate association
+without signing in (use the APK certificate digest you read above):
+
+```bash
+./scripts/deploy/smoke-test.sh https://plaud.example.com "$APK_CERT_SHA256"
+```
+
+This takes only a public fingerprint, not the signing key. A pass confirms the
+origin serves the required statement; still launch the signed APK on the device
+and confirm standalone mode and account sign-in.
 
 Do not add a signing fingerprint to a deployment you don't administer. Until the browser verifies the
 association, it keeps browser controls visible. Navigation to other origins, such

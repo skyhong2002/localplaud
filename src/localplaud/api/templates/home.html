@@ -11,6 +11,7 @@
       <h1 class="page-title" id="home-recent-title">{{ t('Recent files') }}</h1>
       <div class="home-head-links">
         <button class="btn" type="button" data-home-new-recording data-dialog-open="add-sheet" aria-haspopup="dialog" aria-controls="add-sheet">{{ icon('plus', 'sm') }}{{ t('New recording') }}</button>
+        {% if plaud_connected %}<button class="btn sec" type="button" data-home-plaud-check data-open-import="plaud" aria-haspopup="dialog" aria-controls="import-backdrop">{{ icon('refresh', 'sm') }}{{ t('Check Plaud now') }}</button>{% endif %}
         <a class="view-all home-calendar-link" href="/calendar" data-home-calendar aria-label="{{ t('Open the recording calendar') }}">{{ icon('calendar', 'sm') }}<span class="home-calendar-label">{{ t('Calendar') }}</span></a>
         <a class="view-all" href="/">{{ t('View all') }}{{ icon('chevron-right') }}</a>
       </div>
@@ -25,7 +26,7 @@
       <p class="empty-title">{{ t('No recordings yet') }}</p>
       <p class="empty-body">{{ t('Record with your Plaud device as usual. New uploads appear here and are processed locally. You can also add an audio file.') }}</p>
       {% if plaud_connected %}
-      <div class="empty-actions"><button class="btn" id="home-add-audio" data-open-import="device" type="button">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button><button class="btn sec" id="home-import-plaud" data-open-import="plaud" type="button">{{ icon('cloud', 'sm') }}{{ t('Import from Plaud') }}</button></div>
+      <div class="empty-actions"><button class="btn" id="home-add-audio" data-open-import="device" type="button">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button></div>
       {% else %}
       <div class="empty-actions"><a class="btn" id="home-connect-plaud" href="/settings#plaud-account">{{ icon('cloud', 'sm') }}{{ t('Connect Plaud account') }}</a><button class="btn sec" id="home-add-audio" data-open-import="device" type="button">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button></div>
       {% endif %}

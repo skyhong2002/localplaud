@@ -1167,6 +1167,7 @@ body.progressive-failed .progressive-error { display: flex; }
 .home-recent-head, .home-head-links { flex-wrap: wrap; }
 .home-head-links { display: flex; align-items: center; gap: 4px 16px; }
 .home-head-links > * { min-height: 44px; }
+.plaud-check-link { margin-top: 8px; min-height: 44px; }
 .home-calendar-link { gap: 4px; }
 .library-scope-nav { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 8px 0 16px 40px; border-bottom: 1px solid var(--c-border); }
 .library-scope-nav a { display: inline-flex; min-height: 44px; align-items: center; padding: 0 4px; border-bottom: 2px solid transparent; color: var(--c-text-2); text-decoration: none; }

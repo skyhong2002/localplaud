@@ -30,9 +30,19 @@ tracked separately in issue #28.
 
 **Verification after the T3 restart (2026-11-21):** Pixel 7 Brave still showed
 the authenticated Home. A data-sharing consent dialog blocked the Library check;
-no option was selected. The desktop preview reached the sign-in page, and no
-authenticated desktop session was available to the desktop audit. This is not an
-end-to-end comparison against a populated Plaud 4.1 workspace.
+no option was selected. The desktop preview only reached the sign-in page.
+
+**Signed-in desktop spot check (2026-11-21, native Chrome):** Google sign-in
+succeeded. The personal workspace showed a populated Meeting notes list,
+Upcoming and calendar controls on Home, and My files, Recordings and Imports in
+Library. Opening an existing recording from Home kept the dated list beside
+the detail view. The detail view showed a Sources row with an Audio & Transcript
+card, duration and waveform preview, alongside separate Share and download-icon
+controls in the header. That recording was in the ready-to-generate state, so it
+did not verify the generated Notes experience. The source panel, playback and
+export menu options were not verified: after sign-in, Steam Big Picture was
+receiving pointer input instead of the Chrome window. No generation, sharing or
+download was triggered. The Web build number and full 4.1 parity remain unverified.
 
 **localplaud follow-up:** Home groups New recording, Calendar and View all above
 the recent list. All files, Recordings and Imports share search and organization

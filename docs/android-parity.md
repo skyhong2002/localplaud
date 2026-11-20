@@ -123,11 +123,33 @@ cloud Trash changes remain deliberately out of scope.
 
 ## Remaining device acceptance
 
+**Cloud handoff:** Home now offers **Check Plaud now** when the workspace has
+a Plaud connection. The phone Add sheet has the same cloud check. Both show the
+number queued for download separately from the number found, and link directly
+to the new recording or library without leaving the dialog over the destination.
+The check does not request Plaud Intelligence data. A regression test runs the
+catalog check, raw download, worker, playback response, transcript export and
+notes export against a raw-audio-only fake Plaud client and fake AI providers.
+Chromium exercised the check, error and empty states, recording link, audio and
+caption export with synthetic data at 360, 412 and 1280 CSS px.
+
 The USB-connected Pixel 7 ran the debug APK against a synthetic workspace in a
 Brave custom tab. This is not a verified standalone TWA. The production HTTPS
-association endpoint returned `401` during the deployment check. Still verify the
-public association response, standalone launch, launcher shortcuts, and production
-sign-in. Also outstanding are the full signed-in Plaud navigation comparison,
-executing multi-select operations on the device, and the end-to-end path from a
-new recorder upload through local processing, playback, and export. Ask Plaud
-and AutoFlow are not part of this Android acceptance.
+association endpoint returned `401` during the read-only smoke check; public
+health and the sign-in page responded successfully. The debug APK build, lint
+and unit tests passed, but the latest Pixel 7 run did not verify the new screen:
+the browser resumed an older custom tab and the debug activity had no matching
+intent for the attempted test URL. The previously installed APK was restored.
+
+Before closing production acceptance:
+
+1. Build and sign the APK for the final HTTPS workspace origin, publish the
+   matching certificate digest, and run the public Android smoke check.
+2. On Pixel 7, confirm standalone launch, sign-in, the **Sync Plaud** handoff,
+   and library actions with the signed APK.
+3. Upload one short test recording from a real recorder through the official app
+   without Generate. Confirm discovery, local processing, audible playback,
+   speaker/transcript editing, notes, and export in the production workspace.
+
+Ask Plaud and AutoFlow are not part of this Android acceptance. Direct recorder
+transfer remains tracked separately in issue #28.

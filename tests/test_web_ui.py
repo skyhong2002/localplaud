@@ -362,7 +362,7 @@ def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
     assert messages["Audio source"] == "音訊來源"
     assert messages["Could not upload audio"] == "無法上傳音訊"
     assert messages["Could not reach Plaud"] == "無法連線至 Plaud"
-    assert messages["No new recordings"] == "沒有新錄音"
+    assert messages["No new recordings uploaded to Plaud Cloud were found."] == "沒有找到新上傳到 Plaud Cloud 的錄音。"
     assert messages["unsupported audio/video format"] == "不支援的音訊或影片格式"
     assert messages["file exceeds 2 GB limit"] == "檔案超過 2 GB 上限"
 
@@ -429,6 +429,18 @@ def test_home_renders_recent_recordings_and_operational_cards(monkeypatch, tmp_p
     # Add audio (device upload and Plaud import) stays one click away.
     assert 'data-import-mode="plaud"' in response.text and 'data-import-mode="device"' in response.text
     assert 'href="/home"' in response.text and 'href="/"' in response.text
+
+
+def test_home_offers_cloud_check_only_when_plaud_connected(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    assert 'data-home-plaud-check' not in client.get('/home').text
+
+    monkeypatch.setattr('localplaud.plaud.connections.connection_status', lambda *_: {'ok': True})
+    response = client.get('/home')
+    assert response.status_code == 200
+    assert 'data-home-plaud-check data-open-import="plaud"' in response.text
+    assert response.text.count('data-plaud-check-link') == 2
+    assert 'Upload from your recorder in the Plaud app first.' in response.text
 
 
 def test_transcript_page_wraps_speaker_name_for_one_line_clamp(monkeypatch, tmp_path):

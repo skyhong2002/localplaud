@@ -204,11 +204,12 @@
         </div>
         <div class="plaud-import-card" id="plaud-import-panel" role="tabpanel" aria-labelledby="plaud-import-tab" hidden>
           <span class="import-icon">{{ icon('cloud') }}</span><strong>{{ t('Check Plaud for new recordings') }}</strong>
-          <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Looks for recordings uploaded to Plaud since the last check. New ones download and process automatically. localplaud also checks on its own every few minutes.') }}</p>
+          <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Upload from your recorder in the Plaud app first. This checks Plaud Cloud for new recordings. Eligible audio is queued for local download; processing follows your workspace settings.') }}</p>
           <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">{{ t('Check now') }}</button>
           <div id="plaud-import-progress" role="status" aria-live="polite" hidden style="width:100%;max-width:440px">
             <div class="sub" id="plaud-import-progress-label" data-progress-label style="margin-top:12px;text-align:center"></div>
           </div>
+          <a class="btn sec plaud-check-link" data-plaud-check-link data-no-partial hidden></a>
         </div>
       </div>
     </section>
@@ -322,6 +323,7 @@
       <div class="add-progress" data-add-progress hidden>
         <div class="import-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="add-progress-label"><span style="width:0%"></span></div>
         <p class="t-meta" id="add-progress-label" data-add-progress-label role="status" aria-live="polite"></p>
+        <a class="btn sec plaud-check-link" data-plaud-check-link data-no-partial hidden></a>
       </div>
     </div>
   </dialog>
