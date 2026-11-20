@@ -13,6 +13,8 @@ Registered once on the app's template environment (see ``register``):
 - ``initials`` turns a workspace name into a two-letter avatar.
 - ``recording_state`` maps a file summary dict to a compact processing-state
   descriptor (``None`` for a healthy, complete recording).
+- ``static_url(name)`` is ``/static/<name>?v=<content hash>``; that exact hash
+  makes the asset immutable in browser caches (see ``static_assets``).
 """
 
 from __future__ import annotations
@@ -21,6 +23,8 @@ import re
 
 from jinja2 import pass_context
 from markupsafe import Markup, escape
+
+from .static_assets import static_url
 
 _ICON_NAME = re.compile(r"^[a-z0-9-]{1,40}$")
 _SIZES = {"xs": "i-xs", "sm": "i-sm", "lg": "i-lg"}
@@ -159,7 +163,7 @@ def recording_state(item: dict) -> dict | None:
 
 
 def asset_version() -> str:
-    """Short content hash of the shared CSS/JS so browsers refetch after upgrades."""
+    """Short content hash of the shared CSS/JS; part of the service worker release."""
     import hashlib
     from pathlib import Path
 
@@ -174,7 +178,7 @@ def asset_version() -> str:
 
 
 def register(env) -> None:
-    env.globals["asset_version"] = asset_version()
+    env.globals["static_url"] = static_url
     env.globals["icon"] = icon
     env.filters["dur_long"] = dur_long
     env.filters["dur_short"] = dur_short

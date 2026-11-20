@@ -161,6 +161,14 @@ def _count_nodes(content_md: str) -> int:
     return 1 + sum(1 for line in content_md.splitlines() if line.lstrip().startswith("- "))
 
 
+def output_token_budgets(provider: str, chunk_chars: int) -> tuple[int, int, int]:
+    """Return the per-call budgets for extracting, reducing, and outlining."""
+    if provider == "ai-gateway":
+        # The gateway's Responses budget includes reasoning as well as visible text.
+        return 3000, 1800, 6000
+    return 1200, _reduction_max_tokens(chunk_chars), 1500
+
+
 def generate_mind_map(
     transcript: AsrTranscript, settings: Settings, summary_md: str | None = None
 ) -> dict:
@@ -174,6 +182,9 @@ def generate_mind_map(
     llm = build_llm(settings.llm)
     transcript_text = _render_transcript(transcript)
     chunk_chars = _note_chunk_chars(settings, llm)
+    map_tokens, reduce_tokens, outline_tokens = output_token_budgets(
+        settings.llm.provider, chunk_chars
+    )
     chunks = _chunk_text(transcript_text, chunk_chars)
     map_calls = 0
     reduce_calls = 0
@@ -189,18 +200,16 @@ def generate_mind_map(
                     _MAP_PROMPT.format(part=idx, total=len(chunks), text=chunk),
                     system=_SYSTEM,
                     temperature=0.1,
-                    max_tokens=1200,
+                    max_tokens=map_tokens,
                 )
             )
             map_calls += 1
-        reduction_max_tokens = _reduction_max_tokens(chunk_chars)
-
         def reduce(group: str, limit: int, previous: int | None) -> str:
             prompt = _REDUCE_PROMPT.format(text=group, limit=limit)
             if previous is not None:
                 prompt += _TIGHTEN_SUFFIX.format(previous=previous, limit=limit)
             return llm.complete(
-                prompt, system=_SYSTEM, temperature=0.1, max_tokens=reduction_max_tokens
+                prompt, system=_SYSTEM, temperature=0.1, max_tokens=reduce_tokens
             )
 
         notes, reduction = reduce_notes(notes, chunk_chars, reduce)
@@ -225,7 +234,7 @@ def generate_mind_map(
             _OUTLINE_PROMPT.format(context=context, text=source_text),
             system=_SYSTEM,
             temperature=0.2,
-            max_tokens=1500,
+            max_tokens=outline_tokens,
         )
         content = _normalize_outline(raw)
     else:
@@ -241,7 +250,7 @@ def generate_mind_map(
                 ),
                 system=_SYSTEM,
                 temperature=0.2,
-                max_tokens=1500,
+                max_tokens=outline_tokens,
             )
             outlines.append(_normalize_outline(raw))
         content = merge_outlines(outlines)

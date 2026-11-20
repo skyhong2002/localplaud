@@ -773,6 +773,26 @@ def test_no_egress_profile_disables_legacy_asr_fallback():
     assert settings.asr.fallback == ["openai"]
 
 
+def test_stage_vad_options_are_validated_for_local_asr():
+    settings = Settings(asr={"vad": {"enabled": False, "threshold": 0.5}})
+    snapshot = {
+        "stages": {
+            "transcribe": {
+                "connection": "mlx-whisper",
+                "model": "mlx-community/whisper-large-v3-turbo",
+                "options": {"vad": {"enabled": True, "threshold": 0.35}},
+            }
+        }
+    }
+
+    resolved = _settings_for_stage(settings, snapshot, "transcribe")
+
+    assert resolved.asr.vad.enabled is True
+    assert resolved.asr.vad.threshold == 0.35
+    assert settings.asr.vad.enabled is False
+    assert settings.asr.vad.threshold == 0.5
+
+
 def test_correct_dispatch_uses_durable_connection_identity_config_and_secret(monkeypatch):
     settings = Settings()
     original_api_key = settings.llm.openai.api_key

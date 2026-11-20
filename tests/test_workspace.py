@@ -8,6 +8,8 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from localplaud.api.static_assets import static_url
+
 STATIC = Path(__file__).parents[1] / "src/localplaud/api/static"
 
 
@@ -110,8 +112,10 @@ def test_workspace_assets_are_served_and_referenced(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
     page = c.get("/file/r1").text
-    version = re.search(r'/static/js/workspace\.js\?v=([0-9a-f]{12})"', page)
-    assert version and f"/static/css/recording.css?v={version.group(1)}" in page
+    # Each asset carries its own content hash, so editing one never reuses a stale copy.
+    for name in ("js/workspace.js", "js/note-editor.js", "css/recording.css"):
+        assert re.fullmatch(rf"/static/{re.escape(name)}\?v=[0-9a-f]{{12}}", static_url(name))
+        assert f'"{static_url(name)}"' in page
     assert c.get("/static/js/workspace.js").status_code == 200
     assert c.get("/static/css/recording.css").status_code == 200
     config = re.search(r'<script type="application/json" id="ws-config">(.*?)</script>', page, re.S)

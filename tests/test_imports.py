@@ -425,7 +425,7 @@ def test_cloud_note_assets_are_mirrored_served_and_idempotent(monkeypatch, tmp_p
     assert response.status_code == 200
     assert response.content == image
     assert response.headers["content-type"] == "image/png"
-    assert response.headers["cache-control"] == "private, max-age=86400"
+    assert response.headers["cache-control"] == "private, no-store"
     assert client.get(
         f"/api/files/{file_id}/note-assets/../../secret.png"
     ).status_code == 404

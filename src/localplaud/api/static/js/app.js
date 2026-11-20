@@ -586,6 +586,13 @@
     });
   });
 
+  /* ------------------------------------------------------- service worker */
+  // Caches only shared /static assets and shows an offline page when the
+  // server is unreachable; pages and recordings are never stored (see sw.js).
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(() => {}); });
+  }
+
   /* ------------------------------------------ view transitions, offline */
   try {
     if (window.htmx && document.startViewTransition && !reduceMotion()) window.htmx.config.globalViewTransitions = true;

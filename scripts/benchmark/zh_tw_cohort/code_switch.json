@@ -1,0 +1,14 @@
+{
+  "id": "zh-tw-code-switch",
+  "description": "Dense Mandarin/English code-switching in a research discussion. Fictional.",
+  "language": "zh",
+  "voices": {"A": "zh-TW-HsiaoYuNeural", "B": "zh-TW-YunJheNeural"},
+  "turns": [
+    {"speaker": "A", "text": "這次的 experiment 我們用 large-v3-turbo 當 baseline，再加上 forced alignment。"},
+    {"speaker": "B", "text": "alignment 用的是 wav2vec2 嗎？中文的 model 對台灣口音的表現怎麼樣？"},
+    {"speaker": "A", "text": "對，用 wav2vec2。整體的 character error rate 還可以，但是英文專有名詞像 Kubernetes 跟 PostgreSQL 常常拼錯。"},
+    {"speaker": "B", "text": "那 speaker diarization 呢？pyannote 有沒有把我們兩個分開？"},
+    {"speaker": "A", "text": "大部分有，不過講話很短的時候，像是嗯、對、OK 這種，偶爾會被分到錯的人。"},
+    {"speaker": "B", "text": "了解，下週 meeting 前把 confusion matrix 整理出來，我們再一起看。"}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "zh-tw-standup",
+  "description": "Two-speaker engineering stand-up in Taiwan Mandarin with English technical terms. Fictional.",
+  "language": "zh",
+  "voices": {"A": "zh-TW-HsiaoChenNeural", "B": "zh-TW-YunJheNeural"},
+  "turns": [
+    {"speaker": "A", "text": "早安，我們開始今天的 stand-up。昨天的 deploy 有沒有遇到問題？"},
+    {"speaker": "B", "text": "昨天下午有一個 API timeout，我查了一下，是資料庫連線池設定太小。"},
+    {"speaker": "A", "text": "那你改成多少？"},
+    {"speaker": "B", "text": "從 20 調到 50，今天早上看 dashboard 已經正常了。"},
+    {"speaker": "A", "text": "很好。那登入頁面的 bug 呢？QA 說 Safari 上還是會跳出空白畫面。"},
+    {"speaker": "B", "text": "那個我今天會處理，應該是 cookie 的 SameSite 設定，下午會發 pull request。"},
+    {"speaker": "A", "text": "好，記得請志明幫你 review。我這邊在寫下一季的規格文件，週五前會分享給大家。"},
+    {"speaker": "B", "text": "了解，沒有其他問題的話我先去忙了。"}
+  ]
+}

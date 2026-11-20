@@ -1,0 +1,16 @@
+{
+  "id": "zh-tw-product-review",
+  "description": "Three-speaker product review with dates, amounts, Taiwan place names and a short interruption. Fictional.",
+  "language": "zh",
+  "voices": {"A": "zh-TW-HsiaoChenNeural", "B": "zh-TW-YunJheNeural", "C": "zh-TW-HsiaoYuNeural"},
+  "turns": [
+    {"speaker": "A", "text": "今天主要討論新版 App 的上線時程，還有台北跟新竹兩場發表會的安排。"},
+    {"speaker": "B", "text": "上線日期我建議從 12月1日 延到 12月8日，因為金流 SDK 的審核還沒下來。"},
+    {"speaker": "C", "text": "我同意延後，不過行銷預算上限是 300萬，延期不能再追加。"},
+    {"speaker": "A", "text": "那發表會的場地呢？"},
+    {"speaker": "C", "text": "台北場在信義區，大概可以坐 150 人；新竹場在竹北，規模小一點。", "overlap": 0.4},
+    {"speaker": "B", "text": "新竹場我可以支援 demo，不過那週我要先飛一趟東京。"},
+    {"speaker": "A", "text": "好，那這一版先不做深色模式，dark mode 留到明年第一季再評估。"},
+    {"speaker": "C", "text": "OK，我會把結論整理成會議紀錄，今天晚上寄出。"}
+  ]
+}
