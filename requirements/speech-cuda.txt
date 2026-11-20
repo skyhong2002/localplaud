@@ -37,7 +37,7 @@ ml_dtypes==0.6.0
 msgpack==1.2.3
 msgspec==0.21.1
 multiprocess==0.70.19
-nemo-toolkit @ https://github.com/NVIDIA-NeMo/Speech/archive/cf724ac337d1ebc7d0dda1e23fb80916f52927a5.tar.gz#sha256=a095a36ce9bfd7901eb164552a4c579010473f01c0d9ccd54c9706185acc3c81
+nemo-toolkit @ https://github.com/NVIDIA-NeMo/Speech/archive/8bc3920bddc1222feca7f34361ee36d70cc033a6.tar.gz#sha256=ff288d5dc2da9be308b2215b6633d2b330679ded54ce2492e63689c8631609d2
 numba==0.67.0
 nv-one-logger-core==2.3.1
 nv-one-logger-pytorch-lightning-integration==2.3.1

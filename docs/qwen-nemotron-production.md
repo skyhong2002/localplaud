@@ -39,6 +39,9 @@ the existing CUDA runtime and installs the tested NeMo dependencies into
 Torch 2.8.0 CUDA 12.8, Transformers 5.15.1, and faster-whisper 1.2.1. Dependencies
 are recorded in `requirements/speech-cuda.txt`; NeMo is pinned to a source
 archive and hash because older published packages cannot load this checkpoint.
+The pinned NeMo revision includes its Lightning 2.6.6 compatibility fixes for
+OneLogger and Neptune. Hydra 1.3 requires ANTLR 4.9 and OmegaConf below 2.4;
+update those pins only alongside a compatible Hydra version.
 Keep the base image's immutable image ID with the deployment record.
 
 Apply `docker-compose.speech.yml` after the existing compose files. It selects
