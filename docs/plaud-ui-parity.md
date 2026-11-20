@@ -10,6 +10,46 @@ DevTools. All content below is placeholder. Private screenshots live only in
 `data/audits/plaud-ui-20261002/web/` (gitignored), named `d-*.png` (desktop) and
 `m-*.png` (phone).
 
+**Plaud 4.x follow-up:** This document remains the historical signed-in audit,
+not a verified Plaud 4.1 checklist. The newer public help describes adding
+recordings from Home. localplaud now exposes **Home → New recording** on desktop
+and mobile, reuses the foreground capture and import sheet, and distinguishes
+new browser captures from file uploads in the library source filter.
+
+**Signed-in Web spot check (2026-11-21, Brave on Pixel 7):** The shell had a
+global Add button and Home, Library, and Tools destinations. Home separated
+Upcoming from Meeting notes and offered a calendar connection. Library exposed
+My files with separate Recordings and Imports destinations in its folder tree.
+Both were navigable but exposed no recording rows in this session. Opening Add
+showed a recorder activation prompt; no device was activated and no calendar
+was connected. The exact Web build number, populated desktop layout, and
+Sources, Notes, and Export were not verified. This check does not validate the
+localplaud APK, prove full 4.1 parity, or change the scope of production
+acceptance. Ask Plaud and AutoFlow remain out of scope; direct recorder sync is
+tracked separately in issue #28.
+
+**Verification after the T3 restart (2026-11-21):** Pixel 7 Brave still showed
+the authenticated Home. A data-sharing consent dialog blocked the Library check;
+no option was selected. The desktop preview only reached the sign-in page.
+
+**Signed-in desktop spot check (2026-11-21, native Chrome):** Google sign-in
+succeeded. The personal workspace showed a populated Meeting notes list,
+Upcoming and calendar controls on Home, and My files, Recordings and Imports in
+Library. Opening an existing recording from Home kept the dated list beside
+the detail view. The detail view showed a Sources row with an Audio & Transcript
+card, duration and waveform preview, alongside separate Share and download-icon
+controls in the header. That recording was in the ready-to-generate state, so it
+did not verify the generated Notes experience. The source panel, playback and
+export menu options were not verified: after sign-in, Steam Big Picture was
+receiving pointer input instead of the Chrome window. No generation, sharing or
+download was triggered. The Web build number and full 4.1 parity remain unverified.
+
+**localplaud follow-up:** Home groups New recording, Calendar and View all above
+the recent list. All files, Recordings and Imports share search and organization
+filters; switching views clears source-specific filters, and returning from a
+recording restores the library context. Share & export opens the existing menu;
+it does not create a link or download anything by itself.
+
 Ground rules for builders:
 
 - Reproduce **layout, measurements, interaction model, and states**. Do not copy

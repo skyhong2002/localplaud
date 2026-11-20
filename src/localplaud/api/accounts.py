@@ -49,6 +49,7 @@ PUBLIC = {
     "/favicon.ico",
     "/robots.txt",
     "/sw.js",
+    "/.well-known/assetlinks.json",
 }
 # System administration shared by every workspace: only the owner may use it.
 # Everything else acts on the signed-in account's own workspace.

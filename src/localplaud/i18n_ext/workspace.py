@@ -19,6 +19,8 @@ ZH_HANT_TW = {
     "Apply to this paragraph": "僅套用到此段落",
     "Ask about this recording…": "詢問此錄音的內容…",
     "Audio player": "音訊播放器",
+    "Expand playback controls": "展開播放控制",
+    "Collapse playback controls": "收合播放控制",
     "Back to current": "回到目前播放位置",
     "Back to files": "返回檔案列表",
     "Categories": "分類",
@@ -108,4 +110,8 @@ ZH_HANT_TW = {
     "Show note outline": "顯示筆記大綱",
     "Hide note outline": "隱藏筆記大綱",
     "Open full transcript": "開啟完整逐字稿",
+    "Recently used names": "最近使用的名稱",
+    "No recent names yet. Names you assign to speakers appear here.": "尚無最近使用的名稱。你為講者指定的名稱會顯示在這裡。",
+    "Could not load recent names": "無法載入最近使用的名稱",
+    "Use name": "使用名稱",
 }

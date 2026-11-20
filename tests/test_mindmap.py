@@ -392,7 +392,7 @@ def _client(monkeypatch, tmp_path):
     return TestClient(app)
 
 
-def _seed_ui():
+def _seed_ui(*, with_mind_map=True):
     from localplaud.db.models import FileStatus, PlaudFile, Summary
     from localplaud.db.models import Transcript as TranscriptRow
     from localplaud.db.session import session_scope
@@ -422,14 +422,15 @@ def _seed_ui():
         s.add(
             Summary(file_id="r1", template="meeting", title="Sync", content_md="# Sync\n\n- point")
         )
-        s.add(
-            Summary(
-                file_id="r1",
-                template="mind_map",
-                title=None,
-                content_md="# Sync topics\n- agenda\n  - budget\n- decisions",
+        if with_mind_map:
+            s.add(
+                Summary(
+                    file_id="r1",
+                    template="mind_map",
+                    title=None,
+                    content_md="# Sync topics\n- agenda\n  - budget\n- decisions",
+                )
             )
-        )
 
 
 def test_detail_page_renders_mind_map_tab(monkeypatch, tmp_path):
@@ -441,6 +442,8 @@ def test_detail_page_renders_mind_map_tab(monkeypatch, tmp_path):
     assert "Mind map" in r_assets
     assert 'data-panel="mindmap"' in r_assets
     assert 'id="mindmap-src"' in r_assets and "Sync topics" in r_assets
+    assert 'href="/file/r1?tab=mindmap" data-mindmap-preview data-no-partial' in r.text
+    assert r.text.index('data-mindmap-preview') < r.text.index('id="mindmap-src"')
     assert 'id="mm-zoom"' in r_assets and 'id="mm-fit"' in r_assets
     assert 'id="mm-zoom" type="range" min="15" max="140"' in r_assets
     # Fit never enlarges beyond 100% and accounts for both axes; the tree is
@@ -464,6 +467,14 @@ def test_detail_page_renders_mind_map_tab(monkeypatch, tmp_path):
     # Panels are keyed by summary id; exactly one generated-note panel exists
     # (the meeting note) and the mind map never becomes a note tab.
     assert r.text.count('data-note-panel="sum-') == 1
+
+
+def test_notes_have_no_mind_map_preview_until_artifact_exists(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed_ui(with_mind_map=False)
+    response = client.get("/file/r1?tab=notes")
+    assert response.status_code == 200
+    assert 'href="/file/r1?tab=mindmap" data-mindmap-preview' not in response.text
 
 
 def test_export_markdown_includes_mind_map_before_transcript(monkeypatch, tmp_path):

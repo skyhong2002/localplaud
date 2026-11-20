@@ -25,8 +25,21 @@ app.add_typer(auth_app, name="auth")
 console = Console()
 
 
+def _show_version(value: bool) -> None:
+    if value:
+        from . import __version__
+
+        typer.echo(f"localplaud {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
-def _main(verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging.")):
+def _main(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Debug logging."),
+    show_version: bool = typer.Option(
+        False, "--version", is_eager=True, callback=_show_version, help="Show the version and exit."
+    ),
+):
     setup_logging("DEBUG" if verbose else None)
 
 

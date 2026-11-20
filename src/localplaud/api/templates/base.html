@@ -68,6 +68,7 @@
       return {open,close,setDirty:value=>{backdrop.dataset.dirty=String(Boolean(value));},setBusy:value=>{backdrop.dataset.busy=String(Boolean(value));if(value)backdrop.setAttribute('aria-busy','true');else backdrop.removeAttribute('aria-busy');}};
     };
   </script>
+  <script src="{{ static_url('js/capture-drafts.js') }}" defer></script>
   <script src="{{ static_url('js/app.js') }}" defer></script>
   {% block page_head %}{% endblock %}
 </head>
@@ -124,6 +125,7 @@
       <div class="sidebar-divider" style="margin:16px 0"></div>
       <nav aria-label="{{ t('Library') }}"><ul class="nav-list">
         <li><a class="nav-item {% if active=='recordings' and request.query_params.get('view','all')=='all' and not request.query_params.get('folder') and not request.query_params.get('tag') and not request.query_params.get('origin') and not request.query_params.get('scene') %}on{% endif %}" href="/">{{ icon('files') }}<span class="nav-label">{{ t('All files') }}</span><span class="nav-count">({{ sidebar.counts.all }})</span></a></li>
+        {% for scope, label, glyph in [('recordings', 'Recordings', 'mic'), ('imports', 'Imports', 'upload')] %}<li><a class="nav-item {% if active == 'recordings' and request.query_params.get('view') == scope %}on{% endif %}" href="/?view={{ scope }}">{{ icon(glyph) }}<span class="nav-label">{{ t(label) }}</span><span class="nav-count">({{ sidebar.counts[scope] }})</span></a></li>{% endfor %}
         <li><a class="nav-item {% if active=='recordings' and request.query_params.get('view')=='uncategorized' %}on{% endif %}" href="/?view=uncategorized" title="{{ t('Recordings without a folder or tag') }}">{{ icon('inbox') }}<span class="nav-label">{{ t('Unfiled') }}</span><span class="nav-count">({{ sidebar.counts.uncategorized }})</span></a></li>
         <li><a class="nav-item {% if active=='recordings' and request.query_params.get('view')=='trash' %}on{% endif %}" href="/?view=trash">{{ icon('trash') }}<span class="nav-label">{{ t('Trash') }}</span><span class="nav-count">({{ sidebar.counts.trash }})</span></a></li>
       </ul></nav>
@@ -202,11 +204,12 @@
         </div>
         <div class="plaud-import-card" id="plaud-import-panel" role="tabpanel" aria-labelledby="plaud-import-tab" hidden>
           <span class="import-icon">{{ icon('cloud') }}</span><strong>{{ t('Check Plaud for new recordings') }}</strong>
-          <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Looks for recordings uploaded to Plaud since the last check. New ones download and process automatically. localplaud also checks on its own every few minutes.') }}</p>
+          <p class="sub" style="max-width:440px;margin:8px 0 0">{{ t('Upload from your recorder in the Plaud app first. This checks Plaud Cloud for new recordings. Eligible audio is queued for local download; processing follows your workspace settings.') }}</p>
           <button class="btn" id="start-plaud-import" type="button" style="margin-top:17px">{{ t('Check now') }}</button>
           <div id="plaud-import-progress" role="status" aria-live="polite" hidden style="width:100%;max-width:440px">
             <div class="sub" id="plaud-import-progress-label" data-progress-label style="margin-top:12px;text-align:center"></div>
           </div>
+          <a class="btn sec plaud-check-link" data-plaud-check-link data-no-partial hidden></a>
         </div>
       </div>
     </section>
@@ -243,6 +246,7 @@
   <div class="menu row-menu" id="row-menu" role="menu" aria-label="{{ t('Recording actions') }}" hidden>
     <a class="menu-item" role="menuitem" href="#" data-row-action="open">{{ icon('external-link') }}{{ t('Open recording') }}</a>
     <a class="menu-item" role="menuitem" href="#" data-row-action="notes">{{ icon('note') }}{{ t('Notes') }}</a>
+    <a class="menu-item" role="menuitem" href="#" data-row-action="generate" hidden>{{ icon('sparkles') }}{{ t('Generate notes') }}</a>
     <div class="menu-sep"></div>
     <button class="menu-item" role="menuitem" type="button" data-row-action="rename">{{ icon('pencil') }}{{ t('Rename') }}</button>
     <button class="menu-item" role="menuitem" type="button" data-row-action="move">{{ icon('folder-input') }}{{ t('Move to folder') }}</button>
@@ -274,10 +278,31 @@
       <div class="dialog-foot"><button class="btn-ghost btn" type="button" data-folder-create>{{ icon('folder-plus', 'sm') }}{{ t('New folder') }}</button><span style="flex:1"></span><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn" type="submit">{{ t('Move') }}</button></div>
     </form>
   </dialog>
-  <dialog class="sheet" id="add-sheet" aria-labelledby="add-sheet-title">
+  <dialog class="sheet" id="add-sheet" aria-labelledby="add-sheet-title"{% if capture_draft_scope %} data-capture-draft-scope="{{ capture_draft_scope }}"{% endif %}>
     <div class="sheet-grabber" aria-hidden="true"></div>
     <div class="dialog-head"><h2 class="dialog-title" id="add-sheet-title">{{ t('Add audio') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
     <div class="dialog-body add-sheet-body">
+      <button class="add-option" type="button" data-add-record>
+        <span class="add-option-icon">{{ icon('mic') }}</span>
+        <span class="add-option-text"><strong>{{ t('Record audio') }}</strong><small>{{ t('Record on this device and review before uploading') }}</small></span>
+      </button>
+      <div class="add-capture" data-add-capture hidden>
+        <div class="add-capture-heading"><strong data-capture-state role="status"></strong><time data-capture-duration>0:00</time></div>
+        <audio controls preload="metadata" data-capture-preview hidden aria-label="{{ t('Recording preview') }}"></audio>
+        <div class="add-capture-actions">
+          <button class="btn sec" type="button" data-capture-pause hidden>{{ t('Pause recording') }}</button>
+          <button class="btn sec" type="button" data-capture-stop>{{ t('Stop recording') }}</button>
+          <button class="btn sec" type="button" data-capture-discard hidden>{{ t('Discard recording') }}</button>
+          <button class="btn sec" type="button" data-capture-keep hidden>{{ t('Keep draft on this device') }}</button>
+          <button class="btn" type="button" data-capture-save hidden>{{ t('Save recording') }}</button>
+        </div>
+        <p class="t-meta add-capture-note" data-capture-keep-note hidden>{{ t('Only stopped recordings can be kept. The draft expires after 7 days and is cleared the next time localplaud checks browser storage. It is not uploaded until you tap Save and is not encrypted by localplaud. Recordings interrupted before you tap Stop cannot be recovered.') }}</p>
+      </div>
+      <section class="add-drafts" data-capture-drafts aria-labelledby="add-drafts-title" hidden>
+        <h3 class="add-drafts-title" id="add-drafts-title">{{ t('Drafts kept on this device') }}</h3>
+        <p class="t-meta">{{ t('Not uploaded yet. Listed only in this account and workspace. Anyone with access to this browser profile may be able to read the stored audio.') }}</p>
+        <ul class="add-drafts-list" data-capture-drafts-list></ul>
+      </section>
       <label class="add-option" data-add-upload>
         <span class="add-option-icon">{{ icon('upload') }}</span>
         <span class="add-option-text"><strong>{{ t('Import audio') }}</strong><small>{{ t('MP3, MP4, M4A, WAV, OGG, Opus, WebM, FLAC or AAC · up to 2 GB') }}</small></span>
@@ -285,11 +310,12 @@
       </label>
       <button class="add-option" type="button" data-add-sync>
         <span class="add-option-icon">{{ icon('refresh') }}</span>
-        <span class="add-option-text"><strong>{{ t('Check Plaud now') }}</strong><small>{{ t('New uploads download and process automatically') }}</small></span>
+        <span class="add-option-text"><strong>{{ t('Check Plaud now') }}</strong><small>{{ t('Check for recordings already uploaded to Plaud Cloud') }}</small></span>
       </button>
       <div class="add-progress" data-add-progress hidden>
         <div class="import-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="add-progress-label"><span style="width:0%"></span></div>
         <p class="t-meta" id="add-progress-label" data-add-progress-label role="status" aria-live="polite"></p>
+        <a class="btn sec plaud-check-link" data-plaud-check-link data-no-partial hidden></a>
       </div>
     </div>
   </dialog>

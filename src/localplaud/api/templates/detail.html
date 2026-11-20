@@ -22,7 +22,7 @@
     <div class="recording-breadcrumb">
       <a class="ws-back" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true" aria-label="{{ t('Back to files') }}" title="{{ t('Back to files') }}">{{ icon('chevron-left') }}</a>
       <button class="collapse-toggle" type="button" data-collapse-toggle="list" aria-label="{{ t('Hide file list') }}" title="{{ t('Hide file list') }}" aria-controls="recording-file-list" aria-expanded="true">{{ icon('list-collapse') }}</button>
-      <a class="recording-crumb-link" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ icon('folder') }}{{ t('All files') }}</a>
+      <a class="recording-crumb-link" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ icon('folder') }}{{ t(filelist_context.title) }}</a>
       <span class="recording-crumb-separator" aria-hidden="true">›</span>
       <span class="ws-crumb-title" aria-hidden="true">{{ f.filename }}</span>
     </div>
@@ -31,7 +31,7 @@
       <button type="button" data-m-switch="notes" aria-pressed="{{ 'false' if active_tab == 'transcript' else 'true' }}">{{ t('Notes') }}</button>
     </div>
     <div class="recording-actions">
-      <button class="icon-action" id="open-share" type="button" data-recording-share aria-label="{{ t('Share') }}" title="{{ t('Share') }}">{{ icon('share') }}<span class="action-label">{{ t('Share') }}</span></button>
+      <button class="icon-action" id="open-share" type="button" data-recording-share aria-label="{{ t('Share & export') }}" title="{{ t('Share & export') }}">{{ icon('share') }}<span class="action-label">{{ t('Share & export') }}</span></button>
       {% if f.transcript %}{% set has_editable_notes = not f.is_trash and ((notes | selectattr('source', 'equalto', 'local') | list) or f.user_notes) %}
       <details class="transcript-tool ws-find"><summary class="icon-action icon-only" id="open-find" aria-label="{{ t('Find & replace') }}" title="{{ t('Find & replace') }} (Ctrl+F)">{{ icon('search') }}</summary><div class="transcript-popover search-popover" id="find-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}">{{ icon('x') }}</button>
         <div style="display:flex;gap:7px;align-items:center"><input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript and notes') }}" aria-label="{{ t('Find in transcript and notes') }}"><button class="icon-action icon-only" id="find-previous" type="button" aria-label="{{ t('Previous') }}">↑</button><button class="icon-action icon-only" id="find-next" type="button" aria-label="{{ t('Next') }}">↓</button></div><span id="find-count" class="sub" style="font-size:11px">0 {{ t('results') }}</span>
@@ -110,8 +110,10 @@
         <div class="ws-m-player">
           <button type="button" class="ws-m-play" data-m-play aria-label="{{ t('Play') }}">{{ icon('play') }}</button>
           <span class="ws-m-time" data-m-time>{{ (f.duration_ms | dur) if f.duration_ms else '0:00' }}</span>
+          <button type="button" class="ws-m-expand ws-m-player-toggle" data-inline-player-toggle aria-expanded="false" aria-controls="ws-inline-player" aria-label="{{ t('Expand playback controls') }}">{{ icon('chevron-down') }}</button>
           <button type="button" class="ws-m-expand" data-transcript-expand aria-label="{{ t('Open full transcript') }}" title="{{ t('Open full transcript') }}">{{ icon('list-collapse') }}</button>
         </div>
+        <section id="ws-inline-player" class="ws-player" aria-label="{{ t('Audio player') }}" hidden></section>
         {% endif %}
       </div>
       {% if f.has_local_transcript %}
@@ -354,6 +356,12 @@
         {% endif %}
       </div>
       {% endif %}
+      {% if mindmaps %}
+      <a class="ws-m-mindmap-preview" href="/file/{{ f.id }}?tab=mindmap" data-mindmap-preview data-no-partial aria-labelledby="mindmap-preview-title">
+        <span class="ws-m-mindmap-preview-head"><strong id="mindmap-preview-title">{{ t('Mind map') }}</strong>{{ icon('chevron-right') }}</span>
+        <span class="ws-m-mindmap-preview-tree" data-mindmap-preview-tree aria-hidden="true" hidden></span>
+      </a>
+      {% endif %}
     </div>
 
     <div class="tabpanel" id="recording-panel-mindmap" role="tabpanel" aria-labelledby="recording-tab-mindmap" data-panel="mindmap" {% if active_tab != 'mindmap' %}hidden{% endif %}>
@@ -576,7 +584,11 @@
   </section>
 </div>
 {% endif %}
-<dialog class="dialog sheet-on-phone ws-note-dialog" id="note-generate-backdrop" aria-labelledby="note-generate-title">
+{# ?generate=notes (row menu / phone swipe) may open this form only when the
+   recording has a canonical local transcript, is not in Trash, and notes are
+   not already generating. Opening it never queues work; the user confirms. #}
+{% set note_generate_eligible = f.has_local_transcript and not f.is_trash and not (f.notes_state and f.notes_state.status in ('pending', 'running') and f.status == 'processing') %}
+<dialog class="dialog sheet-on-phone ws-note-dialog" id="note-generate-backdrop" aria-labelledby="note-generate-title" data-note-generate-eligible="{{ '1' if note_generate_eligible else '0' }}">
   <div class="sheet-grabber" aria-hidden="true"></div>
   <div class="dialog-head"><h2 class="dialog-title" id="note-generate-title">{{ t('Generate notes') }}</h2><button class="icon-btn" id="note-generate-close" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
   <div class="dialog-body ws-note-dialog-body">
@@ -938,11 +950,28 @@
   const storedAskDockOpen=()=>{try{return localStorage.getItem(askDockStorageKey)==='open';}catch(_error){return false;}};
   const setAskDock=(open,{remember=true,focus=false}={})=>{if(!askDock||!askDockMedia.matches)return false;askDockLayout.classList.toggle('ask-dock-open',open);askDock.hidden=!open;askDockButton.setAttribute('aria-expanded',String(open));if(remember){try{localStorage.setItem(askDockStorageKey,open?'open':'closed');}catch(_error){}}if(open&&focus)requestAnimationFrame(()=>document.getElementById('ask-q')?.focus());return open;};
   const workspacePathForTab=(raw,name)=>{const url=new URL(raw,location.origin);url.searchParams.set('tab',name);url.searchParams.delete('note');url.searchParams.delete('note_id');return `${url.pathname}${url.search}${url.hash}`;};
-  const pushWorkspaceUrl=(url,state)=>{const next=`${url.pathname}${url.search}${url.hash}`,current=`${location.pathname}${location.search}${location.hash}`;if(next!==current)history.pushState(state,'',url);};
+  const tabWorkspace=globalThis.crypto?.randomUUID?.()||Math.random().toString(36);
+  recordingShell.dataset.tabWorkspace=tabWorkspace;
+  const pushWorkspaceUrl=(url,state)=>{
+    const next=`${url.pathname}${url.search}${url.hash}`,current=`${location.pathname}${location.search}${location.hash}`;
+    if(next===current)return;
+    history.replaceState({...history.state,localplaudTabWorkspace:tabWorkspace},'');
+    history.pushState({...state,localplaudTabWorkspace:tabWorkspace},'',url);
+  };
   const syncFilelistTab=name=>document.querySelectorAll('#recording-file-list [data-recording-id]').forEach(link=>{for(const attribute of ['href','hx-get']){const raw=link.getAttribute(attribute);if(raw)link.setAttribute(attribute,workspacePathForTab(raw,name));}});
   const activePanelName=()=>document.querySelector('.tabs>button.on')?.dataset.panel||'transcript';
   const activatePanel=(requested,push=false)=>{if(requested==='ask'&&!askDock)requested='notes';const previous=activePanelName();if(requested==='ask'&&previous!=='ask')askDockLayout.dataset.previousPanel=previous;const dockRequest=requested==='ask'&&askDockMedia.matches,name=dockRequest?'transcript':requested,button=(name==='notes'&&document.querySelector('.tabs>button[data-note-target].on'))||document.querySelector(`.tabs>button[data-panel="${name}"]`);if(!button)return;recordingShell.dataset.activePanel=name;if(dockRequest)setAskDock(true);document.querySelectorAll('.tabs>button').forEach(item=>{const active=item===button;item.classList.toggle('on',active);item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;});panels.forEach(panel=>{if(panel===askDock&&askDockMedia.matches)panel.hidden=!askDockLayout.classList.contains('ask-dock-open');else panel.hidden=panel.dataset.panel!==name;});syncFilelistTab(name);if(push){const url=new URL(location.href);url.searchParams.set('tab',requested);if(requested!=='notes'){url.searchParams.delete('note');url.searchParams.delete('note_id');}pushWorkspaceUrl(url,{localplaudTab:requested});}};
   document.querySelectorAll('.tabs>button').forEach(button=>button.onclick=()=>{if(!button.dataset.noteTarget)activatePanel(button.dataset.panel,true);});
+  const mindmapPreview = recordingShell.querySelector('[data-mindmap-preview]');
+  if (mindmapPreview) {
+    mindmapPreview.href = workspacePathForTab(location.href, 'mindmap');
+    mindmapPreview.addEventListener('click', event => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      activatePanel('mindmap', true);
+      document.getElementById('mindmap-viewport')?.focus();
+    }, {signal:cleanupController.signal});
+  }
   askDockButton?.addEventListener('click',()=>{if(askDockMedia.matches){setAskDock(true,{focus:true});syncFilelistTab(activePanelName());}else activatePanel('ask',true);});
   document.getElementById('close-ask-dock')?.addEventListener('click',()=>{if(!askDockMedia.matches){const back=askDockLayout.dataset.previousPanel||'notes';activatePanel(back,true);document.querySelector(`.tabs>button[data-panel="${back}"]`)?.focus();return;}setAskDock(false);const url=new URL(location.href);if(url.searchParams.get('tab')==='ask'){url.searchParams.delete('tab');history.replaceState({localplaudTab:'transcript'},'',url);}syncFilelistTab(document.querySelector('.tabs>button.on')?.dataset.panel||'transcript');askDockButton.focus();});
   document.addEventListener('htmx:configRequest',event=>{if(event.detail.elt?.closest?.('#recording-file-list [data-recording-id]'))event.detail.path=workspacePathForTab(event.detail.path,activePanelName());},{signal:cleanupController.signal});
@@ -956,6 +985,11 @@
   syncWorkspaceLocation();
   askDockMedia.addEventListener('change',()=>{const requested=new URLSearchParams(location.search).get('tab')||'notes';if(askDockMedia.matches)setAskDock(requested==='ask'||storedAskDockOpen(),{remember:false});else{askDockLayout.classList.remove('ask-dock-open');askDockButton?.setAttribute('aria-expanded','false');}activatePanel(['transcript','notes','mindmap','ask'].includes(requested)?requested:'notes');},{signal:cleanupController.signal});
   window.addEventListener('popstate',syncWorkspaceLocation,{signal:cleanupController.signal});
+  recordingShell.addEventListener('lp:recording-tab-history',()=>{
+    const fromMindmap=recordingShell.dataset.activePanel==='mindmap';
+    syncWorkspaceLocation();
+    if(fromMindmap && recordingShell.dataset.activePanel==='notes' && mindmapPreview?.getClientRects().length)mindmapPreview.focus();
+  },{signal:cleanupController.signal});
   const selectedNoteId={{ f.selected_note_id|tojson }};
   if(selectedNoteId){activatePanel('notes');activateNoteTarget(`saved-${selectedNoteId}`);}
   const requestedNoteTarget=new URLSearchParams(location.search).get('note');
@@ -973,6 +1007,11 @@
   document.querySelectorAll('[data-workspace-note-form]').forEach(form=>form.addEventListener('submit',async event=>{event.preventDefault();const id=form.dataset.workspaceNoteForm,data=new FormData(form),status=form.querySelector('[data-note-status]');form.querySelector('[data-note-conflict]')?.remove();status.textContent={{ t('Saving…')|tojson }};try{const response=await fetch(`/api/notes/${id}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({title:data.get('title'),content_md:data.get('content_md'),base_version:Number(data.get('base_version'))}),signal:cleanupController.signal}),result=await response.json();if(response.ok){form.dataset.originalTitle=String(data.get('title'));form.dataset.originalContent=String(data.get('content_md'));location.href=`/file/{{ f.id }}?tab=notes&note_id=${id}`;return;}if(response.status===409&&result.detail?.code==='note_changed'){showNoteConflict(form,status);return;}status.textContent=typeof result.detail==='string'?result.detail:{{ t('Could not save')|tojson }};}catch(error){if(error.name!=='AbortError')status.textContent=error.message||{{ t('Could not save')|tojson }};}}));
   window.addEventListener('beforeunload',event=>{if(dirtyWorkspaceNote()){event.preventDefault();event.returnValue='';}},{signal:cleanupController.signal});
   document.addEventListener('click',event=>{if(!event.target.closest('a[href],[data-panel],[data-note-target]'))return;const dirty=dirtyWorkspaceNote();if(dirty&&!dirty.contains(event.target)&&!confirm(tr('Discard unsaved note changes?'))){event.preventDefault();event.stopImmediatePropagation();}},{capture:true,signal:cleanupController.signal});
+  // Row menu / phone swipe "Generate notes": open the existing confirmation
+  // form once, then drop the one-shot parameter so Back/refresh never reopen it.
+  // workspace.js (deferred) binds the opener; after a partial swap it can run
+  // after this inline script, so wait for its fresh teardown hook first.
+  if(new URLSearchParams(location.search).get('generate')==='notes'){const cleanUrl=new URL(location.href);cleanUrl.searchParams.delete('generate');history.replaceState(history.state,'',cleanUrl);const noteDialog=document.getElementById('note-generate-backdrop');if(noteDialog?.dataset.noteGenerateEligible==='1'){const openForm=()=>{if(cleanupController.signal.aborted||noteDialog.open)return;const openers=[...document.querySelectorAll('[data-open-note-dialog]:not([disabled]),[data-open-note-generation]')];(openers.find(item=>item.offsetParent)||openers[0])?.click();};const priorWorkspace=window.localplaudWorkspaceTeardown,deadline=Date.now()+5000;const whenWorkspaceReady=()=>{if(cleanupController.signal.aborted)return;const ready=window.localplaudWorkspaceTeardown&&window.localplaudWorkspaceTeardown!==priorWorkspace;if(ready||Date.now()>deadline)requestAnimationFrame(openForm);else setTimeout(whenWorkspaceReady,30);};whenWorkspaceReady();}}
   const editNoteId=new URLSearchParams(location.search).get('edit_note');if(editNoteId){requestAnimationFrame(()=>document.querySelector(`[data-note-edit="${CSS.escape(editNoteId)}"]`)?.click());const cleanUrl=new URL(location.href);cleanUrl.searchParams.delete('edit_note');history.replaceState(history.state,'',cleanUrl);}
   // speaker colors — segments first (keeps first-appearance ordering), then
   // the server-rendered legend swatches share the same mapping

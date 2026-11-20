@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ t('Calendar') }} — localplaud{% endblock %}
+{% block mobile_title %}{{ t('Calendar') }}{% endblock %}
+{% block page_head %}<link rel="stylesheet" href="{{ static_url('css/calendar.css') }}">{% endblock %}
+{% block body %}
+<div class="library-page calendar-page"><div class="page-frame">
+  <nav class="cal-crumb t-meta" aria-label="{{ t('Breadcrumb') }}"><a href="/home">{{ t('Home') }}</a> {{ icon('chevron-right', 'xs') }} <span aria-current="page">{{ t('Calendar') }}</span></nav>
+  <section class="cal" aria-labelledby="cal-title" data-calendar-month="{{ cal.key }}">
+    <div class="cal-head">
+      <h1 class="page-title" id="cal-title" aria-live="polite">{{ cal.title }}</h1>
+      <div class="cal-nav" role="group" aria-label="{{ t('Change month') }}">
+        {% if cal.prev %}<a class="icon-btn" href="/calendar?month={{ cal.prev }}" rel="prev" data-cal-prev aria-label="{{ t('Previous month') }}">{{ icon('chevron-left') }}</a>{% else %}<span class="icon-btn" aria-disabled="true" aria-label="{{ t('Previous month') }}">{{ icon('chevron-left') }}</span>{% endif %}
+        {% if cal.is_current %}<span class="btn sec cal-today" aria-disabled="true">{{ t('This month') }}</span>{% else %}<a class="btn sec cal-today" href="/calendar?month={{ cal.current }}" data-cal-today>{{ t('Today') }}</a>{% endif %}
+        {% if cal.next %}<a class="icon-btn" href="/calendar?month={{ cal.next }}" rel="next" data-cal-next aria-label="{{ t('Next month') }}">{{ icon('chevron-right') }}</a>{% else %}<span class="icon-btn" aria-disabled="true" aria-label="{{ t('Next month') }}">{{ icon('chevron-right') }}</span>{% endif %}
+      </div>
+    </div>
+    <p class="cal-summary t-meta" data-cal-total="{{ cal.total }}">
+      {% if cal.total %}{{ cal.total }} {{ t('recordings') }} · {{ cal.active_days }} {{ t('days with recordings') }} · <a href="/?date_from={{ cal.month_from }}&amp;date_to={{ cal.month_to }}">{{ t('Open this month in Files') }}</a>
+      {% else %}{{ t('No recordings this month.') }}{% endif %}
+      <span class="cal-tz">{{ icon('clock', 'xs') }} {{ cal.timezone }}</span>
+    </p>
+    {% if cal.invalid_request %}<p class="cal-note t-meta" role="status">{{ t('That month is not available, so the current month is shown.') }}</p>{% endif %}
+    <table class="cal-grid">
+      <caption class="sr-only">{{ cal.title }} · {{ t('Choose a day to open its recordings in Files.') }}</caption>
+      <thead><tr>{% for short, full in cal.weekdays %}<th scope="col" abbr="{{ t(full) }}"><span aria-hidden="true">{{ t(short) }}</span><span class="sr-only">{{ t(full) }}</span></th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for week in cal.weeks %}<tr>
+          {% for d in week %}<td class="cal-cell{% if not d.in_month %} is-outside{% endif %}{% if d.count %} has-rec{% endif %}{% if d.is_today %} is-today{% endif %}" data-date="{{ d.date }}"{% if d.in_month %} data-count="{{ d.count }}"{% endif %}>
+            {%- if not d.in_month -%}<span class="cal-day" aria-hidden="true">{{ d.day }}</span>
+            {%- elif d.href -%}<a class="cal-day" href="{{ d.href }}" aria-label="{{ d.label }}"{% if d.is_today %} aria-current="date"{% endif %}><span class="cal-num">{{ d.day }}</span><span class="cal-count" aria-hidden="true">{{ d.count }}</span></a>
+            {%- else -%}<span class="cal-day"{% if d.is_today %} aria-current="date"{% endif %}><span class="cal-num" aria-hidden="true">{{ d.day }}</span><span class="sr-only">{{ d.label }}</span></span>
+            {%- endif -%}
+          </td>{% endfor %}
+        </tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div></div>
+{% endblock %}

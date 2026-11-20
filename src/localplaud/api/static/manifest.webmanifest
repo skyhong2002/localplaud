@@ -17,6 +17,7 @@
   ],
   "shortcuts": [
     {"name": "All files", "url": "/", "icons": [{"src": "/static/icons/icon-192.png", "sizes": "192x192"}]},
-    {"name": "Ask", "url": "/ask", "icons": [{"src": "/static/icons/icon-192.png", "sizes": "192x192"}]}
+    {"name": "Search", "url": "/search", "icons": [{"src": "/static/icons/icon-192.png", "sizes": "192x192"}]},
+    {"name": "Explore", "url": "/explore", "icons": [{"src": "/static/icons/icon-192.png", "sizes": "192x192"}]}
   ]
 }

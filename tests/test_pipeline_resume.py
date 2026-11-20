@@ -269,6 +269,89 @@ def test_pipeline_resumes_and_forces(monkeypatch, tmp_path):
         assert stages[StageName.index].attempts == 2
 
 
+def test_new_plaud_upload_reaches_playable_export_without_cloud_intelligence(monkeypatch, tmp_path):
+    import wave
+    from contextlib import contextmanager
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from localplaud.api.app import app
+    from localplaud.cli import process_automatic_pending
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import init_db, session_scope
+    from localplaud.db.tenancy import DEFAULT_WORKSPACE_ID, workspace_scope
+    from localplaud.plaud.models import PlaudFileDTO
+    from localplaud.poller.poll import poll_once
+
+    _reset_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "recordings"))
+    monkeypatch.setenv("LOCALPLAUD_POLLER__AUTO_DOWNLOAD", "true")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__ARTIFACT_MODE", "independent")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__AUTO_PROCESS_UNTRANSCRIBED_ONLY", "true")
+    settings = get_settings(reload=True)
+    init_db()
+    counters = {"asr": 0, "sum": 0, "mm": 0, "emb": 0}
+    _install_fakes(monkeypatch, counters)
+    listed = []
+
+    class RawAudioOnlyPlaud:
+        def iter_files(self, *, include_trash):
+            yield from listed
+
+        def download_audio(self, dto, destination):
+            assert dto.id == "new-raw-upload"
+            audio = destination / "audio.wav"
+            with wave.open(str(audio), "wb") as writer:
+                writer.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+                writer.writeframes(b"\x00\x20" * 32000)
+            return audio
+
+    @contextmanager
+    def make_client(_config):
+        yield RawAudioOnlyPlaud()
+
+    monkeypatch.setattr("localplaud.imports.make_plaud_client", make_client)
+    monkeypatch.setattr("localplaud.poller.poll.make_plaud_client", make_client)
+    with workspace_scope(DEFAULT_WORKSPACE_ID):
+        assert poll_once(settings)["new"] == 0
+
+    listed.append(PlaudFileDTO(
+        id="new-raw-upload", filename="Recorder upload", duration=2000,
+        start_time=int(datetime.now(UTC).timestamp() * 1000),
+    ))
+    client = TestClient(app)
+    discovery = client.post("/api/imports/plaud/check")
+    assert discovery.status_code == 200
+    assert discovery.json() == {
+        "new": 1, "queued": 1,
+        "recordings": [{"id": "new-raw-upload", "title": "Recorder upload", "queued": True}],
+    }
+    assert not any(counters.values())
+
+    with workspace_scope(DEFAULT_WORKSPACE_ID):
+        assert poll_once(settings)["downloaded"] == 1
+        assert process_automatic_pending(settings) == 1
+    assert counters == {"asr": 1, "sum": 1, "mm": 1, "emb": 1}
+    with session_scope() as session:
+        recording = session.get(PlaudFile, "new-raw-upload")
+        assert recording.status == FileStatus.done and recording.origin == "plaud"
+        assert Path(recording.audio_path).is_file()
+        assert {transcript.source for transcript in recording.transcripts} == {"local"}
+        assert {note.source for note in recording.summaries} == {"local"}
+        assert {note.template for note in recording.summaries} >= {"mind_map"}
+
+    assert client.get("/file/new-raw-upload?tab=notes").status_code == 200
+    audio = client.get("/audio/new-raw-upload", headers={"Range": "bytes=0-15"})
+    assert audio.status_code == 206 and audio.content.startswith(b"RIFF")
+    captions = client.get("/file/new-raw-upload/export/transcript.srt")
+    assert captions.status_code == 200 and "-->" in captions.text and "hello world" in captions.text
+    notes = client.get("/file/new-raw-upload/export/notes.md")
+    assert notes.status_code == 200 and "body" in notes.text
+
+
 def test_derived_artifacts_run_without_audio_and_preserve_upstream_stages(monkeypatch, tmp_path):
     _reset_db(monkeypatch, tmp_path)
     from sqlalchemy import select

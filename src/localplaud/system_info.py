@@ -6,12 +6,12 @@ import os
 import platform
 import re
 from datetime import UTC, datetime
-from importlib.metadata import PackageNotFoundError, version
 
 from sqlalchemy import func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
+from . import __version__
 from .config import Settings, get_settings
 from .db.models import (
     AutomationRule,
@@ -28,10 +28,7 @@ _COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
 def package_version() -> str:
-    try:
-        return version("localplaud")
-    except PackageNotFoundError:
-        return "development"
+    return __version__
 
 
 def build_commit() -> str | None:

@@ -62,6 +62,9 @@ Answers cite the recordings they came from; each citation jumps to the moment in
 
 <p align="center"><img src="docs/assets/screenshots/mobile.webp" alt="Mobile library, transcript, and notes views" width="100%"></p>
 
+Install the mobile web app from your browser, or [build an Android APK](docs/android.md)
+for your self-hosted workspace.
+
 Plus folders, tags, full-text search, AutoFlow automation, and exports to TXT,
 SRT, VTT, DOCX, PDF, and Markdown. Your edits are never overwritten, a failed
 stage never discards good results, and you choose per stage whether AI runs
@@ -172,7 +175,7 @@ end; full Plaud parity and broader language/hardware benchmarks are in progress.
 | Speech and speakers | [Speech quality](docs/speech-quality.md) · [Remote workers](docs/remote-worker.md) · [Speaker identities](docs/cross-recording-speakers.md) |
 | Notes | [Note quality](docs/note-quality.md) · [Chapter outlines](docs/chapter-outline.md) |
 | Integrations | [Webhooks](docs/webhooks.md) · [Email delivery](docs/email-integrations.md) |
-| Product and API | [Changelog](CHANGELOG.md) · [Product workflow](docs/product-workflow.md) · [Plaud API](docs/plaud-api.md) · [ADRs](docs/adr/) |
+| Product and API | [Changelog](CHANGELOG.md) · [Versioning and releases](docs/releases.md) · [Product workflow](docs/product-workflow.md) · [Plaud API](docs/plaud-api.md) · [ADRs](docs/adr/) |
 | Troubleshooting | [Acceptance](docs/acceptance.md) · [Processing repair](docs/processing-repair.md) · [Support](docs/support.md) |
 
 ## Contributing

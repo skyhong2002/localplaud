@@ -91,8 +91,11 @@
   {% set active_tag = organization.tags | selectattr('id', 'equalto', lib.tag) | first %}
   {% set active_scene = facets.scenes | selectattr('active') | first %}
   {% set active_origin = facets.origins | selectattr('active') | first %}
+  {% set source_views = [('all', 'All files'), ('recordings', 'Recordings'), ('imports', 'Imports')] %}
+  {% set organize_view = lib.view if lib.view in ('recordings', 'imports') else 'all' %}
   {% set filter_count = (1 if q else 0) + (1 if lib.state else 0) + (1 if lib.scene is not none else 0) + (1 if lib.folder is not none else 0) + (1 if lib.tag is not none else 0) + (1 if lib.origin else 0) + (1 if lib.date_from else 0) + (1 if lib.date_to else 0) + (1 if lib.min_duration_minutes is not none else 0) + (1 if lib.max_duration_minutes is not none else 0) %}
   {% if lib.view == 'trash' %}{% set view_title = t('Trash') %}{% elif lib.view == 'uncategorized' %}{% set view_title = t('Unfiled') %}{% elif active_folder %}{% set view_title = active_folder.name %}{% elif active_tag %}{% set view_title = active_tag.name %}{% elif active_scene %}{% set view_title = t(active_scene.label) %}{% elif lib.origin == 'plaud' %}{% set view_title = t('Plaud recordings') %}{% elif lib.origin == 'local' %}{% set view_title = t('Local uploads') %}{% else %}{% set view_title = t('All files') %}{% endif %}
+  {% if lib.view in ('recordings', 'imports') and not (active_folder or active_tag or active_scene or active_origin) %}{% set view_title = t('Recordings' if lib.view == 'recordings' else 'Imports') %}{% endif %}
   {% set selectable = lib.view != 'trash' %}
   <div class="library-head"{% if active_tag %} data-active-tag-name="{{ active_tag.name }}"{% endif %}>
     <h1 class="page-title"><span class="only-wide">{{ view_title }}</span><button class="title-switch only-compact" type="button" data-dialog-open="library-sheet" aria-haspopup="dialog">{{ view_title }}{{ icon('chevron-down') }}</button></h1>
@@ -103,9 +106,9 @@
       <div class="orgbox" aria-label="{{ t('Library organization') }}">
         <div class="orgrow">
           <span class="lbl">{{ t('Folders') }}</span>
-          <a class="fchip {% if lib.folder is none %}on{% endif %}" href="{{ liburl(view='all', folder='', tag='') }}">{{ t('All') }}</a>
+          <a class="fchip {% if lib.folder is none %}on{% endif %}" href="{{ liburl(view=organize_view, folder='', tag='') }}">{{ t('All') }}</a>
           {% for folder in organization.folders %}
-          <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="{{ liburl(view='all', folder=folder.id, tag='') }}" title="{{ folder.name }}"><span class="folder-glyph" style="--folder-color:{{ folder.color or 'var(--c-text-2)' }}">{{ icon('folder', 'xs') }}</span>{{ folder.name }} <span class="n">{{ folder.count }}</span></a>
+          <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="{{ liburl(view=organize_view, folder=folder.id, tag='') }}" title="{{ folder.name }}"><span class="folder-glyph" style="--folder-color:{{ folder.color or 'var(--c-text-2)' }}">{{ icon('folder', 'xs') }}</span>{{ folder.name }} <span class="n">{{ folder.count }}</span></a>
           {% endfor %}
           <details class="quickadd"><summary>+ {{ t('Folder') }}</summary>
             <form data-create-kind="folders"><input class="input" name="name" maxlength="80" placeholder="{{ t('Folder name') }}" required><button class="btn btn-sm">{{ t('Add') }}</button></form>
@@ -113,8 +116,8 @@
         </div>
         {% set tag_kinds = [('topic', t('Topics')), ('person', t('People')), ('org', t('Organizations')), ('custom', t('Other'))] %}
         <label class="tag-filter-select"><span class="lbl">{{ t('Tags') }}</span><select class="select" id="library-tag-filter" aria-label="{{ t('Tags') }}" onchange="window.location.href=this.value">
-          <option value="{{ liburl(view='all', folder='', tag='') }}"{% if lib.tag is none %} selected{% endif %}>{{ t('All') }}</option>
-          {% for kind, kind_label in tag_kinds %}{% set kind_tags = organization.tags | selectattr('kind', 'equalto', kind) | list %}{% if kind_tags %}<optgroup label="{{ kind_label }}">{% for tag in kind_tags %}<option value="{{ liburl(view='all', folder='', tag=tag.id) }}"{% if lib.tag == tag.id %} selected{% endif %}>{{ tag.name }} · {{ tag.count }}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}
+          <option value="{{ liburl(view=organize_view, folder='', tag='') }}"{% if lib.tag is none %} selected{% endif %}>{{ t('All') }}</option>
+          {% for kind, kind_label in tag_kinds %}{% set kind_tags = organization.tags | selectattr('kind', 'equalto', kind) | list %}{% if kind_tags %}<optgroup label="{{ kind_label }}">{% for tag in kind_tags %}<option value="{{ liburl(view=organize_view, folder='', tag=tag.id) }}"{% if lib.tag == tag.id %} selected{% endif %}>{{ tag.name }} · {{ tag.count }}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}
         </select></label>
         <div class="orgrow">
           <details class="quickadd"><summary>+ {{ t('Tag') }}</summary>
@@ -146,7 +149,7 @@
         {% endif %}
         <div class="filtrow">
           <span class="lbl">{{ t('View') }}</span>
-          <a class="fchip {% if lib.view == 'all' %}on{% endif %}" href="{{ liburl(view='all') }}">{{ t('All files') }}</a>
+          {% for scope, label in source_views %}<a class="fchip {% if lib.view == scope %}on{% endif %}" href="{{ liburl(view=scope, scene=(lib.scene if lib.view == scope else ''), origin=(lib.origin if lib.view == scope else '')) }}">{{ t(label) }}</a>{% endfor %}
           <a class="fchip {% if lib.view == 'uncategorized' %}on{% endif %}" href="{{ liburl(view='uncategorized', folder='', tag='') }}">{{ t('Unfiled') }}</a>
           <a class="fchip trash {% if lib.view == 'trash' %}on{% endif %}" href="{{ liburl(view='trash', folder='', tag='') }}">{{ t('Trash') }} <span class="n">{{ facets.trash_count }}</span></a>
         </div>
@@ -172,6 +175,14 @@
       </div>
     </div>
   </div>
+
+  {% if lib.view in ('all', 'recordings', 'imports') %}
+  <nav class="library-scope-nav" aria-label="{{ t('Library views') }}">
+    {% for scope, label in source_views %}
+    <a href="{{ liburl(view=scope, scene=(lib.scene if lib.view == scope else ''), origin=(lib.origin if lib.view == scope else '')) }}"{% if lib.view == scope %} aria-current="page"{% endif %}>{{ t(label) }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
 
   {% if filter_count and files %}
   <ul class="active-filters" aria-label="{{ t('Active filters') }}">
@@ -218,7 +229,15 @@
         {% if lib.min_duration_minutes is not none %}<li>{{ t('Minimum') }}: {{ lib.min_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
         {% if lib.max_duration_minutes is not none %}<li>{{ t('Maximum') }}: {{ lib.max_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
       </ul>
-      <div class="empty-actions"><a class="btn sec filtered-empty-reset" href="/?sort={{ lib.sort }}&amp;dir={{ lib.dir }}&amp;view=all">{{ icon('undo', 'sm') }}{{ t('Clear all filters') }}</a></div>
+      <div class="empty-actions"><a class="btn sec filtered-empty-reset" href="/?sort={{ lib.sort }}&amp;dir={{ lib.dir }}&amp;view={{ lib.view if lib.view in ('recordings', 'imports') else 'all' }}">{{ icon('undo', 'sm') }}{{ t('Clear all filters') }}</a></div>
+    {% elif lib.view in ('recordings', 'imports') %}
+      {{ icon('upload' if lib.view == 'imports' else 'mic') }}<p class="empty-title">{{ t('No imports yet') if lib.view == 'imports' else t('No recordings yet.') }}</p>
+      <p class="empty-body">{{ t('Audio files you import appear here.') if lib.view == 'imports' else t('Known recorder and app captures appear here. Older recordings with an unknown source are still in All files.') }}</p>
+      <div class="empty-actions">
+        {% if lib.view == 'imports' %}<button class="btn" type="button" data-open-import="device">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button>
+        {% else %}<button class="btn" type="button" data-dialog-open="add-sheet" aria-haspopup="dialog" aria-controls="add-sheet">{{ icon('plus', 'sm') }}{{ t('New recording') }}</button>{% endif %}
+        <a class="btn sec" href="/">{{ t('All files') }}</a>
+      </div>
     {% else %}
       {{ icon('waveform') }}<p class="empty-title">{{ t('No recordings yet.') }}</p>
       <p class="empty-body">{{ t('Connect the official Plaud API or MCP in Settings, then import your library.') }}</p>
@@ -229,6 +248,21 @@
   <div class="file-table" id="library-table">
     {% if selectable %}
     <div class="bulkbar batch-bar" id="bulkbar">
+      {# Phone (<768px) selection card: count + Done, then icon-over-label touch actions.
+         Hidden at desktop widths, where the controls below stay unchanged. #}
+      <div class="batch-phone-head">
+        <span class="batch-phone-title" id="batch-phone-title" aria-live="polite">{{ t('Selected') }} (<span data-selected-count>0</span>)</span>
+        <button class="batch-done" type="button" id="bulk-done">{{ t('Done') }}</button>
+      </div>
+      <div class="batch-actions" role="toolbar" aria-label="{{ t('Selected recordings actions') }}">
+        <button class="batch-action" type="button" data-batch-action="move" aria-disabled="true">{{ icon('folder-input') }}<span>{{ t('Move') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        <button class="batch-action" type="button" data-batch-action="tag" aria-disabled="true" aria-haspopup="dialog">{{ icon('tag') }}<span>{{ t('Tag') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        <button class="batch-action" type="button" data-batch-action="rename" aria-disabled="true" aria-haspopup="dialog">{{ icon('pencil') }}<span>{{ t('Rename') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        <button class="batch-action" type="button" data-batch-action="export" aria-disabled="true" aria-haspopup="dialog">{{ icon('download') }}<span>{{ t('Export') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        <button class="batch-action" type="button" data-batch-action="resume" aria-disabled="true">{{ icon('rotate-cw') }}<span>{{ t('Resume') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+        {% if lib.view != 'trash' %}<button class="batch-action" type="button" data-batch-action="generate" aria-disabled="true" aria-haspopup="dialog" aria-controls="bulk-generate-dialog">{{ icon('sparkles') }}<span>{{ t('Generate notes') }}</span><span class="visually-hidden" data-batch-reason></span></button>{% endif %}
+        <button class="batch-action danger" type="button" data-batch-action="delete" aria-disabled="true" aria-expanded="false" aria-controls="bulk-delete-confirm">{{ icon('trash') }}<span>{{ t('Delete local processing') }}</span><span class="visually-hidden" data-batch-reason></span></button>
+      </div>
       <span class="batch-count"><input class="checkbox" id="select-all-batch" type="checkbox" aria-label="{{ t('Select all visible recordings') }}" checked><span>{{ t('Selected') }} (<span id="selected-count">0</span>)</span></span>
       <select class="select" id="bulk-action" aria-label="{{ t('Organization action') }}">
         <option value="folder">{{ t('Move to folder') }}</option>
@@ -238,6 +272,7 @@
       </select>
       <select class="select" id="bulk-target" aria-label="{{ t('Folder or tag') }}"></select>
       <button class="btn" type="button" id="bulk-apply">{{ t('Apply') }}</button>
+      {% if lib.view != 'trash' %}<button class="btn sec bulk-generate" type="button" id="bulk-generate-open" data-batch-action="generate" aria-disabled="true" aria-haspopup="dialog" aria-controls="bulk-generate-dialog">{{ icon('sparkles', 'sm') }}{{ t('Generate notes') }}<span class="visually-hidden" data-batch-reason></span></button>{% endif %}
       <button class="btn bulk-export" type="button" id="bulk-export-open">{{ icon('download', 'sm') }}{{ t('Export selected') }}</button>
       <button class="btn danger bulk-delete-processing" type="button" id="bulk-delete-processing" aria-expanded="false" aria-controls="bulk-delete-confirm">{{ icon('trash', 'sm') }}{{ t('Delete local processing') }}</button>
       <button class="text-btn batch-cancel" type="button" id="bulk-clear">{{ t('Cancel') }}</button>
@@ -295,6 +330,7 @@
     </div>
     <ul class="sheet-list">
       <li><a class="sheet-row" href="/" {% if lib.view == 'all' and filter_count == 0 %}aria-current="page"{% endif %}>{{ icon('files') }}<span>{{ t('All files') }}</span><span class="count">{{ sidebar.counts.all }}</span></a></li>
+      {% for scope, label, glyph in [('recordings', 'Recordings', 'mic'), ('imports', 'Imports', 'upload')] %}<li><a class="sheet-row" href="/?view={{ scope }}"{% if lib.view == scope %} aria-current="page"{% endif %}>{{ icon(glyph) }}<span>{{ t(label) }}</span><span class="count">{{ sidebar.counts[scope] }}</span></a></li>{% endfor %}
       <li><a class="sheet-row" href="/?view=uncategorized" {% if lib.view == 'uncategorized' %}aria-current="page"{% endif %}>{{ icon('inbox') }}<span>{{ t('Unfiled') }}</span><span class="count">{{ sidebar.counts.uncategorized }}</span></a></li>
       <li><a class="sheet-row" href="/?view=trash" {% if lib.view == 'trash' %}aria-current="page"{% endif %}>{{ icon('trash') }}<span>{{ t('Trash') }}</span><span class="count">{{ sidebar.counts.trash }}</span></a></li>
     </ul>
@@ -360,6 +396,32 @@
 </div>
 {% endif %}
 {% if files and lib.view != 'trash' %}
+<dialog class="dialog sheet-on-phone" id="bulk-tag-dialog" aria-labelledby="bulk-tag-title">
+  <form id="bulk-tag-form">
+    <div class="sheet-grabber" aria-hidden="true"></div>
+    <div class="dialog-head"><h2 class="dialog-title" id="bulk-tag-title">{{ t('Tag recordings') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+    <div class="dialog-body bulk-tag-body">
+      <fieldset class="bulk-tag-mode"><legend class="visually-hidden">{{ t('Tag action') }}</legend>
+        <label><input type="radio" name="mode" value="add" checked>{{ icon('plus', 'sm') }}{{ t('Add tag') }}</label>
+        <label><input type="radio" name="mode" value="remove">{{ icon('minus', 'sm') }}{{ t('Remove tag') }}</label>
+      </fieldset>
+      <fieldset class="bulk-tag-fieldset"><legend class="visually-hidden">{{ t('Tags') }}</legend><ul class="sheet-list" id="bulk-tag-list"></ul></fieldset>
+      <p class="t-meta" id="bulk-tag-status" role="alert"></p>
+    </div>
+    <div class="dialog-foot"><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn" type="submit" id="bulk-tag-submit">{{ t('Apply') }}</button></div>
+  </form>
+</dialog>
+<dialog class="dialog sheet-on-phone" id="bulk-generate-dialog" aria-labelledby="bulk-generate-title" aria-describedby="bulk-generate-description">
+  <div class="sheet-grabber" aria-hidden="true"></div>
+  <div class="dialog-head"><h2 class="dialog-title" id="bulk-generate-title">{{ t('Generate notes') }}</h2><button class="icon-btn" type="button" data-dialog-close aria-label="{{ t('Close') }}">{{ icon('x') }}</button></div>
+  <div class="dialog-body bulk-generate-body">
+    <p id="bulk-generate-description">{{ t('Regenerates notes, mind map, and search index from each local transcript with its automatic template and AI profile. Speech recognition is not rerun, and audio, transcripts, and edits stay unchanged.') }}</p>
+    <p class="bulk-generate-summary" id="bulk-generate-summary" role="status" aria-live="polite"></p>
+    <ul class="bulk-generate-skipped" id="bulk-generate-skipped" role="list" hidden></ul>
+    <p class="t-meta" id="bulk-generate-status" role="alert"></p>
+  </div>
+  <div class="dialog-foot"><button class="btn sec" type="button" data-dialog-close>{{ t('Cancel') }}</button><button class="btn" type="button" id="bulk-generate-confirm" disabled>{{ icon('sparkles', 'sm') }}<span id="bulk-generate-confirm-label">{{ t('Generate notes') }}</span></button></div>
+</dialog>
 <div class="import-backdrop" id="bulk-export-backdrop" hidden>
   <section class="import-modal" style="min-height:0;width:min(600px,100%)" role="dialog" aria-modal="true" aria-labelledby="bulk-export-title" aria-describedby="bulk-export-description">
     <div class="import-head"><span id="bulk-export-title">{{ t('Export selected recordings') }}</span><button class="import-close" id="bulk-export-close" type="button" aria-label="{{ t('Close') }}"><span class="nav-icon" style="--nav-icon:url('/static/lucide/x.svg')"></span></button></div>
@@ -488,6 +550,13 @@
   const exportDownload = document.getElementById('bulk-export-download');
   const exportTranscript = document.getElementById('bulk-export-transcript');
   const exportNotes = document.getElementById('bulk-export-notes');
+  const phoneDone = document.getElementById('bulk-done');
+  const phoneCount = bar?.querySelector('[data-selected-count]');
+  const phoneActions = bar ? [...bar.querySelectorAll('[data-batch-action]')] : [];
+  const phoneAction = name => phoneActions.find(button => button.dataset.batchAction === name);
+  const phoneMedia = matchMedia('(max-width: 767px)');
+  const libraryMoreTrigger = document.querySelector('[data-menu="library-more-menu"]');
+  let deleteOpener = null;
   const pageChangeBackdrop = document.getElementById('page-change-backdrop');
   const pageChangeClose = document.getElementById('page-change-close');
   const pageChangeCancel = document.getElementById('page-change-cancel');
@@ -531,14 +600,58 @@
       control.checked = n > 0 && n === checks.length;
       control.indeterminate = n > 0 && n < checks.length;
     });
-    if (!n) closeDeleteConfirm({restoreFocus:false});
+    closeDeleteConfirm({restoreFocus:false});
     const table = document.getElementById('library-table');
     table?.classList.toggle('has-selection', n > 0);
     if (n > 0) table?.classList.add('is-selecting');
     checks.forEach(c => c.closest('.file-row')?.classList.toggle('is-selected', c.checked));
     const batchAll = document.getElementById('select-all-batch');
     if (batchAll) { batchAll.checked = n > 0 && n === checks.length; batchAll.indeterminate = n > 0 && n < checks.length; }
+    syncPhoneCard(n);
   }
+  // Phone selection card: every action stays visible; unavailable ones carry
+  // aria-disabled plus a spoken reason instead of disappearing.
+  function syncPhoneCard(n = selected().length) {
+    const table = document.getElementById('library-table');
+    document.body.classList.toggle('library-selecting', Boolean(table?.classList.contains('is-selecting')));
+    if (phoneCount) phoneCount.textContent = n;
+    const ids = selected();
+    const reasons = {
+      move: n ? '' : tr('Select recordings first'),
+      tag: n ? '' : tr('Select recordings first'),
+      rename: n === 1 ? '' : n ? tr('Select one recording to rename') : tr('Select recordings first'),
+      export: !n ? tr('Select recordings first') : n > 50 ? tr('Select no more than 50 recordings') : '',
+      resume: n ? '' : tr('Select recordings first'),
+      generate: generateReason(ids),
+      delete: n ? '' : tr('Select recordings first'),
+    };
+    phoneActions.forEach(button => {
+      const reason = reasons[button.dataset.batchAction] || '';
+      button.setAttribute('aria-disabled', String(Boolean(reason) || button.dataset.busy === 'true'));
+      const hint = button.querySelector('[data-batch-reason]');
+      if (hint) hint.textContent = reason ? ` · ${reason}` : '';
+    });
+    const rename = phoneAction('rename');
+    if (rename) {
+      const more = n === 1 ? checks.find(c => c.value === ids[0])?.closest('.file-row')?.querySelector('.row-more') : null;
+      rename.dataset.fileId = more?.dataset.fileId || '';
+      rename.dataset.title = more?.dataset.title || '';
+    }
+  }
+  // Mirrors the row "Generate notes" flag; the server re-checks eligibility.
+  function generateReason(ids = selected()) {
+    if (!ids.length) return tr('Select recordings first');
+    if (ids.length > 50) return tr('Select no more than 50 recordings');
+    const eligible = ids.some(id => checks.find(c => c.value === id)?.closest('.file-row')?.querySelector('.row-more')?.dataset.canGenerate === '1');
+    return eligible ? '' : tr('No selected recording can generate notes right now.');
+  }
+  function exitSelectMode({restoreFocus=true}={}) {
+    checks.forEach(c => { c.checked = false; });
+    document.getElementById('library-table')?.classList.remove('is-selecting');
+    sync();
+    if (restoreFocus) libraryMoreTrigger?.focus();
+  }
+  cleanupController.signal.addEventListener('abort', () => document.body.classList.remove('library-selecting'), {once:true});
   document.getElementById('select-all-batch')?.addEventListener('change', event => {
     const everything = event.currentTarget.checked;
     checks.forEach(c => { c.checked = everything; });
@@ -549,6 +662,7 @@
       const table = document.getElementById('library-table');
       table?.classList.toggle('is-selecting');
       if (!table?.classList.contains('is-selecting')) { checks.forEach(c => { c.checked = false; }); sync(); }
+      else syncPhoneCard();
       return;
     }
     if (event.target.closest('[data-open-filters]') && filterMenu) { filterReturnFocus = document.activeElement; filterMenu.open = true; return; }
@@ -583,8 +697,11 @@
     if (!deleteConfirm || deleteConfirm.hidden) return;
     deleteConfirm.hidden = true;
     deleteProcessing?.setAttribute('aria-expanded','false');
+    phoneAction('delete')?.setAttribute('aria-expanded','false');
     if (deleteStatus) deleteStatus.textContent = '';
-    if (restoreFocus) deleteProcessing?.focus();
+    const opener = deleteOpener?.isConnected && deleteOpener.offsetParent ? deleteOpener : deleteProcessing;
+    deleteOpener = null;
+    if (restoreFocus) opener?.focus();
   }
   checks.forEach(c => c.addEventListener('change', sync));
   [all, mobileAll].filter(Boolean).forEach(control => control.addEventListener('change', () => {
@@ -617,13 +734,15 @@
   window.addEventListener('pageshow', syncMobileSortFromLocation, {signal:cleanupController.signal});
   clear?.addEventListener('click', () => { checks.forEach(c => c.checked = false); document.getElementById('library-table')?.classList.remove('is-selecting'); sync(); });
   action?.addEventListener('change', () => { closeDeleteConfirm({restoreFocus:false}); targets(); });
-  deleteProcessing?.addEventListener('click', () => {
-    if (!selected().length) return;
+  function openDeleteConfirm(opener) {
+    if (!selected().length || !deleteConfirm) return;
+    deleteOpener = opener;
     deleteConfirm.hidden = false;
-    deleteProcessing.setAttribute('aria-expanded','true');
+    opener.setAttribute('aria-expanded','true');
     if (deleteStatus) deleteStatus.textContent = '';
     deleteCancel?.focus();
-  });
+  }
+  deleteProcessing?.addEventListener('click', () => openDeleteConfirm(deleteProcessing));
   deleteCancel?.addEventListener('click', () => closeDeleteConfirm());
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !deleteConfirm || deleteConfirm.hidden) return;
@@ -661,18 +780,19 @@
   exportTranscript?.addEventListener('change', syncExportOptions);
   exportNotes?.addEventListener('change', syncExportOptions);
   syncExportOptions();
-  exportOpen?.addEventListener('click', event => {
+  exportOpen?.addEventListener('click', event => openExport(event.currentTarget));
+  function openExport(opener) {
     const fileIds = selected();
-    if (!fileIds.length) return;
+    if (!fileIds.length || !exportBackdrop) return;
     if (fileIds.length > 50) { show(tr('Select no more than 50 recordings'), true); return; }
-    exportOpener = event.currentTarget;
+    exportOpener = opener;
     document.getElementById('bulk-export-count').textContent = fileIds.length;
     exportStatus.textContent = '';
     exportBackdrop.hidden = false;
     setExportBackgroundInert(true);
     document.body.classList.add('dialog-open');
     requestAnimationFrame(() => exportFocusables()[0]?.focus());
-  });
+  }
   document.getElementById('bulk-export-close')?.addEventListener('click', () => closeExport());
   document.getElementById('bulk-export-cancel')?.addEventListener('click', () => closeExport());
   exportBackdrop?.addEventListener('click', event => { if (event.target === exportBackdrop) closeExport(); });
@@ -726,10 +846,12 @@
 
   deleteConfirmButton?.addEventListener('click', async () => {
     const fileIds = selected();
-    if (!fileIds.length) return;
+    if (deleteConfirm?.hidden || !fileIds.length) return;
     deleteConfirmButton.disabled = true;
     deleteCancel.disabled = true;
     deleteProcessing.disabled = true;
+    const phoneDelete = phoneAction('delete');
+    if (phoneDelete) { phoneDelete.dataset.busy = 'true'; syncPhoneCard(); }
     deleteStatus.textContent = tr('Removing local data…');
     try {
       const response = await fetch('/api/files/bulk', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file_ids:fileIds,action:'delete_local_processing'})});
@@ -742,7 +864,9 @@
       deleteConfirmButton.disabled = false;
       deleteCancel.disabled = false;
       deleteProcessing.disabled = false;
-      deleteConfirmButton.focus();
+      if (phoneDelete) { delete phoneDelete.dataset.busy; syncPhoneCard(); }
+      if (deleteConfirm.hidden) show(error.message, true);
+      else deleteConfirmButton.focus();
     }
   });
 
@@ -770,6 +894,222 @@
       apply.disabled = false;
     }
   });
+
+  // ---- Phone selection card (<768px). Reuses the bulk endpoints, the shared
+  // row rename/move dialogs, the bulk export dialog, and the delete confirm.
+  const tagDialog = document.getElementById('bulk-tag-dialog');
+  const tagForm = document.getElementById('bulk-tag-form');
+  const tagList = document.getElementById('bulk-tag-list');
+  const tagStatus = document.getElementById('bulk-tag-status');
+  const tagSubmit = document.getElementById('bulk-tag-submit');
+  async function openTagSheet(opener) {
+    if (!tagDialog || !window.lp?.openDialog) return;
+    tagForm.reset();
+    tagList.replaceChildren();
+    tagSubmit.disabled = true;
+    tagStatus.style.color = '';
+    tagStatus.textContent = tr('Loading…');
+    window.lp.openDialog(tagDialog, opener);
+    let data;
+    try { data = await getOrganization(); }
+    catch (error) { if (error.name !== 'AbortError') { tagStatus.style.color = 'var(--c-danger)'; tagStatus.textContent = error.message; } return; }
+    const glyph = document.querySelector('#i-tag') ? '<svg class="i" aria-hidden="true" focusable="false"><use href="#i-tag"></use></svg>' : '';
+    tagList.replaceChildren(...(data.tags || []).map(tag => {
+      const item = document.createElement('li');
+      const label = document.createElement('label');
+      label.className = 'sheet-row';
+      const input = document.createElement('input');
+      input.className = 'checkbox'; input.type = 'checkbox'; input.name = 'tag_id'; input.value = String(tag.id);
+      const name = document.createElement('span');
+      name.className = 'truncate'; name.textContent = tag.name;
+      label.append(input); label.insertAdjacentHTML('beforeend', glyph); label.append(name);
+      item.append(label);
+      return item;
+    }));
+    tagStatus.textContent = data.tags?.length ? '' : tr('No tags yet. Create tags from the Library organization panel.');
+    tagSubmit.disabled = !data.tags?.length;
+  }
+  tagForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const tagIds = [...tagForm.querySelectorAll('input[name="tag_id"]:checked')].map(input => Number(input.value));
+    const fileIds = selected();
+    tagStatus.style.color = 'var(--c-danger)';
+    if (!tagIds.length) { tagStatus.textContent = tr('Choose at least one tag'); return; }
+    if (!fileIds.length) { tagStatus.textContent = tr('Select recordings first'); return; }
+    const body = {file_ids: fileIds};
+    body[tagForm.elements.mode.value === 'remove' ? 'remove_tag_ids' : 'add_tag_ids'] = tagIds;
+    tagSubmit.disabled = true;
+    tagDialog.dataset.busy = 'true';
+    tagStatus.style.color = '';
+    tagStatus.textContent = tr('Saving organization…');
+    try {
+      const response = await fetch('/api/files/organize', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body), signal:cleanupController.signal});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(organizationDetail(data, 'Could not organize recordings'));
+      tagStatus.textContent = `${data.updated} ${tr('recordings updated')}`;
+      window.setTimeout(() => window.location.reload(), 350);
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      tagDialog.dataset.busy = 'false';
+      tagStatus.style.color = 'var(--c-danger)';
+      tagStatus.textContent = error.message;
+      tagSubmit.disabled = false;
+    }
+  }, {signal:cleanupController.signal});
+
+  async function resumeSelected(button) {
+    const fileIds = selected();
+    if (!fileIds.length) return;
+    button.dataset.busy = 'true';
+    syncPhoneCard();
+    show(tr('Saving organization…'));
+    try {
+      const response = await fetch('/api/files/bulk', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({file_ids:fileIds, action:'resume'}), signal:cleanupController.signal});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(organizationDetail(data, 'Could not organize recordings'));
+      show(`${data.updated} ${tr('recordings queued')}`);
+      window.setTimeout(() => window.location.reload(), 350);
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      show(error.message, true);
+      delete button.dataset.busy;
+      syncPhoneCard();
+    }
+  }
+
+  // ---- Batch Generate notes: preview eligibility, confirm, then durably queue
+  // note-only regeneration. Nothing is queued until the user confirms.
+  const generateDialog = document.getElementById('bulk-generate-dialog');
+  const generateSummary = document.getElementById('bulk-generate-summary');
+  const generateSkipped = document.getElementById('bulk-generate-skipped');
+  const generateStatus = document.getElementById('bulk-generate-status');
+  const generateConfirm = document.getElementById('bulk-generate-confirm');
+  const generateConfirmLabel = document.getElementById('bulk-generate-confirm-label');
+  let generatePreview = null;
+  let generateRequest = 0;
+  const generateSkipReasons = {
+    trash: 'In Trash. Restore it before generating notes.',
+    no_local_transcript: 'No local transcript yet. Process the recording first.',
+    no_speech: 'The transcript has no recognizable speech.',
+    processing: 'Already processing. Try again when it finishes.',
+    evidence_in_use: 'Recording evidence is in use. Try again when it finishes.',
+    notes_disabled: 'Note generation is disabled in the automatic processing settings.',
+    automatic_paused: 'Automatic processing is off. Open the recording to generate notes.',
+    automatic_restricted: 'Automatic processing is limited to untranscribed recordings. Open the recording to generate notes.',
+  };
+  function renderGenerateSkipped(skipped) {
+    generateSkipped.replaceChildren(...skipped.map(item => {
+      const li = document.createElement('li');
+      const name = document.createElement('strong');
+      name.textContent = item.title;
+      li.append(name, document.createTextNode(` · ${tr(generateSkipReasons[item.reason] || item.message)}`));
+      return li;
+    }));
+    generateSkipped.hidden = !skipped.length;
+  }
+  async function generateFetch(fileIds, dryRun) {
+    const response = await fetch('/api/files/generate-notes', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({file_ids:fileIds, dry_run:dryRun}), signal:cleanupController.signal});
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(response.status === 404 ? tr('A selected recording is no longer available') : organizationDetail(data, 'Could not queue note generation'));
+      error.skipped = data.skipped;
+      throw error;
+    }
+    return data;
+  }
+  async function openGenerateNotes(opener) {
+    const fileIds = selected();
+    if (!generateDialog || !window.lp?.openDialog || !fileIds.length) return;
+    const request = ++generateRequest;
+    generatePreview = null;
+    generateDialog.dataset.busy = 'false';
+    generateConfirm.disabled = true;
+    generateConfirmLabel.textContent = tr('Generate notes');
+    generateSummary.textContent = tr('Checking selected recordings…');
+    generateStatus.textContent = '';
+    renderGenerateSkipped([]);
+    window.lp.openDialog(generateDialog, opener);
+    try {
+      const data = await generateFetch(fileIds, true);
+      if (request !== generateRequest) return;
+      generatePreview = {fileIds, eligible:data.eligible || []};
+      const ready = generatePreview.eligible.length;
+      const queued = (data.already_queued || []).length;
+      const parts = [`${ready} / ${data.requested} ${tr('recordings will generate notes')}`];
+      if (queued) parts.push(`${queued} ${tr('recordings already queued')}`);
+      if (data.skipped?.length) parts.push(`${data.skipped.length} ${tr('recordings skipped')}`);
+      generateSummary.textContent = parts.join(' · ');
+      renderGenerateSkipped(data.skipped || []);
+      generateConfirm.disabled = !ready;
+      generateConfirmLabel.textContent = ready ? `${tr('Generate notes')} (${ready})` : tr('Generate notes');
+      if (ready) generateConfirm.focus();
+    } catch (error) {
+      if (error.name === 'AbortError' || request !== generateRequest) return;
+      generateSummary.textContent = '';
+      generateStatus.textContent = error.message;
+    }
+  }
+  generateDialog?.addEventListener('lp:dialog-close', () => { generateRequest += 1; generatePreview = null; }, {signal:cleanupController.signal});
+  generateConfirm?.addEventListener('click', async () => {
+    if (!generatePreview?.eligible.length) return;
+    generateConfirm.disabled = true;
+    generateDialog.dataset.busy = 'true';
+    generateStatus.textContent = '';
+    generateSummary.textContent = tr('Queuing…');
+    try {
+      // Only the previewed, eligible recordings are sent; the server re-checks.
+      const data = await generateFetch(generatePreview.eligible, false);
+      const parts = [`${data.queued.length} ${tr('recordings queued for notes')}`];
+      if (data.already_queued?.length) parts.push(`${data.already_queued.length} ${tr('recordings already queued')}`);
+      if (data.skipped?.length) parts.push(`${data.skipped.length} ${tr('recordings skipped')}`);
+      generateSummary.textContent = `${parts.join(' · ')} — ${tr('Notes generate in the background.')}`;
+      renderGenerateSkipped(data.skipped || []);
+      show(parts.join(' · '));
+      window.setTimeout(() => window.location.reload(), 900);
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      generateDialog.dataset.busy = 'false';
+      generateSummary.textContent = '';
+      generateStatus.textContent = error.message;
+      if (error.skipped) renderGenerateSkipped(error.skipped);
+      generateConfirm.disabled = false;
+    }
+  }, {signal:cleanupController.signal});
+
+  bar?.addEventListener('click', event => {
+    const button = event.target.closest('[data-batch-action]');
+    if (!button) return;
+    if (button.getAttribute('aria-disabled') === 'true') {
+      const reason = button.querySelector('[data-batch-reason]')?.textContent.replace(/^ · /, '');
+      if (reason) show(reason, true);
+      return;
+    }
+    const kind = button.dataset.batchAction;
+    if (kind !== 'delete') closeDeleteConfirm({restoreFocus:false});
+    if (kind === 'move') {
+      const dialog = document.getElementById('move-dialog');
+      if (!dialog || !window.lp?.openDialog) return;
+      dialog.querySelectorAll('input[name="folder_id"]').forEach(radio => { radio.checked = false; });
+      const error = dialog.querySelector('[data-move-error]'); if (error) error.textContent = '';
+      dialog.dataset.fileIds = JSON.stringify(selected());
+      delete dialog.dataset.fileId;
+      window.lp.openDialog(dialog, button);
+    } else if (kind === 'tag') openTagSheet(button);
+    else if (kind === 'rename') { if (button.dataset.fileId) window.lp?.rowAction?.(button, 'rename'); }
+    else if (kind === 'export') openExport(button);
+    else if (kind === 'resume') resumeSelected(button);
+    else if (kind === 'generate') openGenerateNotes(button);
+    else if (kind === 'delete') { if (deleteConfirm?.hidden) openDeleteConfirm(button); else closeDeleteConfirm(); }
+  }, {signal:cleanupController.signal});
+  phoneDone?.addEventListener('click', () => { closeDeleteConfirm({restoreFocus:false}); exitSelectMode(); }, {signal:cleanupController.signal});
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || event.defaultPrevented || !phoneMedia.matches) return;
+    if (!document.getElementById('library-table')?.classList.contains('is-selecting')) return;
+    if (document.querySelector('dialog[open]') || (exportBackdrop && !exportBackdrop.hidden) || filterMenu?.open || document.querySelector('[data-menu][aria-expanded="true"]')) return;
+    if (deleteConfirm && !deleteConfirm.hidden) return;
+    event.preventDefault();
+    exitSelectMode();
+  }, {signal:cleanupController.signal});
 
   const retryAll = document.getElementById('attention-retry-button');
   const retryStatus = document.getElementById('attention-retry-status');

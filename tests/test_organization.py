@@ -302,6 +302,106 @@ def test_library_renders_organization_and_bulk_controls(monkeypatch, tmp_path):
     assert "read-only recovery view" in trash.text
 
 
+
+def test_phone_selection_card_renders_touch_actions(monkeypatch, tmp_path):
+    """Phone (<768px) multi-select card: count + Done, icon-over-label actions.
+
+    The desktop select/Apply controls stay in the same bar, and the card only
+    reuses existing endpoints, dialogs, and the delete-local-processing confirm.
+    """
+    import re
+    from pathlib import Path
+
+    client = _client(monkeypatch, tmp_path)
+    _seed_files()
+    page = client.get("/")
+    assert page.status_code == 200
+    html = page.text
+    bar = html.split('id="bulkbar"', 1)[1].split('id="bulk-message"', 1)[0]
+
+    # Count + Done header, and the card is a labelled toolbar.
+    assert 'id="batch-phone-title"' in bar and "data-selected-count" in bar
+    assert '<button class="batch-done" type="button" id="bulk-done">Done</button>' in bar
+    assert 'role="toolbar" aria-label="Selected recordings actions"' in bar
+
+    # Seven legible icon + text actions, all present but aria-disabled until
+    # something is selected (never removed, so their position is stable).
+    actions = re.findall(r'<button class="batch-action( danger)?" type="button" data-batch-action="([a-z]+)" aria-disabled="true"', bar)
+    assert [name for _, name in actions] == ["move", "tag", "rename", "export", "resume", "generate", "delete"]
+    assert [danger for danger, name in actions if name == "delete"] == [" danger"]
+    for label in ("Move", "Tag", "Rename", "Export", "Resume", "Generate notes", "Delete local processing"):
+        assert f"<span>{label}</span>" in bar
+    # Phone actions plus the desktop Generate notes button share reason hints.
+    assert bar.count("data-batch-reason") == 8
+    assert '<use href="#i-folder-input">' in bar and '<use href="#i-trash">' in bar
+    assert 'data-batch-action="delete" aria-disabled="true" aria-expanded="false" aria-controls="bulk-delete-confirm"' in bar
+
+    # Desktop controls are unchanged and still rendered in the same bar.
+    for control in ('id="bulk-action"', 'id="bulk-target"', 'id="bulk-apply"', 'id="bulk-export-open"', 'id="bulk-delete-processing"', 'id="bulk-clear"'):
+        assert control in bar
+
+    # Rename only for exactly one selection, via the shared row rename dialog.
+    assert "rename: n === 1 ? '' : n ? tr('Select one recording to rename') : tr('Select recordings first')" in html
+    assert "window.lp?.rowAction?.(button, 'rename')" in html
+    assert "export: !n ? tr('Select recordings first') : n > 50 ? tr('Select no more than 50 recordings') : ''" in html
+    # Existing endpoints only; delete goes through the existing confirm panel.
+    assert "action:'resume'" in html
+    assert "fetch('/api/files/organize'" in html
+    assert "openDeleteConfirm(button)" in html
+    assert "deleteConfirm.hidden = false" in html
+    assert "/api/plaud" not in html.split("// ---- Phone selection card", 1)[1].split("const retryAll", 1)[0]
+    # Done and Esc leave select mode and return focus to the library "…" trigger.
+    assert "phoneDone?.addEventListener('click'" in html
+    assert "if (restoreFocus) libraryMoreTrigger?.focus();" in html
+    assert "document.body.classList.toggle('library-selecting'" in html
+
+    # Tag sheet: add/remove mode, tags loaded lazily from /api/organization.
+    assert '<dialog class="dialog sheet-on-phone" id="bulk-tag-dialog" aria-labelledby="bulk-tag-title">' in html
+    assert 'name="mode" value="add" checked' in html and 'name="mode" value="remove"' in html
+    assert "body[tagForm.elements.mode.value === 'remove' ? 'remove_tag_ids' : 'add_tag_ids'] = tagIds;" in html
+
+    # The shared move sheet gains a multi-file mode that never defaults to "No folder".
+    app_js = (Path(__file__).resolve().parents[1] / "src/localplaud/api/static/js/app.js").read_text()
+    assert "if (bulkIds && !radios.some(radio => radio.checked))" in app_js
+    assert "file_ids: bulkIds || [id]" in app_js
+    assert "delete moveDialog.dataset.fileIds;" in app_js
+
+    css = (Path(__file__).resolve().parents[1] / "src/localplaud/api/static/css/app.css").read_text()
+    assert ".batch-phone-head, .batch-actions { display: none; }" in css
+    assert "body.library-selecting .m-tabbar { display: none; }" in css
+    assert "@media (prefers-reduced-motion: no-preference)" in css
+
+    trash = client.get("/?view=trash")
+    assert 'id="bulk-done"' not in trash.text
+    assert 'id="bulk-tag-dialog"' not in trash.text
+
+    from localplaud.i18n import catalog
+
+    messages = catalog("zh-Hant-TW")
+    for key in (
+        "Selected recordings actions",
+        "Select recordings first",
+        "Select one recording to rename",
+        "Recordings moved",
+        "Choose a folder",
+        "Tag recordings",
+        "Tag action",
+        "Choose at least one tag",
+        "Done",
+        "Move",
+        "Tag",
+        "Resume",
+        "Export",
+    ):
+        assert messages.get(key), key
+
+    preferences = client.get("/api/preferences/workspace").json()
+    assert client.put("/api/preferences/workspace", json=preferences | {"locale": "zh-Hant-TW"}).status_code == 200
+    zh = client.get("/").text
+    assert 'aria-label="所選錄音的操作"' in zh
+    assert ">完成</button>" in zh
+    assert "<span>刪除本機處理結果</span>" in zh
+
 def test_organization_membership_rejects_active_library_ask(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     _seed_files()

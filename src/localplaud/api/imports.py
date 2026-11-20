@@ -9,11 +9,12 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
+from ..config import get_settings
 from ..db.models import FileStatus, PlaudFile
 from ..db.session import session_scope
 from ..imports import (
@@ -94,8 +95,33 @@ def import_plaud_audio_status(file_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+def capture_draft_scope(request: Request) -> str:
+    if not get_settings().api.accounts_enabled:
+        return "single:workspace:1"
+    account = getattr(request.state, "account_user", None)
+    workspace = getattr(request.state, "workspace_id", None)
+    if account and account["status"] == "active" and workspace:
+        return f"account:{account['id']}:workspace:{workspace}"
+    return ""
+
+
 @_upload_router.post("/local/audio", status_code=201)
-def import_local_audio(file: Annotated[UploadFile, File()]) -> dict:
+def import_local_audio(
+    request: Request,
+    file: Annotated[UploadFile, File()],
+    capture_source: Annotated[Literal["browser_recording", "file_import"], Form()] = "file_import",
+    capture_scope: Annotated[str | None, Form()] = None,
+    captured_at_ms: Annotated[int | None, Form(gt=0)] = None,
+) -> dict:
+    if capture_source == "browser_recording":
+        expected = capture_draft_scope(request)
+        if not expected or capture_scope != expected:
+            raise HTTPException(
+                status_code=409,
+                detail="Your workspace changed. Reopen this page in the original workspace to save the recording.",
+            )
+        if captured_at_ms is not None and captured_at_ms > int(datetime.now(UTC).timestamp() * 1000):
+            raise HTTPException(status_code=422, detail="The recording start time is in the future.")
     original_name = Path(file.filename or "audio").name
     extension = Path(original_name).suffix.lower().lstrip(".")
     if extension not in _ALLOWED_EXTENSIONS:
@@ -127,13 +153,18 @@ def import_local_audio(file: Annotated[UploadFile, File()]) -> dict:
                     fullname=original_name,
                     filesize=written,
                     duration_ms=probe.duration_ms,
-                    start_time_ms=int(now.timestamp() * 1000),
+                    start_time_ms=(
+                        captured_at_ms if capture_source == "browser_recording" and captured_at_ms
+                        else int(now.timestamp() * 1000)
+                    ),
                     status=FileStatus.downloaded,
                     audio_path=str(destination),
                     downloaded_at=now,
                     origin="local",
+                    scene=101 if capture_source == "browser_recording" else 102,
                     raw={
                         "origin": "local",
+                        "capture_source": capture_source,
                         "original_filename": original_name,
                         "media_probe": probe.status,
                     },

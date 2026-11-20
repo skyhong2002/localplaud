@@ -281,6 +281,7 @@
     }
   }
 
+  let collapseInlinePlayer;
   if (player) {
     const toggle = document.getElementById('player-toggle');
     const toggleIcon = document.getElementById('player-toggle-icon');
@@ -362,6 +363,33 @@
       else if (event.key === 'Tab') setSpeedMenu(false);
     });
     on(document, 'click', event => { if (!speedMenu.hidden && !event.target.closest('.ws-speed')) setSpeedMenu(false); });
+    const dock = document.getElementById('persistent-player');
+    const controls = dock?.querySelector('.ws-player-row');
+    const inlineHost = document.getElementById('ws-inline-player');
+    const inlineToggle = $('[data-inline-player-toggle]');
+    if (controls && inlineHost && inlineToggle) {
+      const setInline = open => {
+        const focused = controls.contains(document.activeElement);
+        setSpeedMenu(false);
+        (open ? inlineHost : dock).append(controls);
+        inlineHost.hidden = !open;
+        dock.hidden = open;
+        inlineToggle.setAttribute('aria-expanded', String(open));
+        inlineToggle.setAttribute('aria-label', tr(open ? 'Collapse playback controls' : 'Expand playback controls'));
+        if (focused && !signal.aborted) (phone.matches ? inlineToggle : toggle)?.focus({ preventScroll: true });
+      };
+      collapseInlinePlayer = () => { if (!inlineHost.hidden) setInline(false); };
+      on(inlineToggle, 'click', () => { if (phone.matches) setInline(inlineHost.hidden); });
+      on(inlineHost, 'keydown', event => {
+        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        event.preventDefault();
+        inlineToggle.focus();
+        collapseInlinePlayer();
+      });
+      on(phone, 'change', collapseInlinePlayer);
+      on(document, 'htmx:beforeHistorySave', collapseInlinePlayer);
+      signal.addEventListener('abort', collapseInlinePlayer, { once: true });
+    }
     try { const stored = localStorage.getItem('localplaud:playback-rate'); if (stored) setRate(stored, { remember: false }); } catch (_error) { /* storage unavailable */ }
     on(progress, 'input', () => { const d = duration(); if (d) { player.currentTime = (Number(progress.value) / 1000) * d; sync(); } });
     on(progress, 'change', () => { following = true; scrollToSegment(activeSegment, true); });
@@ -373,7 +401,10 @@
       signal.addEventListener('abort', () => resize.disconnect(), { once: true });
     }
     let waveformTimer = null;
-    signal.addEventListener('abort', () => { if (waveformTimer) clearTimeout(waveformTimer); if (window.lp?.player?.audio !== player || !window.lp.player.parked) player.pause(); }, { once: true });
+    signal.addEventListener('abort', () => {
+      if (waveformTimer) clearTimeout(waveformTimer);
+      if (window.lp?.player?.audio !== player) player.pause();
+    }, { once: true });
     const loadWaveform = async () => {
       if (signal.aborted) return;
       try {
@@ -717,6 +748,7 @@
     if (!response.ok) throw new Error(tr(result.error || 'Could not rename speaker'));
     state.speakers.set(key, result.name || '');
     updateSpeakerEverywhere(key);
+    recentNames = null;
     applySpeakerNoteProjection(result.note_projection, result.note_updates);
     loadOutline();
     return result;
@@ -733,6 +765,7 @@
       state.speakers.set(key, name || '');
       updateSpeakerEverywhere(key);
     }
+    recentNames = null;
     document.dispatchEvent(new CustomEvent('localplaud:speakers-renamed', { detail: { names: result.names || {} } }));
     applySpeakerNoteProjection(result.note_projection, result.note_updates);
     loadOutline();
@@ -781,6 +814,71 @@
     } catch (error) { if (error.name !== 'AbortError' && status) status.textContent = error.message; button.disabled = false; }
   });
 
+  // Recently used names: manual names from this workspace only (server-scoped),
+  // minus names already used by a speaker in this recording, which are offered
+  // as merge targets above and would otherwise silently merge.
+  const RECENT_NAME_LIMIT = 8;
+  let recentNames = null;
+  function recentNameChoices(names, currentLabels, limit) {
+    const taken = new Set([...currentLabels].map(label => String(label || '').trim().toLocaleLowerCase()));
+    const seen = new Set(), result = [];
+    for (const item of names || []) {
+      const name = String(item?.name || '').replace(/\s+/g, ' ').trim();
+      const folded = name.toLocaleLowerCase();
+      if (!name || taken.has(folded) || seen.has(folded)) continue;
+      seen.add(folded);
+      result.push(name);
+      if (result.length >= limit) break;
+    }
+    return result;
+  }
+  async function loadRecentNames() {
+    if (recentNames) return recentNames;
+    const params = new URLSearchParams({ limit: String(RECENT_NAME_LIMIT + 4), exclude_file_id: cfg.fileId || '' });
+    const response = await fetch(`/api/speaker-names/recent?${params}`, { headers: { accept: 'application/json' }, signal });
+    if (!response.ok) throw new Error(tr('Could not load recent names'));
+    recentNames = (await response.json()).names || [];
+    return recentNames;
+  }
+  function recentNamesSection() {
+    let section = sheet && $('[data-recent-names]', sheet);
+    if (section || !sheet) return section;
+    section = document.createElement('div');
+    section.className = 'ws-sheet-section';
+    section.dataset.recentNames = '';
+    const heading = document.createElement('span');
+    heading.className = 'sub'; heading.id = 'ws-recent-names-label';
+    heading.textContent = tr('Recently used names');
+    const list = document.createElement('div');
+    list.className = 'ws-speaker-choices'; list.dataset.recentNameList = '';
+    list.setAttribute('role', 'group'); list.setAttribute('aria-labelledby', heading.id);
+    section.append(heading, list);
+    $('#ws-speaker-name', sheet)?.after(section);
+    return section;
+  }
+  async function renderRecentNames() {
+    const section = recentNamesSection();
+    if (!section) return;
+    const list = $('[data-recent-name-list]', section);
+    const empty = text => { const note = document.createElement('span'); note.className = 'sub'; note.textContent = text; list.replaceChildren(note); };
+    empty(tr('Loading…'));
+    let names;
+    try { names = await loadRecentNames(); } catch (error) {
+      if (error.name !== 'AbortError') empty(tr('Could not load recent names'));
+      return;
+    }
+    const labels = [...state.speakers.keys()].map(speakerLabel);
+    const choices = recentNameChoices(names, labels, RECENT_NAME_LIMIT);
+    if (!choices.length) { empty(tr('No recent names yet. Names you assign to speakers appear here.')); return; }
+    list.replaceChildren(...choices.map(name => {
+      const chip = document.createElement('button');
+      chip.type = 'button'; chip.className = 'ws-speaker-choice'; chip.dataset.recentName = name;
+      chip.textContent = name;
+      chip.setAttribute('aria-label', `${tr('Use name')} ${name}`);
+      return chip;
+    }));
+  }
+
   function closeSheet({ restoreFocus = true } = {}) {
     if (!sheet || sheet.hidden) return;
     sheet.hidden = true;
@@ -807,6 +905,7 @@
       chip.lastChild.textContent = speakerLabel(other);
       return chip;
     }));
+    renderRecentNames();
     const scope = sheet.querySelector('input[name="scope"][value="all"]');
     if (scope) scope.checked = true;
     const segmentScope = sheet.querySelector('input[name="scope"][value="segment"]');
@@ -834,6 +933,14 @@
   });
   on(sheet, 'click', event => {
     if (event.target.closest('[data-sheet-close]')) { closeSheet(); return; }
+    const recent = event.target.closest('[data-recent-name]');
+    if (recent) {
+      const input = $('#ws-speaker-name', sheet);
+      input.value = recent.dataset.recentName;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+      return;
+    }
     const choice = event.target.closest('.ws-speaker-choice');
     if (!choice || !sheetContext) return;
     sheetContext.chosen = choice.dataset.key;
@@ -950,6 +1057,7 @@
       return wrap;
     };
     const tree = document.getElementById('mindmap-tree');
+    const previewTree = $('[data-mindmap-preview-tree]');
     const viewport = document.getElementById('mindmap-viewport');
     const zoom = document.getElementById('mm-zoom');
     // Open with only the first level showing; later refreshes keep the reader's expansion state.
@@ -957,7 +1065,23 @@
     state.refreshMindMap = markdown => {
       mindmapSource.textContent = markdown;
       const collapsed = $$('.mm-node', tree).map(node => node.classList.contains('collapsed'));
-      tree.replaceChildren(render(parseMindMap(markdown)));
+      const root = parseMindMap(markdown);
+      tree.replaceChildren(render(root));
+      if (previewTree) {
+        const title = document.createElement('span');
+        title.className = 'ws-m-mindmap-root';
+        title.textContent = root.text;
+        const branches = document.createElement('span');
+        branches.className = 'ws-m-mindmap-branches';
+        root.children.slice(0, 3).forEach((child, index) => {
+          const branch = document.createElement('span');
+          branch.textContent = child.text;
+          branch.style.setProperty('--mm-branch', `var(${speakerVars[index % speakerVars.length]})`);
+          branches.append(branch);
+        });
+        previewTree.replaceChildren(title, branches);
+        previewTree.hidden = false;
+      }
       $$('.mm-node', tree).forEach((node, index) => {
         const branch = !node.classList.contains('mm-root') && node.querySelector('.mm-children');
         if (branch && (initialRender || collapsed[index])) setCollapsed(node, true);
@@ -1544,6 +1668,7 @@
   });
   function setTranscriptFull(full) {
     if (!transcriptPanel) return;
+    if (full) collapseInlinePlayer?.();
     transcriptPanel.classList.toggle('ws-full', full);
     document.body.classList.toggle('ws-transcript-full', full);
     const card = $('[data-chapter-card]', transcriptPanel);
@@ -1571,6 +1696,7 @@
   const noteTabs = () => $$('.tabs > button[data-note-target], #recording-tab-mindmap');
   const syncSwitch = () => {
     const panel = shell?.dataset.activePanel || 'transcript';
+    if (panel !== 'transcript') collapseInlinePlayer?.();
     if (panel === 'ask') return;
     $$('[data-m-switch]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.mSwitch === 'transcript') === (panel === 'transcript'))));
     const active = panel === 'mindmap' ? document.getElementById('recording-tab-mindmap') : $('.tabs > button[data-note-target].on');

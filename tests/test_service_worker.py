@@ -15,6 +15,16 @@ from tests.test_web_ui import _client
 STATIC = Path(__file__).parents[1] / "src" / "localplaud" / "api" / "static"
 
 
+def test_web_install_shortcuts_open_always_available_workspace_routes(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    manifest = client.get("/static/manifest.webmanifest").json()
+    assert manifest["start_url"] == "/home"
+    shortcuts = [item["url"] for item in manifest["shortcuts"]]
+    assert shortcuts == ["/", "/search", "/explore"]
+    for path in shortcuts:
+        assert client.get(path).status_code == 200
+
+
 def test_service_worker_is_served_at_root_scope_with_a_release_version(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path)
     response = client.get("/sw.js")

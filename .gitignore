@@ -40,6 +40,10 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+android/.gradle/
+android/local.properties
+*.jks
+*.keystore
 
 # ---- Docker/runtime ----
 *.pid

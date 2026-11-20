@@ -107,6 +107,57 @@ def test_scene_filter(monkeypatch, tmp_path):
     assert set(_ids(c, "?scene=1")) == {"a", "b"}  # 't' scene 1 but trashed
 
 
+def test_capture_views_preserve_filters_and_workspace_return(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+
+    with session_scope() as session:
+        session.add_all(
+            PlaudFile(id=key, filename=title, scene=scene, status=FileStatus.done, is_trash=trash)
+            for key, title, scene, trash in [
+                ("app", "Browser capture", 101, False),
+                ("import", "Imported interview", 102, False),
+                ("trash-import", "Trashed import", 102, True),
+                ("legacy", "Legacy file", None, False),
+            ]
+        )
+    assert set(_ids(client, "?view=recordings")) == {"a", "b", "app"}
+    assert _ids(client, "?view=imports") == ["import"]
+    assert _ids(client, "?view=imports&q=interview&state=done") == ["import"]
+    assert "legacy" in _ids(client)
+
+    page = client.get("/?view=imports").text
+    assert 'aria-label="Library views"' in page
+    assert 'view=imports" aria-current="page">Imports</a>' in page
+    assert 'name="view" value="imports"' in page
+    assert not re.search(r'class="fchip[^"\n]*" href="[^"\n]*view=imports&amp;scene=1"', page)
+    filtered = client.get("/?view=recordings&scene=1&q=interview&state=done").text
+    tabs = filtered.split('aria-label="Library views">', 1)[1].split("</nav>", 1)[0]
+    import_href = re.search(r'href="([^"]+)">Imports</a>', tabs).group(1)
+    assert "scene=" not in import_href
+    assert "q=interview" in import_href and "state=done" in import_href
+    assert _ids(client, unescape(import_href).removeprefix("/")) == ["import"]
+    row_href = re.search(r'class="row-title" href="([^"]+)"[^>]*>Imported interview', page).group(1)
+    detail = client.get(unescape(row_href)).text
+    assert 'class="fl-title">Imports</div>' in detail
+    assert re.search(
+        r'class="recording-crumb-link" href="/\?view=imports"[^>]*>.*?Imports</a>', detail, re.S
+    )
+
+
+def test_empty_import_scope_offers_import_without_hiding_legacy_files(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    _seed()
+    page = client.get("/?view=imports").text
+    empty = page.split('<div class="empty-state"', 1)[1].split('class="file-table"', 1)[0]
+    assert "No imports yet" in empty
+    assert 'data-open-import="device"' in empty
+    filtered = client.get("/?view=imports&q=missing").text
+    assert 'class="btn sec filtered-empty-reset" href="/?sort=recorded&amp;dir=desc&amp;view=imports"' in filtered
+
+
 def test_trash_view_inclusion(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()

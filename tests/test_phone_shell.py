@@ -81,8 +81,13 @@ def test_phone_rows_explore_and_add_sheet_render(monkeypatch, tmp_path):
     assert "Upgrade" not in explore.text and "Unlock" not in explore.text
 
     shell = with_assets(c, files)
+    assert 'aria-label="More actions · Weekly Sync"' in row
+    assert '.file-row .row-actions .row-more { width: 44px; height: 44px; }' in shell
+    assert '.file-row:is(.is-swiping, .swipe-open) .row-actions { visibility: hidden; }' in shell
     assert "lp.player = (() => {" in shell and "lp.rowAction = (button, action) =>" in shell
-    assert "window.addEventListener('popstate', park);" in shell
+    assert "window.addEventListener('popstate', event =>" in shell
+    assert "workspace?.dataset.tabWorkspace === workspaceId" in shell
+    assert "workspace.dispatchEvent(new Event('lp:recording-tab-history'))" in shell
     assert "overscroll-behavior-y: contain" in shell
     assert 'id="lp-mini-player"' in files.text and 'id="lp-audio-host" hidden' in files.text
 

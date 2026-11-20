@@ -130,6 +130,12 @@ docker compose --profile <cpu|gpu|mac> up -d --build
 
 Then browse to `https://$DOMAIN`.
 
+For an Android rollout, pass the signed APK's public SHA-256 certificate digest
+to `./scripts/deploy/smoke-test.sh "https://$DOMAIN" "$APK_CERT_SHA256"`.
+This additionally checks the unauthenticated Digital Asset Links response for
+the matching package and signing certificate; it does not validate sign-in or
+recorder transfer. See [Android origin verification](android.md#verify-the-workspace-origin).
+
 The Web App ships its browser runtime inside the Python package. Normal operation
 does not require access to a JavaScript CDN, which is suitable for private or
 offline deployments.

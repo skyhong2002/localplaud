@@ -114,6 +114,19 @@ def test_dashboard_renders(monkeypatch, tmp_path):
     assert "Total audio" not in r.text  # one dense library surface, not a dashboard
 
 
+def test_phone_add_sheet_offers_explicit_recording_review(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    page = client.get("/")
+    assert page.status_code == 200
+    assert 'type="button" data-add-record' in page.text
+    assert 'data-add-capture hidden' in page.text
+    assert 'data-capture-pause hidden>Pause recording</button>' in page.text
+    assert 'data-capture-preview hidden aria-label="Recording preview"' in page.text
+    assert 'data-capture-discard hidden' in page.text
+    assert 'data-capture-save hidden' in page.text
+    assert 'data-add-file' in page.text
+
+
 def test_library_bulk_export_modal_has_accessible_dialog_contract(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     _seed()
@@ -349,7 +362,7 @@ def test_import_dialog_is_hidden_until_explicitly_opened(monkeypatch, tmp_path):
     assert messages["Audio source"] == "音訊來源"
     assert messages["Could not upload audio"] == "無法上傳音訊"
     assert messages["Could not reach Plaud"] == "無法連線至 Plaud"
-    assert messages["No new recordings"] == "沒有新錄音"
+    assert messages["No new recordings uploaded to Plaud Cloud were found."] == "沒有找到新上傳到 Plaud Cloud 的錄音。"
     assert messages["unsupported audio/video format"] == "不支援的音訊或影片格式"
     assert messages["file exceeds 2 GB limit"] == "檔案超過 2 GB 上限"
 
@@ -411,9 +424,23 @@ def test_home_renders_recent_recordings_and_operational_cards(monkeypatch, tmp_p
     assert "Recent files" in response.text and "Weekly Sync" in response.text
     assert "Plaud mirror" in response.text and "754 / 754" in response.text
     assert "AutoFlow activity" in response.text
+    assert 'data-home-new-recording data-dialog-open="add-sheet"' in response.text
+    assert "New recording" in response.text
     # Add audio (device upload and Plaud import) stays one click away.
     assert 'data-import-mode="plaud"' in response.text and 'data-import-mode="device"' in response.text
     assert 'href="/home"' in response.text and 'href="/"' in response.text
+
+
+def test_home_offers_cloud_check_only_when_plaud_connected(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    assert 'data-home-plaud-check' not in client.get('/home').text
+
+    monkeypatch.setattr('localplaud.plaud.connections.connection_status', lambda *_: {'ok': True})
+    response = client.get('/home')
+    assert response.status_code == 200
+    assert 'data-home-plaud-check data-open-import="plaud"' in response.text
+    assert response.text.count('data-plaud-check-link') == 2
+    assert 'Upload from your recorder in the Plaud app first.' in response.text
 
 
 def test_transcript_page_wraps_speaker_name_for_one_line_clamp(monkeypatch, tmp_path):
@@ -476,6 +503,22 @@ def test_ready_to_generate_empty_state_offers_method_dialog(monkeypatch, tmp_pat
     assert 'data-open-manual-note' not in r.text
     assert 'class="note-tab note-add-tab" data-open-note-generation' not in r.text
     assert 'id="generate-notes" disabled' in r.text
+
+
+def test_phone_sources_expands_the_existing_recording_player(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"audio")
+    _seed(str(audio))
+
+    page = client.get("/file/r1?tab=transcript")
+    assert page.status_code == 200
+    assert 'aria-expanded="false" aria-controls="ws-inline-player" aria-label="Expand playback controls"' in page.text
+    assert '<section id="ws-inline-player" class="ws-player" aria-label="Audio player" hidden></section>' in page.text
+    assert 'data-transcript-expand aria-label="Open full transcript"' in page.text
+    assert page.text.count('<audio id="player"') == 1
+    assert page.text.count('id="player-progress"') == 1
+    assert page.text.count('id="player-speed-menu"') == 1
 
 
 def test_metadata_only_recording_guides_audio_import(monkeypatch, tmp_path):
@@ -697,7 +740,8 @@ def test_workspace_generated_note_edit_reuses_copy_and_opens_inline_editor(
     assert "syncFilelistTab(name);if(push)" in r.text
     assert "document.addEventListener('htmx:configRequest'" in r.text
     assert "event.detail.path=workspacePathForTab(event.detail.path,activePanelName())" in r.text
-    assert "if(next!==current)history.pushState(state,'',url)" in r.text
+    assert "if(next===current)return;" in r.text
+    assert "history.pushState({...state,localplaudTabWorkspace:tabWorkspace},'',url)" in r.text
     assert (
         "if(requested!=='notes'){url.searchParams.delete('note');"
         "url.searchParams.delete('note_id');}" in r.text
@@ -1014,7 +1058,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'aria-label="Back 15 seconds" title="Back 15 seconds"' in r_assets
     assert 'aria-label="Forward 15 seconds" title="Forward 15 seconds"' in r_assets
     assert "skip(-15)" in WORKSPACE_JS and "skip(15)" in WORKSPACE_JS
-    assert 'id="open-share" type="button" data-recording-share aria-label="Share" title="Share"' in r_assets
+    assert 'id="open-share" type="button" data-recording-share aria-label="Share &amp; export" title="Share &amp; export"' in r_assets
     # Share opens the one share sheet (link, copy, exports): no separate Export.
     assert 'id="open-export"' not in r.text
     # Plaud Web order: Share · Find · More · | · Ask.
