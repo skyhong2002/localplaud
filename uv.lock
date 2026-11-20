@@ -1851,7 +1851,6 @@ wheels = [
 
 [[package]]
 name = "localplaud"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "apscheduler" },
@@ -1967,7 +1966,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
     { name = "whisperx", marker = "extra == 'forced-align'", specifier = ">=3.4" },
 ]
-provides-extras = ["faster-whisper", "cuda", "mlx", "diarize", "forced-align", "vad", "local-llm", "cloud", "dev"]
+provides-extras = ["cloud", "cuda", "dev", "diarize", "faster-whisper", "forced-align", "local-llm", "mlx", "vad"]
 
 [[package]]
 name = "lxml"

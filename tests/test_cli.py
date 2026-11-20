@@ -7,6 +7,7 @@ import os
 from typer.testing import CliRunner
 
 import localplaud.db.session as db_session
+from localplaud import __version__
 from localplaud.cli import app
 from localplaud.config import get_settings
 
@@ -26,6 +27,12 @@ def test_help_lists_commands():
     assert result.exit_code == 0
     for command in ("init", "auth", "poll", "work", "run", "ls", "ask", "serve"):
         assert command in result.output
+
+
+def test_version_does_not_need_a_subcommand():
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.output.strip() == f"localplaud {__version__}"
 
 
 def test_auth_help_lists_only_official_subcommands():

@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Verify release tag and build Python distributions
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git merge-base --is-ancestor HEAD origin/main || { echo 'Tag a commit merged into main.' >&2; exit 1; }
+          python3 scripts/release_notes.py "$TAG" > release-notes.md
+          uv lock --check
+          uv build --out-dir release-assets
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-release
+          path: |
+            release-assets/*
+            release-notes.md
+          if-no-files-found: error
+
+  android:
+    if: ${{ vars.RELEASE_ANDROID == 'true' }}
+    needs: python
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: android-release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+        with:
+          gradle-version: '8.11.1'
+          cache-disabled: true
+      - name: Test and build for the public workspace origin
+        env:
+          WORKSPACE_ORIGIN: ${{ vars.RELEASE_ANDROID_ORIGIN }}
+        run: |
+          [[ "$WORKSPACE_ORIGIN" == https://* ]] || { echo 'Set RELEASE_ANDROID_ORIGIN to the public HTTPS workspace origin.' >&2; exit 1; }
+          gradle --no-daemon -p android "-PlocalplaudOrigin=$WORKSPACE_ORIGIN" testDebugUnitTest lintDebug assembleRelease
+      - name: Sign and verify the release APK
+        env:
+          TAG: ${{ github.ref_name }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          : "${ANDROID_KEYSTORE_BASE64:?Missing signing keystore}" "${ANDROID_STORE_PASSWORD:?Missing store password}" "${ANDROID_KEY_ALIAS:?Missing key alias}" "${ANDROID_KEY_PASSWORD:?Missing key password}"
+          umask 077
+          scratch=$(mktemp -d)
+          trap 'rm -r -- "$scratch"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$scratch/release.jks"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          unsigned=android/build/outputs/apk/release/localplaud-android-release-unsigned.apk
+          "$tools/zipalign" -P 16 -f 4 "$unsigned" "$scratch/aligned.apk"
+          "$tools/apksigner" sign --ks "$scratch/release.jks" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_STORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$scratch/signed.apk" "$scratch/aligned.apk"
+          "$tools/apksigner" verify --print-certs "$scratch/signed.apk"
+          badging=$("$tools/aapt2" dump badging "$scratch/signed.apk")
+          code=$(sed -n "s/^package: .*versionCode='\([0-9][0-9]*\)'.*/\1/p" <<< "$badging")
+          version=$(sed -n "s/^package: .*versionName='\([^']*\)'.*/\1/p" <<< "$badging")
+          test -n "$code" && test "$version" = "${TAG#v}"
+          mkdir release-assets
+          mv "$scratch/signed.apk" "release-assets/localplaud-android-$version-$code.apk"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-release
+          path: release-assets/*.apk
+          if-no-files-found: error
+
+  publish:
+    needs: [python, android]
+    if: ${{ !cancelled() && needs.python.result == 'success' && (needs.android.result == 'success' || needs.android.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ needs.android.result == 'success' }}
+        with:
+          name: android-release
+          path: release-assets
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          (cd release-assets && sha256sum -- * > ../SHA256SUMS)
+          gh release create "$TAG" release-assets/* SHA256SUMS --verify-tag \
+            --repo "$GITHUB_REPOSITORY" --title "localplaud ${TAG#v}" --notes-file release-notes.md

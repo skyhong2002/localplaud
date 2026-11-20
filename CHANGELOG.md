@@ -4,6 +4,19 @@ All notable changes to localplaud are documented here. The project follows
 [Semantic Versioning](https://semver.org/); until 1.0, minor versions may include
 breaking configuration or schema changes, which are called out explicitly.
 
+## [0.2.0]
+
+- Added an optional Android app for the self-hosted workspace, with a launcher
+  shortcut to the official Plaud app for recorder uploads.
+- Added **Check Plaud now** to Home and the phone's Add menu to find raw audio
+  already uploaded to Plaud Cloud and show what is queued for local download.
+- Refined recording navigation and playback, added a calendar, recent speaker
+  names, note-generation actions, grouped exports, and recoverable phone
+  recording drafts after stopping.
+- Added GitHub release automation for Python packages and optional signed APKs.
+  The Android build is tied to a configured workspace origin and does not pair
+  with the recorder or replace the official upload path.
+
 ## [0.1.0] - 2026-11-04
 
 First public release. localplaud replaces the Plaud Intelligence workflow after
