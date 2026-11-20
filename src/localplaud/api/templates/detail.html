@@ -22,7 +22,7 @@
     <div class="recording-breadcrumb">
       <a class="ws-back" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true" aria-label="{{ t('Back to files') }}" title="{{ t('Back to files') }}">{{ icon('chevron-left') }}</a>
       <button class="collapse-toggle" type="button" data-collapse-toggle="list" aria-label="{{ t('Hide file list') }}" title="{{ t('Hide file list') }}" aria-controls="recording-file-list" aria-expanded="true">{{ icon('list-collapse') }}</button>
-      <a class="recording-crumb-link" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ icon('folder') }}{{ t('All files') }}</a>
+      <a class="recording-crumb-link" href="{{ return_to }}" hx-get="{{ return_to }}" hx-target="#app-view" hx-select="#app-view" hx-swap="outerHTML" hx-push-url="true">{{ icon('folder') }}{{ t(filelist_context.title) }}</a>
       <span class="recording-crumb-separator" aria-hidden="true">›</span>
       <span class="ws-crumb-title" aria-hidden="true">{{ f.filename }}</span>
     </div>
@@ -31,7 +31,7 @@
       <button type="button" data-m-switch="notes" aria-pressed="{{ 'false' if active_tab == 'transcript' else 'true' }}">{{ t('Notes') }}</button>
     </div>
     <div class="recording-actions">
-      <button class="icon-action" id="open-share" type="button" data-recording-share aria-label="{{ t('Share') }}" title="{{ t('Share') }}">{{ icon('share') }}<span class="action-label">{{ t('Share') }}</span></button>
+      <button class="icon-action" id="open-share" type="button" data-recording-share aria-label="{{ t('Share & export') }}" title="{{ t('Share & export') }}">{{ icon('share') }}<span class="action-label">{{ t('Share & export') }}</span></button>
       {% if f.transcript %}{% set has_editable_notes = not f.is_trash and ((notes | selectattr('source', 'equalto', 'local') | list) or f.user_notes) %}
       <details class="transcript-tool ws-find"><summary class="icon-action icon-only" id="open-find" aria-label="{{ t('Find & replace') }}" title="{{ t('Find & replace') }} (Ctrl+F)">{{ icon('search') }}</summary><div class="transcript-popover search-popover" id="find-popover"><button class="popover-close" type="button" data-close-popover aria-label="{{ t('Close') }}">{{ icon('x') }}</button>
         <div style="display:flex;gap:7px;align-items:center"><input id="transcript-find" class="search-input" type="search" placeholder="{{ t('Find in transcript and notes') }}" aria-label="{{ t('Find in transcript and notes') }}"><button class="icon-action icon-only" id="find-previous" type="button" aria-label="{{ t('Previous') }}">↑</button><button class="icon-action icon-only" id="find-next" type="button" aria-label="{{ t('Next') }}">↓</button></div><span id="find-count" class="sub" style="font-size:11px">0 {{ t('results') }}</span>

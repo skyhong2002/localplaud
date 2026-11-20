@@ -14,10 +14,31 @@ DevTools. All content below is placeholder. Private screenshots live only in
 not a verified Plaud 4.1 checklist. The newer public help describes adding
 recordings from Home. localplaud now exposes **Home → New recording** on desktop
 and mobile, reuses the foreground capture and import sheet, and distinguishes
-new browser captures from file uploads in the library source filter. A signed-in
-4.1 comparison of Library, Sources, Notes, and Export is still pending, as are
-Pixel 7 and production acceptance. Ask Plaud and AutoFlow are out of scope for
-this pass; direct recorder sync is tracked separately in issue #28.
+new browser captures from file uploads in the library source filter.
+
+**Signed-in Web spot check (2026-11-21, Brave on Pixel 7):** The shell had a
+global Add button and Home, Library, and Tools destinations. Home separated
+Upcoming from Meeting notes and offered a calendar connection. Library exposed
+My files with separate Recordings and Imports destinations in its folder tree.
+Both were navigable but exposed no recording rows in this session. Opening Add
+showed a recorder activation prompt; no device was activated and no calendar
+was connected. The exact Web build number, populated desktop layout, and
+Sources, Notes, and Export were not verified. This check does not validate the
+localplaud APK, prove full 4.1 parity, or change the scope of production
+acceptance. Ask Plaud and AutoFlow remain out of scope; direct recorder sync is
+tracked separately in issue #28.
+
+**Verification after the T3 restart (2026-11-21):** Pixel 7 Brave still showed
+the authenticated Home. A data-sharing consent dialog blocked the Library check;
+no option was selected. The desktop preview reached the sign-in page, and no
+authenticated desktop session was available to the desktop audit. This is not an
+end-to-end comparison against a populated Plaud 4.1 workspace.
+
+**localplaud follow-up:** Home groups New recording, Calendar and View all above
+the recent list. All files, Recordings and Imports share search and organization
+filters; switching views clears source-specific filters, and returning from a
+recording restores the library context. Share & export opens the existing menu;
+it does not create a link or download anything by itself.
 
 Ground rules for builders:
 

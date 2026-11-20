@@ -1164,15 +1164,17 @@ body.progressive-failed .progressive-error { display: flex; }
 /* Count badges keep white text on a deeper red so the count stays AA. */
 :root[data-appearance="dark"] .badge { background: #C93A2E; }
 
-/* ---------------------------------------------------- Home calendar entry */
-.home-capture-actions { display: flex; justify-content: flex-end; margin-bottom: 16px; }
-.home-capture-actions .btn { min-height: 44px; }
-.home-head-links { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+.home-recent-head, .home-head-links { flex-wrap: wrap; }
+.home-head-links { display: flex; align-items: center; gap: 4px 16px; }
+.home-head-links > * { min-height: 44px; }
 .home-calendar-link { gap: 4px; }
-@media (max-width: 600px) {
-  /* Stack under "View all" so the large Home title keeps its phone width. */
-  .home-head-links { flex-direction: column; align-items: flex-end; gap: 0; }
-  .home-calendar-link { min-width: 44px; min-height: 40px; justify-content: flex-end; }
-  .home-calendar-link .i { width: 20px; height: 20px; }
-  .home-calendar-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.library-scope-nav { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 8px 0 16px 40px; border-bottom: 1px solid var(--c-border); }
+.library-scope-nav a { display: inline-flex; min-height: 44px; align-items: center; padding: 0 4px; border-bottom: 2px solid transparent; color: var(--c-text-2); text-decoration: none; }
+.library-scope-nav a:hover, .library-scope-nav a[aria-current="page"] { color: var(--c-text); }
+.library-scope-nav a[aria-current="page"] { border-bottom-color: currentColor; font-weight: 600; }
+.library-scope-nav a:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+@media (max-width: 767px) {
+  .home-recent-head { display: grid; gap: 8px; }
+  .home-head-links { gap: 4px 12px; }
+  .library-scope-nav { margin-left: 0; }
 }

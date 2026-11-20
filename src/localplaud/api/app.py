@@ -818,6 +818,12 @@ def _base_ctx(request: Request, active: str) -> dict:
                 .order_by(PlaudFile.scene)
             )
         ]
+        sidebar_counts["recordings"] = sum(
+            source["count"] for source in sidebar_scenes if source["value"] in _RECORDING_SCENES
+        )
+        sidebar_counts["imports"] = sum(
+            source["count"] for source in sidebar_scenes if source["value"] == _IMPORT_SCENE
+        )
         sidebar_tags = _sidebar_tags(session, request.query_params.get("tag"))
     return {
         "request": request,
@@ -934,6 +940,11 @@ _SCENE_NAMES = {
     102: "Imported audio",
 }
 
+_RECORDING_SCENES = (1, 7, 101)
+_IMPORT_SCENE = 102
+_LIBRARY_SOURCE_VIEWS = {"recordings": "Recordings", "imports": "Imports"}
+_LIBRARY_VIEW_SCENES = {"recordings": _RECORDING_SCENES, "imports": (_IMPORT_SCENE,)}
+
 
 def _scene_label(scene: int | None) -> str:
     if scene is None:
@@ -977,7 +988,7 @@ def _parse_library_params(
                 scene_val = int(scene)
             except (TypeError, ValueError):
                 scene_val = None
-    view_val = view if view in {"all", "trash", "uncategorized"} else "all"
+    view_val = view if view in {"all", "trash", "uncategorized", *_LIBRARY_SOURCE_VIEWS} else "all"
 
     def optional_int(value: str | None) -> int | None:
         try:
@@ -1194,6 +1205,8 @@ def _library_context_title(params: dict, organization: dict) -> str:
         return "Plaud recordings"
     if params["origin"] == "local":
         return "Local uploads"
+    if params["view"] in _LIBRARY_SOURCE_VIEWS:
+        return _LIBRARY_SOURCE_VIEWS[params["view"]]
     if any(
         params[key] is not None
         for key in (
@@ -1223,6 +1236,8 @@ def _library_query(params: dict, timezone_name: str = "UTC"):
     stmt = stmt.where(PlaudFile.is_trash.is_(params["view"] == "trash"))
     if params["view"] == "uncategorized":
         stmt = stmt.where(PlaudFile.folder_id.is_(None), ~PlaudFile.tags.any())
+    elif view_scenes := _LIBRARY_VIEW_SCENES.get(params["view"]):
+        stmt = stmt.where(PlaudFile.scene.in_(view_scenes))
     if params["q"]:
         pattern = f"%{_escape_like_literal(params['q'])}%"
         stmt = stmt.where(
@@ -1275,9 +1290,12 @@ def _library_facets(session, params: dict) -> dict:
         )
         or 0
     )
+    scope = [PlaudFile.is_trash.is_(False)]
+    if view_scenes := _LIBRARY_VIEW_SCENES.get(params["view"]):
+        scope.append(PlaudFile.scene.in_(view_scenes))
     scene_rows = session.execute(
         select(PlaudFile.scene, func.count())
-        .where(PlaudFile.is_trash.is_(False))
+        .where(*scope)
         .group_by(PlaudFile.scene)
         .order_by(PlaudFile.scene)
     ).all()
@@ -1292,7 +1310,7 @@ def _library_facets(session, params: dict) -> dict:
     ]
     origin_rows = session.execute(
         select(func.coalesce(PlaudFile.origin, "plaud"), func.count())
-        .where(PlaudFile.is_trash.is_(False))
+        .where(*scope)
         .group_by(func.coalesce(PlaudFile.origin, "plaud"))
         .order_by(func.coalesce(PlaudFile.origin, "plaud"))
     ).all()

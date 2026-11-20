@@ -17,6 +17,12 @@ In a recording's **Sources** tab, expand the playback controls for a seekable
 waveform, 15-second skips, and playback speed. The inline and bottom controls
 use the same audio; switching between Sources and Notes does not restart it.
 
+The library has quick links for **All files**, **Recordings**, and **Imports**.
+Recordings shows known recorder and app captures; Imports shows known file
+uploads. Unclassified older items remain in All files. Opening a recording and
+going back preserves the selected view and filters. Use **Share & export** to
+find the recording's download and sharing options in one place.
+
 In **All files**, select up to 50 recordings and choose **Generate notes** to
 preview eligibility. Confirmation queues derived work without rerunning speech
 recognition or sending anything to Plaud. The worker uses each recording's

@@ -1184,7 +1184,7 @@
         else if(query.has('tag'))activeHref=`/?tag=${encodeURIComponent(query.get('tag'))}`;
         else if(query.has('origin'))activeHref=`/?origin=${encodeURIComponent(query.get('origin'))}`;
         else if(query.has('scene'))activeHref=`/?scene=${encodeURIComponent(query.get('scene'))}`;
-        else if(['uncategorized','trash'].includes(query.get('view')))activeHref=`/?view=${query.get('view')}`;
+        else if(['recordings','imports','uncategorized','trash'].includes(query.get('view')))activeHref=`/?view=${query.get('view')}`;
         else activeHref='/';
       }else if(path.startsWith('/file/'))activeHref=null;
       else activeHref=path.startsWith('/home')?'/home':path.startsWith('/ask')?'/ask':path.startsWith('/search')?'/search':path.startsWith('/notes')?'/notes':path.startsWith('/templates')?'/templates':path.startsWith('/discover')?'/discover':path.startsWith('/notifications')?'/notifications':path.startsWith('/settings')?'/settings':path.startsWith('/status')?'/status':null;

@@ -91,8 +91,11 @@
   {% set active_tag = organization.tags | selectattr('id', 'equalto', lib.tag) | first %}
   {% set active_scene = facets.scenes | selectattr('active') | first %}
   {% set active_origin = facets.origins | selectattr('active') | first %}
+  {% set source_views = [('all', 'All files'), ('recordings', 'Recordings'), ('imports', 'Imports')] %}
+  {% set organize_view = lib.view if lib.view in ('recordings', 'imports') else 'all' %}
   {% set filter_count = (1 if q else 0) + (1 if lib.state else 0) + (1 if lib.scene is not none else 0) + (1 if lib.folder is not none else 0) + (1 if lib.tag is not none else 0) + (1 if lib.origin else 0) + (1 if lib.date_from else 0) + (1 if lib.date_to else 0) + (1 if lib.min_duration_minutes is not none else 0) + (1 if lib.max_duration_minutes is not none else 0) %}
   {% if lib.view == 'trash' %}{% set view_title = t('Trash') %}{% elif lib.view == 'uncategorized' %}{% set view_title = t('Unfiled') %}{% elif active_folder %}{% set view_title = active_folder.name %}{% elif active_tag %}{% set view_title = active_tag.name %}{% elif active_scene %}{% set view_title = t(active_scene.label) %}{% elif lib.origin == 'plaud' %}{% set view_title = t('Plaud recordings') %}{% elif lib.origin == 'local' %}{% set view_title = t('Local uploads') %}{% else %}{% set view_title = t('All files') %}{% endif %}
+  {% if lib.view in ('recordings', 'imports') and not (active_folder or active_tag or active_scene or active_origin) %}{% set view_title = t('Recordings' if lib.view == 'recordings' else 'Imports') %}{% endif %}
   {% set selectable = lib.view != 'trash' %}
   <div class="library-head"{% if active_tag %} data-active-tag-name="{{ active_tag.name }}"{% endif %}>
     <h1 class="page-title"><span class="only-wide">{{ view_title }}</span><button class="title-switch only-compact" type="button" data-dialog-open="library-sheet" aria-haspopup="dialog">{{ view_title }}{{ icon('chevron-down') }}</button></h1>
@@ -103,9 +106,9 @@
       <div class="orgbox" aria-label="{{ t('Library organization') }}">
         <div class="orgrow">
           <span class="lbl">{{ t('Folders') }}</span>
-          <a class="fchip {% if lib.folder is none %}on{% endif %}" href="{{ liburl(view='all', folder='', tag='') }}">{{ t('All') }}</a>
+          <a class="fchip {% if lib.folder is none %}on{% endif %}" href="{{ liburl(view=organize_view, folder='', tag='') }}">{{ t('All') }}</a>
           {% for folder in organization.folders %}
-          <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="{{ liburl(view='all', folder=folder.id, tag='') }}" title="{{ folder.name }}"><span class="folder-glyph" style="--folder-color:{{ folder.color or 'var(--c-text-2)' }}">{{ icon('folder', 'xs') }}</span>{{ folder.name }} <span class="n">{{ folder.count }}</span></a>
+          <a class="fchip {% if lib.folder == folder.id %}on{% endif %}" href="{{ liburl(view=organize_view, folder=folder.id, tag='') }}" title="{{ folder.name }}"><span class="folder-glyph" style="--folder-color:{{ folder.color or 'var(--c-text-2)' }}">{{ icon('folder', 'xs') }}</span>{{ folder.name }} <span class="n">{{ folder.count }}</span></a>
           {% endfor %}
           <details class="quickadd"><summary>+ {{ t('Folder') }}</summary>
             <form data-create-kind="folders"><input class="input" name="name" maxlength="80" placeholder="{{ t('Folder name') }}" required><button class="btn btn-sm">{{ t('Add') }}</button></form>
@@ -113,8 +116,8 @@
         </div>
         {% set tag_kinds = [('topic', t('Topics')), ('person', t('People')), ('org', t('Organizations')), ('custom', t('Other'))] %}
         <label class="tag-filter-select"><span class="lbl">{{ t('Tags') }}</span><select class="select" id="library-tag-filter" aria-label="{{ t('Tags') }}" onchange="window.location.href=this.value">
-          <option value="{{ liburl(view='all', folder='', tag='') }}"{% if lib.tag is none %} selected{% endif %}>{{ t('All') }}</option>
-          {% for kind, kind_label in tag_kinds %}{% set kind_tags = organization.tags | selectattr('kind', 'equalto', kind) | list %}{% if kind_tags %}<optgroup label="{{ kind_label }}">{% for tag in kind_tags %}<option value="{{ liburl(view='all', folder='', tag=tag.id) }}"{% if lib.tag == tag.id %} selected{% endif %}>{{ tag.name }} · {{ tag.count }}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}
+          <option value="{{ liburl(view=organize_view, folder='', tag='') }}"{% if lib.tag is none %} selected{% endif %}>{{ t('All') }}</option>
+          {% for kind, kind_label in tag_kinds %}{% set kind_tags = organization.tags | selectattr('kind', 'equalto', kind) | list %}{% if kind_tags %}<optgroup label="{{ kind_label }}">{% for tag in kind_tags %}<option value="{{ liburl(view=organize_view, folder='', tag=tag.id) }}"{% if lib.tag == tag.id %} selected{% endif %}>{{ tag.name }} · {{ tag.count }}</option>{% endfor %}</optgroup>{% endif %}{% endfor %}
         </select></label>
         <div class="orgrow">
           <details class="quickadd"><summary>+ {{ t('Tag') }}</summary>
@@ -146,7 +149,7 @@
         {% endif %}
         <div class="filtrow">
           <span class="lbl">{{ t('View') }}</span>
-          <a class="fchip {% if lib.view == 'all' %}on{% endif %}" href="{{ liburl(view='all') }}">{{ t('All files') }}</a>
+          {% for scope, label in source_views %}<a class="fchip {% if lib.view == scope %}on{% endif %}" href="{{ liburl(view=scope, scene=(lib.scene if lib.view == scope else ''), origin=(lib.origin if lib.view == scope else '')) }}">{{ t(label) }}</a>{% endfor %}
           <a class="fchip {% if lib.view == 'uncategorized' %}on{% endif %}" href="{{ liburl(view='uncategorized', folder='', tag='') }}">{{ t('Unfiled') }}</a>
           <a class="fchip trash {% if lib.view == 'trash' %}on{% endif %}" href="{{ liburl(view='trash', folder='', tag='') }}">{{ t('Trash') }} <span class="n">{{ facets.trash_count }}</span></a>
         </div>
@@ -172,6 +175,14 @@
       </div>
     </div>
   </div>
+
+  {% if lib.view in ('all', 'recordings', 'imports') %}
+  <nav class="library-scope-nav" aria-label="{{ t('Library views') }}">
+    {% for scope, label in source_views %}
+    <a href="{{ liburl(view=scope, scene=(lib.scene if lib.view == scope else ''), origin=(lib.origin if lib.view == scope else '')) }}"{% if lib.view == scope %} aria-current="page"{% endif %}>{{ t(label) }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
 
   {% if filter_count and files %}
   <ul class="active-filters" aria-label="{{ t('Active filters') }}">
@@ -218,7 +229,15 @@
         {% if lib.min_duration_minutes is not none %}<li>{{ t('Minimum') }}: {{ lib.min_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
         {% if lib.max_duration_minutes is not none %}<li>{{ t('Maximum') }}: {{ lib.max_duration_minutes }} {{ t('minutes') }}</li>{% endif %}
       </ul>
-      <div class="empty-actions"><a class="btn sec filtered-empty-reset" href="/?sort={{ lib.sort }}&amp;dir={{ lib.dir }}&amp;view=all">{{ icon('undo', 'sm') }}{{ t('Clear all filters') }}</a></div>
+      <div class="empty-actions"><a class="btn sec filtered-empty-reset" href="/?sort={{ lib.sort }}&amp;dir={{ lib.dir }}&amp;view={{ lib.view if lib.view in ('recordings', 'imports') else 'all' }}">{{ icon('undo', 'sm') }}{{ t('Clear all filters') }}</a></div>
+    {% elif lib.view in ('recordings', 'imports') %}
+      {{ icon('upload' if lib.view == 'imports' else 'mic') }}<p class="empty-title">{{ t('No imports yet') if lib.view == 'imports' else t('No recordings yet.') }}</p>
+      <p class="empty-body">{{ t('Audio files you import appear here.') if lib.view == 'imports' else t('Known recorder and app captures appear here. Older recordings with an unknown source are still in All files.') }}</p>
+      <div class="empty-actions">
+        {% if lib.view == 'imports' %}<button class="btn" type="button" data-open-import="device">{{ icon('upload', 'sm') }}{{ t('Import audio') }}</button>
+        {% else %}<button class="btn" type="button" data-dialog-open="add-sheet" aria-haspopup="dialog" aria-controls="add-sheet">{{ icon('plus', 'sm') }}{{ t('New recording') }}</button>{% endif %}
+        <a class="btn sec" href="/">{{ t('All files') }}</a>
+      </div>
     {% else %}
       {{ icon('waveform') }}<p class="empty-title">{{ t('No recordings yet.') }}</p>
       <p class="empty-body">{{ t('Connect the official Plaud API or MCP in Settings, then import your library.') }}</p>
@@ -311,6 +330,7 @@
     </div>
     <ul class="sheet-list">
       <li><a class="sheet-row" href="/" {% if lib.view == 'all' and filter_count == 0 %}aria-current="page"{% endif %}>{{ icon('files') }}<span>{{ t('All files') }}</span><span class="count">{{ sidebar.counts.all }}</span></a></li>
+      {% for scope, label, glyph in [('recordings', 'Recordings', 'mic'), ('imports', 'Imports', 'upload')] %}<li><a class="sheet-row" href="/?view={{ scope }}"{% if lib.view == scope %} aria-current="page"{% endif %}>{{ icon(glyph) }}<span>{{ t(label) }}</span><span class="count">{{ sidebar.counts[scope] }}</span></a></li>{% endfor %}
       <li><a class="sheet-row" href="/?view=uncategorized" {% if lib.view == 'uncategorized' %}aria-current="page"{% endif %}>{{ icon('inbox') }}<span>{{ t('Unfiled') }}</span><span class="count">{{ sidebar.counts.uncategorized }}</span></a></li>
       <li><a class="sheet-row" href="/?view=trash" {% if lib.view == 'trash' %}aria-current="page"{% endif %}>{{ icon('trash') }}<span>{{ t('Trash') }}</span><span class="count">{{ sidebar.counts.trash }}</span></a></li>
     </ul>

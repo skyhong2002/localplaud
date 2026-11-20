@@ -1046,7 +1046,7 @@ def test_detail_page_renders(monkeypatch, tmp_path):
     assert 'aria-label="Back 15 seconds" title="Back 15 seconds"' in r_assets
     assert 'aria-label="Forward 15 seconds" title="Forward 15 seconds"' in r_assets
     assert "skip(-15)" in WORKSPACE_JS and "skip(15)" in WORKSPACE_JS
-    assert 'id="open-share" type="button" data-recording-share aria-label="Share" title="Share"' in r_assets
+    assert 'id="open-share" type="button" data-recording-share aria-label="Share &amp; export" title="Share &amp; export"' in r_assets
     # Share opens the one share sheet (link, copy, exports): no separate Export.
     assert 'id="open-export"' not in r.text
     # Plaud Web order: Share · Find · More · | · Ask.
