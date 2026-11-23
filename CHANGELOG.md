@@ -4,6 +4,32 @@ All notable changes to localplaud are documented here. The project follows
 [Semantic Versioning](https://semver.org/); until 1.0, minor versions may include
 breaking configuration or schema changes, which are called out explicitly.
 
+## [0.3.0] - 2026-11-23
+
+- Fixed library and recording-picker search for generated titles while retaining
+  original-filename matching and private workspace boundaries.
+- Kept public-share audio playback available when the transcript is not shared.
+- Added foreground Android USB/BLE diagnostics. Finding a recorder does not grant
+  permission to connect or read it; the release APK keeps direct connection gated.
+- Added a separately installed, Debug-only BLE Lab APK and a reusable BlueZ test
+  peripheral for connection, bounded recovery, and automatic-reconnection testing.
+  Pixel 7 completed three peripheral disconnect/reconnect cycles without another
+  tap. These tests use a custom test service, not a Plaud recorder.
+- Added upload-only, short-lived browser approval and idempotent audio-ingest
+  receipts, plus a durable Android upload queue and manual Debug upload diagnostics.
+  Recorder transfer and background automatic upload are not implemented.
+- Added Android variant tests, lint, and packaged-manifest/isolation checks to CI
+  and release builds. Releases include the signed workspace APK and a clearly
+  named, separate Debug BLE Lab APK, alongside Python packages and checksums.
+- Expanded regressions for missing speech dependencies recovering without losing
+  transcripts or edits. Real-model and authenticated production acceptance remain
+  tracked separately from synthetic tests.
+
+Original Plaud Note direct connection, recording access, and automatic transfer
+remain unverified and require supported device authorization. Existing recorder
+bindings and recordings are preserved. See the
+[Android limitations](https://github.com/skyhong2002/localplaud/blob/v0.3.0/docs/android.md).
+
 ## [0.2.0]
 
 - Added an optional Android app for the self-hosted workspace, with a launcher

@@ -1,0 +1,3 @@
+<resources>
+    <string name="ble_lab_app_name" translatable="false">Localplaud BLE Lab</string>
+</resources>

@@ -1,0 +1,23 @@
+<resources>
+    <string name="plaud_simulation_heading">Bluetooth simulation · Debug only</string>
+    <string name="plaud_simulation_idle">Uses a simulated device. Does not connect to a real recorder.</string>
+    <string name="plaud_simulation_start">Start simulated connection</string>
+    <string name="plaud_simulation_disconnect">Simulate link loss</string>
+    <string name="plaud_simulation_reconnected">Simulated connection restored automatically.</string>
+    <string name="plaud_probe_heading">BLE lab peripheral · Debug only</string>
+    <string name="plaud_probe_description">Use only a test peripheral you control. This checks a custom BLE service and does not connect to a Plaud recorder or read recordings.</string>
+    <string name="plaud_probe_address">Test peripheral address (AA:BB:CC:DD:EE:FF)</string>
+    <string name="plaud_probe_idle">No active lab test.</string>
+    <string name="plaud_probe_saved">Lab device saved. Authorize and scan to resume with a new connection.</string>
+    <string name="plaud_probe_storage_failed">Could not read or update the saved lab device. Try again.</string>
+    <string name="plaud_probe_retry_read">Retry reading saved device</string>
+    <string name="plaud_probe_start">Authorize and scan for lab peripheral</string>
+    <string name="plaud_probe_rescan">Rescan for lab peripheral</string>
+    <string name="plaud_probe_rescan_cooldown">Automatic reconnect stopped. Wait for the cooldown before rescanning.</string>
+    <string name="plaud_probe_rescan_ready">Automatic reconnect stopped. Rescan to start a new round.</string>
+    <string name="plaud_probe_stop">Stop lab test and forget device</string>
+    <string name="plaud_probe_permission">Allow Nearby devices, then tap Authorize and scan again.</string>
+    <string name="plaud_probe_permission_revoked">Nearby devices permission was revoked. The lab session ended. Restore the permission, then authorize a new lab session.</string>
+    <string name="plaud_probe_unavailable">Lab test requires Android 12 or later and Bluetooth on.</string>
+    <string name="plaud_probe_status">%1$s · Ready sessions: %2$d</string>
+</resources>

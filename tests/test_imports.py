@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from io import BytesIO
+from pathlib import Path
+from threading import Barrier
+from uuid import uuid4
 
 import httpx
 import respx
@@ -601,6 +605,51 @@ def test_browser_capture_appears_in_recording_source_filter(monkeypatch, tmp_pat
     assert client.post(
         "/api/imports/local/audio", data={"capture_source": "plaud"}, files=files
     ).status_code == 422
+
+
+def test_recording_upload_retries_reuse_one_receipt_and_never_overwrite_audio(monkeypatch, tmp_path):
+    _reset_db(monkeypatch, tmp_path)
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    from localplaud.api import imports
+    from localplaud.api.app import app
+    from localplaud.db.models import PlaudFile
+    from localplaud.db.session import init_db, session_scope
+
+    init_db()
+    upload_id = str(uuid4())
+    data = {"upload_id": upload_id, "capture_scope": "single:workspace:1"}
+    barrier = Barrier(2, timeout=5)
+
+    def probe(_path):
+        barrier.wait()
+        return imports._AudioProbe(100, "verified")
+
+    def upload(audio=b"original recorder audio", form=None):
+        return TestClient(app).post(
+            "/api/imports/local/audio", data=data if form is None else form,
+            files={"file": ("recording.opus", audio)},
+        )
+
+    monkeypatch.setattr(imports, "_probe_audio", probe)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = [pool.submit(upload) for _ in range(2)]
+        responses = [request.result(timeout=10) for request in pending]
+    assert all(response.status_code == 201 for response in responses)
+    first, second = (response.json() for response in responses)
+    assert first == second == upload().json()
+    assert upload(b"different audio").status_code == 409
+    assert upload(form={"upload_id": upload_id}).status_code == 409
+    with session_scope() as session:
+        row, = session.scalars(select(PlaudFile)).all()
+        assert row.id == first["id"]
+        original = Path(row.audio_path)
+        assert original.read_bytes() == b"original recorder audio"
+        assert list(original.parent.iterdir()) == [original]
+        row.filename = "Edited recording"
+        row.duration_ms = 143
+    assert upload().json() == first
 
 
 def test_on_demand_plaud_audio_import_uses_its_existing_claim(monkeypatch, tmp_path):

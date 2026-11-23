@@ -185,3 +185,36 @@ def test_stale_capture_cannot_upload_into_another_workspace(accounts_client, mon
         )
         assert response.status_code == 409
         assert "workspace changed" in response.json()["detail"]
+        data = {"upload_id": "fa820954-30b1-4fc1-868c-ad5cb310ecd0"}
+        if scope is not None:
+            data["capture_scope"] = scope
+        response = accounts_client.post(
+            "/api/imports/local/audio", data=data, files={"file": ("test.opus", b"private audio")}
+        )
+        assert response.status_code == 409
+        assert "workspace changed" in response.json()["detail"]
+
+
+def test_upload_receipts_are_independent_per_workspace(accounts_client, monkeypatch):  # noqa: F811
+    from localplaud.api import imports
+
+    create_user("sky", role="owner")
+    create_user("member")
+    monkeypatch.setattr(imports, "_probe_audio", lambda _path: imports._AudioProbe(100, "verified"))
+    receipt_ids = set()
+    for name in ("sky", "member"):
+        accounts_client.cookies.clear()
+        login(accounts_client, name)
+        sheet = _sheet(accounts_client.get("/home").text)
+        scope = re.search(r'data-capture-draft-scope="([^"]+)"', sheet).group(1)
+        response = accounts_client.post(
+            "/api/imports/local/audio",
+            data={"upload_id": "fa820954-30b1-4fc1-868c-ad5cb310ecd0", "capture_scope": scope},
+            files={"file": ("test.opus", name.encode())},
+        )
+        assert response.status_code == 201
+        receipt_id = response.json()["id"]
+        receipt_ids.add(receipt_id)
+        files = accounts_client.get("/api/files").json()["files"]
+        assert [item["id"] for item in files] == [receipt_id]
+    assert len(receipt_ids) == 2

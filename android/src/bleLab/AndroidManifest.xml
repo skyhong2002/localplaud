@@ -1,0 +1,22 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <application
+        android:label="@string/ble_lab_app_name"
+        android:networkSecurityConfig="@xml/debug_network_security_config"
+        tools:replace="android:label">
+        <activity android:name=".WorkspaceActivity" android:exported="false" tools:replace="android:exported">
+            <intent-filter tools:node="removeAll" />
+        </activity>
+        <activity-alias
+            android:name=".BleLabLauncher"
+            android:exported="true"
+            android:targetActivity=".PlaudSyncActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+    </application>
+</manifest>

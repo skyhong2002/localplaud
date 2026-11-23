@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import re
@@ -17,7 +18,7 @@ from authlib.jose import JsonWebToken
 from authlib.oidc.core import CodeIDToken
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 
@@ -25,6 +26,7 @@ from ..config import get_settings
 from ..db.models import (
     AccountAuditEvent,
     AccountUser,
+    AndroidUploadApproval,
     AuthRateLimit,
     AuthTransaction,
     BrowserSession,
@@ -32,12 +34,21 @@ from ..db.models import (
 )
 from ..db.session import session_scope
 from ..db.tenancy import workspace_scope
-from ..workspaces import ensure_user_workspace
+from ..workspaces import ensure_user_workspace, workspace_for_user
 from .static_assets import keeps_own_cache_policy
+from .upload_limits import UPLOAD_PATH
 
 router = APIRouter()
 COOKIE = "localplaud_session"
 OAUTH_COOKIE = "localplaud_oauth"
+_ANDROID_UPLOAD_GRANT = re.compile(
+    r"lpu1\.([1-9][0-9]{0,17})\.([1-9][0-9]{0,17})\.([0-9]{10})\.([a-f0-9]{64})"
+)
+_ANDROID_UPLOAD_TTL = timedelta(hours=1)
+_ANDROID_APPROVAL_TTL = timedelta(minutes=5)
+_ANDROID_APPROVAL_PATH = "/account/android-upload"
+_ANDROID_CLAIM_PATH = "/api/imports/local/android-grant"
+_ANDROID_PROOF = re.compile(r"[A-Za-z0-9_-]{43}")
 PASSWORDS = PasswordHasher()
 _DUMMY_HASH = PASSWORDS.hash(secrets.token_urlsafe(32))
 PUBLIC = {
@@ -207,11 +218,154 @@ def authenticated(request):
         return user, session
 
 
+def _android_upload_signature(fields: str, session: BrowserSession) -> str:
+    return digest(f"android-upload:{fields}:{session.token_hash}")
+
+
+def _android_upload_grant(session: BrowserSession, workspace_id: int) -> dict:
+    expires_at = min(now() + _ANDROID_UPLOAD_TTL, aware(session.expires_at))
+    fields = f"{session.id}.{workspace_id}.{int(expires_at.timestamp())}"
+    return {
+        "upload_token": f"lpu1.{fields}.{_android_upload_signature(fields, session)}",
+        "capture_scope": f"account:{session.user_id}:workspace:{workspace_id}",
+        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+    }
+
+
+def _android_challenge_key(challenge: str) -> str:
+    return digest(f"android-approval:{challenge}")
+
+
+def _android_browser_binding(session: BrowserSession) -> str:
+    return digest(f"android-approval-session:{session.token_hash}")
+
+
+@router.get(_ANDROID_APPROVAL_PATH)
+def android_upload_approval_page(request: Request, challenge: str = ""):
+    account_enabled()
+    if not _ANDROID_PROOF.fullmatch(challenge):
+        raise HTTPException(status_code=400, detail="Invalid Android upload challenge")
+    response = render(request, "auth_android_upload.html", account_user=current_user(request), challenge=challenge)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    return response
+
+
+@router.post(_ANDROID_APPROVAL_PATH)
+def approve_android_upload(request: Request, challenge: str = Form()):
+    account_enabled()
+    if not _ANDROID_PROOF.fullmatch(challenge):
+        raise HTTPException(status_code=400, detail="Invalid Android upload challenge")
+    session = request.state.account_session
+    workspace_id = request.state.workspace_id
+    if not session or not workspace_id:
+        raise HTTPException(status_code=403, detail="Active workspace required")
+    current_time = now()
+    with session_scope() as db:
+        db.execute(delete(AndroidUploadApproval).where(AndroidUploadApproval.expires_at <= current_time))
+        created = db.scalar(
+            insert(AndroidUploadApproval)
+            .values(
+                challenge_hash=_android_challenge_key(challenge),
+                session_id=session.id,
+                session_binding=_android_browser_binding(session),
+                workspace_id=workspace_id,
+                expires_at=min(current_time + _ANDROID_APPROVAL_TTL, aware(session.expires_at)),
+                claimed=False,
+            )
+            .on_conflict_do_nothing()
+            .returning(AndroidUploadApproval.challenge_hash)
+        )
+    if not created:
+        raise HTTPException(status_code=409, detail="Android upload challenge already approved")
+    response = render(request, "auth_android_upload.html", account_user=current_user(request), approved=True)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    return response
+
+
+@router.post(_ANDROID_CLAIM_PATH)
+def claim_android_upload_grant(request: Request) -> dict:
+    account_enabled()
+    scheme, _, proof = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "upload-proof" or not _ANDROID_PROOF.fullmatch(proof):
+        raise HTTPException(status_code=401, detail="Missing or invalid Android upload proof")
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(proof.encode("ascii")).digest()).decode("ascii").rstrip("=")
+    current_time = now()
+    with session_scope() as db:
+        approval = db.scalar(
+            update(AndroidUploadApproval)
+            .where(
+                AndroidUploadApproval.challenge_hash == _android_challenge_key(challenge),
+                AndroidUploadApproval.expires_at > current_time,
+                AndroidUploadApproval.claimed.is_(False),
+            )
+            .values(claimed=True)
+            .returning(AndroidUploadApproval)
+        )
+        if approval is None:
+            raise HTTPException(status_code=404, detail="Android upload approval unavailable")
+        session = db.get(BrowserSession, approval.session_id)
+        if (
+            not session
+            or not session.user_id
+            or aware(session.expires_at) <= current_time
+            or not hmac.compare_digest(approval.session_binding, _android_browser_binding(session))
+        ):
+            raise HTTPException(status_code=401, detail="Issuing session is no longer active")
+        user = db.get(AccountUser, session.user_id)
+        if not user or user.status != "active" or workspace_for_user(db, user.id) != approval.workspace_id:
+            raise HTTPException(status_code=401, detail="Issuing workspace is no longer active")
+        return _android_upload_grant(session, approval.workspace_id)
+
+
+def _android_upload_account(token: str):
+    match = _ANDROID_UPLOAD_GRANT.fullmatch(token)
+    if not match:
+        return None
+    session_id, workspace_id, expires_at, signature = match.groups()
+    current_time = now()
+    if int(expires_at) <= current_time.timestamp():
+        return None
+    with session_scope() as db:
+        session = db.get(BrowserSession, int(session_id))
+        if not session or not session.user_id or aware(session.expires_at) <= current_time:
+            return None
+        fields = f"{session_id}.{workspace_id}.{expires_at}"
+        if not hmac.compare_digest(signature, _android_upload_signature(fields, session)):
+            return None
+        user = db.get(AccountUser, session.user_id)
+        if not user or user.status != "active" or workspace_for_user(db, user.id) != int(workspace_id):
+            return None
+    return user_dict(user), int(workspace_id), session.id
+
+
 async def gate(request, call_next):
     path = request.url.path
     worker = path.startswith("/api/worker/v1/")
     if worker:
         return await call_next(request)
+    if path == _ANDROID_CLAIM_PATH and request.method == "POST":
+        response = await call_next(request)
+        response.headers["Vary"] = "Authorization"
+        return response
+    authorization = request.headers.get("authorization", "")
+    if (
+        path == UPLOAD_PATH
+        and request.method == "POST"
+        and authorization.lower().startswith("bearer ")
+    ):
+        authorized = _android_upload_account(authorization[7:])
+        if authorized is None:
+            return JSONResponse(
+                {"detail": "Invalid or expired recording upload grant"}, status_code=401
+            )
+        request.state.account_user, request.state.workspace_id, request.state.android_upload_session_id = authorized
+        request.state.android_upload = True
+        with workspace_scope(request.state.workspace_id):
+            response = await call_next(request)
+        response.headers["Vary"] = "Authorization"
+        return response
     if request.method not in {"GET", "HEAD", "OPTIONS"} and not csrf_ok(request):
         return JSONResponse({"detail": "請從本站重新提交。"}, status_code=403)
     user, session = authenticated(request)

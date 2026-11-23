@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import json
+import wave
 from contextlib import contextmanager
+from io import BytesIO
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
+import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from typer.testing import CliRunner
+
+from tests.test_accounts import _approve_android_upload, create_user, login
+from tests.test_accounts import client as accounts_client  # noqa: F401
 
 
 def _setup(monkeypatch, tmp_path):
@@ -109,6 +119,62 @@ def _providers(monkeypatch):
             },
         },
     )
+
+
+def test_android_authorized_upload_is_processed_once_without_plaud(
+    accounts_client, monkeypatch, tmp_path  # noqa: F811
+):
+    from localplaud.config import get_settings
+    from localplaud.db.models import FileStatus, PlaudFile
+    from localplaud.db.session import session_scope
+    from localplaud.db.tenancy import workspace_scope
+    from localplaud.worker.daemon import DaemonJobs
+
+    monkeypatch.setenv("LOCALPLAUD_POLLER__ENABLED", "false")
+    monkeypatch.setenv("LOCALPLAUD_POLLER__DOWNLOAD_DIR", str(tmp_path / "android-audio"))
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONVERT", "false")
+    monkeypatch.setenv("LOCALPLAUD_PIPELINE__CONCURRENCY", "1")
+    settings = get_settings(reload=True)
+    create_user("android-member")
+    login(accounts_client, "android-member")
+    grant = _approve_android_upload(accounts_client).json()
+    workspace_id = int(grant["capture_scope"].rsplit(":", 1)[1])
+    assert workspace_id != 1
+    _providers(monkeypatch)
+    monkeypatch.setattr("localplaud.worker.reindex.process_pending_reindexes", lambda *a, **k: 0)
+    monkeypatch.setattr("localplaud.worker.knowledge_index.process_pending_documents", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        "localplaud.poller.poll.make_plaud_client", lambda *a, **k: pytest.fail("Plaud client used")
+    )
+
+    raw_audio = BytesIO()
+    with wave.open(raw_audio, "wb") as audio_file:
+        audio_file.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+        audio_file.writeframes(bytes(32000))
+    form = {"upload_id": str(uuid4()), "capture_scope": grant["capture_scope"]}
+    audio = {"file": ("accepted-recording.wav", raw_audio.getvalue(), "audio/wav")}
+    jobs = DaemonJobs(settings, "android-acceptance", SimpleNamespace())
+    with TestClient(accounts_client.app, base_url="https://testserver") as native:
+        native.headers["Authorization"] = f"Bearer {grant['upload_token']}"
+        path = "/api/imports/local/audio"
+        response = native.post(path, data=form, files=audio)
+        assert response.status_code == 201
+        receipt = response.json()
+        assert receipt["status"] == "downloaded"
+        assert jobs.work() == 1
+        replay = native.post(path, data=form, files=audio)
+        assert replay.status_code == 201 and replay.json() == receipt
+        assert jobs.work() == 0
+
+    with workspace_scope(workspace_id), session_scope() as db:
+        recording, = db.scalars(select(PlaudFile)).all()
+        assert recording.id == receipt["id"] and recording.status == FileStatus.done
+        assert recording.workspace_id == workspace_id and recording.origin == "local"
+        assert Path(recording.audio_path).read_bytes() == raw_audio.getvalue()
+        assert recording.local_transcript.has_speakers
+        assert {summary.source for summary in recording.summaries} == {"local"}
+    with workspace_scope(1), session_scope() as db:
+        assert db.get(PlaudFile, receipt["id"]) is None
 
 
 def test_clean_raw_audio_passes_subscription_independence_gate(monkeypatch, tmp_path):
