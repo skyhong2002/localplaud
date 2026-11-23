@@ -1,0 +1,37 @@
+{% if processing_overview is defined %}
+{% set overview = processing_overview %}
+<section class="panel processing-overview" aria-label="{{ t('Processing status') }}">
+  <div class="processing-overview-head">
+    <div>
+      <strong>{{ t(overview.heading) }}</strong>
+      <div class="sub">
+        {{ overview.waiting }} {{ t('waiting') }} · {{ overview.active }} {{ t('running') }} ·
+        {{ overview.attention }} {{ t('need attention') }}
+        {% if overview.issue_stage %} · {{ t(overview.issue_stage) }}{% endif %}
+      </div>
+    </div>
+    {% if overview.link == '/settings#remote-workers' and account_user|default(None) and account_user.role != 'owner' %}
+    <a href="/status">{{ t('System status') }} {{ icon('chevron-right', 'sm') }}</a>
+    {% else %}
+    <a href="{{ overview.link }}">{{ t(overview.action) }} {{ icon('chevron-right', 'sm') }}</a>
+    {% endif %}
+  </div>
+  {% if not compact_processing_status|default(false) %}
+  <ol class="processing-overview-stages">
+    <li>
+      <strong>{{ icon('cloud', 'sm') }} {{ t('Plaud account') }}</strong>
+      <a class="st {{ 'healthy' if overview.plaud_connected else 'degraded' }}" href="#plaud-account">{{ t('connected') if overview.plaud_connected else t('sign-in required') }}</a>
+    </li>
+    {% for step in overview.steps %}
+    <li>
+      <strong>{{ icon(step.icon, 'sm') }} {{ t(step.label) }}</strong>
+      <span class="st {{ step.state }}">{{ t(step.state) }}</span>
+      {% if step.checked_at %}
+      <time class="sub" datetime="{{ step.checked_at }}">{{ step.checked_at[:16]|replace('T', ' · ') }} UTC</time>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+</section>
+{% endif %}
