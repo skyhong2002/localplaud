@@ -255,6 +255,7 @@ def test_login_rejects_open_redirect_and_tampered_cookie(monkeypatch, tmp_path):
         "/login", data={"password": "pw", "next": "https://evil.example"}, follow_redirects=False
     )
     assert response.headers["location"] == "/"
+    client.cookies.clear()
     client.cookies.set("localplaud_session", "tampered.value")
     assert client.get("/", headers={"Accept": "text/html"}, follow_redirects=False).status_code == 303
 

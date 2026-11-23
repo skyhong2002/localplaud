@@ -581,8 +581,13 @@ def test_derived_artifacts_require_canonical_local_transcript(monkeypatch, tmp_p
         assert recording.stage_runs == []
 
 
-def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypatch, tmp_path):
+@pytest.mark.parametrize("missing_pyannote", [False, True], ids=["available", "recover-missing"])
+def test_diarization_resume_uses_raw_transcript_not_canonical_revision(
+    monkeypatch, tmp_path, missing_pyannote
+):
     _reset_db(monkeypatch, tmp_path)
+    import sys
+
     from sqlalchemy import select
 
     from localplaud.config import get_settings
@@ -600,6 +605,7 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
 
     for stage in ("ALIGN", "SUMMARIZE", "MIND_MAP", "INDEX"):
         monkeypatch.setenv(f"LOCALPLAUD_PIPELINE__{stage}", "false")
+    monkeypatch.setenv("LOCALPLAUD_DIARIZE__PROVIDER", "pyannote")
     get_settings(reload=True)
     init_db()
     audio = tmp_path / "raw-lane.wav"
@@ -651,6 +657,20 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
 
     seen = []
 
+    if missing_pyannote:
+        with monkeypatch.context() as unavailable:
+            unavailable.setitem(sys.modules, "pyannote", None)
+            process_file("raw-lane")
+        with session_scope() as session:
+            row = session.get(PlaudFile, "raw-lane")
+            run = next(item for item in row.stage_runs if item.stage == StageName.diarize)
+            assert row.status == FileStatus.partial
+            assert row.local_transcript.id == raw_id
+            assert not row.local_transcript.has_speakers
+            assert row.corrected_transcript.text == "corrected words"
+            assert run.status == StageStatus.degraded
+            assert "pyannote.audio not installed" in run.error
+
     def fake_diarize(_wav, transcript, _cfg):
         seen.append(transcript.text)
         for segment in transcript.segments:
@@ -694,7 +714,7 @@ def test_diarization_resume_uses_raw_transcript_not_canonical_revision(monkeypat
         assert diarization.provider == expected_provider
         assert diarization.model == expected_model
         assert diarization.detail["provided_by_asr"] is False
-        assert diarization.detail["reused_attempt"] == 1
+        assert diarization.detail["reused_attempt"] == (2 if missing_pyannote else 1)
 
 
 def test_diarization_killed_by_memory_pressure_is_retried_before_the_pipeline_moves_on(

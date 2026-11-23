@@ -37,15 +37,13 @@
     .panels{flex:1;min-height:0;display:flex;flex-direction:column;margin-top:8px}
     .panel{flex:1;min-height:0;overflow-y:auto}
     .panel[hidden]{display:none}
-    /* The play bar stays pinned above the transcript; only the list scrolls. */
     #panel-transcript{display:flex;flex-direction:column;overflow:hidden}
     .transcript-scroll{flex:1;min-height:0;overflow-y:auto}
 
     .import-badge{display:inline-block;padding:2px 9px;border:1px solid var(--line);border-radius:999px;background:var(--soft-3);color:var(--tab-off);font-size:11px;font-weight:600;white-space:nowrap;vertical-align:middle}
     h2 .import-badge,h1 .import-badge{margin-left:10px;vertical-align:4px}
 
-    /* transcript tab */
-    .player{padding:8px 0 4px}
+    .player{flex:none;padding:12px 0 4px}
     .player-time{font-size:14px;line-height:21px;color:var(--muted);font-variant-numeric:tabular-nums}
     .player-controls{display:flex;align-items:center;gap:16px;margin-top:12px}
     .play-btn{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:50%;background:var(--soft-2);color:var(--ink)}
@@ -144,32 +142,33 @@
   {% set outlines = notes | selectattr('template', 'equalto', 'outline') | list %}
   {% set default_tab = 'summary' if (show_notes and notes) or not show_transcript else 'transcript' %}
 
+  {% if show_transcript or show_notes %}
   <div class="column tabs" role="tablist" aria-label="{{ recording.title }}">
     {% if show_transcript %}<button id="tab-transcript" role="tab" aria-controls="panel-transcript" aria-selected="{{ 'true' if default_tab == 'transcript' else 'false' }}" data-tab="transcript">{{ t('Transcription') }}</button>{% endif %}
     {% if show_notes %}<button id="tab-summary" role="tab" aria-controls="panel-summary" aria-selected="{{ 'true' if default_tab == 'summary' else 'false' }}" data-tab="summary">{{ t('Summary') }}</button>{% endif %}
   </div>
+  {% endif %}
+
+  {% if recording.has_audio %}
+  <div class="column player" id="player-bar">
+    <div class="player-time"><span id="player-position">00:00:00</span> / {{ recording.duration_clock }}</div>
+    <div class="player-controls">
+      <button class="play-btn" id="play-toggle" type="button" aria-label="{{ t('Play') }}">
+        <svg id="play-icon" width="14" height="16" viewBox="0 0 14 16" aria-hidden="true"><path d="M1.5 1.6v12.8L12.6 8Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        <svg id="pause-icon" width="12" height="14" viewBox="0 0 12 14" aria-hidden="true"><path d="M2 1v12M10 1v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      </button>
+      <input class="scrubber" id="scrubber" type="range" min="0" max="1000" value="0" aria-label="{{ t('Seek') }}">
+      <button class="speed-btn" id="speed-toggle" type="button" aria-label="{{ t('Playback speed') }}">1x</button>
+      <a class="download-btn" href="{{ audio_url }}?download=1" download aria-label="{{ t('Download audio') }}" title="{{ t('Download audio') }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg></a>
+    </div>
+    <audio id="shared-audio" preload="metadata" src="{{ audio_url }}"></audio>
+  </div>
+  {% endif %}
 
   <div class="panels">
     {% if show_transcript %}
     <section class="panel" id="panel-transcript" role="tabpanel" aria-labelledby="tab-transcript" {% if default_tab != 'transcript' %}hidden{% endif %}>
-      <div class="column">
-        {% if recording.has_audio %}
-        <div class="player" id="player-bar">
-          <div class="player-time"><span id="player-position">00:00:00</span> / {{ recording.duration_clock }}</div>
-          <div class="player-controls">
-            <button class="play-btn" id="play-toggle" type="button" aria-label="{{ t('Play') }}">
-              <svg id="play-icon" width="14" height="16" viewBox="0 0 14 16" aria-hidden="true"><path d="M1.5 1.6v12.8L12.6 8Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-              <svg id="pause-icon" width="12" height="14" viewBox="0 0 12 14" aria-hidden="true"><path d="M2 1v12M10 1v12" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
-            </button>
-            <input class="scrubber" id="scrubber" type="range" min="0" max="1000" value="0" aria-label="{{ t('Seek') }}">
-            <button class="speed-btn" id="speed-toggle" type="button" aria-label="{{ t('Playback speed') }}">1x</button>
-            <a class="download-btn" href="{{ audio_url }}?download=1" download aria-label="{{ t('Download audio') }}" title="{{ t('Download audio') }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg></a>
-          </div>
-          <audio id="shared-audio" preload="metadata" src="{{ audio_url }}"></audio>
-        </div>
-        {% endif %}
-        {% if transcript_imported %}<div class="transcript-badge-row"><span class="import-badge">{{ t('Imported from Plaud') }}</span></div>{% endif %}
-      </div>
+      {% if transcript_imported %}<div class="column"><div class="transcript-badge-row"><span class="import-badge">{{ t('Imported from Plaud') }}</span></div></div>{% endif %}
       <div class="transcript-scroll" id="transcript-scroll">
       <div class="column">
         {% if segments %}
