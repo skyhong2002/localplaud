@@ -903,6 +903,21 @@ def _workspace_timezone_name() -> str:
 # library sorting / filtering
 # --------------------------------------------------------------------------- #
 
+def _title_search_predicate(query: str):
+    """Match the displayed title, retaining original-filename discovery."""
+    title = func.coalesce(
+        func.nullif(PlaudFile.local_title, ""),
+        func.nullif(PlaudFile.generated_title, ""),
+        func.nullif(PlaudFile.filename, ""),
+        func.substr(PlaudFile.id, 1, 12),
+    )
+    pattern = f"%{_escape_like_literal(query)}%"
+    return or_(
+        title.ilike(pattern, escape="\\"),
+        PlaudFile.filename.ilike(pattern, escape="\\"),
+    )
+
+
 _SORT_COLUMNS = {
     "recorded": PlaudFile.start_time_ms,
     "name": func.coalesce(PlaudFile.local_title, PlaudFile.filename),
@@ -1241,13 +1256,7 @@ def _library_query(params: dict, timezone_name: str = "UTC"):
     elif view_scenes := _LIBRARY_VIEW_SCENES.get(params["view"]):
         stmt = stmt.where(PlaudFile.scene.in_(view_scenes))
     if params["q"]:
-        pattern = f"%{_escape_like_literal(params['q'])}%"
-        stmt = stmt.where(
-            or_(
-                PlaudFile.local_title.ilike(pattern, escape="\\"),
-                PlaudFile.filename.ilike(pattern, escape="\\"),
-            )
-        )
+        stmt = stmt.where(_title_search_predicate(params["q"]))
     if params["state"] is not None:
         alias_states = _STATE_ALIASES.get(params["state"])
         if alias_states is not None:
@@ -1467,13 +1476,7 @@ def recording_picker(q: str = "", limit: int = 20) -> dict:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 50")
     stmt = select(PlaudFile).where(PlaudFile.is_trash.is_(False))
     if q:
-        pattern = f"%{_escape_like_literal(q)}%"
-        stmt = stmt.where(
-            or_(
-                PlaudFile.local_title.ilike(pattern, escape="\\"),
-                PlaudFile.filename.ilike(pattern, escape="\\"),
-            )
-        )
+        stmt = stmt.where(_title_search_predicate(q))
     stmt = stmt.order_by(PlaudFile.start_time_ms.desc(), PlaudFile.id.desc()).limit(limit)
     with session_scope() as session:
         rows = list(session.scalars(stmt))
