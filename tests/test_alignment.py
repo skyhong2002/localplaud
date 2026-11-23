@@ -956,9 +956,12 @@ def test_whisperx_catalog_model_uses_alignment_health_probe(monkeypatch, tmp_pat
     ]
 
 
+@pytest.mark.parametrize("missing_whisperx", [False, True], ids=["available", "recover-missing"])
 def test_pipeline_dispatches_forced_alignment_and_resumes_without_replacing_edits(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, missing_whisperx
 ):
+    import sys
+
     import localplaud.config as config
     import localplaud.db.session as db_session
     import localplaud.worker.align as alignment
@@ -1064,23 +1067,51 @@ def test_pipeline_dispatches_forced_alignment_and_resumes_without_replacing_edit
             },
         )
 
+    degraded_transcript_id = None
+    if missing_whisperx:
+        with monkeypatch.context() as unavailable:
+            unavailable.setitem(sys.modules, "whisperx", None)
+            process_file("forced")
+        with session_scope() as session:
+            row = session.get(PlaudFile, "forced")
+            degraded_transcript_id = row.local_transcript.id
+            run = next(item for item in row.stage_runs if item.stage == StageName.align)
+            assert row.status == FileStatus.partial
+            assert row.local_transcript.text == "hello world"
+            assert run.status == StageStatus.degraded
+            assert run.detail["retryable"] is True
+            assert run.detail["requested_forced_alignment"] is True
+            assert "install the 'forced-align' extra" in run.error
+
     monkeypatch.setattr(alignment, "_forced_align_whisperx", fake_forced_align)
-    process_file("forced")
+    with monkeypatch.context() as retry:
+        if missing_whisperx:
+            retry.setattr(
+                "localplaud.worker.pipeline.transcribe.run_asr",
+                lambda *_args: pytest.fail("Retry should reuse ASR"),
+            )
+        process_file("forced")
 
     with session_scope() as session:
         row = session.get(PlaudFile, "forced")
         raw = row.local_transcript
         transcript_id = raw.id
+        if missing_whisperx:
+            assert transcript_id == degraded_transcript_id
         assert [word["text"] for word in raw.segments[0]["words"]] == ["hello", "world"]
         run = next(item for item in row.stage_runs if item.stage == StageName.align)
         assert run.status == StageStatus.completed
         assert (run.provider, run.model) == ("whisperx", "wav2vec2-auto")
         assert run.detail["forced_alignment"] is True
         assert run.resolved_profile_snapshot["stages"]["align"]["connection"] == "align:whisperx"
-        attempt = (
-            session.query(StageAttempt).filter_by(file_id="forced", stage=StageName.align).one()
+        attempts = (
+            session.query(StageAttempt)
+            .filter_by(file_id="forced", stage=StageName.align)
+            .order_by(StageAttempt.attempt)
+            .all()
         )
-        assert attempt.status == StageStatus.completed
+        assert len(attempts) == (2 if missing_whisperx else 1)
+        assert attempts[-1].status == StageStatus.completed
         session.add(
             TranscriptRevision(
                 file_id="forced",
@@ -1131,7 +1162,7 @@ def test_pipeline_dispatches_forced_alignment_and_resumes_without_replacing_edit
     with session_scope() as session:
         row = session.get(PlaudFile, "forced")
         run = next(item for item in row.stage_runs if item.stage == StageName.align)
-        assert run.attempts == 1
+        assert run.attempts == (2 if missing_whisperx else 1)
         assert (run.provider, run.model) == ("whisperx", "wav2vec2-auto")
         assert row.local_transcript.text == "hello world"
         assert row.transcript_revisions[0].text == "edited"

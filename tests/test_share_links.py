@@ -346,6 +346,31 @@ def test_notes_render_as_switchable_pages(clients):
     assert "buildOutline" in page.text
 
 
+@pytest.mark.parametrize("show_notes", [False, True])
+def test_share_audio_controls_do_not_require_shared_transcript(clients, show_notes):
+    authenticated, public, tmp_path = clients
+    audio = _seed_recording(tmp_path)
+    response = authenticated.post(
+        "/api/files/recording/share-link",
+        json={"options": {"audio": True, "transcript": False, "notes": show_notes}},
+    )
+    assert response.status_code == 200
+    path = _share_path(response.json())
+
+    page = public.get(path)
+    assert page.status_code == 200
+    assert f'src="{path}/audio"' in page.text
+    assert f'href="{path}/audio?download=1"' in page.text
+    assert 'id="panel-transcript"' not in page.text
+    assert 'id="tab-transcript"' not in page.text
+    assert ('id="panel-summary"' in page.text) is show_notes
+    assert ('role="tablist"' in page.text) is show_notes
+    assert "corrected canonical line" not in page.text
+    assert ("Local generated note" in page.text) is show_notes
+    assert public.get(f"{path}/audio").content == audio
+    assert public.get(f"{path}/audio?download=1").content == audio
+
+
 def test_share_options_control_public_content(clients):
     authenticated, public, tmp_path = clients
     _seed_recording(tmp_path)
