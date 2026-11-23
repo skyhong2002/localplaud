@@ -1310,6 +1310,7 @@
     const back = $(root, '[data-sf-settings-back]');
     const groups = $$(root, '[data-sf-group]');
     const navLinks = $$(root, '[data-sf-nav-target]');
+    const providerDetails = $(root, '[data-settings-provider-details]');
     const groupOf = (id) => document.getElementById(id)?.closest('[data-sf-group]')?.dataset.sfGroup || null;
 
     const title = document.querySelector('[data-sf-settings-title]');
@@ -1319,11 +1320,14 @@
     function render() {
       const hash = decodeURIComponent(location.hash.slice(1));
       const active = hash.startsWith('group-') ? hash.slice(6) : (hash ? groupOf(hash) : null);
+      const revealProviders = active === 'processing' && providerDetails && !providerDetails.open;
+      if (revealProviders) providerDetails.open = true;
       back.hidden = true;
       if (!isPhone()) {
         index.hidden = true; layout.hidden = false;
         groups.forEach((group) => { group.hidden = group.hasAttribute('data-sf-phone-only'); });
         root.dataset.view = 'all';
+        if (revealProviders) document.getElementById(hash)?.scrollIntoView({ block: 'start' });
         return;
       }
       if (!active) {
