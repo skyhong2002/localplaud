@@ -1,0 +1,20 @@
+{% extends "auth_base.html" %}
+{% block title %}授權 Android 錄音上傳{% endblock %}
+{% block content %}
+<section class="auth-card" aria-labelledby="android-approval-title">
+  <div class="eyebrow">localplaud for Android</div>
+  <h1 id="android-approval-title">{% if approved %}已核准錄音上傳{% else %}授權 Android 錄音上傳{% endif %}</h1>
+  {% if approved %}
+    <p class="sub">請回到 localplaud App 領取授權。未領取的授權會在 5 分鐘內失效。</p>
+  {% else %}
+    <p class="sub">允許提出這個請求的 App 在一小時內上傳錄音到 <strong>{{ account_user.username }}</strong> 的工作區。它不能讀取錄音庫，也不會連結或變更 Plaud 帳號。</p>
+    <p>核對碼：<strong><code>{{ challenge[:8] }}</code></strong></p>
+    <p>只有在本機的 localplaud App 剛顯示相同核對碼時才應核准。不要核准別人傳來的連結。</p>
+    <form class="auth-form" method="post" action="/account/android-upload">
+      <input type="hidden" name="challenge" value="{{ challenge }}">
+      <button class="btn btn-primary" type="submit">允許上傳</button>
+    </form>
+  {% endif %}
+  <p class="auth-switch"><a href="/home">返回工作區</a></p>
+</section>
+{% endblock %}

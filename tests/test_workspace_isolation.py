@@ -50,6 +50,7 @@ def test_every_content_model_is_workspace_owned():
         "account_users",
         "oauth_identities",
         "auth_transactions",
+        "android_upload_approvals",
         "auth_rate_limits",
         "account_audit_events",
         "browser_sessions",

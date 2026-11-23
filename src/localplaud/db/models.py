@@ -135,6 +135,18 @@ class AuthTransaction(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class AndroidUploadApproval(Base):
+    """System auth exchange; the issuing workspace is revalidated on claim."""
+
+    __tablename__ = "android_upload_approvals"
+    challenge_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[int] = mapped_column(Integer)
+    session_binding: Mapped[str] = mapped_column(String(64))
+    workspace_id: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    claimed: Mapped[bool] = mapped_column(default=False)
+
+
 class AuthRateLimit(Base):
     __tablename__ = "auth_rate_limits"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)

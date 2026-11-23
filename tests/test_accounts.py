@@ -1,8 +1,12 @@
 """Authorization acceptance: no legacy key, pending-data boundary, OIDC, and recovery."""
 
 import asyncio
+import base64
+import hashlib
 import re
-from datetime import timedelta
+import secrets
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -79,6 +83,142 @@ def login(client, username="someone"):
     result = client.post("/login", data={"identifier": username, "password": PASSWORD})
     assert result.status_code == 303
     return result
+
+
+def _android_upload_request():
+    proof = secrets.token_urlsafe(32)
+    value = base64.urlsafe_b64encode(hashlib.sha256(proof.encode()).digest()).decode().rstrip("=")
+    return {"challenge": value}, {"Authorization": f"Upload-Proof {proof}"}
+
+
+def _approve_android_upload(client):
+    body, headers = _android_upload_request()
+    assert client.post("/account/android-upload", data=body).status_code == 200
+    response = client.post("/api/imports/local/android-grant", headers=headers)
+    assert response.status_code == 200
+    return response
+
+
+def test_android_upload_grant_is_limited_to_one_workspace_and_upload_route(client, monkeypatch, tmp_path):
+    from localplaud.api import imports
+
+    def file_dir(file_id):
+        path = tmp_path / file_id
+        path.mkdir(exist_ok=True)
+        return path
+
+    monkeypatch.setattr(imports, "file_dir", file_dir)
+    monkeypatch.setattr(imports, "_probe_audio", lambda _path: imports._AudioProbe(100, "verified"))
+    grant_path = "/api/imports/local/android-grant"
+    upload_path = "/api/imports/local/audio"
+    assert client.post(grant_path).status_code == 401
+    create_user("member")
+    create_user("other")
+    login(client, "other")
+    other_scope = _approve_android_upload(client).json()["capture_scope"]
+    client.cookies.clear()
+    login(client, "member")
+    grant_response = _approve_android_upload(client)
+    assert grant_response.status_code == 200
+    assert "no-store" in grant_response.headers["cache-control"]
+    grant = grant_response.json()
+    assert grant["expires_at"].endswith("Z")
+    token = grant["upload_token"]
+
+    with TestClient(client.app, base_url="https://testserver", follow_redirects=False) as native:
+        native.headers["Authorization"] = f"Bearer {token}"
+        assert native.get("/api/files").status_code == 401
+        assert native.post(grant_path).status_code == 401
+        assert native.post("/api/imports/plaud/check").status_code == 403
+
+        captured_at_ms = int((datetime.now(UTC) - timedelta(days=1)).timestamp() * 1000)
+
+        def upload(scope, *, upload_id="fa820954-30b1-4fc1-868c-ad5cb310ecd0", headers=None, captured_at=captured_at_ms):
+            data = {"capture_scope": scope, "captured_at_ms": str(captured_at)}
+            if upload_id:
+                data["upload_id"] = upload_id
+            return native.post(upload_path, data=data, files={"file": ("test.opus", b"audio")}, headers=headers)
+
+        scope = grant["capture_scope"]
+        assert upload(other_scope).status_code == 409
+        assert upload(scope, upload_id=None).status_code == 422
+        assert upload(scope, captured_at=captured_at_ms + 2 * 86400_000).status_code == 422
+        invalid = f"{token[:-1]}{'0' if token[-1] != '0' else '1'}"
+        assert upload(scope, headers={"Authorization": f"Bearer {invalid}"}).status_code == 401
+        response = upload(scope)
+        assert response.status_code == 201
+        assert response.json()["upload_id"] == "fa820954-30b1-4fc1-868c-ad5cb310ecd0"
+        retry = upload(scope)
+        assert retry.json() == response.json()
+        for receipt in (response, retry):
+            assert receipt.headers["x-localplaud-upload-id"] == response.json()["upload_id"]
+            assert receipt.headers["x-localplaud-recording-id"] == response.json()["id"]
+        assert [row["id"] for row in client.get("/api/files").json()["files"]] == [response.json()["id"]]
+        from localplaud.db.models import PlaudFile
+        from localplaud.db.tenancy import system_scope
+
+        with system_scope(), session_scope() as db:
+            recording = db.get(PlaudFile, response.json()["id"])
+            assert recording.start_time_ms == captured_at_ms
+            assert recording.raw["upload_channel"] == "android_grant"
+            assert recording.raw["upload_session_id"] == int(token.split(".")[1])
+        client.cookies.clear()
+        login(client, "other")
+        assert not client.get("/api/files").json()["files"]
+
+
+def test_android_upload_grant_expires_and_session_revocation_invalidates_it(client, monkeypatch):
+    create_user("member")
+    login(client, "member")
+    issued_at = auth.now()
+    grant = _approve_android_upload(client).json()
+    token = grant["upload_token"]
+    session_id = int(token.split(".")[1])
+    with TestClient(client.app, base_url="https://testserver", headers={"Authorization": f"Bearer {token}"}) as native:
+        path = "/api/imports/local/audio"
+        assert native.post(path).status_code == 422
+        with monkeypatch.context() as clock:
+            clock.setattr(auth, "now", lambda: issued_at + timedelta(hours=1, seconds=1))
+            assert native.post(path).status_code == 401
+        assert client.post(f"/account/sessions/{session_id}/revoke").status_code == 303
+        assert native.post(path).status_code == 401
+
+
+def test_android_approval_requires_browser_consent_and_only_one_matching_exchange(client, monkeypatch):
+    approve_path = "/account/android-upload"
+    claim_path = "/api/imports/local/android-grant"
+    body, headers = _android_upload_request()
+    assert client.post(approve_path, data=body).status_code == 401
+    create_user("member")
+    login(client, "member")
+    monkeypatch.setattr(auth, "render", render_account_page)
+    page = client.get(approve_path, params=body)
+    assert page.status_code == 200
+    assert page.headers["x-frame-options"] == "DENY"
+    assert page.headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert "允許上傳" in page.text and "member" in page.text
+    assert headers["Authorization"].split()[1] not in page.text
+    assert client.post(claim_path, headers=headers).status_code == 404
+    assert client.post(
+        approve_path, data=body, headers={"Origin": "https://not-localplaud.example"}
+    ).status_code == 403
+    assert client.post(approve_path, data=body).status_code == 200
+    _, wrong_proof = _android_upload_request()
+
+    def claim(proof_headers):
+        with TestClient(client.app, base_url="https://testserver") as native:
+            return native.post(claim_path, headers=proof_headers)
+
+    assert claim(wrong_proof).status_code == 404
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(claim, (headers, headers)))
+    assert sorted(response.status_code for response in results) == [200, 404]
+    assert client.post(approve_path, data=body).status_code == 409
+    expired_body, expired_proof = _android_upload_request()
+    assert client.post(approve_path, data=expired_body).status_code == 200
+    expired_at = auth.now() + timedelta(minutes=5, seconds=1)
+    monkeypatch.setattr(auth, "now", lambda: expired_at)
+    assert claim(expired_proof).status_code == 404
 
 
 @pytest.mark.parametrize("path", ["/account", "/admin/users?notice=updated"])

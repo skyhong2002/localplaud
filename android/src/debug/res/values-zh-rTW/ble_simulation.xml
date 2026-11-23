@@ -1,0 +1,23 @@
+<resources>
+    <string name="plaud_simulation_heading">藍牙模擬 · 僅限測試版</string>
+    <string name="plaud_simulation_idle">使用模擬裝置，不會連上實體錄音筆。</string>
+    <string name="plaud_simulation_start">開始模擬連線</string>
+    <string name="plaud_simulation_disconnect">模擬斷線</string>
+    <string name="plaud_simulation_reconnected">模擬連線已自動恢復。</string>
+    <string name="plaud_probe_heading">BLE 測試周邊 · 僅限測試版</string>
+    <string name="plaud_probe_description">只使用你控制的測試周邊。這項測試僅檢查自訂 BLE 服務，不連接 Plaud 錄音筆，也不讀取錄音。</string>
+    <string name="plaud_probe_address">測試周邊地址（AA:BB:CC:DD:EE:FF）</string>
+    <string name="plaud_probe_idle">目前沒有進行中的測試。</string>
+    <string name="plaud_probe_saved">已記住測試裝置。請重新授權並掃描，建立新的連線。</string>
+    <string name="plaud_probe_storage_failed">無法讀取或更新已儲存的測試裝置。請重試。</string>
+    <string name="plaud_probe_retry_read">重試讀取已儲存裝置</string>
+    <string name="plaud_probe_start">授權並掃描測試周邊</string>
+    <string name="plaud_probe_rescan">重新掃描測試周邊</string>
+    <string name="plaud_probe_rescan_cooldown">自動重連已停止。請等候冷卻時間結束後再重新掃描。</string>
+    <string name="plaud_probe_rescan_ready">自動重連已停止。可手動重新掃描，開始新一輪嘗試。</string>
+    <string name="plaud_probe_stop">停止測試並忘記裝置</string>
+    <string name="plaud_probe_permission">允許存取鄰近裝置後，再點一次「授權並掃描測試周邊」。</string>
+    <string name="plaud_probe_permission_revoked">鄰近裝置權限已撤銷，測試會話已結束。恢復系統權限後，請重新授權測試會話。</string>
+    <string name="plaud_probe_unavailable">測試需要 Android 12 以上版本，且藍牙必須開啟。</string>
+    <string name="plaud_probe_status">%1$s · 已就緒的連線次數：%2$d</string>
+</resources>

@@ -64,7 +64,8 @@ jobs:
           WORKSPACE_ORIGIN: ${{ vars.RELEASE_ANDROID_ORIGIN }}
         run: |
           [[ "$WORKSPACE_ORIGIN" == https://* ]] || { echo 'Set RELEASE_ANDROID_ORIGIN to the public HTTPS workspace origin.' >&2; exit 1; }
-          gradle --no-daemon -p android "-PlocalplaudOrigin=$WORKSPACE_ORIGIN" testDebugUnitTest lintDebug assembleRelease
+          gradle --no-daemon -p android "-PlocalplaudOrigin=$WORKSPACE_ORIGIN" testDebugUnitTest testBleLabUnitTest testReleaseUnitTest lintDebug lintBleLab lintRelease assembleDebug assembleBleLab assembleRelease
+          python3 scripts/check_android_variants.py
       - name: Sign and verify the release APK
         env:
           TAG: ${{ github.ref_name }}
@@ -91,6 +92,7 @@ jobs:
           test -n "$code" && test "$version" = "${TAG#v}"
           mkdir release-assets
           mv "$scratch/signed.apk" "release-assets/localplaud-android-$version-$code.apk"
+          cp android/build/outputs/apk/bleLab/localplaud-android-bleLab.apk "release-assets/localplaud-ble-lab-$version-debug.apk"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-release

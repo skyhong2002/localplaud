@@ -8,15 +8,18 @@ import subprocess
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Literal
-from uuid import uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
+from sqlalchemy.exc import IntegrityError
 
 from ..config import get_settings
 from ..db.models import FileStatus, PlaudFile
 from ..db.session import session_scope
+from ..db.tenancy import current_workspace_id
 from ..imports import (
     audio_import_status,
     check_plaud_now,
@@ -109,19 +112,31 @@ def capture_draft_scope(request: Request) -> str:
 def import_local_audio(
     request: Request,
     file: Annotated[UploadFile, File()],
+    response: Response,
     capture_source: Annotated[Literal["browser_recording", "file_import"], Form()] = "file_import",
     capture_scope: Annotated[str | None, Form()] = None,
     captured_at_ms: Annotated[int | None, Form(gt=0)] = None,
+    upload_id: Annotated[UUID | None, Form()] = None,
 ) -> dict:
-    if capture_source == "browser_recording":
+    android_upload = getattr(request.state, "android_upload", False)
+    if android_upload and (
+        upload_id is None or capture_source != "file_import"
+    ):
+        raise HTTPException(status_code=422, detail="Android upload requires a recording upload ID")
+    if capture_source == "browser_recording" or upload_id is not None:
         expected = capture_draft_scope(request)
         if not expected or capture_scope != expected:
             raise HTTPException(
                 status_code=409,
                 detail="Your workspace changed. Reopen this page in the original workspace to save the recording.",
             )
-        if captured_at_ms is not None and captured_at_ms > int(datetime.now(UTC).timestamp() * 1000):
-            raise HTTPException(status_code=422, detail="The recording start time is in the future.")
+    if capture_source == "browser_recording" or android_upload:
+        if captured_at_ms is not None and captured_at_ms > int(
+            datetime.now(UTC).timestamp() * 1000
+        ):
+            raise HTTPException(
+                status_code=422, detail="The recording start time is in the future."
+            )
     original_name = Path(file.filename or "audio").name
     extension = Path(original_name).suffix.lower().lstrip(".")
     if extension not in _ALLOWED_EXTENSIONS:
@@ -130,62 +145,120 @@ def import_local_audio(
             status_code=415,
             detail="unsupported audio/video format",
         )
-    file_id = f"local-{uuid4().hex}"
+    file_id = (
+        f"local-sync-{uuid5(NAMESPACE_URL, f'localplaud:{current_workspace_id()}:{upload_id}').hex}"
+        if upload_id is not None
+        else f"local-{uuid4().hex}"
+    )
+    digest = sha256() if upload_id is not None else None
     destination = None
     written = 0
     try:
-        destination = file_dir(file_id) / f"audio.{extension}"
-        with destination.open("wb") as output:
+        basename = f"audio-{uuid4().hex}" if upload_id is not None else "audio"
+        destination = file_dir(file_id) / f"{basename}.{extension}"
+        with destination.open("xb") as output:
             while chunk := file.file.read(1 << 20):
                 written += len(chunk)
                 if written > _MAX_UPLOAD_BYTES:
                     raise HTTPException(status_code=413, detail="file exceeds 2 GB limit")
                 output.write(chunk)
+                if digest is not None:
+                    digest.update(chunk)
         if not written:
             raise HTTPException(status_code=422, detail="audio file is empty")
+        upload_sha256 = digest.hexdigest() if digest is not None else None
+        if upload_sha256 is not None:
+            with session_scope() as session:
+                existing = session.get(PlaudFile, file_id)
+                if existing is not None:
+                    _discard_upload(destination, remove_directory=False)
+                    return _upload_response(response, _replay_upload(existing, upload_sha256))
         probe = _probe_audio(destination)
         now = datetime.now(UTC)
-        with session_scope() as session:
-            session.add(
-                PlaudFile(
-                    id=file_id,
-                    filename=Path(original_name).stem or "Imported audio",
-                    fullname=original_name,
-                    filesize=written,
-                    duration_ms=probe.duration_ms,
-                    start_time_ms=(
-                        captured_at_ms if capture_source == "browser_recording" and captured_at_ms
-                        else int(now.timestamp() * 1000)
-                    ),
-                    status=FileStatus.downloaded,
-                    audio_path=str(destination),
-                    downloaded_at=now,
-                    origin="local",
-                    scene=101 if capture_source == "browser_recording" else 102,
-                    raw={
-                        "origin": "local",
-                        "capture_source": capture_source,
-                        "original_filename": original_name,
-                        "media_probe": probe.status,
-                    },
+        receipt = {
+            "id": file_id,
+            "filename": Path(original_name).stem or "Imported audio",
+            "filesize": written,
+            "duration_ms": probe.duration_ms,
+            "status": "downloaded",
+            "media_probe": probe.status,
+            **({"upload_id": str(upload_id)} if upload_id is not None else {}),
+        }
+        try:
+            with session_scope() as session:
+                session.add(
+                    PlaudFile(
+                        id=file_id,
+                        filename=Path(original_name).stem or "Imported audio",
+                        fullname=original_name,
+                        filesize=written,
+                        duration_ms=probe.duration_ms,
+                        start_time_ms=(
+                            captured_at_ms
+                            if (capture_source == "browser_recording" or android_upload) and captured_at_ms
+                            else int(now.timestamp() * 1000)
+                        ),
+                        status=FileStatus.downloaded,
+                        audio_path=str(destination),
+                        downloaded_at=now,
+                        origin="local",
+                        scene=101 if capture_source == "browser_recording" else 102,
+                        raw={
+                            "origin": "local",
+                            "capture_source": capture_source,
+                            "original_filename": original_name,
+                            "media_probe": probe.status,
+                            **(
+                                {
+                                    "upload_channel": "android_grant",
+                                    "upload_session_id": request.state.android_upload_session_id,
+                                }
+                                if android_upload else {}
+                            ),
+                            **(
+                                {"upload_sha256": upload_sha256, "upload_receipt": receipt}
+                                if upload_sha256 is not None
+                                else {}
+                            ),
+                        },
+                    )
                 )
-            )
+        except IntegrityError:
+            if upload_sha256 is not None:
+                with session_scope() as session:
+                    existing = session.get(PlaudFile, file_id)
+                    if existing is not None:
+                        _discard_upload(destination, remove_directory=False)
+                        return _upload_response(response, _replay_upload(existing, upload_sha256))
+            raise
     except BaseException:
         if destination is not None:
-            with suppress(OSError):
-                destination.unlink(missing_ok=True)
-                destination.parent.rmdir()
+            _discard_upload(destination, remove_directory=upload_id is None)
         raise
     finally:
         file.file.close()
-    return {
-        "id": file_id,
-        "filename": Path(original_name).stem or "Imported audio",
-        "filesize": written,
-        "duration_ms": probe.duration_ms,
-        "status": "downloaded",
-        "media_probe": probe.status,
-    }
+    return _upload_response(response, receipt)
+
+
+def _upload_response(response: Response, receipt: dict) -> dict:
+    if "upload_id" in receipt:
+        response.headers["X-Localplaud-Upload-Id"] = receipt["upload_id"]
+        response.headers["X-Localplaud-Recording-Id"] = receipt["id"]
+    return receipt
+
+
+def _discard_upload(path: Path, *, remove_directory: bool) -> None:
+    with suppress(OSError):
+        path.unlink(missing_ok=True)
+        if remove_directory:
+            path.parent.rmdir()
+
+
+def _replay_upload(existing: PlaudFile, upload_sha256: str) -> dict:
+    raw = existing.raw or {}
+    if raw.get("upload_sha256") != upload_sha256:
+        raise HTTPException(status_code=409, detail="Upload ID already used for different audio")
+    return raw["upload_receipt"]
 
 
 router.include_router(_upload_router)

@@ -64,6 +64,9 @@ Answers cite the recordings they came from; each citation jumps to the moment in
 
 Install the mobile web app from your browser, or [build an Android APK](docs/android.md)
 for your self-hosted workspace.
+Releases also provide a separate Debug BLE Lab APK for custom test peripherals;
+it does not establish direct Plaud recorder access. See the
+[Android diagnostics and limitations](docs/android.md).
 
 Plus folders, tags, full-text search, AutoFlow automation, and exports to TXT,
 SRT, VTT, DOCX, PDF, and Markdown. Your edits are never overwritten, a failed

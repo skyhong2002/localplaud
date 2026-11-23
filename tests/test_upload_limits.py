@@ -13,7 +13,7 @@ from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 
 from localplaud.api import imports
 from localplaud.api.upload_limits import UPLOAD_PATH, UploadBodyLimitMiddleware
@@ -498,7 +498,7 @@ def test_upload_failures_leave_no_audio_or_directory_and_close_upload(
     )
     expected = RuntimeError if failure == "database" else HTTPException
     with pytest.raises(expected) as error:
-        imports.import_local_audio(Request({"type": "http"}), upload)
+        imports.import_local_audio(Request({"type": "http"}), upload, Response())
     if isinstance(error.value, HTTPException):
         assert error.value.status_code == (503 if failure == "timeout" else 422)
     assert upload.file.closed and not directory.exists()
@@ -522,7 +522,7 @@ def test_missing_probe_preserves_every_previously_supported_extension(
     monkeypatch.setattr(imports.subprocess, "run", missing)
     monkeypatch.setattr(imports, "session_scope", database)
     upload = UploadFile(filename=f"memo.{extension}", file=BytesIO(b"fixture bytes"))
-    result = imports.import_local_audio(Request({"type": "http"}), upload)
+    result = imports.import_local_audio(Request({"type": "http"}), upload, Response())
     assert result["duration_ms"] is None and result["media_probe"] == "unavailable"
     assert rows[0].raw["media_probe"] == "unavailable"
     assert upload.file.closed
